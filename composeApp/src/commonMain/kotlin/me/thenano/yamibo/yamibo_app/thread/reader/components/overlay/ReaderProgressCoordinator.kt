@@ -1,4 +1,4 @@
-﻿package me.thenano.yamibo.yamibo_app.thread.reader
+﻿package me.thenano.yamibo.yamibo_app.thread.reader.components.overlay
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -9,6 +9,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import me.thenano.yamibo.yamibo_app.repository.ChapterStateRepository
+import me.thenano.yamibo.yamibo_app.thread.reader.debug.debugPerfLog
 import kotlin.math.floor
 
 internal data class ReaderProgressGeometry(
@@ -143,7 +144,10 @@ internal class ReaderProgressCoordinator(
 
     suspend fun applyProgress(updates: List<ChapterStateRepository.ProgressUpdate>) {
         writeMutex.withLock {
-            if (writesBlockedUntilScroll) return
+            if (writesBlockedUntilScroll) {
+                debugPerfLog("progress_write_blocked|updates=${updates.size}")
+                return
+            }
             val merged = LinkedHashMap<Long, ChapterStateRepository.ProgressUpdate>()
             pendingReadPosts.forEach { (postId, title) ->
                 val existing = chapterStates.value[postId]
@@ -160,13 +164,23 @@ internal class ReaderProgressCoordinator(
                 if ((submittedState?.second ?: existingState?.read) == true || effectiveState == candidateState) {
                     return@forEach
                 }
+                if (
+                    effectiveState != null &&
+                    !effectiveState.second &&
+                    !candidate.read &&
+                    candidate.progressPercent < effectiveState.first
+                ) {
+                    return@forEach
+                }
                 val existing = merged[candidate.targetId]
                 merged[candidate.targetId] = if (existing?.read == true) existing else candidate
             }
             if (merged.isEmpty()) {
                 pendingReadPosts.keys.removeAll { chapterStates.value[it]?.read == true }
+                debugPerfLog("progress_write_skipped|updates=${updates.size}")
                 return
             }
+            debugPerfLog("progress_write|updates=${merged.size}|targets=${merged.keys.joinToString(",")}")
             repository.applyProgressUpdates(merged.values.toList())
             merged.forEach { (postId, update) ->
                 submittedStates[postId] = update.progressPercent to update.read
@@ -207,6 +221,8 @@ internal class ReaderProgressCoordinator(
         title: String,
         progressPercent: Int,
         read: Boolean,
+        lastPageIndex: Int? = null,
+        totalPages: Int? = null,
     ) = ChapterStateRepository.ProgressUpdate(
         targetType = ChapterStateRepository.TargetType.ThreadPost,
         parentId = parentId,
@@ -214,5 +230,7 @@ internal class ReaderProgressCoordinator(
         title = title,
         progressPercent = progressPercent,
         read = read,
+        lastPageIndex = lastPageIndex,
+        totalPages = totalPages,
     )
 }

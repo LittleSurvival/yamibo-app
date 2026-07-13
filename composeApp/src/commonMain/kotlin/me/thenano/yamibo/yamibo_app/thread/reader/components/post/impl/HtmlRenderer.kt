@@ -32,7 +32,9 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.TextUnitType
 import androidx.compose.ui.unit.dp
@@ -323,8 +325,10 @@ fun HtmlRenderer(
     onImageReload: ((String) -> Unit)? = null,
     imageErrorMessageFor: ((String) -> String?)? = null,
     imageRetryKeyFor: ((String) -> Int)? = null,
+    imageHasLoadedFor: ((String) -> Boolean)? = null,
     imageCachedHeightFor: ((String) -> Int?)? = null,
     imagePlaceholderAspectRatioFor: ((String) -> Float?)? = null,
+    maxImageHeight: Dp? = null,
     onImageHeightChanged: ((String, Int) -> Unit)? = null,
     onImageAspectRatioChanged: ((String, Float) -> Unit)? = null,
 ) {
@@ -342,8 +346,10 @@ fun HtmlRenderer(
         onImageReload = onImageReload,
         imageErrorMessageFor = imageErrorMessageFor,
         imageRetryKeyFor = imageRetryKeyFor,
+        imageHasLoadedFor = imageHasLoadedFor,
         imageCachedHeightFor = imageCachedHeightFor,
         imagePlaceholderAspectRatioFor = imagePlaceholderAspectRatioFor,
+        maxImageHeight = maxImageHeight,
         onImageHeightChanged = onImageHeightChanged,
         onImageAspectRatioChanged = onImageAspectRatioChanged,
     )
@@ -360,8 +366,10 @@ fun HtmlBlocksRenderer(
     onImageReload: ((String) -> Unit)? = null,
     imageErrorMessageFor: ((String) -> String?)? = null,
     imageRetryKeyFor: ((String) -> Int)? = null,
+    imageHasLoadedFor: ((String) -> Boolean)? = null,
     imageCachedHeightFor: ((String) -> Int?)? = null,
     imagePlaceholderAspectRatioFor: ((String) -> Float?)? = null,
+    maxImageHeight: Dp? = null,
     onImageHeightChanged: ((String, Int) -> Unit)? = null,
     onImageAspectRatioChanged: ((String, Float) -> Unit)? = null,
 ) {
@@ -386,8 +394,10 @@ fun HtmlBlocksRenderer(
                     onImageReload = onImageReload,
                     imageErrorMessageFor = imageErrorMessageFor,
                     imageRetryKeyFor = imageRetryKeyFor,
+                    imageHasLoadedFor = imageHasLoadedFor,
                     imageCachedHeightFor = imageCachedHeightFor,
                     imagePlaceholderAspectRatioFor = imagePlaceholderAspectRatioFor,
+                    maxImageHeight = maxImageHeight,
                     onImageHeightChanged = onImageHeightChanged,
                     onImageAspectRatioChanged = onImageAspectRatioChanged,
                     fontFamily = readerFontFamily,
@@ -642,8 +652,10 @@ private fun HtmlBlockRenderer(
     onImageReload: ((String) -> Unit)? = null,
     imageErrorMessageFor: ((String) -> String?)? = null,
     imageRetryKeyFor: ((String) -> Int)? = null,
+    imageHasLoadedFor: ((String) -> Boolean)? = null,
     imageCachedHeightFor: ((String) -> Int?)? = null,
     imagePlaceholderAspectRatioFor: ((String) -> Float?)? = null,
+    maxImageHeight: Dp? = null,
     onImageHeightChanged: ((String, Int) -> Unit)? = null,
     onImageAspectRatioChanged: ((String, Float) -> Unit)? = null,
     fontFamily: FontFamily = HtmlDefaultFontFamily,
@@ -939,6 +951,8 @@ private fun HtmlBlockRenderer(
                     onReload = { onImageReload?.invoke(url) },
                     cachedHeightPx = imageCachedHeightFor?.invoke(url),
                     placeholderAspectRatio = imagePlaceholderAspectRatioFor?.invoke(url),
+                    maxRenderedHeight = maxImageHeight,
+                    suppressLoadingPlaceholderWhenCached = imageHasLoadedFor?.invoke(url) == true,
                     onRenderedHeightChanged = { heightPx -> onImageHeightChanged?.invoke(url, heightPx) },
                     onRenderedAspectRatioChanged = { ratio -> onImageAspectRatioChanged?.invoke(url, ratio) },
                 )
@@ -1004,6 +1018,8 @@ private fun HtmlBlockRenderer(
                             fontSize = 14.sp,
                             lineHeight = 18.sp,
                             fontWeight = FontWeight.Medium,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
                         )
 
                         block.uploadInfo?.let {
@@ -1012,6 +1028,8 @@ private fun HtmlBlockRenderer(
                                 color = colors.htmlTextDark.copy(alpha = 0.72f),
                                 fontSize = 12.sp,
                                 lineHeight = 16.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
 
@@ -1021,6 +1039,8 @@ private fun HtmlBlockRenderer(
                                 color = colors.htmlTextDark.copy(alpha = 0.72f),
                                 fontSize = 12.sp,
                                 lineHeight = 16.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
                     }
@@ -1147,8 +1167,10 @@ private fun HtmlBlockRenderer(
                                     onImageReload = onImageReload,
                                     imageErrorMessageFor = imageErrorMessageFor,
                                     imageRetryKeyFor = imageRetryKeyFor,
+                                    imageHasLoadedFor = imageHasLoadedFor,
                                     imageCachedHeightFor = imageCachedHeightFor,
                                     imagePlaceholderAspectRatioFor = imagePlaceholderAspectRatioFor,
+                                    maxImageHeight = maxImageHeight,
                                     onImageHeightChanged = onImageHeightChanged,
                                     onImageAspectRatioChanged = onImageAspectRatioChanged,
                                     fontFamily = fontFamily,
@@ -1200,8 +1222,10 @@ private fun HtmlBlockRenderer(
                             onImageReload = onImageReload,
                             imageErrorMessageFor = imageErrorMessageFor,
                             imageRetryKeyFor = imageRetryKeyFor,
+                            imageHasLoadedFor = imageHasLoadedFor,
                             imageCachedHeightFor = imageCachedHeightFor,
                             imagePlaceholderAspectRatioFor = imagePlaceholderAspectRatioFor,
+                            maxImageHeight = maxImageHeight,
                             onImageHeightChanged = onImageHeightChanged,
                             onImageAspectRatioChanged = onImageAspectRatioChanged,
                             fontFamily = fontFamily,
@@ -1236,8 +1260,10 @@ private fun HtmlBlockRenderer(
                             onImageReload = onImageReload,
                             imageErrorMessageFor = imageErrorMessageFor,
                             imageRetryKeyFor = imageRetryKeyFor,
+                            imageHasLoadedFor = imageHasLoadedFor,
                             imageCachedHeightFor = imageCachedHeightFor,
                             imagePlaceholderAspectRatioFor = imagePlaceholderAspectRatioFor,
+                            maxImageHeight = maxImageHeight,
                             onImageHeightChanged = onImageHeightChanged,
                             onImageAspectRatioChanged = onImageAspectRatioChanged,
                             fontFamily = fontFamily,
@@ -1256,7 +1282,9 @@ private fun HtmlBlockRenderer(
             ) {
                 Text(
                     text = block.codeText,
-                    modifier = Modifier.padding(12.dp),
+                    modifier = Modifier
+                        .horizontalScroll(rememberScrollState())
+                        .padding(12.dp),
                     style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp)
                 )
             }
@@ -1334,8 +1362,10 @@ private fun HtmlBlockRenderer(
                                                             onImageReload = onImageReload,
                                                             imageErrorMessageFor = imageErrorMessageFor,
                                                             imageRetryKeyFor = imageRetryKeyFor,
+                                                            imageHasLoadedFor = imageHasLoadedFor,
                                                             imageCachedHeightFor = imageCachedHeightFor,
                                                             imagePlaceholderAspectRatioFor = imagePlaceholderAspectRatioFor,
+                                                            maxImageHeight = maxImageHeight,
                                                             onImageHeightChanged = onImageHeightChanged,
                                                             onImageAspectRatioChanged = onImageAspectRatioChanged,
                                                             fontFamily = fontFamily,

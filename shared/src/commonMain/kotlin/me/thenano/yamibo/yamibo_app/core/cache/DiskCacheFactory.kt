@@ -66,11 +66,6 @@ class DiskCacheFactory(
         )
     }
 
-    /** Returns total size of the cache directory in bytes */
-    suspend fun getTotalCacheSizeBytes(): Long? = withContext(Dispatchers.IO) {
-        getCacheStorageBreakdown().usages.sumOf { it.bytes }
-    }
-
     suspend fun getCacheStorageBreakdown(): CacheStorageBreakdown = withContext(Dispatchers.IO) {
         val grouped = linkedMapOf(
             "images" to CacheStorageUsage("images", i18n("圖片"), 0L),

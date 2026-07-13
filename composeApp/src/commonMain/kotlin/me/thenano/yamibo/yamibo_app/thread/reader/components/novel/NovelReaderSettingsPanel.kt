@@ -30,7 +30,9 @@ import me.thenano.yamibo.yamibo_app.profile.settings.bound.NovelScrollButtonDisp
 import me.thenano.yamibo.yamibo_app.profile.settings.bound.NovelScrollButtonJumpTargetSetting
 import me.thenano.yamibo.yamibo_app.profile.settings.bound.NovelScrollButtonThresholdSetting
 import me.thenano.yamibo.yamibo_app.profile.settings.bound.NovelSystemBarsBackgroundSetting
+import me.thenano.yamibo.yamibo_app.profile.settings.bound.MangaTouchZoneSetting
 import me.thenano.yamibo.yamibo_app.profile.settings.bound.ReaderFontSelectorSetting
+import me.thenano.yamibo.yamibo_app.profile.settings.bound.ThreadReaderModeSetting
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.util.state
 
@@ -90,6 +92,16 @@ fun NovelReaderSettingsPanel(
 
                     SectionTitle(i18n("簡繁轉換"), color = colors.textDark)
                     NovelChineseConversionSetting()
+
+                    Spacer(Modifier.height(24.dp))
+
+                    SectionTitle("${i18n("閱讀模式")} (beta測試)", color = colors.textDark)
+                    ThreadReaderModeSetting()
+
+                    Spacer(Modifier.height(24.dp))
+
+                    SectionTitle(i18n("觸控分區"), color = colors.textDark)
+                    MangaTouchZoneSetting()
 
                     Spacer(Modifier.height(24.dp))
 

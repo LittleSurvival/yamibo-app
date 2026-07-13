@@ -3,10 +3,13 @@ package me.thenano.yamibo.yamibo_app.thread.reader
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 
 import YamiboIcons
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
@@ -21,17 +24,25 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil3.SingletonImageLoader
 import coil3.compose.LocalPlatformContext
+import coil3.request.CachePolicy
+import coil3.request.SuccessResult
 import io.github.littlesurvival.YamiboForum
 import io.github.littlesurvival.YamiboRoute
 import io.github.littlesurvival.core.YamiboResult
@@ -42,11 +53,20 @@ import io.github.littlesurvival.dto.value.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withTimeoutOrNull
 import me.thenano.yamibo.yamibo_app.*
 import me.thenano.yamibo.yamibo_app.favorite.*
+import me.thenano.yamibo.yamibo_app.thread.reader.components.manga.TouchAction
+import me.thenano.yamibo.yamibo_app.thread.reader.components.manga.getTouchAction
 import me.thenano.yamibo.yamibo_app.components.tracking.ReadingTimeTracker
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.repository.inapplinknavigation.InAppLinkContext
@@ -72,6 +92,8 @@ import me.thenano.yamibo.yamibo_app.thread.image.LocalImageSetCatalogCoverLabel
 import me.thenano.yamibo.yamibo_app.thread.image.LocalImageSetCatalogCoverListener
 import me.thenano.yamibo.yamibo_app.thread.image.LocalImageSetCoverListener
 import me.thenano.yamibo.yamibo_app.thread.image.LocalReaderOverlayVisible
+import me.thenano.yamibo.yamibo_app.thread.image.LocalReaderImagePainterCache
+import me.thenano.yamibo.yamibo_app.thread.image.createReaderImagePainterCache
 import me.thenano.yamibo.yamibo_app.thread.reader.debug.DebugRecomposeProbe
 import me.thenano.yamibo.yamibo_app.thread.reader.debug.debugPerfLog
 import me.thenano.yamibo.yamibo_app.thread.reader.components.CommentBanner
@@ -82,6 +104,9 @@ import me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.ReaderPageP
 import me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.ReaderPageProgressHint
 import me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.ReaderPageProgressSlideBar
 import me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.ReaderScrollJumpButton
+import me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.ReaderSinglePageProgress
+import me.thenano.yamibo.yamibo_app.thread.reader.components.post.PostFooterSection
+import me.thenano.yamibo.yamibo_app.thread.reader.components.post.PostFooterRenderOptions
 import me.thenano.yamibo.yamibo_app.thread.reader.components.post.PostRenderer
 import me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl.HtmlBlock
 import me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl.HtmlParser
@@ -96,6 +121,34 @@ import me.thenano.yamibo.yamibo_app.util.time.epochMillisOrNull
 import me.thenano.yamibo.yamibo_app.webview.action.IActionWebView
 import me.thenano.yamibo.yamibo_app.repository.settings.ReaderScrollButtonDisplayMode
 import me.thenano.yamibo.yamibo_app.repository.settings.ReaderScrollButtonJumpTarget
+import me.thenano.yamibo.yamibo_app.repository.settings.ThreadReaderMode
+import me.thenano.yamibo.yamibo_app.repository.settings.TouchZoneLayout
+import me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.ReaderProgressCoordinator
+import me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.ReaderProgressGeometry
+import me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.ReaderScrollSession
+import me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.calculateReaderProgress
+import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.SinglePageTapAction
+import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.ThreadReaderAnchorRange
+import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.ThreadReaderMeasuredPackingResult
+import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.ThreadReaderMeasuredUnit
+import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.ThreadReaderMeasuredUnitKind
+import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.ThreadReaderPageSlice
+import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.ThreadReaderPaginationInput
+import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.ThreadReaderPlannedPage
+import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.ThreadReaderReadingAnchor
+import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.buildSafeBreakMap
+import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.buildThreadReaderPageProgressStates
+import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.captureSinglePageViewportAnchor
+import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.packMeasuredThreadReaderUnitsResult
+import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.physicalDragForSinglePageDelta
+import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.planFixedHeightReaderPages
+import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.resolvePageIndexForPersistedAnchor
+import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.resolveSinglePagePlanTransition
+import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.semanticStableId
+import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.sliceHtmlBlocksForPage
+import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.shouldInlineFooterOnFinalPage
+import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.singlePageDeltaForPhysicalDrag
+import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.singlePageDeltaForTouchAction
 import kotlin.math.abs
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -108,6 +161,9 @@ internal sealed interface ReaderState {
 private enum class ReaderEntryKind {
     WholePost,
     SegmentedHeader,
+    SegmentedBodyWithHeader,
+    SegmentedBodyWithHeaderAndFooter,
+    SegmentedBodyWithFooter,
     SegmentedBody,
     SegmentedFooter,
     RegularTagBanner,
@@ -115,6 +171,12 @@ private enum class ReaderEntryKind {
     NovelCommentBanner,
     Separator,
 }
+
+private fun ReaderEntryKind.isSegmentedBodyLike(): Boolean =
+    this == ReaderEntryKind.SegmentedBodyWithHeader ||
+        this == ReaderEntryKind.SegmentedBodyWithHeaderAndFooter ||
+        this == ReaderEntryKind.SegmentedBodyWithFooter ||
+        this == ReaderEntryKind.SegmentedBody
 
 private data class ReaderBodySegment(
     val blocks: List<HtmlBlock>,
@@ -131,10 +193,217 @@ private data class ReaderListEntry(
     val bodyBlocks: List<HtmlBlock> = emptyList(),
     val anchorBlockId: String? = null,
     val anchorBlockType: String? = null,
+    val footerRenderOptions: PostFooterRenderOptions = PostFooterRenderOptions(),
 ) {
     val isScrollAnchor: Boolean
-        get() = kind == ReaderEntryKind.WholePost || kind == ReaderEntryKind.SegmentedBody
+        get() = kind == ReaderEntryKind.WholePost ||
+            kind == ReaderEntryKind.SegmentedBodyWithHeader ||
+            kind == ReaderEntryKind.SegmentedBodyWithHeaderAndFooter ||
+            kind == ReaderEntryKind.SegmentedBodyWithFooter ||
+            kind == ReaderEntryKind.SegmentedBody
 }
+
+private data class ThreadReaderSinglePageEntry(
+    val sourceEntryIndex: Int,
+    val sourceEntry: ReaderListEntry,
+    val page: ThreadReaderPlannedPage,
+    val renderEntry: ReaderListEntry,
+)
+
+private data class ThreadReaderSinglePageLayoutResult(
+    val entries: List<ThreadReaderSinglePageEntry>,
+    val footerMeasurementSpecs: List<SinglePageFooterMeasurementSpec>,
+)
+
+private data class ThreadReaderSinglePageSession(
+    val layoutResult: ThreadReaderSinglePageLayoutResult,
+    val currentPageIndex: Int,
+    val stablePageId: String,
+    val anchor: ThreadReaderReadingAnchor?,
+    val layoutKey: Any,
+    val generation: Int,
+)
+
+private const val FOOTER_SECTION_PREFIX = "Footer:"
+
+internal fun footerSectionAnchor(section: PostFooterSection): String = "$FOOTER_SECTION_PREFIX${section.name}"
+
+internal fun footerSectionAnchor(sections: Set<PostFooterSection>): String =
+    "$FOOTER_SECTION_PREFIX${sections.sortedBy { it.ordinal }.joinToString(",") { it.name }}"
+
+internal fun footerSectionsForAnchorBlockType(anchorBlockType: String?): Set<PostFooterSection> {
+    val sectionNames = anchorBlockType?.removePrefix(FOOTER_SECTION_PREFIX)
+        ?.takeIf { it != anchorBlockType }
+        ?: return PostFooterSection.All
+    val sections = sectionNames
+        .split(',')
+        .mapNotNull { name -> PostFooterSection.entries.firstOrNull { it.name == name } }
+        .toSet()
+    return sections.ifEmpty { PostFooterSection.All }
+}
+
+private fun Post.singlePageFooterSectionGroups(includeNavigation: Boolean): List<Set<PostFooterSection>> {
+    val sections = buildSet {
+        if (lastEditedTime != null) add(PostFooterSection.Metadata)
+        if (includeNavigation) add(PostFooterSection.Navigation)
+        if (poll != null) add(PostFooterSection.Poll)
+        if (rateBlock.rates.isNotEmpty()) add(PostFooterSection.Rates)
+        if (comments.isNotEmpty()) add(PostFooterSection.Comments)
+        if (attachments.isNotEmpty()) add(PostFooterSection.Attachments)
+        add(PostFooterSection.Actions)
+    }
+    return if (sections.isEmpty()) emptyList() else listOf(sections)
+}
+
+private data class SinglePageFooterUnit(
+    val sections: Set<PostFooterSection>,
+    val renderOptions: PostFooterRenderOptions = PostFooterRenderOptions(),
+    val measuredUnit: ThreadReaderMeasuredUnit,
+    val measurementKey: String,
+)
+
+private data class SinglePageFooterMeasurementSpec(
+    val key: String,
+    val post: Post,
+    val sections: Set<PostFooterSection>,
+    val renderOptions: PostFooterRenderOptions,
+    val showTagAction: Boolean,
+    val showCommentReaderAction: Boolean,
+)
+
+private fun List<SinglePageFooterUnit>.combineFooterRenderOptions(): PostFooterRenderOptions {
+    val rateRanges = mapNotNull { it.renderOptions.rateRange }
+    val commentRanges = mapNotNull { it.renderOptions.commentRange }
+    return PostFooterRenderOptions(
+        rateRange = rateRanges.takeIf { it.isNotEmpty() }?.let { ranges ->
+            ranges.minOf { it.first }..ranges.maxOf { it.last }
+        },
+        commentRange = commentRanges.takeIf { it.isNotEmpty() }?.let { ranges ->
+            ranges.minOf { it.first }..ranges.maxOf { it.last }
+        },
+    )
+}
+
+private fun Post.singlePageMeasuredFooterUnits(
+    sections: Set<PostFooterSection>,
+    lineHeightPx: Int,
+    maxPageHeightPx: Int,
+    measurementKeyPrefix: String,
+    measuredHeightFor: (String) -> Int? = { null },
+): List<SinglePageFooterUnit> {
+    val line = lineHeightPx.coerceAtLeast(1)
+    val maxHeight = maxPageHeightPx.coerceAtLeast(line)
+    val units = mutableListOf<SinglePageFooterUnit>()
+
+    fun addUnit(
+        id: String,
+        kind: ThreadReaderMeasuredUnitKind,
+        unitSections: Set<PostFooterSection>,
+        heightPx: Int,
+        renderOptions: PostFooterRenderOptions = PostFooterRenderOptions(),
+    ) {
+        val measurementKey = "$measurementKeyPrefix|$id"
+        units += SinglePageFooterUnit(
+            sections = unitSections,
+            renderOptions = renderOptions,
+            measurementKey = measurementKey,
+            measuredUnit = ThreadReaderMeasuredUnit(
+                id = id,
+                kind = kind,
+                heightPx = (measuredHeightFor(measurementKey) ?: heightPx).coerceAtLeast(line),
+                blockId = "footer-$id",
+            ),
+        )
+    }
+
+    if (PostFooterSection.Metadata in sections && lastEditedTime != null) {
+        addUnit("metadata", ThreadReaderMeasuredUnitKind.Metadata, setOf(PostFooterSection.Metadata), line * 3)
+    }
+    if (PostFooterSection.Navigation in sections) {
+        addUnit("navigation", ThreadReaderMeasuredUnitKind.NavigationBanner, setOf(PostFooterSection.Navigation), line * 4)
+    }
+    if (PostFooterSection.Poll in sections && poll != null) {
+        addUnit("poll", ThreadReaderMeasuredUnitKind.Poll, setOf(PostFooterSection.Poll), (line * 8).coerceAtMost(maxHeight))
+    }
+    if (PostFooterSection.Rates in sections && rateBlock.rates.isNotEmpty()) {
+        val headerHeight = line * 4
+        val rateRowHeight = line * 2
+        val rowsPerUnit = ((maxHeight - headerHeight).coerceAtLeast(rateRowHeight) / rateRowHeight).coerceAtLeast(1)
+        rateBlock.rates.indices.chunked(rowsPerUnit).forEachIndexed { chunkIndex, rows ->
+            val range = rows.first()..rows.last()
+            addUnit(
+                id = "rates-$chunkIndex-${range.first}-${range.last}",
+                kind = ThreadReaderMeasuredUnitKind.RatingRows,
+                unitSections = setOf(PostFooterSection.Rates),
+                heightPx = headerHeight + rateRowHeight * rows.size,
+                renderOptions = PostFooterRenderOptions(rateRange = range),
+            )
+        }
+    }
+    if (PostFooterSection.Comments in sections && comments.isNotEmpty()) {
+        val headerHeight = line * 3
+        val commentRowHeight = line * 4
+        val rowsPerUnit = ((maxHeight - headerHeight).coerceAtLeast(commentRowHeight) / commentRowHeight).coerceAtLeast(1)
+        comments.indices.chunked(rowsPerUnit).forEachIndexed { chunkIndex, rows ->
+            val range = rows.first()..rows.last()
+            addUnit(
+                id = "comments-$chunkIndex-${range.first}-${range.last}",
+                kind = ThreadReaderMeasuredUnitKind.CommentRows,
+                unitSections = setOf(PostFooterSection.Comments),
+                heightPx = headerHeight + commentRowHeight * rows.size,
+                renderOptions = PostFooterRenderOptions(commentRange = range),
+            )
+        }
+    }
+    if (PostFooterSection.Attachments in sections && attachments.isNotEmpty()) {
+        addUnit("attachments", ThreadReaderMeasuredUnitKind.AttachmentRows, setOf(PostFooterSection.Attachments), line * (attachments.size.coerceAtMost(4) * 2 + 2))
+    }
+    if (PostFooterSection.Actions in sections) {
+        addUnit("actions", ThreadReaderMeasuredUnitKind.ActionRow, setOf(PostFooterSection.Actions), line * 3)
+    }
+    return units
+}
+
+private fun Post.hasSinglePageSemanticFooter(): Boolean =
+    lastEditedTime != null ||
+        poll != null ||
+        rateBlock.rates.isNotEmpty() ||
+        comments.isNotEmpty() ||
+        attachments.isNotEmpty()
+
+private fun singlePageFooterMeasurementKeyPrefix(
+    postId: Long,
+    sections: Set<PostFooterSection>,
+    viewportWidthPx: Int,
+    contentWidthFraction: Float,
+    fontSize: Int,
+    lineSpacing: Float,
+    readerFontId: String,
+    convertedContentVersion: Int,
+): String =
+    buildString {
+        append("footer")
+        append("|post=").append(postId)
+        append("|sections=").append(sections.sortedBy { it.ordinal }.joinToString(",") { it.name })
+        append("|width=").append(viewportWidthPx)
+        append("|contentWidth=").append((contentWidthFraction * 1000).toInt())
+        append("|fontSize=").append(fontSize)
+        append("|lineSpacing=").append((lineSpacing * 1000).toInt())
+        append("|font=").append(readerFontId)
+        append("|content=").append(convertedContentVersion)
+    }
+
+private fun Post.hasSinglePageTagNavigation(
+    postPage: Int,
+    isNovelThread: Boolean,
+    showRegularFirstPostTagBanner: Boolean,
+    showNovelFirstPostTagBanner: Boolean,
+): Boolean =
+    floor == 1 &&
+        postPage == 1 &&
+        (showRegularFirstPostTagBanner || (isNovelThread && showNovelFirstPostTagBanner))
+
+private fun hasSinglePageCommentNavigation(isNovelThread: Boolean): Boolean = isNovelThread
 
 private data class VisiblePostRange(
     val firstIndex: Int?,
@@ -153,16 +422,15 @@ internal fun splitLongReaderTextBlock(block: HtmlBlock.Text): List<HtmlBlock.Tex
     val text = block.annotatedString.text
     if (text.length <= MAX_READER_TEXT_SEGMENT_CHARS) return listOf(block)
 
+    val breakMap = buildSafeBreakMap(block)
     return buildList {
         var start = 0
         var chunkIndex = 0
         while (start < text.length) {
-            val hardEnd = (start + MAX_READER_TEXT_SEGMENT_CHARS).coerceAtMost(text.length)
-            val preferredBreak = if (hardEnd < text.length) text.lastIndexOf('\n', hardEnd - 1) else -1
-            val end = preferredBreak
-                .takeIf { it > start + MAX_READER_TEXT_SEGMENT_CHARS / 2 }
-                ?.plus(1)
-                ?: hardEnd
+            val end = breakMap.bestBreak(
+                start = start,
+                maxEndExclusive = start + MAX_READER_TEXT_SEGMENT_CHARS,
+            )
             add(
                 block.copy(
                     annotatedString = block.annotatedString.subSequence(start, end),
@@ -173,6 +441,23 @@ internal fun splitLongReaderTextBlock(block: HtmlBlock.Text): List<HtmlBlock.Tex
             chunkIndex++
         }
     }
+}
+
+private fun ReaderListEntry.toSinglePageRenderEntry(
+    page: ThreadReaderPlannedPage,
+): ReaderListEntry {
+    val slicedBlocks = if (bodyBlocks.isEmpty()) {
+        emptyList()
+    } else {
+        sliceHtmlBlocksForPage(bodyBlocks, page.slices)
+    }
+    return copy(
+        key = "$key-single-${page.semanticStableId()}",
+        contentType = "$contentType-single",
+        bodyBlocks = if (page.slices.isEmpty()) bodyBlocks else slicedBlocks,
+        anchorBlockId = page.anchorRange.blockId ?: anchorBlockId,
+        anchorBlockType = anchorBlockType,
+    )
 }
 
 private fun HtmlBlock.readerTextLength(): Int = when (this) {
@@ -319,6 +604,8 @@ internal fun ThreadReaderScreen(
     val navigator = LocalNavigator.current
     val platformContext = LocalPlatformContext.current
     val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val textMeasurer = rememberTextMeasurer()
     val progressCoordinator = remember(tid, chapterStateRepository, scope) {
         ReaderProgressCoordinator(
             repository = chapterStateRepository,
@@ -329,12 +616,44 @@ internal fun ThreadReaderScreen(
     val listState = rememberLazyListState()
     val isNovelThread = threadType == ReadHistoryRepository.ThreadEntryType.Novel
     val keepSystemBarsBackground = novelSettingsRepository.keepSystemBarsBackground.state()
+    val readerFontSize = novelSettingsRepository.fontSize.state()
+    val readerLineSpacing = novelSettingsRepository.lineSpacing.state()
+    val readerFontId = novelSettingsRepository.readerFontId.state()
+    val readerContentWidthFraction = novelSettingsRepository.contentWidthFraction.state()
     val scrollButtonDisplayMode = novelSettingsRepository.scrollButtonDisplayMode.state()
     val scrollButtonDirectionThreshold = novelSettingsRepository.scrollButtonDirectionThreshold.state()
     val scrollButtonJumpTarget = novelSettingsRepository.scrollButtonJumpTarget.state()
     val showPageProgressHint = novelSettingsRepository.showPageProgressHint.state()
+    val threadReaderMode = novelSettingsRepository.threadReaderMode.state()
+    val touchZoneLayout = LocalMangaReaderSettingsRepository.current.touchZone.state()
+    val isSinglePageMode = threadReaderMode != ThreadReaderMode.SCROLL_CONTINUOUS
+    val readerSystemTopPadding = if (keepSystemBarsBackground) {
+        WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    } else {
+        0.dp
+    }
+    val readerSystemBottomPadding = if (keepSystemBarsBackground) {
+        WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    } else {
+        0.dp
+    }
+    val singlePageTopReadingPadding = readerSystemTopPadding + 16.dp
+    val singlePageBottomReadingPadding = readerSystemBottomPadding + 40.dp
 
     var state by remember { mutableStateOf<ReaderState>(ReaderState.Loading) }
+    var readerViewportHeightPx by remember { mutableIntStateOf(0) }
+    var readerViewportWidthPx by remember { mutableIntStateOf(0) }
+    val singlePageContentHeightPx = remember(
+        readerViewportHeightPx,
+        singlePageTopReadingPadding,
+        singlePageBottomReadingPadding,
+        density,
+    ) {
+        val reservedPx = with(density) {
+            (singlePageTopReadingPadding + singlePageBottomReadingPadding).roundToPx()
+        }
+        (readerViewportHeightPx - reservedPx).coerceAtLeast(1)
+    }
     var posts by remember { mutableStateOf<List<Post>>(emptyList()) }
     var postIndexByPid by remember { mutableStateOf<Map<Long, Int>>(emptyMap()) }
     var pageByPid by remember { mutableStateOf<Map<Long, Int>>(emptyMap()) }
@@ -349,6 +668,10 @@ internal fun ThreadReaderScreen(
     val postHeightCache = remember(tid) { mutableStateMapOf<Long, Int>() }
     val imageHeightCache = remember(tid) { mutableStateMapOf<String, Int>() }
     val imageAspectRatioCache = remember(tid) { mutableStateMapOf<String, Float>() }
+    var activeImageGeometrySnapshot by remember(tid, targetPid) {
+        mutableStateOf<Map<String, Float>>(emptyMap())
+    }
+    var imageGeometryPreflightReady by remember(tid, targetPid) { mutableStateOf(false) }
     val pendingPostHeights = remember(tid) { mutableStateMapOf<Long, Int>() }
     val loadedImageUrlsByPost = remember(tid) { mutableStateMapOf<Long, Set<String>>() }
     val prefetchedImageUrls = remember(tid) { hashSetOf<String>() }
@@ -365,6 +688,14 @@ internal fun ThreadReaderScreen(
     var dismissedUpdateWarningPages by remember(tid, authorId) { mutableStateOf(emptySet<Int>()) }
     var scrollJumpButtonPointsDown by remember { mutableStateOf(false) }
     var showScrollJumpButtonAfterSlide by remember { mutableStateOf(false) }
+    var singlePageSession by remember(tid, targetPid) {
+        mutableStateOf<ThreadReaderSinglePageSession?>(null)
+    }
+    var previousThreadReaderMode by remember(tid, targetPid) { mutableStateOf(threadReaderMode) }
+    var singlePageDragPreviewOffsetPx by remember { mutableFloatStateOf(0f) }
+    var singlePageDragPreviewAxisSizePx by remember { mutableFloatStateOf(1f) }
+    var singlePageTurnAnimating by remember { mutableStateOf(false) }
+    var committedSinglePageOverlay by remember(tid, targetPid) { mutableStateOf<ReaderListEntry?>(null) }
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
     val authRepo = LocalAuthRepository.current
@@ -381,8 +712,13 @@ internal fun ThreadReaderScreen(
 
     var hasRestoredPosition by remember { mutableStateOf(false) }
     var pendingSavedPosition by remember(tid, targetPid) { mutableStateOf<ThreadReadingHistory?>(null) }
+    var hasResolvedInitialHistoryLookup by remember(tid, targetPid) { mutableStateOf(targetPid != null) }
+    var imageGeometryPriorityPostId by remember(tid, targetPid) {
+        mutableStateOf(targetPid?.value?.toLong())
+    }
     var isRestoringSavedPosition by remember { mutableStateOf(false) }
     var canPersistReadingState by remember(tid, targetPid) { mutableStateOf(false) }
+    var hasPresentedInitialSinglePage by remember(tid, targetPid) { mutableStateOf(false) }
     var pendingTargetPid by remember(tid, targetPid) { mutableStateOf(targetPid?.value?.toLong()) }
     var lastReadingSnapshot by remember(tid) {
         mutableStateOf<Pair<ThreadReadingHistory?, List<ChapterStateRepository.ProgressUpdate>>?>(null)
@@ -831,6 +1167,96 @@ internal fun ThreadReaderScreen(
             }
         }
     }
+    LaunchedEffect(
+        tid,
+        isSinglePageMode,
+        readerEntries,
+        readerViewportWidthPx,
+        singlePageContentHeightPx,
+        readerFontSize,
+        readerLineSpacing,
+        readerFontId,
+        readerContentWidthFraction,
+        convertedContentVersion,
+        hasResolvedInitialHistoryLookup,
+        imageGeometryPriorityPostId,
+    ) {
+        if (!hasResolvedInitialHistoryLookup) {
+            imageGeometryPreflightReady = false
+            return@LaunchedEffect
+        }
+        if (!isSinglePageMode || readerEntries.isEmpty() || readerViewportWidthPx <= 0) {
+            imageGeometryPreflightReady = !isSinglePageMode
+            return@LaunchedEffect
+        }
+
+        imageGeometryPreflightReady = false
+        val activePostId = singlePageSession
+            ?.layoutResult
+            ?.entries
+            ?.getOrNull(singlePageSession?.currentPageIndex ?: -1)
+            ?.page
+            ?.postId
+        val priorityPostId = imageGeometryPriorityPostId
+            ?: activePostId
+            ?: targetPid?.value?.toLong()
+            ?: posts.firstOrNull()?.pid?.value?.toLong()
+        val priorityIndex = posts.indexOfFirst { it.pid.value.toLong() == priorityPostId }
+        val prioritizedPosts = if (priorityIndex >= 0) {
+            buildList {
+                add(posts[priorityIndex])
+                posts.getOrNull(priorityIndex - 1)?.let(::add)
+                posts.getOrNull(priorityIndex + 1)?.let(::add)
+            }
+        } else {
+            posts.take(2)
+        }
+        val urls = prioritizedPosts.asSequence()
+            .flatMap { post -> expectedImageUrlsByPost[post.pid.value.toLong()].orEmpty().asSequence() }
+            .distinct()
+            .toList()
+        if (urls.isEmpty()) {
+            activeImageGeometrySnapshot = imageAspectRatioCache.toMap()
+            imageGeometryPreflightReady = true
+            return@LaunchedEffect
+        }
+
+        val imageLoader = SingletonImageLoader.get(platformContext)
+        val cookie = authRepo.cookieStore.load().orEmpty()
+        val measuredRatios = mutableMapOf<String, Float>()
+        val semaphore = Semaphore(permits = 4)
+        withTimeoutOrNull(500.milliseconds) {
+            coroutineScope {
+                urls.map { imageUrl ->
+                    async {
+                        semaphore.withPermit {
+                            val request = buildImageRequest(
+                                context = platformContext,
+                                url = imageUrl,
+                                cookie = cookie,
+                                enableCrossfade = false,
+                            )
+                            val cachedResult = imageLoader.execute(
+                                request.newBuilder()
+                                    .networkCachePolicy(CachePolicy.DISABLED)
+                                    .build()
+                            )
+                            val result = if (cachedResult is SuccessResult) cachedResult else imageLoader.execute(request)
+                            if (result is SuccessResult && result.image.width > 0 && result.image.height > 0) {
+                                measuredRatios[imageUrl] =
+                                    result.image.height.toFloat() / result.image.width.toFloat()
+                            }
+                        }
+                    }
+                }.awaitAll()
+            }
+        }
+        activeImageGeometrySnapshot = imageAspectRatioCache.toMap() + measuredRatios
+        imageGeometryPreflightReady = true
+        debugPerfLog(
+            "single_page_image_preflight|urls=${urls.size}|resolved=${activeImageGeometrySnapshot.size}|timeoutMs=500"
+        )
+    }
     val entryIndexByPid = remember(readerEntries) {
         buildMap {
             readerEntries.forEachIndexed { index, entry ->
@@ -848,6 +1274,9 @@ internal fun ThreadReaderScreen(
                 when (entry.kind) {
                     ReaderEntryKind.WholePost,
                     ReaderEntryKind.SegmentedHeader,
+                    ReaderEntryKind.SegmentedBodyWithHeader,
+                    ReaderEntryKind.SegmentedBodyWithHeaderAndFooter,
+                    ReaderEntryKind.SegmentedBodyWithFooter,
                     ReaderEntryKind.SegmentedBody,
                     ReaderEntryKind.SegmentedFooter -> true
                     else -> false
@@ -855,6 +1284,410 @@ internal fun ThreadReaderScreen(
             }
             .groupBy { it.value.post.pid.value.toLong() }
             .mapValues { (_, entries) -> entries.first().index..entries.last().index }
+    }
+    val singlePageMeasuredHeightCache = remember { mutableStateMapOf<String, Int>() }
+    val singlePageImagePainterCache = remember(tid) { createReaderImagePainterCache(maxEntries = 24) }
+    var singlePageMeasuredHeightVersion by remember { mutableIntStateOf(0) }
+    val candidateSinglePageLayoutResult = remember(
+        readerEntries,
+        pageByPid,
+        initialPage,
+        singlePageContentHeightPx,
+        readerFontSize,
+        readerLineSpacing,
+        readerFontId,
+        readerContentWidthFraction,
+        convertedContentVersion,
+        activeImageGeometrySnapshot,
+        readerViewportWidthPx,
+        textMeasurer,
+        singlePageMeasuredHeightVersion,
+        isNovelThread,
+        showRegularFirstPostTagBanner,
+        showNovelFirstPostTagBanner,
+    ) {
+        val viewportHeightPx = singlePageContentHeightPx.coerceAtLeast(1)
+        val estimatedLineHeightPx = (readerFontSize * readerLineSpacing * density.density * 1.52f).toInt().coerceAtLeast(28)
+        val fontSizeScale = (16f / readerFontSize.toFloat().coerceAtLeast(1f)).coerceIn(0.6f, 1.25f)
+        val estimatedCharsPerLine = (26 * readerContentWidthFraction * fontSizeScale).toInt().coerceAtLeast(10)
+        val pageVerticalPaddingPx = with(density) { 48.dp.roundToPx() }
+        val measuredTextWidthPx = (readerViewportWidthPx * readerContentWidthFraction)
+            .toInt()
+            .coerceAtLeast(1)
+        val measuredTextStyle = TextStyle(
+            fontSize = readerFontSize.sp,
+            lineHeight = (readerFontSize * readerLineSpacing).sp,
+        )
+        val packedPostIds = mutableSetOf<Long>()
+        val footerMeasurementSpecs = mutableListOf<SinglePageFooterMeasurementSpec>()
+        val entries = buildList {
+            readerEntries.forEachIndexed { sourceIndex, entry ->
+                val eligible = when (entry.kind) {
+                    ReaderEntryKind.WholePost,
+                    ReaderEntryKind.SegmentedHeader,
+                    ReaderEntryKind.SegmentedBodyWithHeader,
+                    ReaderEntryKind.SegmentedBodyWithHeaderAndFooter,
+                    ReaderEntryKind.SegmentedBodyWithFooter,
+                    ReaderEntryKind.SegmentedBody,
+                    ReaderEntryKind.SegmentedFooter -> true
+                    ReaderEntryKind.RegularTagBanner,
+                    ReaderEntryKind.NovelTagBanner,
+                    ReaderEntryKind.NovelCommentBanner,
+                    ReaderEntryKind.Separator -> false
+                }
+                if (!eligible) return@forEachIndexed
+
+                val postId = entry.post.pid.value.toLong()
+                if (!packedPostIds.add(postId)) return@forEachIndexed
+
+                val renderBlocks = normalizeHtmlBlocks(
+                    HtmlParser.parseHtml(convertedContentByPid[postId] ?: entry.post.contentHtml)
+                )
+                val plannedPages = if (renderBlocks.isEmpty()) {
+                    listOf(
+                        ThreadReaderPlannedPage(
+                            postId = postId,
+                            pageIndexInPost = 0,
+                            totalPagesInPost = 1,
+                            estimatedHeightPx = viewportHeightPx,
+                            anchorRange = ThreadReaderAnchorRange(postId, entry.anchorBlockId, null, null),
+                            slices = emptyList(),
+                        )
+                    )
+                } else {
+                    planFixedHeightReaderPages(
+                        ThreadReaderPaginationInput(
+                            postId = postId,
+                            blocks = renderBlocks,
+                            viewportHeightPx = viewportHeightPx,
+                            estimatedCharsPerLine = estimatedCharsPerLine,
+                            estimatedLineHeightPx = estimatedLineHeightPx,
+                            verticalPaddingPx = pageVerticalPaddingPx,
+                            contentWidthPx = measuredTextWidthPx,
+                            imageHeightFor = { null },
+                            imageHeightToWidthRatioFor = { block ->
+                                activeImageGeometrySnapshot[normalizeImageUrl(block.url)]
+                            },
+                            textHeightFor = { block, start, end ->
+                                val text = block.annotatedString.subSequence(start, end)
+                                val measuredHeight = textMeasurer.measure(
+                                    text = text,
+                                    style = measuredTextStyle.copy(textAlign = block.textAlign),
+                                    constraints = Constraints(maxWidth = measuredTextWidthPx),
+                                ).size.height
+                                (measuredHeight * 104 + 99) / 100 + with(density) { 8.dp.roundToPx() }
+                            },
+                        )
+                    )
+                }
+                val postPage = pageByPid[postId] ?: initialPage
+                val showTagAction = entry.post.hasSinglePageTagNavigation(
+                    postPage = postPage,
+                    isNovelThread = isNovelThread,
+                    showRegularFirstPostTagBanner = showRegularFirstPostTagBanner,
+                    showNovelFirstPostTagBanner = showNovelFirstPostTagBanner,
+                )
+                val showCommentReaderAction = hasSinglePageCommentNavigation(isNovelThread)
+                val includeNavigation = showTagAction || showCommentReaderAction
+                val footerGroups = if (
+                    (plannedPages.size > 1 || entry.post.hasSinglePageSemanticFooter() || includeNavigation)
+                ) {
+                    entry.post.singlePageFooterSectionGroups(includeNavigation)
+                } else {
+                    emptyList()
+                }
+                val maxPageHeightPx = (viewportHeightPx - pageVerticalPaddingPx).coerceAtLeast(1)
+                var inlineFooterMeasuredHeightPx: Int? = null
+                val footerUnits = footerGroups.flatMap { sections ->
+                    val measurementKeyPrefix = singlePageFooterMeasurementKeyPrefix(
+                        postId = postId,
+                        sections = sections,
+                        viewportWidthPx = readerViewportWidthPx,
+                        contentWidthFraction = readerContentWidthFraction,
+                        fontSize = readerFontSize,
+                        lineSpacing = readerLineSpacing,
+                        readerFontId = readerFontId,
+                        convertedContentVersion = convertedContentVersion,
+                    )
+                    val units = entry.post.singlePageMeasuredFooterUnits(
+                        sections = sections,
+                        lineHeightPx = estimatedLineHeightPx,
+                        maxPageHeightPx = maxPageHeightPx,
+                        measurementKeyPrefix = measurementKeyPrefix,
+                        measuredHeightFor = { key -> singlePageMeasuredHeightCache[key] },
+                    )
+                    val combinedMeasurementKey = "$measurementKeyPrefix|combined"
+                    footerMeasurementSpecs += SinglePageFooterMeasurementSpec(
+                        key = combinedMeasurementKey,
+                        post = entry.post,
+                        sections = sections,
+                        renderOptions = units.combineFooterRenderOptions(),
+                        showTagAction = showTagAction,
+                        showCommentReaderAction = showCommentReaderAction,
+                    )
+                    inlineFooterMeasuredHeightPx = singlePageMeasuredHeightCache[combinedMeasurementKey]
+                    units
+                }
+                footerUnits.forEach { unit ->
+                    footerMeasurementSpecs += SinglePageFooterMeasurementSpec(
+                        key = unit.measurementKey,
+                        post = entry.post,
+                        sections = unit.sections,
+                        renderOptions = unit.renderOptions,
+                        showTagAction = showTagAction,
+                        showCommentReaderAction = showCommentReaderAction,
+                    )
+                }
+                val inlineFooterUnits = footerUnits.takeIf { units ->
+                    plannedPages.isNotEmpty() &&
+                        units.isNotEmpty() &&
+                        shouldInlineFooterOnFinalPage(
+                            lastPageEstimatedHeightPx = plannedPages.last().estimatedHeightPx,
+                            footerEstimatedHeightPx = inlineFooterMeasuredHeightPx ?: units.sumOf { it.measuredUnit.heightPx },
+                            viewportHeightPx = viewportHeightPx,
+                            verticalPaddingPx = pageVerticalPaddingPx,
+                        )
+                }
+                val standaloneFooterPackingResult = if (inlineFooterUnits == null) {
+                    packMeasuredThreadReaderUnitsResult(
+                        units = footerUnits.map { it.measuredUnit },
+                        viewportHeightPx = viewportHeightPx,
+                        verticalPaddingPx = pageVerticalPaddingPx,
+                    )
+                } else {
+                    ThreadReaderMeasuredPackingResult(pages = emptyList(), rejectedUnits = emptyList())
+                }
+                if (standaloneFooterPackingResult.hasOverflow) {
+                    debugPerfLog(
+                        "single_page_measured_reject|post=$postId|max=$maxPageHeightPx|units=${
+                            standaloneFooterPackingResult.rejectedUnits.joinToString(",") { "${it.id}:${it.kind}:${it.heightPx}" }
+                        }"
+                    )
+                }
+                val standaloneFooterPages = standaloneFooterPackingResult.pages
+                val footerUnitById = footerUnits.associateBy { it.measuredUnit.id }
+                val totalSinglePagesForEntry = plannedPages.size + standaloneFooterPages.size
+                plannedPages.forEach { rawPage ->
+                    val page = rawPage.copy(totalPagesInPost = totalSinglePagesForEntry)
+                    val isFirstBodyPage = rawPage.pageIndexInPost == 0
+                    val includesInlineFooter = inlineFooterUnits != null &&
+                        rawPage.pageIndexInPost == plannedPages.lastIndex
+                    val sourceEntry = when {
+                        renderBlocks.isNotEmpty() -> entry.copy(
+                            key = "post-$postId-single-packed",
+                            kind = when {
+                                isFirstBodyPage && includesInlineFooter -> ReaderEntryKind.SegmentedBodyWithHeaderAndFooter
+                                isFirstBodyPage -> ReaderEntryKind.SegmentedBodyWithHeader
+                                includesInlineFooter -> ReaderEntryKind.SegmentedBodyWithFooter
+                                else -> ReaderEntryKind.SegmentedBody
+                            },
+                            contentType = when {
+                                isFirstBodyPage && includesInlineFooter -> "thread_post_single_body_header_footer"
+                                isFirstBodyPage -> "thread_post_single_body_header"
+                                includesInlineFooter -> "thread_post_single_body_footer"
+                                else -> "thread_post_single_body"
+                            },
+                            bodyBlocks = renderBlocks,
+                            anchorBlockId = page.anchorRange.blockId,
+                            anchorBlockType = inlineFooterUnits
+                                ?.takeIf { includesInlineFooter }
+                                ?.flatMap { it.sections }
+                                ?.toSet()
+                                ?.let(::footerSectionAnchor)
+                                ?: "Mixed",
+                            footerRenderOptions = inlineFooterUnits
+                                ?.takeIf { includesInlineFooter }
+                                ?.combineFooterRenderOptions()
+                                ?: PostFooterRenderOptions(),
+                        )
+                        else -> entry
+                    }
+                    add(
+                        ThreadReaderSinglePageEntry(
+                            sourceEntryIndex = sourceIndex,
+                            sourceEntry = entry,
+                            page = page,
+                            renderEntry = sourceEntry.toSinglePageRenderEntry(page),
+                        )
+                    )
+                }
+                standaloneFooterPages.forEachIndexed { footerIndex, footerPagePlan ->
+                    val units = footerPagePlan.units.mapNotNull { footerUnitById[it.id] }
+                    val sections = units.flatMap { it.sections }.toSet()
+                    val sectionAnchor = footerSectionAnchor(sections)
+                    val sectionKey = units.joinToString("-") { it.measuredUnit.id }
+                    val footerPage = ThreadReaderPlannedPage(
+                        postId = postId,
+                        pageIndexInPost = plannedPages.size + footerIndex,
+                        totalPagesInPost = totalSinglePagesForEntry,
+                        estimatedHeightPx = footerPagePlan.estimatedHeightPx,
+                        anchorRange = ThreadReaderAnchorRange(postId, "footer-$sectionKey", null, null),
+                        slices = emptyList(),
+                    )
+                    val footerEntry = entry.copy(
+                        key = "${entry.key}-single-footer-$sectionKey",
+                        contentType = "thread_post_single_footer_group",
+                        kind = ReaderEntryKind.SegmentedFooter,
+                        bodyBlocks = emptyList(),
+                        anchorBlockId = "footer-$sectionKey",
+                        anchorBlockType = sectionAnchor,
+                        footerRenderOptions = units.combineFooterRenderOptions(),
+                    )
+                    add(
+                        ThreadReaderSinglePageEntry(
+                            sourceEntryIndex = sourceIndex,
+                            sourceEntry = entry,
+                            page = footerPage,
+                            renderEntry = footerEntry,
+                        )
+                    )
+                }
+            }
+        }
+        ThreadReaderSinglePageLayoutResult(
+            entries = entries,
+            footerMeasurementSpecs = footerMeasurementSpecs.distinctBy { it.key },
+        )
+    }
+    val candidateSinglePageEntries = candidateSinglePageLayoutResult.entries
+    val singlePageEntries = singlePageSession?.layoutResult?.entries.orEmpty()
+    val singlePageFooterMeasurementSpecs = candidateSinglePageLayoutResult.footerMeasurementSpecs
+    val singlePageMeasurementsReady = singlePageFooterMeasurementSpecs.all { spec ->
+        singlePageMeasuredHeightCache.containsKey(spec.key)
+    }
+    val singlePageModelIndex = singlePageSession?.currentPageIndex ?: 0
+    val singlePageProgressByPageIndex = remember(singlePageEntries, progressEntryRangeByPid, pageByPid, initialPage) {
+        buildThreadReaderPageProgressStates(
+            pageRefs = singlePageEntries.map { it.renderEntry.key to it.page },
+            pageByPostId = pageByPid,
+            initialForumPage = initialPage,
+        )
+    }
+    val currentSinglePageState = remember(singlePageModelIndex, singlePageProgressByPageIndex) {
+        singlePageProgressByPageIndex[singlePageModelIndex]
+    }
+    val singlePageLayoutKey = remember(
+        readerEntries,
+        singlePageContentHeightPx,
+        readerFontSize,
+        readerLineSpacing,
+        readerFontId,
+        readerContentWidthFraction,
+        convertedContentVersion,
+        activeImageGeometrySnapshot,
+        readerViewportWidthPx,
+    ) {
+        listOf(
+            readerEntries.size,
+            readerEntries.firstOrNull()?.key,
+            readerEntries.lastOrNull()?.key,
+            singlePageContentHeightPx,
+            readerFontSize,
+            readerLineSpacing,
+            readerFontId,
+            readerContentWidthFraction,
+            convertedContentVersion,
+            activeImageGeometrySnapshot.hashCode(),
+            readerViewportWidthPx,
+        )
+    }
+    fun anchorForSinglePageEntry(entry: ThreadReaderSinglePageEntry): ThreadReaderReadingAnchor {
+        val topOverlayPx = if (showMenu) with(density) { 96.dp.roundToPx() } else 0
+        val bottomOverlayPx = if (showMenu) {
+            val hasSinglePageProgress = (currentSinglePageState?.currentPostPageCount ?: 0) > 1
+            with(density) {
+                (if (hasSinglePageProgress) 116.dp else 72.dp).roundToPx()
+            }
+        } else {
+            0
+        }
+        return captureSinglePageViewportAnchor(
+            page = entry.page,
+            viewportHeightPx = singlePageContentHeightPx,
+            topOverlayPx = topOverlayPx,
+            bottomOverlayPx = bottomOverlayPx,
+        )
+    }
+    fun rememberCurrentSinglePageAnchor(index: Int = singlePageModelIndex) {
+        if (!isSinglePageMode) return
+        val session = singlePageSession ?: return
+        val anchor = singlePageEntries.getOrNull(index)?.let(::anchorForSinglePageEntry) ?: return
+        singlePageSession = session.copy(anchor = anchor)
+    }
+    fun updateSinglePagePosition(index: Int, anchor: ThreadReaderReadingAnchor? = null): Boolean {
+        val session = singlePageSession ?: return false
+        val entry = session.layoutResult.entries.getOrNull(index) ?: return false
+        singlePageSession = session.copy(
+            currentPageIndex = index,
+            stablePageId = entry.page.semanticStableId(),
+            anchor = anchor ?: anchorForSinglePageEntry(entry),
+        )
+        return true
+    }
+    LaunchedEffect(isSinglePageMode, showMenu, currentSinglePageState?.currentPostPageCount) {
+        if (!isSinglePageMode) return@LaunchedEffect
+        rememberCurrentSinglePageAnchor()
+    }
+    LaunchedEffect(
+        isSinglePageMode,
+        imageGeometryPreflightReady,
+        singlePageMeasurementsReady,
+        singlePageLayoutKey,
+        candidateSinglePageLayoutResult,
+    ) {
+        if (
+            !isSinglePageMode ||
+            !imageGeometryPreflightReady ||
+            !singlePageMeasurementsReady ||
+            candidateSinglePageEntries.isEmpty()
+        ) {
+            return@LaunchedEffect
+        }
+
+        val previous = singlePageSession
+        if (previous == null) {
+            val first = candidateSinglePageEntries.first()
+            singlePageSession = ThreadReaderSinglePageSession(
+                layoutResult = candidateSinglePageLayoutResult,
+                currentPageIndex = 0,
+                stablePageId = first.page.semanticStableId(),
+                anchor = anchorForSinglePageEntry(first),
+                layoutKey = singlePageLayoutKey,
+                generation = 0,
+            )
+            return@LaunchedEffect
+        }
+        if (previous.layoutKey == singlePageLayoutKey) return@LaunchedEffect
+
+        val preservedAnchor = previous.anchor
+            ?: previous.layoutResult.entries.getOrNull(previous.currentPageIndex)?.let(::anchorForSinglePageEntry)
+        val transition = resolveSinglePagePlanTransition(
+            previousPages = previous.layoutResult.entries.map { it.page },
+            candidatePages = candidateSinglePageEntries.map { it.page },
+            previousPageIndex = previous.currentPageIndex,
+            previousStablePageId = previous.stablePageId,
+            anchor = preservedAnchor,
+        ) ?: return@LaunchedEffect
+        val resolvedEntry = candidateSinglePageEntries[transition.pageIndex]
+        singlePageSession = ThreadReaderSinglePageSession(
+            layoutResult = candidateSinglePageLayoutResult,
+            currentPageIndex = transition.pageIndex,
+            stablePageId = transition.stablePageId,
+            anchor = preservedAnchor ?: anchorForSinglePageEntry(resolvedEntry),
+            layoutKey = singlePageLayoutKey,
+            generation = previous.generation + 1,
+        )
+        listState.scrollToItem(0)
+        debugPerfLog(
+            "single_page_plan_commit|generation=${previous.generation + 1}|from=${previous.currentPageIndex}|to=${transition.pageIndex}|stable=${transition.stablePageId}"
+        )
+    }
+    LaunchedEffect(isSinglePageMode, singlePageEntries.size, currentSinglePageState?.currentEntryKey) {
+        if (isSinglePageMode) {
+            debugPerfLog(
+                "single_page_model|entries=${singlePageEntries.size}|current=${currentSinglePageState?.currentEntryKey.orEmpty()}"
+            )
+        }
     }
     val contentPostEndingAtIndex = remember(readerEntries, progressEntryRangeByPid) {
         buildMap {
@@ -873,6 +1706,84 @@ internal fun ThreadReaderScreen(
                         put(anchorBlockId, index)
                     }
                 }
+            }
+        }
+    }
+
+    fun nearestSinglePageModelIndex(entryIndex: Int): Int {
+        if (singlePageEntries.isEmpty()) return 0
+        return singlePageEntries
+            .withIndex()
+            .minByOrNull { (_, entry) -> abs(entry.sourceEntryIndex - entryIndex) }
+            ?.index ?: 0
+    }
+
+    fun setSinglePageEntryIndex(entryIndex: Int) {
+        if (singlePageEntries.isEmpty()) return
+        updateSinglePagePosition(
+            nearestSinglePageModelIndex(entryIndex).coerceIn(0, singlePageEntries.lastIndex)
+        )
+    }
+
+    fun moveSinglePage(delta: Int): Boolean {
+        if (singlePageEntries.isEmpty()) return false
+        val currentPosition = singlePageModelIndex.coerceIn(0, singlePageEntries.lastIndex)
+        val targetPosition = (currentPosition + delta).coerceIn(0, singlePageEntries.lastIndex)
+        if (targetPosition == currentPosition) return false
+        updateSinglePagePosition(targetPosition)
+        val page = singlePageEntries[targetPosition].page
+        debugPerfLog(
+            "single_page_turn_commit|from=$currentPosition|to=$targetPosition|post=${page.postId}|postPage=${page.pageIndexInPost + 1}/${page.totalPagesInPost}"
+        )
+        return true
+    }
+
+    fun axisSizeForSinglePage(): Float {
+        val raw = if (threadReaderMode == ThreadReaderMode.SINGLE_TTB) {
+            readerViewportHeightPx.toFloat()
+        } else {
+            // The width is not stored separately; the viewport height is a safe fallback until the pointer scope updates it.
+            singlePageDragPreviewAxisSizePx
+        }
+        return raw.coerceAtLeast(1f)
+    }
+    fun animateSinglePageOffset(
+        from: Float,
+        to: Float,
+        onFinished: () -> Unit = {},
+    ) {
+        scope.launch {
+            singlePageTurnAnimating = true
+            animate(
+                initialValue = from,
+                targetValue = to,
+                animationSpec = tween(durationMillis = 220),
+            ) { value, _ ->
+                singlePageDragPreviewOffsetPx = value
+            }
+            onFinished()
+            singlePageDragPreviewOffsetPx = 0f
+            singlePageTurnAnimating = false
+        }
+    }
+    fun animateSinglePageMove(
+        delta: Int,
+        axisSize: Float = axisSizeForSinglePage(),
+        onCommit: () -> Unit = {},
+    ) {
+        if (delta == 0 || singlePageTurnAnimating) return
+        val targetPosition = (singlePageModelIndex + delta).coerceIn(0, singlePageEntries.lastIndex)
+        if (targetPosition == singlePageModelIndex) {
+            animateSinglePageOffset(singlePageDragPreviewOffsetPx, 0f)
+            return
+        }
+        val physicalDirection = physicalDragForSinglePageDelta(threadReaderMode, delta)
+        val targetOffset = physicalDirection * axisSize.coerceAtLeast(1f)
+        animateSinglePageOffset(singlePageDragPreviewOffsetPx, targetOffset) {
+            val committedEntry = singlePageEntries.getOrNull(targetPosition)?.renderEntry
+            committedSinglePageOverlay = committedEntry
+            if (moveSinglePage(delta)) {
+                onCommit()
             }
         }
     }
@@ -910,6 +1821,10 @@ internal fun ThreadReaderScreen(
     fun handlePostImageError(imageUrl: String, message: String) {
         val normalizedUrl = normalizeImageUrl(imageUrl)
         failedImageMessages[normalizedUrl] = message
+    }
+
+    fun hasPostImageLoaded(postId: Long, imageUrl: String): Boolean {
+        return normalizeImageUrl(imageUrl) in loadedImageUrlsByPost[postId].orEmpty()
     }
 
     fun handlePostImageReload(imageUrl: String) {
@@ -956,6 +1871,61 @@ internal fun ThreadReaderScreen(
     /** Build a reading history snapshot from current scroll state (does NOT save) */
     fun buildHistory(): ThreadReadingHistory? {
         if (posts.isEmpty() || readerEntries.isEmpty()) return null
+        if (isSinglePageMode) {
+            val currentIndex = singlePageSession?.currentPageIndex ?: return null
+            val pageEntry = singlePageSession?.layoutResult?.entries?.getOrNull(currentIndex) ?: return null
+            val centerReaderEntry = pageEntry.renderEntry
+            val centerPost = centerReaderEntry.post
+            val pageState = singlePageProgressByPageIndex[currentIndex]
+            val pageAnchor = anchorForSinglePageEntry(pageEntry)
+            val blockEndOffset = pageAnchor.blockId?.let { blockId ->
+                singlePageEntries.asSequence()
+                    .filter { it.page.postId == pageEntry.page.postId }
+                    .flatMap { it.page.slices.asSequence() }
+                    .filterIsInstance<ThreadReaderPageSlice.Text>()
+                    .filter { it.blockId == blockId }
+                    .map { it.endOffset }
+                    .maxOrNull()
+            }
+            val blockRatio = if (pageAnchor.textOffset != null && blockEndOffset != null && blockEndOffset > 0) {
+                (pageAnchor.textOffset.toFloat() / blockEndOffset.toFloat()).coerceIn(0f, 1f)
+            } else {
+                pageAnchor.blockRatio
+            }
+            val postRatio = pageState?.let { current ->
+                if (current.currentPostPageCount <= 1) 0f
+                else current.currentPostPageIndex.toFloat() / (current.currentPostPageCount - 1).toFloat()
+            }
+            val postPage = pageState?.forumPage ?: pageByPid[centerPost.pid.value.toLong()] ?: initialPage
+            val forumInfo = threadInfo?.forum
+            Logger.i("ThreadReaderScreen", "$title : $coverUrl")
+            return ThreadReadingHistory(
+                threadType = threadType,
+                threadName = threadInfo?.title ?: title,
+                threadId = tid,
+                threadCover = coverUrl,
+                lastUpdatedTime = loadedPostsByPage[1]
+                    ?.firstOrNull { it.floor == 1 }
+                    ?.let { it.lastEditedTime?.epochMillisOrNull() ?: it.timeCreate.epochMillisOrNull() },
+                forumName = forumInfo?.name,
+                forumId = forumInfo?.fid,
+                authorId = authorId,
+                page = postPage,
+                postId = centerPost.pid,
+                postTitle = centerPost.title,
+                anchorPostId = centerPost.pid.value.toLong(),
+                anchorPostRatio = postRatio,
+                anchorBlockId = pageAnchor.blockId ?: centerReaderEntry.anchorBlockId,
+                anchorBlockType = centerReaderEntry.anchorBlockType,
+                anchorBlockRatio = blockRatio,
+                globalScrollY = null,
+                viewportHeight = null,
+                firstVisibleItemIndex = pageEntry.sourceEntryIndex,
+                firstVisibleItemOffset = 0,
+                historyOrigin = threadHistoryOrigin,
+                lastVisitTime = currentTimeMillis()
+            )
+        }
         val layoutInfo = listState.layoutInfo
         val visibleItems = layoutInfo.visibleItemsInfo
         if (visibleItems.isEmpty()) return null
@@ -1014,7 +1984,7 @@ internal fun ThreadReaderScreen(
             anchorPostRatio = if (centerReaderEntry.kind == ReaderEntryKind.WholePost) entryRatio else null,
             anchorBlockId = centerReaderEntry.anchorBlockId,
             anchorBlockType = centerReaderEntry.anchorBlockType,
-            anchorBlockRatio = if (centerReaderEntry.kind == ReaderEntryKind.SegmentedBody) entryRatio else null,
+            anchorBlockRatio = if (centerReaderEntry.kind.isSegmentedBodyLike()) entryRatio else null,
             globalScrollY = null,
             viewportHeight = (viewportBottom - viewportTop),
             firstVisibleItemIndex = firstVisible,
@@ -1115,6 +2085,25 @@ internal fun ThreadReaderScreen(
 
     fun currentChapterUpdates(): List<ChapterStateRepository.ProgressUpdate> {
         if (posts.isEmpty() || readerEntries.isEmpty()) return emptyList()
+        if (isSinglePageMode) {
+            val currentIndex = singlePageSession?.currentPageIndex ?: return emptyList()
+            val pageState = singlePageProgressByPageIndex[currentIndex] ?: return emptyList()
+            val entry = singlePageSession?.layoutResult?.entries?.getOrNull(currentIndex)?.sourceEntry
+                ?: return emptyList()
+            if (progressCoordinator.isRead(pageState.currentPostId)) return emptyList()
+            val progressPercent = ((pageState.currentPostPageIndex + 1).toFloat() /
+                pageState.currentPostPageCount.toFloat() * 100f).toInt().coerceIn(1, 100)
+            return listOfNotNull(
+                progressCoordinator.update(
+                    postId = pageState.currentPostId,
+                    title = entry.post.title.ifBlank { i18n("（無標題）") },
+                    progressPercent = progressPercent,
+                    read = progressPercent >= 100,
+                    lastPageIndex = pageState.currentPostPageIndex,
+                    totalPages = pageState.currentPostPageCount,
+                )
+            )
+        }
         val layoutInfo = listState.layoutInfo
         val visibleItems = layoutInfo.visibleItemsInfo
         if (visibleItems.isEmpty()) return emptyList()
@@ -1218,26 +2207,58 @@ internal fun ThreadReaderScreen(
 
     suspend fun persistCurrentReadingState() {
         if (!canWriteReadingState()) return
-        val history = runCatching(::buildHistory).getOrNull()
-        val progressUpdates = runCatching(::currentChapterUpdates).getOrDefault(emptyList())
+        val history = runCatching(::buildHistory)
+            .onFailure { error -> debugPerfLog("history_build_error|${error::class.simpleName}|${error.message.orEmpty()}") }
+            .getOrNull()
+        val progressUpdates = runCatching(::currentChapterUpdates)
+            .onFailure { error -> debugPerfLog("progress_build_error|${error::class.simpleName}|${error.message.orEmpty()}") }
+            .getOrDefault(emptyList())
         if (history != null || progressUpdates.isNotEmpty()) {
             lastReadingSnapshot = history to progressUpdates
         }
+        debugPerfLog(
+            "persist_reading_state|mode=$threadReaderMode|history=${history != null}|progressUpdates=${progressUpdates.size}"
+        )
         persistReadingSnapshot(history, progressUpdates)
     }
 
     fun currentVisiblePageForAction(): Int {
+        if (isSinglePageMode) {
+            val session = singlePageSession ?: return initialPage
+            val currentEntry = session.layoutResult.entries.getOrNull(session.currentPageIndex)?.sourceEntry
+                ?: return initialPage
+            return pageByPid[currentEntry.post.pid.value.toLong()] ?: initialPage
+        }
         val currentIndex = visibleAnchorEntryIndex() ?: listState.firstVisibleItemIndex
         val currentEntry = readerEntries.getOrNull(currentIndex) ?: return initialPage
         return pageByPid[currentEntry.post.pid.value.toLong()] ?: initialPage
     }
 
-    LaunchedEffect(loadedPages, totalPages, tid, authorId, readerEntries, downloadQueue, dismissedUpdateWarningPages) {
-        snapshotFlow { currentVisiblePageForAction() }
+    fun isMeaningfulLastLoadedBoundaryForUpdateWarning(currentPage: Int): Boolean {
+        if (currentPage != totalPages) return false
+        if (!isSinglePageMode) return true
+        return singlePageEntries.isNotEmpty() &&
+            singlePageModelIndex == singlePageEntries.lastIndex &&
+            currentSinglePageState?.forumPage == totalPages
+    }
+
+    LaunchedEffect(
+        loadedPages,
+        totalPages,
+        tid,
+        authorId,
+        readerEntries,
+        singlePageEntries,
+        singlePageModelIndex,
+        currentSinglePageState?.forumPage,
+        downloadQueue,
+        dismissedUpdateWarningPages,
+    ) {
+        snapshotFlow { currentVisiblePageForAction() to isMeaningfulLastLoadedBoundaryForUpdateWarning(currentVisiblePageForAction()) }
             .distinctUntilChanged()
-            .collect { currentPage ->
+            .collect { (currentPage, isMeaningfulBoundary) ->
                 showDownloadedLastPageWarning =
-                    currentPage == totalPages &&
+                    isMeaningfulBoundary &&
                         currentPage !in dismissedUpdateWarningPages &&
                         downloadQueue.any {
                             it.key == ThreadPageDownloadKey(tid.value, currentPage, authorId?.value) &&
@@ -1282,12 +2303,18 @@ internal fun ThreadReaderScreen(
             ?.takeIf { it in 1..99 }
             ?: 0
         if (progressPercent <= 0) {
+            if (isSinglePageMode) {
+                setSinglePageEntryIndex(index)
+            }
             listState.scrollToItem(index)
             return
         }
 
         val range = progressEntryRangeByPid[pid]
         if (range == null) {
+            if (isSinglePageMode) {
+                setSinglePageEntryIndex(index)
+            }
             listState.scrollToItem(index)
             return
         }
@@ -1297,7 +2324,12 @@ internal fun ThreadReaderScreen(
         val targetIndex = (range.first + targetEntryOffset).coerceIn(range.first, range.last)
         val intraEntryProgress = (targetProgress - targetEntryOffset).coerceIn(0f, 0.95f)
 
-        listState.scrollToItem(targetIndex)
+        if (isSinglePageMode) {
+            setSinglePageEntryIndex(targetIndex)
+            listState.scrollToItem(0)
+            return
+        }
+        listState.scrollToItem(0)
         withFrameNanos { }
         val itemHeight = listState.layoutInfo.visibleItemsInfo
             .firstOrNull { it.index == targetIndex }
@@ -1514,7 +2546,12 @@ internal fun ThreadReaderScreen(
         if (nearestIndex >= 0) {
             val nearestPost = posts[nearestIndex]
             val entryIndex = entryIndexByPid[nearestPost.pid.value.toLong()] ?: nearestIndex
-            listState.scrollToItem(entryIndex)
+            if (isSinglePageMode) {
+                setSinglePageEntryIndex(entryIndex)
+                listState.scrollToItem(0)
+            } else {
+                listState.scrollToItem(entryIndex)
+            }
             hasRestoredPosition = true
             if (nearestPost.pid.value.toLong() != targetPidLong) {
                 snackbarHostState.showSnackbar(i18n("找不到指定的樓層，已跳轉至最接近的樓層"))
@@ -1523,6 +2560,11 @@ internal fun ThreadReaderScreen(
     }
 
     suspend fun restoreSavedListOffset(index: Int, offset: Int) {
+        if (isSinglePageMode) {
+            setSinglePageEntryIndex(index)
+            listState.scrollToItem(0)
+            return
+        }
         listState.scrollToItem(index, offset)
         withFrameNanos { }
         delay(120.milliseconds)
@@ -1532,6 +2574,23 @@ internal fun ThreadReaderScreen(
     }
 
     suspend fun restoreSavedPosition(savedPosition: ThreadReadingHistory) {
+        if (isSinglePageMode) {
+            val restoredPageIndex = resolvePageIndexForPersistedAnchor(
+                pages = singlePageEntries.map { it.page },
+                postId = savedPosition.anchorPostId,
+                blockId = savedPosition.anchorBlockId,
+                blockRatio = savedPosition.anchorBlockRatio,
+                postRatio = savedPosition.anchorPostRatio,
+            )
+            if (restoredPageIndex != null) {
+                updateSinglePagePosition(restoredPageIndex)
+                listState.scrollToItem(0)
+                debugPerfLog(
+                    "single_page_restore|post=${savedPosition.anchorPostId}|block=${savedPosition.anchorBlockId.orEmpty()}|blockRatio=${savedPosition.anchorBlockRatio}|postRatio=${savedPosition.anchorPostRatio}|index=$restoredPageIndex"
+                )
+                return
+            }
+        }
         val savedIndex = savedPosition.firstVisibleItemIndex
         val savedOffset = savedPosition.firstVisibleItemOffset
         if (savedIndex != null && savedIndex >= 0 && savedIndex < readerEntries.size) {
@@ -1548,7 +2607,12 @@ internal fun ThreadReaderScreen(
         if (!savedPosition.anchorBlockId.isNullOrEmpty()) {
             val blockIndex = entryIndexByAnchorBlockId[savedPosition.anchorBlockId]
             if (blockIndex != null) {
-                listState.scrollToItem(blockIndex)
+                if (isSinglePageMode) {
+                    setSinglePageEntryIndex(blockIndex)
+                    listState.scrollToItem(0)
+                } else {
+                    listState.scrollToItem(blockIndex)
+                }
                 return
             }
         }
@@ -1556,7 +2620,12 @@ internal fun ThreadReaderScreen(
         if (savedPosition.anchorPostId > 0) {
             val postIndex = entryIndexByPid[savedPosition.anchorPostId] ?: -1
             if (postIndex >= 0) {
-                listState.scrollToItem(postIndex)
+                if (isSinglePageMode) {
+                    setSinglePageEntryIndex(postIndex)
+                    listState.scrollToItem(0)
+                } else {
+                    listState.scrollToItem(postIndex)
+                }
             } else {
                 fallbackNearestPost(savedPosition.anchorPostId, savedPosition.page)
             }
@@ -1645,6 +2714,7 @@ internal fun ThreadReaderScreen(
                         loadPage(catalogPosition.page)
                     }
                     pendingSavedPosition = catalogPosition
+                    imageGeometryPriorityPostId = catalogPosition.anchorPostId
                     pendingTargetPid = null
                 }
             } catch (_: Exception) {
@@ -1666,20 +2736,24 @@ internal fun ThreadReaderScreen(
                         loadPage(savedPosition.page)
                     }
                     pendingSavedPosition = savedPosition
+                    imageGeometryPriorityPostId = savedPosition.anchorPostId
                 } else {
                     hasRestoredPosition = true
                     canPersistReadingState = true
                 }
+                hasResolvedInitialHistoryLookup = true
             } catch (_: Exception) {
                 hasRestoredPosition = true
                 canPersistReadingState = true
+                hasResolvedInitialHistoryLookup = true
             }
         }
     }
 
-    LaunchedEffect(state, readerEntries, pendingSavedPosition) {
+    LaunchedEffect(state, readerEntries, singlePageEntries, pendingSavedPosition) {
         val savedPosition = pendingSavedPosition ?: return@LaunchedEffect
         if (state != ReaderState.Success || readerEntries.isEmpty()) return@LaunchedEffect
+        if (isSinglePageMode && singlePageEntries.isEmpty()) return@LaunchedEffect
 
         isRestoringSavedPosition = true
         try {
@@ -1693,6 +2767,26 @@ internal fun ThreadReaderScreen(
         }
     }
 
+    LaunchedEffect(threadReaderMode, state, readerEntries) {
+        val previousMode = previousThreadReaderMode
+        if (previousMode == threadReaderMode) return@LaunchedEffect
+        if (state != ReaderState.Success || readerEntries.isEmpty()) {
+            previousThreadReaderMode = threadReaderMode
+            return@LaunchedEffect
+        }
+
+        if (previousMode == ThreadReaderMode.SCROLL_CONTINUOUS && isSinglePageMode) {
+            setSinglePageEntryIndex(listState.firstVisibleItemIndex)
+            listState.scrollToItem(0)
+        } else if (previousMode != ThreadReaderMode.SCROLL_CONTINUOUS && !isSinglePageMode) {
+            val sourceIndex = singlePageEntries.getOrNull(singlePageModelIndex)?.sourceEntryIndex ?: 0
+            listState.scrollToItem(sourceIndex)
+        }
+
+        persistCurrentReadingState()
+        previousThreadReaderMode = threadReaderMode
+    }
+
     LaunchedEffect(state, canPersistReadingState, readerEntries) {
         if (state != ReaderState.Success || !canPersistReadingState || readerEntries.isEmpty()) {
             return@LaunchedEffect
@@ -1701,13 +2795,52 @@ internal fun ThreadReaderScreen(
         persistCurrentReadingState()
     }
 
+    LaunchedEffect(isSinglePageMode, readerEntries, singlePageEntries, singlePageModelIndex) {
+        if (!isSinglePageMode || state != ReaderState.Success || readerEntries.isEmpty()) return@LaunchedEffect
+        if (singlePageEntries.isEmpty()) return@LaunchedEffect
+        val targetIndex = singlePageModelIndex.coerceIn(0, singlePageEntries.lastIndex)
+        if (targetIndex != singlePageModelIndex) {
+            updateSinglePagePosition(targetIndex)
+        }
+        listState.scrollToItem(0)
+    }
+
+    LaunchedEffect(
+        isSinglePageMode,
+        hasRestoredPosition,
+        imageGeometryPreflightReady,
+        singlePageSession?.generation,
+        singlePageModelIndex,
+    ) {
+        if (!isSinglePageMode) {
+            hasPresentedInitialSinglePage = true
+            return@LaunchedEffect
+        }
+        if (
+            !hasRestoredPosition ||
+            !imageGeometryPreflightReady ||
+            hasPresentedInitialSinglePage ||
+            singlePageEntries.isEmpty()
+        ) {
+            return@LaunchedEffect
+        }
+        delay(150.milliseconds)
+        withFrameNanos { }
+        hasPresentedInitialSinglePage = true
+    }
+
     LaunchedEffect(state, posts, readerEntries, pendingTargetPid) {
         val targetPidLong = pendingTargetPid ?: return@LaunchedEffect
         if (state != ReaderState.Success || posts.isEmpty() || readerEntries.isEmpty()) return@LaunchedEffect
 
         val targetIndex = entryIndexByPid[targetPidLong] ?: -1
         if (targetIndex >= 0) {
-            listState.scrollToItem(targetIndex)
+            if (isSinglePageMode) {
+                setSinglePageEntryIndex(targetIndex)
+                listState.scrollToItem(0)
+            } else {
+                listState.scrollToItem(targetIndex)
+            }
             hasRestoredPosition = true
             canPersistReadingState = true
             pendingTargetPid = null
@@ -1831,8 +2964,12 @@ internal fun ThreadReaderScreen(
         }
     }
 
-    LaunchedEffect(listState, state, scrollButtonDisplayMode, scrollButtonDirectionThreshold) {
-        if (state != ReaderState.Success || scrollButtonDisplayMode == ReaderScrollButtonDisplayMode.NEVER) {
+    LaunchedEffect(listState, state, isSinglePageMode, scrollButtonDisplayMode, scrollButtonDirectionThreshold) {
+        if (
+            isSinglePageMode ||
+            state != ReaderState.Success ||
+            scrollButtonDisplayMode == ReaderScrollButtonDisplayMode.NEVER
+        ) {
             showScrollJumpButtonAfterSlide = false
             return@LaunchedEffect
         }
@@ -1875,7 +3012,18 @@ internal fun ThreadReaderScreen(
             }
     }
 
-    LaunchedEffect(listState, state, posts, readerEntries, tid, isLoadingNextPage, loadedPages, totalPages) {
+    LaunchedEffect(
+        listState,
+        state,
+        posts,
+        readerEntries,
+        tid,
+        isSinglePageMode,
+        singlePageModelIndex,
+        isLoadingNextPage,
+        loadedPages,
+        totalPages,
+    ) {
         if (state != ReaderState.Success || posts.isEmpty() || readerEntries.isEmpty()) return@LaunchedEffect
 
         val imageLoader = SingletonImageLoader.get(platformContext)
@@ -1883,6 +3031,76 @@ internal fun ThreadReaderScreen(
         val preloadBehindCount = 2
         val preloadAheadCount = 2
         val pagePreloadThreshold = 5
+
+        fun handleVisiblePostRange(range: VisiblePostRange) {
+            val firstVisibleItemIndex = range.firstIndex ?: return
+            val lastVisibleItemIndex = range.lastIndex ?: return
+            val startIndex = (firstVisibleItemIndex - preloadBehindCount).coerceAtLeast(0)
+            val endIndex = (lastVisibleItemIndex + preloadAheadCount).coerceAtMost(posts.lastIndex)
+
+            if (startIndex <= endIndex) {
+                debugPerfLog("image_prefetch_window|first=$firstVisibleItemIndex|last=$lastVisibleItemIndex|start=$startIndex|end=$endIndex")
+                for (index in startIndex..endIndex) {
+                    val post = posts[index]
+                    expectedImageUrlsByPost[post.pid.value.toLong()].orEmpty().forEach { imageUrl ->
+                        if (imageUrl in failedImageMessages) return@forEach
+                        if (!prefetchedImageUrls.add(imageUrl)) return@forEach
+                        debugPerfLog("image_prefetch_enqueue|post=${post.pid.value}|url=$imageUrl")
+                        imageLoader.enqueue(
+                            buildImageRequest(
+                                context = platformContext,
+                                url = imageUrl,
+                                cookie = cookie,
+                                enableCrossfade = false,
+                            )
+                        )
+                    }
+                }
+            }
+
+            if (isLoadingNextPage) return
+
+            val firstPost = posts.getOrNull(firstVisibleItemIndex)
+            if (firstPost != null) {
+                val page = pageByPid[firstPost.pid.value.toLong()] ?: 1
+                val bounds = pageIndexBounds[page]
+                if (bounds != null && firstVisibleItemIndex - bounds.first <= pagePreloadThreshold) {
+                    val prevPage = page - 1
+                    if (prevPage >= 1 && prevPage !in loadedPages && prevPage !in failedAutoLoadPages) {
+                        currentPageFetching = prevPage
+                        debugPerfLog("auto_preload_prev|page=$prevPage|first=$firstVisibleItemIndex|last=$lastVisibleItemIndex")
+                        scope.launch { loadPage(prevPage, autoTriggered = true) }
+                        return
+                    }
+                }
+            }
+
+            val lastPost = posts.getOrNull(lastVisibleItemIndex)
+            if (lastPost != null) {
+                val page = pageByPid[lastPost.pid.value.toLong()] ?: 1
+                val bounds = pageIndexBounds[page]
+                if (bounds != null && bounds.last - lastVisibleItemIndex <= pagePreloadThreshold) {
+                    val nextPage = page + 1
+                    if (nextPage <= totalPages && nextPage !in loadedPages && nextPage !in failedAutoLoadPages) {
+                        currentPageFetching = nextPage
+                        debugPerfLog("auto_preload_next|page=$nextPage|first=$firstVisibleItemIndex|last=$lastVisibleItemIndex")
+                        scope.launch { loadPage(nextPage, autoTriggered = true) }
+                        return
+                    }
+                }
+            }
+        }
+
+        if (isSinglePageMode) {
+            val currentEntry = singlePageEntries.getOrNull(singlePageModelIndex)?.sourceEntry ?: return@LaunchedEffect
+            handleVisiblePostRange(
+                VisiblePostRange(
+                    firstIndex = currentEntry.postIndex,
+                    lastIndex = currentEntry.postIndex,
+                )
+            )
+            return@LaunchedEffect
+        }
 
         snapshotFlow {
             val visiblePostIndices = listState.layoutInfo.visibleItemsInfo
@@ -1894,64 +3112,7 @@ internal fun ThreadReaderScreen(
             )
         }
             .distinctUntilChanged()
-            .collect { range ->
-                val firstVisibleItemIndex = range.firstIndex ?: return@collect
-                val lastVisibleItemIndex = range.lastIndex ?: return@collect
-                val startIndex = (firstVisibleItemIndex - preloadBehindCount).coerceAtLeast(0)
-                val endIndex = (lastVisibleItemIndex + preloadAheadCount).coerceAtMost(posts.lastIndex)
-
-                if (startIndex <= endIndex) {
-                    for (index in startIndex..endIndex) {
-                        val post = posts[index]
-                        expectedImageUrlsByPost[post.pid.value.toLong()].orEmpty().forEach { imageUrl ->
-                            if (imageUrl in failedImageMessages) return@forEach
-                            if (!prefetchedImageUrls.add(imageUrl)) return@forEach
-                            imageLoader.enqueue(
-                                buildImageRequest(
-                                    context = platformContext,
-                                    url = imageUrl,
-                                    cookie = cookie,
-                                    enableCrossfade = false,
-                                )
-                            )
-                        }
-                    }
-                }
-
-                if (isLoadingNextPage) return@collect
-
-                // Detect if we are close to the beginning of the CURRENT loaded page block
-                val firstPost = posts.getOrNull(firstVisibleItemIndex)
-                if (firstPost != null) {
-                    val page = pageByPid[firstPost.pid.value.toLong()] ?: 1
-                    val bounds = pageIndexBounds[page]
-                    if (bounds != null && firstVisibleItemIndex - bounds.first <= pagePreloadThreshold) {
-                        val prevPage = page - 1
-                        if (prevPage >= 1 && prevPage !in loadedPages && prevPage !in failedAutoLoadPages) {
-                            currentPageFetching = prevPage
-                            debugPerfLog("auto_preload_prev|page=$prevPage|first=$firstVisibleItemIndex|last=$lastVisibleItemIndex")
-                            scope.launch { loadPage(prevPage, autoTriggered = true) }
-                            return@collect
-                        }
-                    }
-                }
-
-                // Detect if we are close to the end of the CURRENT loaded page block
-                val lastPost = posts.getOrNull(lastVisibleItemIndex)
-                if (lastPost != null) {
-                    val page = pageByPid[lastPost.pid.value.toLong()] ?: 1
-                    val bounds = pageIndexBounds[page]
-                    if (bounds != null && bounds.last - lastVisibleItemIndex <= pagePreloadThreshold) {
-                        val nextPage = page + 1
-                        if (nextPage <= totalPages && nextPage !in loadedPages && nextPage !in failedAutoLoadPages) {
-                            currentPageFetching = nextPage
-                            debugPerfLog("auto_preload_next|page=$nextPage|first=$firstVisibleItemIndex|last=$lastVisibleItemIndex")
-                            scope.launch { loadPage(nextPage, autoTriggered = true) }
-                            return@collect
-                        }
-                    }
-                }
-            }
+            .collect { range -> handleVisiblePostRange(range) }
     }
 
     /** Save on back before popping so the previous detail screen reads fresh progress. */
@@ -1975,7 +3136,34 @@ internal fun ThreadReaderScreen(
         if (candidate <= totalPages && candidate in failedAutoLoadPages) candidate else null
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .onSizeChanged { size ->
+                if (size.width > 0) readerViewportWidthPx = size.width
+                if (size.height > 0) readerViewportHeightPx = size.height
+            }
+    ) {
+        if (isSinglePageMode) {
+            ThreadReaderMeasureHost(
+                specs = singlePageFooterMeasurementSpecs,
+                widthPx = readerViewportWidthPx,
+                linkContext = htmlLinkContext,
+                onMeasured = { measurements ->
+                    val changed = measurements.filter { (key, height) ->
+                        singlePageMeasuredHeightCache[key] != height
+                    }
+                    if (changed.isNotEmpty()) {
+                        singlePageMeasuredHeightCache.putAll(changed)
+                        singlePageMeasuredHeightVersion += 1
+                        debugPerfLog(
+                            "single_page_measure_host|count=${changed.size}|${changed.entries.joinToString(",") { "${it.key}:${it.value}" }}"
+                        )
+                    }
+                },
+            )
+        }
+
         ModalNavigationDrawer(
             drawerState = drawerState,
             gesturesEnabled = drawerState.isOpen,
@@ -1989,6 +3177,12 @@ internal fun ThreadReaderScreen(
                         readerEntries = readerEntries,
                         pageByPid = pageByPid,
                         initialPage = initialPage,
+                        singlePageCurrentPosition = currentSinglePageState?.let { state ->
+                            ReaderCatalogCurrentPosition(
+                                page = state.forumPage,
+                                pid = singlePageEntries.getOrNull(singlePageModelIndex)?.sourceEntry?.post?.pid,
+                            )
+                        },
                         totalPages = totalPages,
                         loadedPostsByPage = loadedPostsByPage,
                         bookmarkedPostIds = postBookMarkEntries.values
@@ -2065,6 +3259,7 @@ internal fun ThreadReaderScreen(
 
         CompositionLocalProvider(
             LocalReaderOverlayVisible provides showMenu,
+            LocalReaderImagePainterCache provides singlePageImagePainterCache,
             LocalImageClickListener provides { showMenu = !showMenu },
             LocalImageDoubleClickListener provides handleImageDoubleTap,
             LocalImageSetCoverListener provides ::applySelectedCover,
@@ -2081,7 +3276,8 @@ internal fun ThreadReaderScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(colors.creamBackground)
-                    .pointerInput(Unit) {
+                    .pointerInput(isSinglePageMode) {
+                        if (isSinglePageMode) return@pointerInput
                         awaitEachGesture {
                             val down = awaitFirstDown(
                                 requireUnconsumed = false,
@@ -2154,9 +3350,98 @@ internal fun ThreadReaderScreen(
                             }
                         }
                     }
-                    .pointerInput(Unit) {
+                    .pointerInput(isSinglePageMode, threadReaderMode, singlePageEntries, singlePageTurnAnimating) {
+                        if (!isSinglePageMode) return@pointerInput
+                        var dragDistance = 0f
+                        detectDragGestures(
+                            onDragStart = {
+                                if (!singlePageTurnAnimating) {
+                                    dragDistance = 0f
+                                    singlePageDragPreviewOffsetPx = 0f
+                                }
+                            },
+                            onDragCancel = {
+                                dragDistance = 0f
+                                animateSinglePageOffset(singlePageDragPreviewOffsetPx, 0f)
+                            },
+                            onDragEnd = {
+                                val axisSize = if (threadReaderMode == ThreadReaderMode.SINGLE_TTB) {
+                                    size.height.toFloat()
+                                } else {
+                                    size.width.toFloat()
+                                }
+                                singlePageDragPreviewAxisSizePx = axisSize.coerceAtLeast(1f)
+                                val threshold = axisSize * 0.25f
+                                if (axisSize > 0f && abs(dragDistance) >= threshold) {
+                                    val delta = singlePageDeltaForPhysicalDrag(threadReaderMode, dragDistance)
+                                    animateSinglePageMove(delta, axisSize) {
+                                        scope.launch {
+                                            delay(120.milliseconds)
+                                            persistCurrentReadingState()
+                                        }
+                                    }
+                                } else {
+                                    animateSinglePageOffset(singlePageDragPreviewOffsetPx, 0f)
+                                }
+                                dragDistance = 0f
+                            },
+                            onDrag = { change, dragAmount ->
+                                if (!singlePageTurnAnimating) {
+                                    val axisSize = if (threadReaderMode == ThreadReaderMode.SINGLE_TTB) {
+                                        size.height.toFloat()
+                                    } else {
+                                        size.width.toFloat()
+                                    }.coerceAtLeast(1f)
+                                    singlePageDragPreviewAxisSizePx = axisSize
+                                    val axisDelta = if (threadReaderMode == ThreadReaderMode.SINGLE_TTB) {
+                                        dragAmount.y
+                                    } else {
+                                        dragAmount.x
+                                    }
+                                    dragDistance += axisDelta
+                                    singlePageDragPreviewOffsetPx = dragDistance.coerceIn(-axisSize, axisSize)
+                                    change.consume()
+                                }
+                            },
+                        )
+                    }
+                    .pointerInput(isSinglePageMode, threadReaderMode, touchZoneLayout, singlePageEntries, singlePageTurnAnimating) {
                         detectTapGestures { position ->
-                            if (position.x in (size.width / 3f)..(size.width * 2f / 3f)) {
+                            if (isSinglePageMode && singlePageEntries.isNotEmpty()) {
+                                if (singlePageTurnAnimating) return@detectTapGestures
+                                val action = if (touchZoneLayout == TouchZoneLayout.DISABLED) {
+                                    SinglePageTapAction.Menu
+                                } else {
+                                    when (getTouchAction(
+                                        touchZoneLayout,
+                                        xFraction = position.x / size.width.toFloat().coerceAtLeast(1f),
+                                        yFraction = position.y / size.height.toFloat().coerceAtLeast(1f),
+                                    )) {
+                                        TouchAction.PREV -> SinglePageTapAction.Prev
+                                        TouchAction.NEXT -> SinglePageTapAction.Next
+                                        TouchAction.MENU -> SinglePageTapAction.Menu
+                                        null -> null
+                                    }
+                                }
+                                val delta = singlePageDeltaForTouchAction(threadReaderMode, action)
+                                if (delta == 0) {
+                                    showMenu = !showMenu
+                                    debugPerfLog("toggle_overlay|showMenu=$showMenu")
+                                } else {
+                                    val axisSize = if (threadReaderMode == ThreadReaderMode.SINGLE_TTB) {
+                                        size.height.toFloat()
+                                    } else {
+                                        size.width.toFloat()
+                                    }.coerceAtLeast(1f)
+                                    singlePageDragPreviewAxisSizePx = axisSize
+                                    animateSinglePageMove(delta, axisSize) {
+                                        scope.launch {
+                                            delay(120.milliseconds)
+                                            persistCurrentReadingState()
+                                        }
+                                    }
+                                }
+                            } else if (position.x in (size.width / 3f)..(size.width * 2f / 3f)) {
                                 showMenu = !showMenu
                                 debugPerfLog("toggle_overlay|showMenu=$showMenu")
                             }
@@ -2179,40 +3464,292 @@ internal fun ThreadReaderScreen(
                     }
 
                     is ReaderState.Success -> {
-                        val topContentPadding = if (keepSystemBarsBackground) {
-                            WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+                        val topContentPadding = if (isSinglePageMode) {
+                            singlePageTopReadingPadding
                         } else {
-                            0.dp
+                            readerSystemTopPadding
                         }
-                        val bottomContentPadding = if (keepSystemBarsBackground) {
-                            WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 40.dp
+                        val bottomContentPadding = if (isSinglePageMode) {
+                            singlePageBottomReadingPadding
                         } else {
-                            40.dp
+                            readerSystemBottomPadding + 40.dp
                         }
-                        LazyColumn(
-                            state = listState,
-                            modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(
-                                top = topContentPadding,
-                                bottom = bottomContentPadding,
+                        val singlePageMaxImageHeight = if (isSinglePageMode && readerViewportHeightPx > 0) {
+                            with(density) { singlePageContentHeightPx.coerceAtLeast(1).toDp() }
+                        } else {
+                            null
+                        }
+                        val renderSinglePagePreviewEntry: @Composable (ReaderListEntry) -> Unit = { entry ->
+                            val post = entry.post
+                            val postId = post.pid.value.toLong()
+                            when (entry.kind) {
+                                ReaderEntryKind.WholePost -> {
+                                    PostRenderer(
+                                        post = post,
+                                        threadTitle = if (post.floor == 1) title else null,
+                                        totalViews = threadInfo?.totalViews.takeIf { post.floor == 1 },
+                                        totalReplies = threadInfo?.totalReplies.takeIf { post.floor == 1 },
+                                        linkContext = htmlLinkContext,
+                                        cachedHeightPx = postHeightCache[postId],
+                                        imageErrorMessageFor = { imageUrl ->
+                                            failedImageMessages[normalizeImageUrl(imageUrl)]
+                                        },
+                                        imageRetryKeyFor = { imageUrl ->
+                                            imageRetryKeys[normalizeImageUrl(imageUrl)] ?: 0
+                                        },
+                                        imageHasLoadedFor = { imageUrl ->
+                                            hasPostImageLoaded(postId, imageUrl)
+                                        },
+                                        imageCachedHeightFor = { imageUrl ->
+                                            imageHeightCache[normalizeImageUrl(imageUrl)]
+                                        },
+                                        imagePlaceholderAspectRatioFor = { imageUrl ->
+                                            imagePlaceholderAspectRatioFor(post, imageUrl)
+                                        },
+                                        maxImageHeight = singlePageMaxImageHeight,
+                                    )
+                                }
+                                ReaderEntryKind.SegmentedHeader -> {
+                                    PostRenderer(
+                                        post = post,
+                                        threadTitle = if (post.floor == 1) title else null,
+                                        totalViews = threadInfo?.totalViews.takeIf { post.floor == 1 },
+                                        totalReplies = threadInfo?.totalReplies.takeIf { post.floor == 1 },
+                                        linkContext = htmlLinkContext,
+                                        bodyBlocks = emptyList(),
+                                        showFooter = false,
+                                        imageErrorMessageFor = { imageUrl ->
+                                            failedImageMessages[normalizeImageUrl(imageUrl)]
+                                        },
+                                        imageRetryKeyFor = { imageUrl ->
+                                            imageRetryKeys[normalizeImageUrl(imageUrl)] ?: 0
+                                        },
+                                        imageHasLoadedFor = { imageUrl ->
+                                            hasPostImageLoaded(postId, imageUrl)
+                                        },
+                                        imageCachedHeightFor = { imageUrl ->
+                                            imageHeightCache[normalizeImageUrl(imageUrl)]
+                                        },
+                                        imagePlaceholderAspectRatioFor = { imageUrl ->
+                                            imagePlaceholderAspectRatioFor(post, imageUrl)
+                                        },
+                                        maxImageHeight = singlePageMaxImageHeight,
+                                    )
+                                }
+                                ReaderEntryKind.SegmentedBodyWithHeader,
+                                ReaderEntryKind.SegmentedBodyWithHeaderAndFooter,
+                                ReaderEntryKind.SegmentedBodyWithFooter,
+                                ReaderEntryKind.SegmentedBody -> {
+                                    val showSegmentHeader =
+                                        entry.kind == ReaderEntryKind.SegmentedBodyWithHeader ||
+                                            entry.kind == ReaderEntryKind.SegmentedBodyWithHeaderAndFooter
+                                    val showSegmentFooter =
+                                        entry.kind == ReaderEntryKind.SegmentedBodyWithHeaderAndFooter ||
+                                            entry.kind == ReaderEntryKind.SegmentedBodyWithFooter
+                                    val segmentFooterSections = if (showSegmentFooter) {
+                                        footerSectionsForAnchorBlockType(entry.anchorBlockType)
+                                    } else {
+                                        emptySet()
+                                    }
+                                    val postPage = pageByPid[postId] ?: initialPage
+                                    val showTagAction = PostFooterSection.Navigation in segmentFooterSections &&
+                                        post.hasSinglePageTagNavigation(
+                                            postPage = postPage,
+                                            isNovelThread = isNovelThread,
+                                            showRegularFirstPostTagBanner = showRegularFirstPostTagBanner,
+                                            showNovelFirstPostTagBanner = showNovelFirstPostTagBanner,
+                                        )
+                                    val showCommentReaderAction = PostFooterSection.Navigation in segmentFooterSections &&
+                                        hasSinglePageCommentNavigation(isNovelThread)
+                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                        PostRenderer(
+                                            post = post,
+                                            threadTitle = if (showSegmentHeader && post.floor == 1) title else null,
+                                            totalViews = threadInfo?.totalViews.takeIf { showSegmentHeader && post.floor == 1 },
+                                            totalReplies = threadInfo?.totalReplies.takeIf { showSegmentHeader && post.floor == 1 },
+                                            bodyBlocks = entry.bodyBlocks,
+                                            linkContext = htmlLinkContext,
+                                            showHeader = showSegmentHeader,
+                                            showFooter = false,
+                                            verticalPadding = 0.dp,
+                                            imageErrorMessageFor = { imageUrl ->
+                                                failedImageMessages[normalizeImageUrl(imageUrl)]
+                                            },
+                                            imageRetryKeyFor = { imageUrl ->
+                                                imageRetryKeys[normalizeImageUrl(imageUrl)] ?: 0
+                                            },
+                                            imageHasLoadedFor = { imageUrl ->
+                                                hasPostImageLoaded(postId, imageUrl)
+                                            },
+                                            imageCachedHeightFor = { imageUrl ->
+                                                imageHeightCache[normalizeImageUrl(imageUrl)]
+                                            },
+                                            imagePlaceholderAspectRatioFor = { imageUrl ->
+                                                imagePlaceholderAspectRatioFor(post, imageUrl)
+                                            },
+                                            maxImageHeight = singlePageMaxImageHeight,
+                                        )
+                                        if (showTagAction) {
+                                            CommentBanner(text = i18n("查看標籤列表"), icon = "🏷️", onClick = {})
+                                        }
+                                        if (showCommentReaderAction) {
+                                            CommentBanner(text = i18n("點擊跳轉到評論區"), onClick = {})
+                                        }
+                                        if (showSegmentFooter) {
+                                            PostRenderer(
+                                                post = post,
+                                                bodyBlocks = emptyList(),
+                                                linkContext = htmlLinkContext,
+                                                showHeader = false,
+                                                showFooter = true,
+                                                footerSections = segmentFooterSections - PostFooterSection.Navigation,
+                                                footerRenderOptions = entry.footerRenderOptions,
+                                                verticalPadding = 0.dp,
+                                                onVote = { optionIds -> handleVote(optionIds) },
+                                                onLoadRateOptions = { threadRepository.fetchRatePopoutPage(tid, post.pid) },
+                                                onLoadRateResults = { threadRepository.fetchRateResults(tid, post.pid) },
+                                                onLoadVoters = { optionId, page -> threadRepository.fetchVoters(tid, optionId, page) },
+                                                onRate = { score, reason, noticeAuthor -> handleRate(post.pid, score, reason, noticeAuthor) },
+                                                onComment = { message -> handleComment(post.pid, message) },
+                                                onReply = { handleReply(post.pid) },
+                                            )
+                                        }
+                                    }
+                }
+                ReaderEntryKind.SegmentedFooter -> {
+                    val postPage = pageByPid[postId] ?: initialPage
+                    val showTagAction = isSinglePageMode && post.hasSinglePageTagNavigation(
+                        postPage = postPage,
+                        isNovelThread = isNovelThread,
+                        showRegularFirstPostTagBanner = showRegularFirstPostTagBanner,
+                        showNovelFirstPostTagBanner = showNovelFirstPostTagBanner,
+                    )
+                    val showCommentReaderAction = isSinglePageMode && hasSinglePageCommentNavigation(isNovelThread)
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        if (showTagAction) {
+                            CommentBanner(
+                                text = i18n("查看標籤列表"),
+                                icon = "🏷️",
+                                onClick = {
+                                    navigator.navigate(
+                                        ITagListScreen(
+                                            tid = tid,
+                                            initialTags = post.tags.value
+                                        )
+                                    )
+                                }
                             )
-                        ) {
+                        }
+                        if (showCommentReaderAction) {
+                            CommentBanner(
+                                text = i18n("點擊跳轉到評論區"),
+                                onClick = {
+                                    navigator.navigate(
+                                        ICommentReaderScreen(
+                                            tid = tid,
+                                            postTitle = post.title.ifEmpty { i18n("第{}樓", post.floor) },
+                                            oPostId = post.pid,
+                                            authorId = authorId ?: post.author.uid
+                                        )
+                                    )
+                                }
+                            )
+                        }
+                        PostRenderer(
+                            post = post,
+                            bodyBlocks = emptyList(),
+                            showHeader = false,
+                            showFooter = true,
+                            footerSections = footerSectionsForAnchorBlockType(entry.anchorBlockType) - PostFooterSection.Navigation,
+                            footerRenderOptions = entry.footerRenderOptions,
+                            linkContext = htmlLinkContext,
+                            verticalPadding = 0.dp,
+                            onVote = { optionIds -> handleVote(optionIds) },
+                            onLoadRateOptions = { threadRepository.fetchRatePopoutPage(tid, post.pid) },
+                            onLoadRateResults = { threadRepository.fetchRateResults(tid, post.pid) },
+                            onLoadVoters = { optionId, page -> threadRepository.fetchVoters(tid, optionId, page) },
+                            onRate = { score, reason, noticeAuthor -> handleRate(post.pid, score, reason, noticeAuthor) },
+                            onComment = { message -> handleComment(post.pid, message) },
+                            onReply = { handleReply(post.pid) },
+                        )
+                    }
+                }
+                                ReaderEntryKind.RegularTagBanner,
+                                ReaderEntryKind.NovelTagBanner -> {
+                                    CommentBanner(text = i18n("查看標籤列表"), icon = "🏷️", onClick = {})
+                                }
+                                ReaderEntryKind.NovelCommentBanner -> {
+                                    CommentBanner(text = i18n("點擊跳轉到評論區"), onClick = {})
+                                }
+                                ReaderEntryKind.Separator -> {
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                                        color = colors.brownPrimary.copy(alpha = 0.15f)
+                                    )
+                                }
+                            }
+                        }
+                        val displayedReaderEntries = if (isSinglePageMode) {
+                            listOfNotNull(singlePageEntries.getOrNull(singlePageModelIndex)?.renderEntry)
+                        } else {
+                            readerEntries
+                        }
+                        val previewTargetDelta = if (isSinglePageMode && abs(singlePageDragPreviewOffsetPx) > 1f) {
+                            singlePageDeltaForPhysicalDrag(threadReaderMode, singlePageDragPreviewOffsetPx)
+                        } else {
+                            0
+                        }
+                        val previewTargetEntry = singlePageEntries
+                            .getOrNull(singlePageModelIndex + previewTargetDelta)
+                            ?.takeIf { previewTargetDelta != 0 }
+                            ?.renderEntry
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            LazyColumn(
+                                state = listState,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer {
+                                        if (isSinglePageMode) {
+                                            alpha = if (hasPresentedInitialSinglePage) 1f else 0f
+                                            if (threadReaderMode == ThreadReaderMode.SINGLE_TTB) {
+                                                translationY = singlePageDragPreviewOffsetPx
+                                            } else {
+                                                translationX = singlePageDragPreviewOffsetPx
+                                            }
+                                        }
+                                    },
+                                userScrollEnabled = !isSinglePageMode,
+                                contentPadding = PaddingValues(
+                                    top = topContentPadding,
+                                    bottom = bottomContentPadding,
+                                )
+                            ) {
                             itemsIndexed(
-                                items = readerEntries,
+                                items = displayedReaderEntries,
                                 key = { _, entry -> entry.key },
                                 contentType = { _, entry -> entry.contentType }
                             ) { _, entry ->
                                 val post = entry.post
                                 val postId = post.pid.value.toLong()
                                 val hasTrackedImages = expectedImageUrlsByPost[postId].orEmpty().isNotEmpty()
-
+                                if (isSinglePageMode && committedSinglePageOverlay?.key == entry.key) {
+                                    LaunchedEffect(entry.key) {
+                                        // Keep the committed target over the new page until the new composition
+                                        // has survived a complete frame and can take ownership of rendering.
+                                        withFrameNanos { }
+                                        withFrameNanos { }
+                                        if (committedSinglePageOverlay?.key == entry.key) {
+                                            committedSinglePageOverlay = null
+                                        }
+                                    }
+                                }
                                 when (entry.kind) {
                                     ReaderEntryKind.WholePost -> {
                                         PostRenderer(
                                             post = post,
-                                            modifier = Modifier.onSizeChanged { size ->
-                                                progressCoordinator.updateItemHeight(entry.key, size.height)
-                                            },
+                                modifier = Modifier.onSizeChanged { size ->
+                                    progressCoordinator.updateItemHeight(entry.key, size.height)
+                                },
                                             threadTitle = if (post.floor == 1) title else null,
                                             totalViews = threadInfo?.totalViews.takeIf { post.floor == 1 },
                                             totalReplies = threadInfo?.totalReplies.takeIf { post.floor == 1 },
@@ -2239,12 +3776,16 @@ internal fun ThreadReaderScreen(
                                             imageRetryKeyFor = { imageUrl ->
                                                 imageRetryKeys[normalizeImageUrl(imageUrl)] ?: 0
                                             },
+                                            imageHasLoadedFor = { imageUrl ->
+                                                hasPostImageLoaded(postId, imageUrl)
+                                            },
                                             imageCachedHeightFor = { imageUrl ->
                                                 imageHeightCache[normalizeImageUrl(imageUrl)]
                                             },
                                             imagePlaceholderAspectRatioFor = { imageUrl ->
                                                 imagePlaceholderAspectRatioFor(post, imageUrl)
                                             },
+                                            maxImageHeight = singlePageMaxImageHeight,
                                             onImageHeightChanged = { imageUrl, heightPx ->
                                                 handleImageHeightChanged(imageUrl, heightPx)
                                             },
@@ -2257,9 +3798,9 @@ internal fun ThreadReaderScreen(
                                     ReaderEntryKind.SegmentedHeader -> {
                                         PostRenderer(
                                             post = post,
-                                            modifier = Modifier.onSizeChanged { size ->
-                                                progressCoordinator.updateItemHeight(entry.key, size.height)
-                                            },
+                                modifier = Modifier.onSizeChanged { size ->
+                                    progressCoordinator.updateItemHeight(entry.key, size.height)
+                                },
                                             threadTitle = if (post.floor == 1) title else null,
                                             totalViews = threadInfo?.totalViews.takeIf { post.floor == 1 },
                                             totalReplies = threadInfo?.totalReplies.takeIf { post.floor == 1 },
@@ -2275,12 +3816,16 @@ internal fun ThreadReaderScreen(
                                             imageRetryKeyFor = { imageUrl ->
                                                 imageRetryKeys[normalizeImageUrl(imageUrl)] ?: 0
                                             },
+                                            imageHasLoadedFor = { imageUrl ->
+                                                hasPostImageLoaded(postId, imageUrl)
+                                            },
                                             imageCachedHeightFor = { imageUrl ->
                                                 imageHeightCache[normalizeImageUrl(imageUrl)]
                                             },
                                             imagePlaceholderAspectRatioFor = { imageUrl ->
                                                 imagePlaceholderAspectRatioFor(post, imageUrl)
                                             },
+                                            maxImageHeight = singlePageMaxImageHeight,
                                             onImageHeightChanged = { imageUrl, heightPx ->
                                                 handleImageHeightChanged(imageUrl, heightPx)
                                             },
@@ -2290,60 +3835,188 @@ internal fun ThreadReaderScreen(
                                         )
                                     }
 
+                                    ReaderEntryKind.SegmentedBodyWithHeader,
+                                    ReaderEntryKind.SegmentedBodyWithHeaderAndFooter,
+                                    ReaderEntryKind.SegmentedBodyWithFooter,
                                     ReaderEntryKind.SegmentedBody -> {
-                                        PostRenderer(
-                                            post = post,
-                                            modifier = Modifier.onSizeChanged { size ->
-                                                progressCoordinator.updateItemHeight(entry.key, size.height)
-                                            },
-                                            bodyBlocks = entry.bodyBlocks,
-                                            linkContext = htmlLinkContext,
-                                            showHeader = false,
-                                            showFooter = false,
-                                            verticalPadding = 0.dp,
-                                            onImageSuccess = { imageUrl -> handlePostImageSuccess(post, imageUrl) },
-                                            onImageError = { imageUrl, message -> handlePostImageError(imageUrl, message) },
-                                            onImageReload = { imageUrl -> handlePostImageReload(imageUrl) },
-                                            imageErrorMessageFor = { imageUrl ->
-                                                failedImageMessages[normalizeImageUrl(imageUrl)]
-                                            },
-                                            imageRetryKeyFor = { imageUrl ->
-                                                imageRetryKeys[normalizeImageUrl(imageUrl)] ?: 0
-                                            },
-                                            imageCachedHeightFor = { imageUrl ->
-                                                imageHeightCache[normalizeImageUrl(imageUrl)]
-                                            },
-                                            imagePlaceholderAspectRatioFor = { imageUrl ->
-                                                imagePlaceholderAspectRatioFor(post, imageUrl)
-                                            },
-                                            onImageHeightChanged = { imageUrl, heightPx ->
-                                                handleImageHeightChanged(imageUrl, heightPx)
-                                            },
-                                            onImageAspectRatioChanged = { imageUrl, aspectRatio ->
-                                                handleImageAspectRatioChanged(imageUrl, aspectRatio)
-                                            },
+                                        val showSegmentHeader =
+                                            entry.kind == ReaderEntryKind.SegmentedBodyWithHeader ||
+                                                entry.kind == ReaderEntryKind.SegmentedBodyWithHeaderAndFooter
+                                        val showSegmentFooter =
+                                            entry.kind == ReaderEntryKind.SegmentedBodyWithHeaderAndFooter ||
+                                                entry.kind == ReaderEntryKind.SegmentedBodyWithFooter
+                                        val segmentFooterSections = if (showSegmentFooter) {
+                                            footerSectionsForAnchorBlockType(entry.anchorBlockType)
+                                        } else {
+                                            emptySet()
+                                        }
+                                        val postPage = pageByPid[postId] ?: initialPage
+                                        val showTagAction = PostFooterSection.Navigation in segmentFooterSections &&
+                                            post.hasSinglePageTagNavigation(
+                                                postPage = postPage,
+                                                isNovelThread = isNovelThread,
+                                                showRegularFirstPostTagBanner = showRegularFirstPostTagBanner,
+                                                showNovelFirstPostTagBanner = showNovelFirstPostTagBanner,
+                                            )
+                                        val showCommentReaderAction = PostFooterSection.Navigation in segmentFooterSections &&
+                                            hasSinglePageCommentNavigation(isNovelThread)
+                                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .onSizeChanged { size ->
+                                    progressCoordinator.updateItemHeight(entry.key, size.height)
+                                }
+                                        ) {
+                                            PostRenderer(
+                                                post = post,
+                                                threadTitle = if (showSegmentHeader && post.floor == 1) title else null,
+                                                totalViews = threadInfo?.totalViews.takeIf { showSegmentHeader && post.floor == 1 },
+                                                totalReplies = threadInfo?.totalReplies.takeIf { showSegmentHeader && post.floor == 1 },
+                                                bodyBlocks = entry.bodyBlocks,
+                                                linkContext = htmlLinkContext,
+                                                showHeader = showSegmentHeader,
+                                                showFooter = false,
+                                                verticalPadding = 0.dp,
+                                                onImageSuccess = { imageUrl -> handlePostImageSuccess(post, imageUrl) },
+                                                onImageError = { imageUrl, message -> handlePostImageError(imageUrl, message) },
+                                                onImageReload = { imageUrl -> handlePostImageReload(imageUrl) },
+                                                imageErrorMessageFor = { imageUrl ->
+                                                    failedImageMessages[normalizeImageUrl(imageUrl)]
+                                                },
+                                                imageRetryKeyFor = { imageUrl ->
+                                                    imageRetryKeys[normalizeImageUrl(imageUrl)] ?: 0
+                                                },
+                                                imageHasLoadedFor = { imageUrl ->
+                                                    hasPostImageLoaded(postId, imageUrl)
+                                                },
+                                                imageCachedHeightFor = { imageUrl ->
+                                                    imageHeightCache[normalizeImageUrl(imageUrl)]
+                                                },
+                                                imagePlaceholderAspectRatioFor = { imageUrl ->
+                                                    imagePlaceholderAspectRatioFor(post, imageUrl)
+                                                },
+                                                maxImageHeight = singlePageMaxImageHeight,
+                                                onImageHeightChanged = { imageUrl, heightPx ->
+                                                    handleImageHeightChanged(imageUrl, heightPx)
+                                                },
+                                                onImageAspectRatioChanged = { imageUrl, aspectRatio ->
+                                                    handleImageAspectRatioChanged(imageUrl, aspectRatio)
+                                                },
+                                            )
+                                            if (showTagAction) {
+                                                CommentBanner(
+                                                    text = i18n("查看標籤列表"),
+                                                    icon = "🏷️",
+                                                    onClick = {
+                                                        navigator.navigate(
+                                                            ITagListScreen(
+                                                                tid = tid,
+                                                                initialTags = post.tags.value
+                                                            )
+                                                        )
+                                                    }
+                                                )
+                                            }
+                                            if (showCommentReaderAction) {
+                                                CommentBanner(
+                                                    text = i18n("點擊跳轉到評論區"),
+                                                    onClick = {
+                                                        navigator.navigate(
+                                                            ICommentReaderScreen(
+                                                                tid = tid,
+                                                                postTitle = post.title.ifEmpty { i18n("第{}樓", post.floor) },
+                                                                oPostId = post.pid,
+                                                                authorId = authorId ?: post.author.uid
+                                                            )
+                                                        )
+                                                    }
+                                                )
+                                            }
+                                            if (showSegmentFooter) {
+                                                PostRenderer(
+                                                    post = post,
+                                                    bodyBlocks = emptyList(),
+                                                    showHeader = false,
+                                                    showFooter = true,
+                                                    footerSections = segmentFooterSections - PostFooterSection.Navigation,
+                                                    footerRenderOptions = entry.footerRenderOptions,
+                                                    linkContext = htmlLinkContext,
+                                                    verticalPadding = 0.dp,
+                                                    onVote = { optionIds -> handleVote(optionIds) },
+                                                    onLoadRateOptions = { threadRepository.fetchRatePopoutPage(tid, post.pid) },
+                                                    onLoadRateResults = { threadRepository.fetchRateResults(tid, post.pid) },
+                                                    onLoadVoters = { optionId, page -> threadRepository.fetchVoters(tid, optionId, page) },
+                                                    onRate = { score, reason, noticeAuthor -> handleRate(post.pid, score, reason, noticeAuthor) },
+                                                    onComment = { message -> handleComment(post.pid, message) },
+                                                    onReply = { handleReply(post.pid) },
+                                                )
+                                            }
+                                        }
+                    }
+
+                    ReaderEntryKind.SegmentedFooter -> {
+                        val postPage = pageByPid[postId] ?: initialPage
+                        val showTagAction = isSinglePageMode && post.hasSinglePageTagNavigation(
+                            postPage = postPage,
+                            isNovelThread = isNovelThread,
+                            showRegularFirstPostTagBanner = showRegularFirstPostTagBanner,
+                            showNovelFirstPostTagBanner = showNovelFirstPostTagBanner,
+                        )
+                        val showCommentReaderAction = isSinglePageMode && hasSinglePageCommentNavigation(isNovelThread)
+                        Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onSizeChanged { size ->
+                                progressCoordinator.updateItemHeight(entry.key, size.height)
+                            }
+                        ) {
+                            if (showTagAction) {
+                                CommentBanner(
+                                    text = i18n("查看標籤列表"),
+                                    icon = "🏷️",
+                                    onClick = {
+                                        navigator.navigate(
+                                            ITagListScreen(
+                                                tid = tid,
+                                                initialTags = post.tags.value
+                                            )
                                         )
                                     }
-
-                                    ReaderEntryKind.SegmentedFooter -> {
-                                        PostRenderer(
-                                            post = post,
-                                            modifier = Modifier.onSizeChanged { size ->
-                                                progressCoordinator.updateItemHeight(entry.key, size.height)
-                                            },
-                                            bodyBlocks = emptyList(),
-                                            showHeader = false,
-                                            showFooter = true,
-                                            linkContext = htmlLinkContext,
-                                            verticalPadding = 0.dp,
-                                            onVote = { optionIds -> handleVote(optionIds) },
-                                            onLoadRateOptions = { threadRepository.fetchRatePopoutPage(tid, post.pid) },
-                                            onLoadRateResults = { threadRepository.fetchRateResults(tid, post.pid) },
-                                            onLoadVoters = { optionId, page -> threadRepository.fetchVoters(tid, optionId, page) },
-                                            onRate = { score, reason, noticeAuthor -> handleRate(post.pid, score, reason, noticeAuthor) },
-                                            onComment = { message -> handleComment(post.pid, message) },
-                                            onReply = { handleReply(post.pid) },
+                                )
+                            }
+                            if (showCommentReaderAction) {
+                                CommentBanner(
+                                    text = i18n("點擊跳轉到評論區"),
+                                    onClick = {
+                                        navigator.navigate(
+                                            ICommentReaderScreen(
+                                                tid = tid,
+                                                postTitle = post.title.ifEmpty { i18n("第{}樓", post.floor) },
+                                                oPostId = post.pid,
+                                                authorId = authorId ?: post.author.uid
+                                            )
                                         )
+                                    }
+                                )
+                            }
+                            PostRenderer(
+                                post = post,
+                                bodyBlocks = emptyList(),
+                                showHeader = false,
+                                showFooter = true,
+                                footerSections = footerSectionsForAnchorBlockType(entry.anchorBlockType) - PostFooterSection.Navigation,
+                                footerRenderOptions = entry.footerRenderOptions,
+                                linkContext = htmlLinkContext,
+                                verticalPadding = 0.dp,
+                                onVote = { optionIds -> handleVote(optionIds) },
+                                onLoadRateOptions = { threadRepository.fetchRatePopoutPage(tid, post.pid) },
+                                onLoadRateResults = { threadRepository.fetchRateResults(tid, post.pid) },
+                                onLoadVoters = { optionId, page -> threadRepository.fetchVoters(tid, optionId, page) },
+                                onRate = { score, reason, noticeAuthor -> handleRate(post.pid, score, reason, noticeAuthor) },
+                                onComment = { message -> handleComment(post.pid, message) },
+                                onReply = { handleReply(post.pid) },
+                            )
+                        }
                                     }
 
                                     ReaderEntryKind.RegularTagBanner,
@@ -2418,7 +4091,11 @@ internal fun ThreadReaderScreen(
                                 }
                             }
 
-                            if (totalPages in loadedPages && posts.isNotEmpty()) {
+                            if (
+                                totalPages in loadedPages &&
+                                posts.isNotEmpty() &&
+                                (!isSinglePageMode || isMeaningfulLastLoadedBoundaryForUpdateWarning(currentVisiblePageForAction()))
+                            ) {
                                 item(key = "refresh_last_page_$totalPages") {
                                     CommentBanner(
                                         text = i18n("重新整理最後一頁"),
@@ -2452,6 +4129,49 @@ internal fun ThreadReaderScreen(
                                             color = colors.textDark.copy(alpha = 0.5f),
                                             fontSize = 12.sp
                                         )
+                                    }
+                                    }
+                                }
+                            }
+                            val transitionOverlayEntry = previewTargetEntry ?: committedSinglePageOverlay
+                            if (transitionOverlayEntry != null) {
+                                val isDragPreview = previewTargetEntry != null
+                                val previewInitialOffset = if (singlePageDragPreviewOffsetPx < 0f) {
+                                    singlePageDragPreviewAxisSizePx
+                                } else {
+                                    -singlePageDragPreviewAxisSizePx
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .zIndex(if (isDragPreview) 1f else 2f)
+                                        .graphicsLayer {
+                                            val offset = if (isDragPreview) {
+                                                previewInitialOffset + singlePageDragPreviewOffsetPx
+                                            } else {
+                                                0f
+                                            }
+                                            if (threadReaderMode == ThreadReaderMode.SINGLE_TTB) {
+                                                translationY = offset
+                                            } else {
+                                                translationX = offset
+                                            }
+                                        }
+                                ) {
+                                    LazyColumn(
+                                        modifier = Modifier.fillMaxSize(),
+                                        userScrollEnabled = false,
+                                        contentPadding = PaddingValues(
+                                            top = topContentPadding,
+                                            bottom = bottomContentPadding,
+                                        )
+                                    ) {
+                                        item(
+                                            key = transitionOverlayEntry.key,
+                                            contentType = transitionOverlayEntry.contentType,
+                                        ) {
+                                            renderSinglePagePreviewEntry(transitionOverlayEntry)
+                                        }
                                     }
                                 }
                             }
@@ -2492,7 +4212,7 @@ internal fun ThreadReaderScreen(
                     0.dp
                 }
                 ThreadReaderProgressOverlay(
-                    visible = !showSettingsPanel && state == ReaderState.Success,
+                    visible = !isSinglePageMode && !showSettingsPanel && state == ReaderState.Success,
                     showHint = showPageProgressHint,
                     listState = listState,
                     readerEntries = readerEntries,
@@ -2511,6 +4231,28 @@ internal fun ThreadReaderScreen(
                         .align(Alignment.BottomEnd)
                         .padding(end = 0.dp, bottom = progressHintBottomPadding),
                 )
+                val singlePageHintProgress = currentSinglePageState
+                    ?.takeIf { it.currentPostPageCount > 1 }
+                    ?.let { pageState ->
+                        val total = pageState.currentPostPageCount.coerceAtLeast(1)
+                        val page = (pageState.currentPostPageIndex + 1).coerceIn(1, total)
+                        ReaderPageProgress(
+                            page = page,
+                            totalPages = total,
+                            fraction = page.toFloat() / total.toFloat(),
+                        )
+                    }
+                ReaderPageProgressHint(
+                    progress = singlePageHintProgress,
+                    visible = isSinglePageMode &&
+                        !showMenu &&
+                        !showSettingsPanel &&
+                        state == ReaderState.Success &&
+                        showPageProgressHint,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 0.dp, bottom = progressHintBottomPadding),
+                )
 
                 val showScrollJumpButton =
                     state == ReaderState.Success &&
@@ -2525,7 +4267,7 @@ internal fun ThreadReaderScreen(
                 } else {
                     96.dp
                 }
-                if (!showSettingsPanel) {
+                if (!isSinglePageMode && !showSettingsPanel) {
                     ReaderScrollJumpButton(
                         visible = showScrollJumpButton,
                         pointsDown = scrollJumpButtonPointsDown,
@@ -2606,6 +4348,30 @@ internal fun ThreadReaderScreen(
                     onSettings = {
                         showSettingsPanel = true
                         showMenu = false
+                    },
+                    singlePageProgress = currentSinglePageState
+                        ?.takeIf { isSinglePageMode && it.currentPostPageCount > 1 }
+                        ?.let { pageState ->
+                            ReaderSinglePageProgress(
+                                currentPage = pageState.currentPostPageIndex,
+                                totalPages = pageState.currentPostPageCount,
+                                rtl = threadReaderMode == ThreadReaderMode.SINGLE_RTL,
+                            )
+                    },
+                    onSinglePageProgressChange = { pageIndex ->
+                        currentSinglePageState?.let { pageState ->
+                            val postPages = singlePageEntries
+                                .withIndex()
+                                .filter { (_, entry) -> entry.page.postId == pageState.currentPostId }
+                            postPages.getOrNull(pageIndex.coerceIn(0, postPages.lastIndex))?.let { target ->
+                                if (target.index != singlePageModelIndex) {
+                                    updateSinglePagePosition(target.index)
+                                }
+                            }
+                        }
+                    },
+                    onSinglePageProgressCommit = {
+                        scope.launch { persistCurrentReadingState() }
                     },
                     modifier = Modifier.align(Alignment.BottomCenter)
                 )
@@ -2764,6 +4530,22 @@ internal fun ThreadReaderScreen(
                         Text("×", color = colors.textDark, fontSize = 20.sp)
                     }
                 }
+            }
+        }
+
+        if (
+            isSinglePageMode &&
+            state == ReaderState.Success &&
+            (!hasPresentedInitialSinglePage || singlePageEntries.isEmpty())
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(colors.creamBackground)
+                    .systemBarsPadding()
+                    .zIndex(3f)
+            ) {
+                ThreadLoadingSkeleton()
             }
         }
 
@@ -3019,6 +4801,7 @@ private fun ReaderCatalogPanelWithPosition(
     readerEntries: List<ReaderListEntry>,
     pageByPid: Map<Long, Int>,
     initialPage: Int,
+    singlePageCurrentPosition: ReaderCatalogCurrentPosition? = null,
     totalPages: Int,
     loadedPostsByPage: Map<Int, List<Post>>,
     bookmarkedPostIds: Set<Long>,
@@ -3031,14 +4814,14 @@ private fun ReaderCatalogPanelWithPosition(
     drawerOpen: Boolean,
 ) {
     val currentChapterStates by chapterStates.collectAsState()
-    val currentPosition by remember(listState, readerEntries, pageByPid, initialPage) {
+    val currentPosition by remember(listState, readerEntries, pageByPid, initialPage, singlePageCurrentPosition) {
         derivedStateOf {
-            calculateReaderCatalogCurrentPosition(
-                listState = listState,
-                readerEntries = readerEntries,
-                pageByPid = pageByPid,
-                initialPage = initialPage,
-            )
+            singlePageCurrentPosition ?: calculateReaderCatalogCurrentPosition(
+                    listState = listState,
+                    readerEntries = readerEntries,
+                    pageByPid = pageByPid,
+                    initialPage = initialPage,
+                )
         }
     }
 
@@ -3094,6 +4877,72 @@ private fun calculateReaderCatalogCurrentPosition(
         page = entry?.let { pageByPid[it.post.pid.value.toLong()] } ?: initialPage,
         pid = entry?.post?.pid,
     )
+}
+
+@Composable
+private fun ThreadReaderMeasureHost(
+    specs: List<SinglePageFooterMeasurementSpec>,
+    widthPx: Int,
+    linkContext: InAppLinkContext,
+    onMeasured: (Map<String, Int>) -> Unit,
+) {
+    if (specs.isEmpty() || widthPx <= 0) return
+
+    val latestOnMeasured by rememberUpdatedState(onMeasured)
+    val measurementChannel = remember { Channel<Map<String, Int>>(capacity = Channel.CONFLATED) }
+    DisposableEffect(measurementChannel) {
+        onDispose { measurementChannel.close() }
+    }
+    LaunchedEffect(measurementChannel) {
+        for (measurements in measurementChannel) {
+            withFrameNanos { }
+            latestOnMeasured(measurements)
+        }
+    }
+
+    SubcomposeLayout(modifier = Modifier.size(0.dp)) { _ ->
+        val constraints = Constraints(
+            minWidth = 0,
+            maxWidth = widthPx.coerceAtLeast(1),
+            minHeight = 0,
+            maxHeight = Constraints.Infinity,
+        )
+        val measurements = buildMap {
+            specs.forEach { spec ->
+            val placeables = subcompose(spec.key) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    if (PostFooterSection.Navigation in spec.sections && spec.showTagAction) {
+                        CommentBanner(text = i18n("查看標籤列表"), icon = "🏷️", onClick = {})
+                    }
+                    if (PostFooterSection.Navigation in spec.sections && spec.showCommentReaderAction) {
+                        CommentBanner(text = i18n("點擊跳轉到評論區"), onClick = {})
+                    }
+                    val footerSections = spec.sections - PostFooterSection.Navigation
+                    if (footerSections.isNotEmpty()) {
+                        PostRenderer(
+                            post = spec.post,
+                            bodyBlocks = emptyList(),
+                            showHeader = false,
+                            showFooter = true,
+                            footerSections = footerSections,
+                            footerRenderOptions = spec.renderOptions,
+                            linkContext = linkContext,
+                            verticalPadding = 0.dp,
+                            onVote = { true },
+                            onRate = { _, _, _ -> },
+                            onComment = {},
+                            onReply = {},
+                        )
+                    }
+                }
+            }.map { measurable -> measurable.measure(constraints) }
+            val height = placeables.maxOfOrNull { it.height } ?: 0
+                if (height > 0) put(spec.key, height)
+            }
+        }
+        if (measurements.isNotEmpty()) measurementChannel.trySend(measurements)
+        layout(0, 0) {}
+    }
 }
 
 @Composable

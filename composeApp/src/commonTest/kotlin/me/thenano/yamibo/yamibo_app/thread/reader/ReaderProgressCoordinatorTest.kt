@@ -1,5 +1,8 @@
 package me.thenano.yamibo.yamibo_app.thread.reader
 
+import me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.ReaderProgressGeometry
+import me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.ReaderScrollSession
+import me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.calculateReaderProgress
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull

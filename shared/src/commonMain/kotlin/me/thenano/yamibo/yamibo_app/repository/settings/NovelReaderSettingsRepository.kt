@@ -20,6 +20,13 @@ enum class ReaderScrollButtonJumpTarget(val label: String) {
     POST_EDGE("post_edge"),
 }
 
+enum class ThreadReaderMode(val label: String) {
+    SCROLL_CONTINUOUS("scroll_continuous"),
+    SINGLE_LTR("single_ltr"),
+    SINGLE_RTL("single_rtl"),
+    SINGLE_TTB("single_ttb"),
+}
+
 class NovelReaderSettingsRepository(store: SettingsStore) : SettingsRegistry(store, prefix = "novelreadersettings") {
 
     val fontSize by intSetting(
@@ -65,6 +72,12 @@ class NovelReaderSettingsRepository(store: SettingsStore) : SettingsRegistry(sto
         name = "chinese_conversion",
         description = "novel_reader_chinese_conversion",
         default = ReaderChineseConversionOption.DEFAULT,
+    )
+
+    val threadReaderMode by enumSetting(
+        name = "thread_reader_mode",
+        description = "novel_reader_thread_reader_mode",
+        default = ThreadReaderMode.SCROLL_CONTINUOUS,
     )
 
     val scrollButtonDisplayMode by enumSetting(

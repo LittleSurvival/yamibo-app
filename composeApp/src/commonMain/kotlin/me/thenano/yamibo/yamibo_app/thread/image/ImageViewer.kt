@@ -10,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -35,12 +36,51 @@ import yamibo_app.composeapp.generated.resources.Res
 import yamibo_app.composeapp.generated.resources.image_icon
 
 val LocalReaderOverlayVisible = compositionLocalOf { false }
+internal interface ReaderImagePainterCache {
+    operator fun get(url: String): Painter?
+    fun put(url: String, painter: Painter)
+    val size: Int
+}
+
+internal fun createReaderImagePainterCache(maxEntries: Int = 24): ReaderImagePainterCache =
+    LruReaderImagePainterCache(maxEntries)
+
+internal val LocalReaderImagePainterCache = compositionLocalOf<ReaderImagePainterCache?> { null }
 val LocalImageClickListener = compositionLocalOf<(() -> Unit)?> { null }
 val LocalImageDoubleClickListener = compositionLocalOf<((String) -> Unit)?> { null }
 val LocalImageSetCoverListener = compositionLocalOf<((String) -> Unit)?> { null }
 val LocalImageSetCatalogCoverListener = compositionLocalOf<((String) -> Unit)?> { null }
 val LocalImageSetCatalogCoverLabel = compositionLocalOf<String?> { null }
 val LocalImageActionMessageListener = compositionLocalOf<((String) -> Unit)?> { null }
+
+private class LruReaderImagePainterCache(
+    private val maxEntries: Int,
+) : ReaderImagePainterCache {
+    private val painters = mutableMapOf<String, Painter>()
+    private val accessOrder = ArrayDeque<String>()
+
+    init {
+        require(maxEntries > 0)
+    }
+
+    override val size: Int get() = painters.size
+
+    override fun get(url: String): Painter? = painters[url]?.also {
+        accessOrder.remove(url)
+        accessOrder.addLast(url)
+    }
+
+    override fun put(url: String, painter: Painter) {
+        painters[url] = painter
+        accessOrder.remove(url)
+        accessOrder.addLast(url)
+        while (accessOrder.size > maxEntries) {
+            painters.remove(accessOrder.removeFirst())
+        }
+    }
+}
+
+private object ReaderImagePainterMemoryCache : ReaderImagePainterCache by LruReaderImagePainterCache(24)
 
 /**
  * A unified image viewer for posts and manga reading.
@@ -64,8 +104,10 @@ fun ImageViewer(
     onReload: (() -> Unit)? = null,
     cachedHeightPx: Int? = null,
     placeholderAspectRatio: Float? = null,
+    maxRenderedHeight: Dp? = null,
     imageVerticalPadding: Dp = 1.dp,
     showLoadingPlaceholder: Boolean = true,
+    suppressLoadingPlaceholderWhenCached: Boolean = false,
     onRenderedHeightChanged: ((Int) -> Unit)? = null,
     onRenderedAspectRatioChanged: ((Float) -> Unit)? = null,
 ) {
@@ -109,6 +151,10 @@ fun ImageViewer(
     }
     val painter = rememberAsyncImagePainter(model = sizedImageRequest)
     val painterState by painter.state.collectAsState()
+    val sharedPainterCache = LocalReaderImagePainterCache.current
+    var lastSuccessfulPainter by remember(fullUrl) {
+        mutableStateOf(sharedPainterCache?.get(fullUrl) ?: ReaderImagePainterMemoryCache.get(fullUrl))
+    }
     val latestOverlayOpen by rememberUpdatedState(isOverlayOpen)
     val latestOnSingleTap by rememberUpdatedState(onSingleTap)
     val latestOnDoubleTap by rememberUpdatedState(onDoubleTap)
@@ -140,18 +186,20 @@ fun ImageViewer(
             ),
         contentAlignment = Alignment.Center
     ) {
-        val reservedHeight = remember(cachedHeightPx, placeholderAspectRatio, maxWidth, density) {
-            when {
+        val reservedHeight = remember(cachedHeightPx, placeholderAspectRatio, maxWidth, density, maxRenderedHeight) {
+            val estimatedHeight = when {
                 cachedHeightPx != null -> with(density) { cachedHeightPx.toDp() }
                 placeholderAspectRatio != null && maxWidth > 0.dp -> {
                     (maxWidth * placeholderAspectRatio).coerceAtLeast(220.dp)
                 }
                 else -> 220.dp
             }
+            maxRenderedHeight?.let { estimatedHeight.coerceAtMost(it) } ?: estimatedHeight
         }
 
         Box(
-            modifier = if (fillContainer) Modifier.fillMaxSize() else Modifier.fillMaxWidth(),
+            modifier = (if (fillContainer) Modifier.fillMaxSize() else Modifier.fillMaxWidth())
+                .then(maxRenderedHeight?.let { Modifier.heightIn(max = it) } ?: Modifier),
             contentAlignment = Alignment.Center
         ) {
             if (blockedErrorMessage != null) {
@@ -174,7 +222,17 @@ fun ImageViewer(
             } else {
                 when (val state = painterState) {
                     is AsyncImagePainter.State.Loading, is AsyncImagePainter.State.Empty -> {
-                        if (showLoadingPlaceholder) {
+                        val cachedPainter = lastSuccessfulPainter
+                        if (suppressLoadingPlaceholderWhenCached && cachedPainter != null) {
+                            Image(
+                                painter = cachedPainter,
+                                contentDescription = contentDescription ?: "Yamibo Image",
+                                modifier = (if (fillContainer) Modifier.fillMaxSize() else Modifier.fillMaxWidth())
+                                    .then(maxRenderedHeight?.let { Modifier.heightIn(max = it) } ?: Modifier)
+                                    .padding(vertical = if (fillContainer) 0.dp else imageVerticalPadding),
+                                contentScale = contentScale
+                            )
+                        } else if (showLoadingPlaceholder && !suppressLoadingPlaceholderWhenCached) {
                             ImageLoadingContent(
                                 reservedHeight = reservedHeight,
                                 onImageRetry = onReload,
@@ -212,6 +270,11 @@ fun ImageViewer(
                     }
 
                     is AsyncImagePainter.State.Success -> {
+                        SideEffect {
+                            lastSuccessfulPainter = state.painter
+                            sharedPainterCache?.put(fullUrl, state.painter)
+                            ReaderImagePainterMemoryCache.put(fullUrl, state.painter)
+                        }
                         LaunchedEffect(fullUrl, retryKey, onSuccess) {
                             if (!hasReportedSuccess) {
                                 hasReportedSuccess = true
@@ -224,6 +287,7 @@ fun ImageViewer(
                             painter = painter,
                             contentDescription = contentDescription ?: "Yamibo Image",
                             modifier = (if (fillContainer) Modifier.fillMaxSize() else Modifier.fillMaxWidth())
+                                .then(maxRenderedHeight?.let { Modifier.heightIn(max = it) } ?: Modifier)
                                 .padding(vertical = if (fillContainer) 0.dp else imageVerticalPadding)
                                 .onSizeChanged { size ->
                                     if (size.height > 0) {
