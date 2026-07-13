@@ -44,12 +44,14 @@ import io.github.littlesurvival.dto.value.ThreadId
 import me.thenano.yamibo.yamibo_app.LocalFontRepository
 import me.thenano.yamibo.yamibo_app.components.font.getFontFamily
 import me.thenano.yamibo.yamibo_app.LocalNovelReaderSettingsRepository
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.components.text.rememberConvertedText
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.navigation.IInAppLinkResolvingScreen
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.navigation.looksLikeSupportedYamiboInAppLink
 import me.thenano.yamibo.yamibo_app.repository.inapplinknavigation.InAppLinkContext
+import me.thenano.yamibo.yamibo_app.repository.inapplinknavigation.normalizeYamiboUrl
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.thread.image.ImageViewer
 import me.thenano.yamibo.yamibo_app.thread.reader.debug.DebugRecomposeProbe
@@ -182,16 +184,6 @@ private data class LinkMenuState(
 )
 
 private const val SPOILER_ANNOTATION_TAG = "YAMIBO_SPOILER"
-
-private fun normalizeYamiboLink(url: String): String {
-    val cleaned = url.trim().replace("&amp;", "&")
-    return when {
-        cleaned.startsWith("http://") || cleaned.startsWith("https://") -> cleaned
-        cleaned.startsWith("//") -> "https:$cleaned"
-        cleaned.startsWith("/") -> "https://bbs.yamibo.com$cleaned"
-        else -> "https://bbs.yamibo.com/$cleaned"
-    }
-}
 
 private fun applyThemedLinkStyle(text: AnnotatedString, linkColor: Color): AnnotatedString {
     val links = text.getStringAnnotations("URL", 0, text.length)
@@ -777,7 +769,7 @@ private fun HtmlBlockRenderer(
                                                         adjustedAnnotatedString.getStringAnnotations("URL", offset, offset)
                                                             .firstOrNull()
                                                     if (link != null) {
-                                                        val fullUrl = normalizeYamiboLink(link.item)
+                                                        val fullUrl = normalizeYamiboUrl(link.item)
                                                         val linkText = adjustedAnnotatedString.substring(link.start, link.end)
                                                         showLongPressMenu = LinkMenuState(
                                                             url = fullUrl,
@@ -796,7 +788,7 @@ private fun HtmlBlockRenderer(
                                                         adjustedAnnotatedString.getStringAnnotations("URL", offset, offset)
                                                             .firstOrNull()
                                                     if (link != null) {
-                                                        val fullUrl = normalizeYamiboLink(link.item)
+                                                        val fullUrl = normalizeYamiboUrl(link.item)
                                                         if (looksLikeSupportedYamiboInAppLink(fullUrl)) {
                                                             navigator.navigate(IInAppLinkResolvingScreen(fullUrl, linkContext))
                                                         }
@@ -903,7 +895,8 @@ private fun HtmlBlockRenderer(
                                 TextButton(onClick = {
                                     try {
                                         uriHandler.openUri(fullUrl)
-                                    } catch (_: Exception) {
+                                    } catch (error: Exception) {
+                                        Logger.w("HtmlRenderer", "Failed to open link in external browser url=$fullUrl", error)
                                     }
                                     showLongPressMenu = null
                                 }) { Text(i18n("外部瀏覽器"), color = colors.brownPrimary, fontSize = 16.sp) }
@@ -1108,7 +1101,8 @@ private fun HtmlBlockRenderer(
                                 TextButton(onClick = {
                                     try {
                                         uriHandler.openUri(fullUrl)
-                                    } catch (_: Exception) {
+                                    } catch (error: Exception) {
+                                        Logger.w("HtmlRenderer", "Failed to open attachment in external browser url=$fullUrl", error)
                                     }
                                     showAttachmentMenu = false
                                 }) { Text(i18n("使用外部瀏覽器開啟"), color = colors.brownPrimary, fontSize = 16.sp) }

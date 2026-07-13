@@ -120,7 +120,9 @@ class DiskCacheFactory(
                 meta.isDirectory -> {
                     var total = 0L
                     for (child in fileSystem.listRecursively(path)) {
-                        val childMeta = runCatching { fileSystem.metadata(child) }.getOrNull() ?: continue
+                        val childMeta = runCatching { fileSystem.metadata(child) }
+                            .onFailure { Logger.d("DiskCacheFactory", "Failed to read cache child metadata path=$child", it) }
+                            .getOrNull() ?: continue
                         if (childMeta.isRegularFile) {
                             total += childMeta.size ?: 0L
                         }
@@ -129,7 +131,8 @@ class DiskCacheFactory(
                 }
                 else -> 0L
             }
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            Logger.w("DiskCacheFactory", "Failed to calculate cache size path=$path", error)
             null
         }
     }
@@ -155,7 +158,7 @@ class DiskCacheFactory(
                 fileSystem.createDirectories(rootCacheDir)
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Logger.e("DiskCacheFactory", "Failed to clear all disk cache", e)
         }
     }
 }
@@ -183,7 +186,7 @@ class DiskCacheImpl<T : Any>(
             try {
                 fileSystem.createDirectories(namespaceDir)
             } catch (e: Exception) {
-                e.printStackTrace()
+                Logger.e("DiskCacheImpl", "Failed to create namespace directory namespace=$namespace", e)
             }
         }
     }
@@ -231,9 +234,13 @@ class DiskCacheImpl<T : Any>(
             // Trigger LRU asynchronously
             maintainLRU()
         } catch (e: Exception) {
-            Logger.e("DiskCacheImpl", "Failed to update DB metadata for key $key", e)
+            Logger.e("DiskCacheImpl", "Failed to update DB metadata for namespace=$namespace key=$key", e)
             // Cleanup file if DB failed
-            try { fileSystem.delete(file) } catch (_: Exception) {}
+            try {
+                fileSystem.delete(file)
+            } catch (cleanupError: Exception) {
+                Logger.w("DiskCacheImpl", "Failed to cleanup cache file after DB failure namespace=$namespace key=$key", cleanupError)
+            }
         }
     }
 
@@ -258,7 +265,8 @@ class DiskCacheImpl<T : Any>(
         // 2. Try L2 Disk Cache
         val entry = try {
             queries.get(namespace, key).executeAsOneOrNull()
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            Logger.w("DiskCacheImpl", "Failed to read DB metadata namespace=$namespace key=$key", error)
             null
         } ?: return null
 
@@ -276,7 +284,9 @@ class DiskCacheImpl<T : Any>(
                     namespace = namespace,
                     cacheKey = key
                 )
-            } catch (_: Exception) {}
+            } catch (error: Exception) {
+                Logger.w("DiskCacheImpl", "Failed to update access time namespace=$namespace key=$key", error)
+            }
         }
 
         val file = getFilePath(key)
@@ -287,7 +297,7 @@ class DiskCacheImpl<T : Any>(
                 }
             } else null
         } catch (e: Exception) {
-            e.printStackTrace()
+            Logger.w("DiskCacheImpl", "Failed to read cache file namespace=$namespace key=$key", e)
             null
         }
 
@@ -305,7 +315,7 @@ class DiskCacheImpl<T : Any>(
             }
             decoded
         } catch (e: Exception) {
-            e.printStackTrace()
+            Logger.w("DiskCacheImpl", "Failed to decode cache value namespace=$namespace key=$key", e)
             remove(key)
             null
         }
@@ -318,7 +328,7 @@ class DiskCacheImpl<T : Any>(
             queries.delete(namespace, key)
             fileSystem.delete(getFilePath(key))
         } catch (e: Exception) {
-            e.printStackTrace()
+            Logger.w("DiskCacheImpl", "Failed to remove cache value namespace=$namespace key=$key", e)
         }
     }
 
@@ -333,10 +343,12 @@ class DiskCacheImpl<T : Any>(
             matchingKeys.forEach { key ->
                 try {
                     fileSystem.delete(getFilePath(key))
-                } catch (_: Exception) {}
+                } catch (error: Exception) {
+                    Logger.w("DiskCacheImpl", "Failed to delete cache file by prefix namespace=$namespace key=$key", error)
+                }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Logger.w("DiskCacheImpl", "Failed to remove cache values by prefix namespace=$namespace prefix=$prefix", e)
         }
     }
 
@@ -350,7 +362,7 @@ class DiskCacheImpl<T : Any>(
                 fileSystem.createDirectories(namespaceDir)
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Logger.e("DiskCacheImpl", "Failed to clear cache namespace=$namespace", e)
         }
     }
 
@@ -366,7 +378,7 @@ class DiskCacheImpl<T : Any>(
                     }
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                Logger.w("DiskCacheImpl", "Failed to maintain LRU namespace=$namespace", e)
             }
         }
     }

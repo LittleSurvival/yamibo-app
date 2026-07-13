@@ -1,5 +1,6 @@
 package me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl
 
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 
 import androidx.compose.ui.graphics.Color
@@ -438,7 +439,8 @@ object HtmlParser {
                     else -> null
                 }
             }
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            Logger.d("HtmlParser", "Failed to parse color value=$normalized", error)
             null
         }
     }

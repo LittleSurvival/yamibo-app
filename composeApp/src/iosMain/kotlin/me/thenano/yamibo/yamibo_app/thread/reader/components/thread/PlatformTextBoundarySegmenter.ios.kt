@@ -2,6 +2,7 @@ package me.thenano.yamibo.yamibo_app.thread.reader.components.thread
 
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.useContents
+import me.thenano.yamibo.yamibo_app.Logger
 import platform.CoreFoundation.CFRangeMake
 import platform.CoreFoundation.CFRelease
 import platform.CoreFoundation.CFStringCreateWithCString
@@ -43,7 +44,9 @@ private class IosCoreFoundationTextBoundarySegmenter(
                 }
             }.toIntArray()
         }
-    }.getOrNull() ?: fallback.graphemeBoundaries(text, locale)
+    }
+        .onFailure { Logger.d(TAG, "CoreFoundation grapheme boundary detection failed; using fallback segmenter", it) }
+        .getOrNull() ?: fallback.graphemeBoundaries(text, locale)
 
     private fun tokenizerBoundaries(text: String, unit: ULong): IntArray? = runCatching {
         withCoreFoundationString(text) { string ->
@@ -66,7 +69,9 @@ private class IosCoreFoundationTextBoundarySegmenter(
                 CFRelease(tokenizer)
             }
         }
-    }.getOrNull()
+    }
+        .onFailure { Logger.d(TAG, "CoreFoundation tokenizer boundary detection failed; using fallback segmenter", it) }
+        .getOrNull()
 
     private inline fun <T> withCoreFoundationString(text: String, block: (platform.CoreFoundation.CFStringRef) -> T): T {
         val string = CFStringCreateWithCString(null, text, kCFStringEncodingUTF8)
@@ -78,3 +83,5 @@ private class IosCoreFoundationTextBoundarySegmenter(
         }
     }
 }
+
+private const val TAG = "TextBoundarySegmenter"

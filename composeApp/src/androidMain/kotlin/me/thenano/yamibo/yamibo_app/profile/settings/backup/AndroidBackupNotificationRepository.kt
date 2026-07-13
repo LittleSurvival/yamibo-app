@@ -10,6 +10,7 @@ import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.MainActivity
 import me.thenano.yamibo.yamibo_app.R
 
@@ -46,7 +47,7 @@ internal class AndroidBackupNotificationRepository(context: Context) {
                     .setContentIntent(createOpenAppPendingIntent())
                     .build(),
             )
-        }
+        }.onFailure { Logger.w(TAG, "Failed to show completed backup notification", it) }
     }
 
     @SuppressLint("MissingPermission")
@@ -62,7 +63,7 @@ internal class AndroidBackupNotificationRepository(context: Context) {
                     .setContentIntent(createOpenAppPendingIntent())
                     .build(),
             )
-        }
+        }.onFailure { Logger.w(TAG, "Failed to show failed backup notification", it) }
     }
 
     private fun ensureChannel() {
@@ -86,6 +87,7 @@ internal class AndroidBackupNotificationRepository(context: Context) {
     }
 
     companion object {
+        const val TAG = "AndroidBackupNotification"
         const val CHANNEL_ID = "yamibo_backup_channel"
         const val NOTIFICATION_ID = 231001
     }

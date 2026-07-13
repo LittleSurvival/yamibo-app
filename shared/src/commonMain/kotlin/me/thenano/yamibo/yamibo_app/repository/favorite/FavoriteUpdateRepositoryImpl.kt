@@ -37,6 +37,7 @@ import me.thenano.yamibo.yamiboapp.FavoriteUpdateRun
 import me.thenano.yamibo.yamiboapp.FavoriteUpdateTrackedTarget
 import kotlin.math.max
 import kotlin.random.Random
+import kotlin.time.Duration.Companion.milliseconds
 
 class FavoriteUpdateRepositoryImpl(
     private val db: Database,
@@ -220,7 +221,7 @@ class FavoriteUpdateRepositoryImpl(
                     )
                 )
             }
-            delay(250)
+            delay(250.milliseconds)
         }
 
         val now = currentTimeMillis()
@@ -315,7 +316,7 @@ class FavoriteUpdateRepositoryImpl(
         getFavoriteUpdateCandidates().map { item ->
             ScopeTarget(
                 fid = item.scopeFid(),
-            categoryIds = localFavoriteRepository.getCategoryIdsForItem(item.id),
+                categoryIds = localFavoriteRepository.getCategoryIdsForItem(item.id),
             )
         }
 
@@ -337,10 +338,7 @@ class FavoriteUpdateRepositoryImpl(
         val result = threadRepository.fetchThread(threadId, authorId, page = 1, reverse = true)
         return when (result) {
             is YamiboResult.Success -> handleThreadPage(item, mode, result.value, authorId)
-            is YamiboResult.NotLoggedIn -> CheckResult.Failed(i18n("登入狀態已失效，無法檢查 {}", item.title))
-            is YamiboResult.NoPermission -> CheckResult.Failed(result.reason)
-            is YamiboResult.Maintenance -> CheckResult.Failed(i18n("百合會維護中，無法檢查 {}", item.title))
-            is YamiboResult.Failure -> CheckResult.Failed(result.reason)
+            else -> result.toCheckFailure(item.title)
         }
     }
 
@@ -499,12 +497,9 @@ class FavoriteUpdateRepositoryImpl(
         val now = currentTimeMillis()
         val authorId = 0L
         val existing = targetQueries.getByTarget(item.targetType.name, item.targetId, authorId).executeAsOneOrNull()
-        val refresh = when (val result = rssSearchSubscriptionRepository.refresh(item.targetId)) {
-            is YamiboResult.Success -> result.value
-            is YamiboResult.NotLoggedIn -> return CheckResult.Failed(i18n("登入狀態已失效，無法檢查 {}", item.title))
-            is YamiboResult.NoPermission -> return CheckResult.Failed(result.reason)
-            is YamiboResult.Maintenance -> return CheckResult.Failed(i18n("百合會維護中，無法檢查 {}", item.title))
-            is YamiboResult.Failure -> return CheckResult.Failed(result.reason)
+        when (val result = rssSearchSubscriptionRepository.refresh(item.targetId)) {
+            is YamiboResult.Success -> Unit
+            else -> return result.toCheckFailure(item.title)
         }
         val currentRows = rssResultQueries
             .getBySubscription(item.targetId, Long.MAX_VALUE, 0)
@@ -561,10 +556,7 @@ class FavoriteUpdateRepositoryImpl(
         val existing = targetQueries.getByTarget(item.targetType.name, item.targetId, authorId).executeAsOneOrNull()
         val pageOne = when (val result = tagRepository.fetchTagPage(TagId(item.targetId.toInt()), 1)) {
             is YamiboResult.Success -> result.value
-            is YamiboResult.NotLoggedIn -> return CheckResult.Failed(i18n("登入狀態已失效，無法檢查 {}", item.title))
-            is YamiboResult.NoPermission -> return CheckResult.Failed(result.reason)
-            is YamiboResult.Maintenance -> return CheckResult.Failed(i18n("百合會維護中，無法檢查 {}", item.title))
-            is YamiboResult.Failure -> return CheckResult.Failed(result.reason)
+            else -> return result.toCheckFailure(item.title)
         }
         val knownIds = existing?.knownThreadIds?.csvLongs()?.toMutableSet() ?: linkedSetOf()
         val firstPageIds = pageOne.threadSummaries.map { it.tid.value.toLong() }
@@ -666,10 +658,7 @@ class FavoriteUpdateRepositoryImpl(
     ): Result<TagPage> {
         return when (val result = tagRepository.fetchTagPage(TagId(item.targetId.toInt()), page)) {
             is YamiboResult.Success -> Result.success(result.value)
-            is YamiboResult.NotLoggedIn -> Result.failure(IllegalStateException(i18n("登入狀態已失效，無法檢查 {}", item.title)))
-            is YamiboResult.NoPermission -> Result.failure(IllegalStateException(result.reason))
-            is YamiboResult.Maintenance -> Result.failure(IllegalStateException(i18n("百合會維護中，無法檢查 {}", item.title)))
-            is YamiboResult.Failure -> Result.failure(IllegalStateException(result.reason))
+            else -> Result.failure(IllegalStateException(result.favoriteUpdateFailureReason(item.title)))
         }
     }
 
@@ -950,6 +939,18 @@ class FavoriteUpdateRepositoryImpl(
 
     private fun appendLine(existing: String?, line: String): String =
         listOfNotNull(existing, line).joinToString("\n")
+
+    private fun YamiboResult<*>.toCheckFailure(itemTitle: String): CheckResult.Failed =
+        CheckResult.Failed(favoriteUpdateFailureReason(itemTitle))
+
+    private fun YamiboResult<*>.favoriteUpdateFailureReason(itemTitle: String): String =
+        when (this) {
+            is YamiboResult.NotLoggedIn -> i18n("登入狀態已失效，無法檢查 {}", itemTitle)
+            is YamiboResult.NoPermission -> reason
+            is YamiboResult.Maintenance -> i18n("百合會維護中，無法檢查 {}", itemTitle)
+            is YamiboResult.Failure -> reason
+            is YamiboResult.Success -> error("Success result has no failure reason")
+        }
 
     private fun shouldStop(runId: String): Boolean {
         if (runId in interruptRequestedRunIds) return true

@@ -106,8 +106,4 @@ class NovelReaderSettingsRepository(store: SettingsStore) : SettingsRegistry(sto
         description = "novel_reader_show_page_progress_hint",
         default = true,
     )
-
-    companion object {
-        val chineseConversionOptions = ReaderChineseConversionOption.entries.map { it to it.label }
-    }
 }

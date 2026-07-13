@@ -1,12 +1,11 @@
 package me.thenano.yamibo.yamibo_app.repository.download
 
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.encodeToString
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.repository.settings.AppSettingsRepository
 import okio.FileSystem
 import okio.Path
 import okio.Path.Companion.toPath
-import okio.SYSTEM
 import okio.buffer
 import okio.use
 import platform.Foundation.NSDocumentDirectory
@@ -137,6 +136,7 @@ class IOSDownloadStorageProvider(
         if (!fileSystem.exists(path)) return emptyList()
         val bytes = fileSystem.source(path).buffer().use { it.readByteArray() }
         return runCatching { json.decodeFromString<List<DownloadQueueEntry>>(bytes.decodeToString()) }
+            .onFailure { Logger.w(TAG, "Failed to decode download queue", it) }
             .getOrDefault(emptyList())
     }
 
@@ -191,21 +191,27 @@ class IOSDownloadStorageProvider(
         val path = dir / "manifest.json"
         if (!fileSystem.exists(path)) return null
         val bytes = fileSystem.source(path).buffer().use { it.readByteArray() }
-        return runCatching { json.decodeFromString<ThreadPageDownloadManifest>(bytes.decodeToString()) }.getOrNull()
+        return runCatching { json.decodeFromString<ThreadPageDownloadManifest>(bytes.decodeToString()) }
+            .onFailure { Logger.d(TAG, "Failed to decode thread page manifest", it) }
+            .getOrNull()
     }
 
     private fun readTagMangaManifest(dir: Path): TagMangaChapterManifest? {
         val path = dir / "manifest.json"
         if (!fileSystem.exists(path)) return null
         val bytes = fileSystem.source(path).buffer().use { it.readByteArray() }
-        return runCatching { json.decodeFromString<TagMangaChapterManifest>(bytes.decodeToString()) }.getOrNull()
+        return runCatching { json.decodeFromString<TagMangaChapterManifest>(bytes.decodeToString()) }
+            .onFailure { Logger.d(TAG, "Failed to decode tag manga manifest", it) }
+            .getOrNull()
     }
 
     private fun readRssMangaManifest(dir: Path): RssMangaChapterManifest? {
         val path = dir / "manifest.json"
         if (!fileSystem.exists(path)) return null
         val bytes = fileSystem.source(path).buffer().use { it.readByteArray() }
-        return runCatching { json.decodeFromString<RssMangaChapterManifest>(bytes.decodeToString()) }.getOrNull()
+        return runCatching { json.decodeFromString<RssMangaChapterManifest>(bytes.decodeToString()) }
+            .onFailure { Logger.d(TAG, "Failed to decode RSS manga manifest", it) }
+            .getOrNull()
     }
 
     private fun rootDir(): Path = selectedFolder() / "YamiboDownloads"
@@ -223,6 +229,7 @@ class IOSDownloadStorageProvider(
     }
 
     private companion object {
+        const val TAG = "IOSDownloadStorageProvider"
         const val QUEUE_FILE = "queue.json"
     }
 }

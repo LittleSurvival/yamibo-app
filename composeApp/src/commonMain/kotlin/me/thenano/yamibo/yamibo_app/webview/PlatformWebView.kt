@@ -12,6 +12,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.profile.LoadingOverlay
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.navigation.Navigatable
@@ -72,7 +73,9 @@ internal fun PlatformWebViewScreen(
                 onOpenBrowserClick = {
                     try {
                         uriHandler.openUri(currentUrl)
-                    } catch (_: Exception) {}
+                    } catch (error: Exception) {
+                        Logger.w("PlatformWebView", "Failed to open browser url=$currentUrl", error)
+                    }
                 },
                 showNavigation = showNavigation,
                 useBackIcon = useBackIcon,

@@ -2,27 +2,22 @@ package me.thenano.yamibo.yamibo_app.repository.rss
 
 import io.github.littlesurvival.YamiboForum
 import io.github.littlesurvival.core.YamiboResult
-import io.github.littlesurvival.dto.model.AttachmentType
 import io.github.littlesurvival.dto.model.ThreadSummary
-import io.github.littlesurvival.dto.model.TimeInfo
-import io.github.littlesurvival.dto.model.User
 import io.github.littlesurvival.dto.page.SearchPage
 import io.github.littlesurvival.dto.page.TagPage
 import io.github.littlesurvival.dto.value.ForumId
 import io.github.littlesurvival.dto.value.SearchId
-import io.github.littlesurvival.dto.value.ThreadId
-import io.github.littlesurvival.dto.value.UserId
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.json.Json
 import me.thenano.yamibo.yamibo_app.Database
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.repository.AuthRepository
 import me.thenano.yamibo.yamibo_app.repository.ForumRepository
 import me.thenano.yamibo.yamibo_app.repository.RssSearchSubscriptionRepository
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
 import me.thenano.yamibo.yamiboapp.RssSearchSubscription
-import me.thenano.yamibo.yamiboapp.RssSearchSubscriptionResult
 
 class RssSearchSubscriptionRepositoryImpl(
     private val db: Database,
@@ -245,7 +240,7 @@ class RssSearchSubscriptionRepositoryImpl(
         }
         val searchPage = when (searchResult) {
             is YamiboResult.Success -> normalizeSearchPageForum(searchResult.value, forumId)
-            else -> return buildCachedCatalogPage(effectiveSubscriptionRow, safePage, pageSize)
+            else -> return buildCachedCatalogPage(effectiveSubscriptionRow, safePage)
         }
         val now = currentTimeMillis()
         saveSearchPageCache(subscriptionId, safePage, searchPage, now)
@@ -279,13 +274,12 @@ class RssSearchSubscriptionRepositoryImpl(
         pageSize: Int,
     ): RssSearchSubscriptionRepository.CatalogPage? {
         val subscriptionRow = subscriptionQueries.getById(subscriptionId).executeAsOneOrNull() ?: return null
-        return buildCachedCatalogPage(subscriptionRow, page, pageSize)
+        return buildCachedCatalogPage(subscriptionRow, page)
     }
 
     private fun buildCachedCatalogPage(
         subscriptionRow: RssSearchSubscription,
         page: Int,
-        pageSize: Int,
     ): RssSearchSubscriptionRepository.CatalogPage? {
         val subscription = subscriptionRow.toSummary()
         val safePage = page.coerceAtLeast(1)
@@ -296,7 +290,9 @@ class RssSearchSubscriptionRepositoryImpl(
                 json.decodeFromString<SearchPage>(cache.pageJson),
                 subscription.forumId,
             )
-        }.getOrNull() ?: return null
+        }
+            .onFailure { Logger.d(TAG, "Failed to decode cached RSS catalog page subscriptionId=${subscription.id} page=$safePage", it) }
+            .getOrNull() ?: return null
         return RssSearchSubscriptionRepository.CatalogPage(
             subscription = subscription,
             tagPage = TagPage(
@@ -453,7 +449,11 @@ class RssSearchSubscriptionRepositoryImpl(
             updatedAt = updatedAt,
             lastRefreshStartedAt = lastRefreshStartedAt,
             lastRefreshFinishedAt = lastRefreshFinishedAt,
-            lastRefreshStatus = lastRefreshStatus?.let { runCatching { RssSearchSubscriptionRepository.RefreshStatus.valueOf(it) }.getOrNull() },
+            lastRefreshStatus = lastRefreshStatus?.let { raw ->
+                runCatching { RssSearchSubscriptionRepository.RefreshStatus.valueOf(raw) }
+                    .onFailure { Logger.d(TAG, "Failed to parse refresh status value=$raw", it) }
+                    .getOrNull()
+            },
             lastRefreshMessage = lastRefreshMessage,
             lastTotalCount = lastTotalCount.toInt(),
             unreadCount = resultQueries.countUnreadBySubscription(id).executeAsOne().toInt(),
@@ -462,29 +462,6 @@ class RssSearchSubscriptionRepositoryImpl(
 
     private fun normalizeKeyword(value: String): String =
         value.trim().replace(Regex("\\s+"), " ")
-
-    private fun RssSearchSubscriptionResult.toThreadSummary(): ThreadSummary {
-        return ThreadSummary(
-            tid = ThreadId(threadId.toInt()),
-            title = title,
-            fid = forumId?.toInt()?.let(::ForumId),
-            attachmentType = attachmentType?.let { runCatching { AttachmentType.valueOf(it) }.getOrNull() },
-            hasPoll = hasPoll != 0L,
-            url = url,
-            author = if (authorId != null && authorName != null) {
-                User(UserId(authorId.toInt()), authorName, authorAvatarUrl)
-            } else {
-                null
-            },
-            description = description,
-            replyCount = replyCount?.toInt(),
-            viewCount = viewCount?.toInt(),
-            tag = tag,
-            lastUpdate = if (lastUpdateText != null && lastUpdateEpoch != null) {
-                TimeInfo(lastUpdateText, lastUpdateSpecialText, lastUpdateEpoch)
-            } else {
-                null
-            },
-        )
-    }
 }
+
+private const val TAG = "RssSearchSubscriptionRepository"

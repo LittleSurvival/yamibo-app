@@ -1,11 +1,11 @@
 package me.thenano.yamibo.yamibo_app.repository
 
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.repository.backup.BackupStorageProvider
 import me.thenano.yamibo.yamibo_app.repository.settings.AppSettingsRepository
 import okio.FileSystem
 import okio.Path
 import okio.Path.Companion.toPath
-import okio.SYSTEM
 import okio.buffer
 import okio.use
 import platform.Foundation.NSDocumentDirectory
@@ -17,15 +17,19 @@ class IOSBackupStorageProvider(
 ) : BackupStorageProvider {
     private val fileSystem = FileSystem.SYSTEM
 
-    override suspend fun getSelectedFolderLabel(): String? =
+    private inline fun <T> backupResult(operation: String, block: () -> T): Result<T> =
+        runCatching(block)
+            .onFailure { Logger.e(TAG, "$operation failed", it) }
+
+    override suspend fun getSelectedFolderLabel(): String =
         selectedFolder().toString()
 
-    override suspend fun setSelectedFolder(uri: String): Result<Unit> = runCatching {
+    override suspend fun setSelectedFolder(uri: String): Result<Unit> = backupResult("setSelectedFolder") {
         appSettingsRepository.backupFolderUri.setValue(uri)
         ensureFolder(selectedFolder())
     }
 
-    override suspend fun writeBackupFile(fileName: String, bytes: ByteArray): Result<BackupRepository.BackupFileInfo> = runCatching {
+    override suspend fun writeBackupFile(fileName: String, bytes: ByteArray): Result<BackupRepository.BackupFileInfo> = backupResult("writeBackupFile fileName=$fileName") {
         val folder = selectedFolder()
         ensureFolder(folder)
         val path = folder / fileName
@@ -39,7 +43,7 @@ class IOSBackupStorageProvider(
         )
     }
 
-    override suspend fun readBackupFile(sourceUri: String): Result<ByteArray> = runCatching {
+    override suspend fun readBackupFile(sourceUri: String): Result<ByteArray> = backupResult("readBackupFile") {
         fileSystem.source(sourceUri.toPath()).buffer().use { it.readByteArray() }
     }
 
@@ -63,7 +67,7 @@ class IOSBackupStorageProvider(
     override suspend fun getBackupStorageBytes(): Long =
         listBackupFiles().sumOf { it.bytes }
 
-    override suspend fun deleteBackupFile(fileInfo: BackupRepository.BackupFileInfo): Result<Unit> = runCatching {
+    override suspend fun deleteBackupFile(fileInfo: BackupRepository.BackupFileInfo): Result<Unit> = backupResult("deleteBackupFile name=${fileInfo.name}") {
         fileSystem.delete(fileInfo.uri.toPath())
     }
 
@@ -84,6 +88,7 @@ class IOSBackupStorageProvider(
     }
 
     private companion object {
+        const val TAG = "IOSBackupStorageProvider"
         const val BACKUP_EXTENSION = ".yamibobak"
         const val AUTO_BACKUP_SUFFIX = "-autobackup.yamibobak"
     }

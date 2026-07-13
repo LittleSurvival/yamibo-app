@@ -102,7 +102,8 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
     suspend fun reloadReadingHistory() {
         readHistory = try {
             readHistoryRepo.getPosition(tid, ReadHistoryRepository.ThreadEntryType.Novel, authorId)
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            Logger.w("NovelThreadDetailScreen", "Failed to reload reading history tid=${tid.value}", error)
             null
         }
     }

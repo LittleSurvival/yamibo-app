@@ -25,8 +25,8 @@ import io.github.littlesurvival.dto.value.TagId
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import me.thenano.yamibo.yamibo_app.repository.DownloadRepository
 import me.thenano.yamibo.yamibo_app.repository.TagRepository
 import me.thenano.yamibo.yamibo_app.repository.ThreadRepository
 import kotlin.test.Test

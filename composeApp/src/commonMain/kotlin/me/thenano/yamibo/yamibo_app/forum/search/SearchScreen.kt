@@ -65,6 +65,7 @@ import io.github.littlesurvival.dto.page.SearchPage
 import io.github.littlesurvival.dto.value.ForumId
 import io.github.littlesurvival.dto.value.SearchId
 import kotlinx.coroutines.launch
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.LocalAuthRepository
 import me.thenano.yamibo.yamibo_app.LocalFavoriteRepository
 import me.thenano.yamibo.yamibo_app.LocalForumRepository
@@ -234,7 +235,8 @@ fun SearchScreen(fid: ForumId?) {
             } else if (categoryIds.isNotEmpty() || collectionIds.isNotEmpty()) {
                 favoriteRepository.setItemLocations(existingItem.id, categoryIds, collectionIds)
             }
-        } catch (_: Throwable) {
+        } catch (error: Throwable) {
+            Logger.e("SearchScreen", "Failed to save RSS favorite keyword=$keyword", error)
             if (existingSubscription == null) {
                 rssRepository.delete(result.value)
             }

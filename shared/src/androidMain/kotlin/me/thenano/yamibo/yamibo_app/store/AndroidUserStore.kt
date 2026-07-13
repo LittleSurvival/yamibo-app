@@ -9,7 +9,6 @@ import io.github.littlesurvival.dto.page.ProfilePage
 import io.github.littlesurvival.dto.value.FormHash
 import io.github.littlesurvival.dto.value.UserId
 import me.thenano.yamibo.yamibo_app.store.auth.UserStore
-
 class AndroidUserStore(context: Context) : UserStore {
     private val prefs =
         EncryptedSharedPreferences.create(

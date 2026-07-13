@@ -8,6 +8,7 @@ import androidx.core.content.FileProvider
 import androidx.core.net.toUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.repository.appupdate.AppUpdateDownloadState
 import me.thenano.yamibo.yamibo_app.repository.appupdate.AppUpdatePlatform
 import me.thenano.yamibo.yamibo_app.repository.appupdate.AppUpdateRelease
@@ -51,7 +52,9 @@ class AndroidAppUpdatePlatform(
         val sha = asset.sha256
         val fileIsValid = apkFile.exists() && apkFile.hasApkZipSignature() && runCatching {
             sha.isNullOrBlank() || apkFile.sha256().equals(sha, ignoreCase = true)
-        }.getOrDefault(false)
+        }
+            .onFailure { Logger.d(TAG, "Cached APK validation failed; downloading a fresh asset", it) }
+            .getOrDefault(false)
 
         if (fileIsValid) {
             return@withContext requestInstall(apkFile, release)
@@ -98,7 +101,13 @@ class AndroidAppUpdatePlatform(
                 }
             }
             requestInstall(apkFile, release)
-        }.getOrElse { error ->
+        }
+            .onFailure { error ->
+                if (error !is CancellationException) {
+                    Logger.e(TAG, "APK download or install request failed version=${release.versionName}", error)
+                }
+            }
+            .getOrElse { error ->
             apkFile.delete()
             if (error is CancellationException) {
                 AppUpdateDownloadState.Failed(release, "Download canceled")
@@ -143,6 +152,8 @@ class AndroidAppUpdatePlatform(
         return AppUpdateDownloadState.Completed(release)
     }
 }
+
+private const val TAG = "AndroidAppUpdate"
 
 private class CancellationException : Exception()
 

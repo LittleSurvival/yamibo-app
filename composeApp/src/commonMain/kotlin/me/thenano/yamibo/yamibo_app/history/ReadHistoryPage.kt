@@ -29,6 +29,7 @@ import me.thenano.yamibo.yamibo_app.LocalAppSettingsRepository
 import me.thenano.yamibo.yamibo_app.LocalFavoriteRepository
 import me.thenano.yamibo.yamibo_app.LocalFavoriteSyncRepository
 import me.thenano.yamibo.yamibo_app.LocalReadHistoryRepository
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.components.controls.YamiboActionChip
 import me.thenano.yamibo.yamibo_app.components.controls.YamiboMultiSelectDialog
 import me.thenano.yamibo.yamibo_app.favorite.*
@@ -218,6 +219,7 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
             )
             currentPage = page
         } catch (e: Exception) {
+            Logger.e("ReadHistoryPage", "Failed to load read history page=$page filters=${selectedFilters.joinToString()}", e)
             state = HistoryState.Error(e.message ?: i18n("載入失敗"))
         }
     }
@@ -239,6 +241,7 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
             )
             currentPage = page
         } catch (e: Exception) {
+            Logger.e("ReadHistoryPage", "Failed to search read history page=$page", e)
             state = HistoryState.Error(e.message ?: i18n("搜尋失敗"))
         }
     }

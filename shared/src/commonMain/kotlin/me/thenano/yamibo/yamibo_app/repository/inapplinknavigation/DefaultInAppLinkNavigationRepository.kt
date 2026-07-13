@@ -26,7 +26,7 @@ class DefaultInAppLinkNavigationRepository(
         onProgress: (String) -> Unit,
     ): InAppLinkResolveResult {
         onProgress(i18n("解析連結"))
-        val normalized = normalizeUrl(url)
+        val normalized = normalizeYamiboUrl(url)
         if (!isYamiboUrl(normalized)) {
             return InAppLinkResolveResult.Resolved(InAppLinkTarget.WebOnlyTarget(normalized))
         }
@@ -343,16 +343,6 @@ class DefaultInAppLinkNavigationRepository(
         const val AUTHOR_PAGE_SEARCH_LIMIT = 6
         const val AUTHOR_FORWARD_VERIFY_RADIUS = 2
         const val COMMENT_BACK_SCAN_LIMIT = 2
-
-        fun normalizeUrl(raw: String): String {
-            val cleaned = raw.trim().replace("&amp;", "&")
-            return when {
-                cleaned.startsWith("http://") || cleaned.startsWith("https://") -> cleaned
-                cleaned.startsWith("//") -> "https:$cleaned"
-                cleaned.startsWith("/") -> "https://bbs.yamibo.com$cleaned"
-                else -> "https://bbs.yamibo.com/$cleaned"
-            }
-        }
 
         fun isYamiboUrl(url: String): Boolean {
             return url.startsWith("https://bbs.yamibo.com/") ||

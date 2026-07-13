@@ -212,11 +212,13 @@ App 更新,App updates,App 更新,App 更新
 每日簽到模式與補簽偏好,Daily sign mode and repair preference,每日簽到模式與補簽偏好,每日签到模式与补签偏好
 簽到設定,Daily Sign,簽到設定,签到设置
 緩存空間與啟動時清理設定,Cache storage and launch cleanup settings,緩存空間與啟動時清理設定,缓存空间与启动时清理设置
+清除圖片、頁面與其他暫存資料，釋放目前已使用的儲存空間。,"Clear images, pages, and other temporary data to free storage.",清除圖片、頁面與其他暫存資料，釋放目前已使用的儲存空間。,清除图片、页面与其他暂存资料，释放目前已使用的存储空间。
 "清除圖片、頁面與其他暫存資料，釋放目前已使用的儲存空間。
 目前緩存大小：{}","Clear images, pages, and other temporary data to free storage.
 Current cache size: {}","清除圖片、頁面與其他暫存資料，釋放目前已使用的儲存空間。
 目前緩存大小：{}","清除图片、页面与其他暂存资料，释放目前已使用的存储空间。
 目前缓存大小：{}"
+目前緩存大小：{},Current cache size: {},目前緩存大小：{},目前缓存大小：{}
 儲存空間,Storage,儲存空間,存储空间
 深色模式,Dark mode,深色模式,深色模式
 淺色模式,Light mode,淺色模式,浅色模式

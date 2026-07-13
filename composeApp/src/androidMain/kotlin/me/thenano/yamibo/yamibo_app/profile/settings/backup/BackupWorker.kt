@@ -6,6 +6,7 @@ import android.os.Build
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.repository.settings.AppSettingsRepository
 import me.thenano.yamibo.yamibo_app.store.settings.AndroidSettingsStore
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
@@ -30,6 +31,7 @@ class BackupWorker(
             notifications.showCompleted("${file.name}，${file.bytes} bytes")
             Result.success()
         } catch (throwable: Throwable) {
+            Logger.e("BackupWorker", "Automatic backup failed", throwable)
             notifications.showFailed(throwable.message ?: "建立備份時發生錯誤")
             Result.retry()
         }

@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.repository.AppUpdateRepository
 import me.thenano.yamibo.yamibo_app.repository.settings.AppSettingsRepository
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
@@ -67,7 +68,13 @@ class DefaultAppUpdateRepository(
                 val manifest = json.decodeFromString<AppUpdateManifestDto>(response.bodyAsText())
                 manifest
             }
-            val manifest = result.getOrNull()
+            val manifest = result
+                .onFailure { error ->
+                    if (error !is CancellationException) {
+                        Logger.w(TAG, "Failed to fetch or decode update manifest source=${source.name}", error)
+                    }
+                }
+                .getOrNull()
             if (manifest == null) {
                 if (result.exceptionOrNull() is CancellationException) throw result.exceptionOrNull() as CancellationException
                 val message = result.exceptionOrNull()?.message
@@ -100,7 +107,9 @@ class DefaultAppUpdateRepository(
                 } else {
                     null
                 }
-            }.getOrNull()
+            }
+                .onFailure { Logger.d(TAG, "Failed to fetch update changelog source=${source.name} version=${manifest.versionCode}", it) }
+                .getOrNull()
 
             val release = manifest.toRelease(source, platform, changelogText)
             appSettingsRepository.appUpdatePreferredSourceIndex.setValue(sources.indexOf(source).coerceAtLeast(0))
@@ -151,6 +160,8 @@ class DefaultAppUpdateRepository(
     override val isInstallPermissionGranted: Boolean
         get() = platform.isInstallPermissionGranted
 }
+
+private const val TAG = "AppUpdateRepository"
 
 @Serializable
 private data class AppUpdateManifestDto(

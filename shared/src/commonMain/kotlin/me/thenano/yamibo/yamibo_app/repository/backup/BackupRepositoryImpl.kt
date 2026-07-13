@@ -4,19 +4,10 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.repository.BackupRepository
-import me.thenano.yamibo.yamibo_app.repository.settings.core.BoolSetting
-import me.thenano.yamibo.yamibo_app.repository.settings.core.EnumSetting
-import me.thenano.yamibo.yamibo_app.repository.settings.core.FloatSetting
-import me.thenano.yamibo.yamibo_app.repository.settings.core.IntSetting
-import me.thenano.yamibo.yamibo_app.repository.settings.core.SettingItem
-import me.thenano.yamibo.yamibo_app.repository.settings.core.SettingsRegistry
-import me.thenano.yamibo.yamibo_app.repository.settings.core.StringSetting
+import me.thenano.yamibo.yamibo_app.repository.settings.core.*
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 import me.thenano.yamibo.yamibo_app.util.time.currentLocalDateKeyAt
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
-import me.thenano.yamibo.yamiboapp.LocalFavoriteCategory
-import me.thenano.yamibo.yamiboapp.LocalFavoriteCollection
-import me.thenano.yamibo.yamiboapp.LocalFavoriteItem
 
 class BackupRepositoryImpl(
     private val db: Database,
@@ -228,7 +219,7 @@ class BackupRepositoryImpl(
             backup.favorites.categories.forEach { category ->
                 val existing = if (mode == BackupRepository.RestoreMode.Merge) {
                     categoryQueries.getAll().executeAsList()
-                        .firstOrNull { it.name.trim().lowercase() == category.name.trim().lowercase() }
+                        .firstOrNull { it.name.trim().equals(category.name.trim(), ignoreCase = true) }
                 } else null
                 val targetId = existing?.id ?: run {
                     categoryQueries.insertCategory(category.name, category.sortOrder, category.createdAt, category.updatedAt)
@@ -241,7 +232,7 @@ class BackupRepositoryImpl(
                 val mappedCategoryId = categoryIdMap[collection.categoryLocalId] ?: return@forEach
                 val existing = if (mode == BackupRepository.RestoreMode.Merge) {
                     collectionQueries.getByCategoryId(mappedCategoryId).executeAsList()
-                        .firstOrNull { it.name.trim().lowercase() == collection.name.trim().lowercase() }
+                        .firstOrNull { it.name.trim().equals(collection.name.trim(), ignoreCase = true) }
                 } else null
                 val targetId = existing?.id ?: run {
                     collectionQueries.insertCollection(

@@ -197,6 +197,7 @@ fun RssSearchSubscriptionDetailScreen(
     LaunchedEffect(subscriptionId, favoriteRefreshToken, canonicalCover?.resolvedUrl, state) {
         refreshFavoriteState()
         runCatching { favoriteRepository.syncFavoriteMetadata(favoriteTarget()) }
+            .onFailure { Logger.w("RssSearchSubscriptionDetailScreen", "Failed to sync favorite metadata subscriptionId=$subscriptionId", it) }
     }
 
     fun navigateToThread(thread: ThreadSummary, threads: List<ThreadSummary>, pageNav: PageNav?) {
@@ -550,7 +551,10 @@ fun RssSearchSubscriptionDetailScreen(
                 scope.launch {
                     if (!ensureDownloadStorageReady()) return@launch
                     downloadRepository.enqueueRssMangaChapter(subscriptionId, currentTitle(), currentQuery(), thread, currentPage)
-                        .onFailure { snackbarHostState.showSnackbar(it.message ?: i18n("加入下載失敗")) }
+                        .onFailure { error ->
+                            Logger.e("RssSearchSubscriptionDetailScreen", "Failed to enqueue RSS manga chapter subscriptionId=$subscriptionId tid=${thread.tid.value}", error)
+                            snackbarHostState.showSnackbar(error.message ?: i18n("加入下載失敗"))
+                        }
                 }
             },
             onRefreshChapter = {
@@ -593,7 +597,10 @@ fun RssSearchSubscriptionDetailScreen(
                     scope.launch {
                         if (!ensureDownloadStorageReady()) return@launch
                         downloadRepository.enqueueRssMangaCurrentPage(subscriptionId, currentTitle(), currentQuery(), currentThreads, currentPage)
-                            .onFailure { snackbarHostState.showSnackbar(it.message ?: i18n("加入下載失敗")) }
+                            .onFailure { error ->
+                                Logger.e("RssSearchSubscriptionDetailScreen", "Failed to enqueue current RSS manga page subscriptionId=$subscriptionId page=$currentPage", error)
+                                snackbarHostState.showSnackbar(error.message ?: i18n("加入下載失敗"))
+                            }
                     }
                 })
                 add(CatalogDownloadAction(i18n("下載全部分頁")) {
@@ -601,7 +608,10 @@ fun RssSearchSubscriptionDetailScreen(
                     scope.launch {
                         if (!ensureDownloadStorageReady()) return@launch
                         downloadRepository.enqueueRssMangaAllPages(subscriptionId, currentTitle(), currentQuery())
-                            .onFailure { snackbarHostState.showSnackbar(it.message ?: i18n("加入下載失敗")) }
+                            .onFailure { error ->
+                                Logger.e("RssSearchSubscriptionDetailScreen", "Failed to enqueue all RSS manga pages subscriptionId=$subscriptionId", error)
+                                snackbarHostState.showSnackbar(error.message ?: i18n("加入下載失敗"))
+                            }
                     }
                 })
                 if (currentPageHasDownloads) {

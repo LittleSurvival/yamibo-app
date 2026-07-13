@@ -59,6 +59,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.thenano.yamibo.yamibo_app.LocalDownloadRepository
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.components.controls.YamiboActionChip
 import me.thenano.yamibo.yamibo_app.components.controls.YamiboMultiSelectDialog
 import me.thenano.yamibo.yamibo_app.components.controls.YamiboSingleSelectDialog
@@ -71,6 +72,7 @@ import me.thenano.yamibo.yamibo_app.core.cache.CacheStorageUsage
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.profile.settings.backup.IBackupSettingsScreen
+import me.thenano.yamibo.yamibo_app.repository.DownloadRepository
 import me.thenano.yamibo.yamibo_app.repository.download.DOWNLOADED_CONTENT_FILTER_ALL
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadQueueEntry
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadQueueSummary
@@ -130,6 +132,7 @@ fun DownloadQueueScreen() {
                 )
             }
         }.getOrElse { error ->
+            Logger.e("DownloadQueueScreen", "Failed to load downloaded content management", error)
             DownloadContentManagementState.Error(error.message ?: i18n("載入下載內容失敗"))
         }
     }
@@ -168,7 +171,10 @@ fun DownloadQueueScreen() {
                     onRetry = { entry ->
                         scope.launch {
                             repository.retry(entry.key)
-                                .onFailure { snackbarHostState.showSnackbar(it.message ?: i18n("重試失敗")) }
+                                .onFailure { error ->
+                                    Logger.e("DownloadQueueScreen", "Failed to retry download key=${entry.key.stableId}", error)
+                                    snackbarHostState.showSnackbar(error.message ?: i18n("重試失敗"))
+                                }
                         }
                     },
                 )
@@ -194,7 +200,10 @@ fun DownloadQueueScreen() {
                                     reloadContentManagement()
                                     snackbarHostState.showSnackbar(i18n("已清除下載內容"))
                                 }
-                                .onFailure { snackbarHostState.showSnackbar(it.message ?: i18n("清除失敗")) }
+                                .onFailure { error ->
+                                    Logger.e("DownloadQueueScreen", "Failed to clear download group id=${group.id}", error)
+                                    snackbarHostState.showSnackbar(error.message ?: i18n("清除失敗"))
+                                }
                         }
                     },
                     onClearItem = { item ->
@@ -204,7 +213,10 @@ fun DownloadQueueScreen() {
                                     reloadContentManagement()
                                     snackbarHostState.showSnackbar(i18n("已清除下載內容"))
                                 }
-                                .onFailure { snackbarHostState.showSnackbar(it.message ?: i18n("清除失敗")) }
+                                .onFailure { error ->
+                                    Logger.e("DownloadQueueScreen", "Failed to clear download item key=${item.key.stableId}", error)
+                                    snackbarHostState.showSnackbar(error.message ?: i18n("清除失敗"))
+                                }
                         }
                     },
                     onRefreshItem = { item ->
@@ -785,7 +797,7 @@ private fun entryDetailLabel(entry: DownloadQueueEntry): String = when (val key 
 
 private suspend fun clearItem(
     key: DownloadTaskKey,
-    repository: me.thenano.yamibo.yamibo_app.repository.download.DownloadRepository,
+    repository: DownloadRepository,
 ): Result<Unit> = when (key) {
     is ThreadPageDownloadKey -> repository.clearPage(key)
     is TagMangaChapterDownloadKey -> repository.clearTagMangaChapter(key)
@@ -794,7 +806,7 @@ private suspend fun clearItem(
 
 private suspend fun clearGroup(
     group: DownloadedContentGroup,
-    repository: me.thenano.yamibo.yamibo_app.repository.download.DownloadRepository,
+    repository: DownloadRepository,
 ): Result<Unit> {
     val firstKey = group.items.firstOrNull()?.key ?: return Result.success(Unit)
     return when (firstKey) {

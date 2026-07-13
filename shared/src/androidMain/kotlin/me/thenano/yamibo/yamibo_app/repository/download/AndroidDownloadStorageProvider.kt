@@ -3,11 +3,10 @@ package me.thenano.yamibo.yamibo_app.repository.download
 import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
-import android.content.Intent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.encodeToString
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.repository.settings.AppSettingsRepository
 
 class AndroidDownloadStorageProvider(
@@ -50,13 +49,13 @@ class AndroidDownloadStorageProvider(
             val renamed = DocumentsContract.renameDocument(resolver, tmp, key.stableId)
                 ?: error("儲存提供者不支援完成下載檔案")
             if (renamed == tmp) {
-                val actual = findChild(treeUri, root, key.stableId)
-                if (actual == null) error("下載資料夾重新命名失敗")
+                findChild(treeUri, root, key.stableId) ?: error("下載資料夾重新命名失敗")
             }
-            previous?.let { runCatching { DocumentsContract.deleteDocument(resolver, it) } }
+            previous?.let { deleteDocumentSafely(it, "delete previous thread page key=${key.stableId}") }
         } catch (error: Throwable) {
-            runCatching { DocumentsContract.deleteDocument(resolver, tmp) }
-            previous?.let { runCatching { DocumentsContract.renameDocument(resolver, it, key.stableId) } }
+            Logger.e(TAG, "writeThreadPage failed key=${key.stableId}", error)
+            deleteDocumentSafely(tmp, "cleanup tmp thread page key=${key.stableId}")
+            previous?.let { renameDocumentSafely(it, key.stableId, "restore previous thread page key=${key.stableId}") }
             throw error
         }
     }
@@ -109,10 +108,11 @@ class AndroidDownloadStorageProvider(
         try {
             DocumentsContract.renameDocument(resolver, tmp, key.chapterStableId)
                 ?: error("儲存提供者不支援完成下載檔案")
-            previous?.let { runCatching { DocumentsContract.deleteDocument(resolver, it) } }
+            previous?.let { deleteDocumentSafely(it, "delete previous tag manga chapter key=${key.stableId}") }
         } catch (error: Throwable) {
-            runCatching { DocumentsContract.deleteDocument(resolver, tmp) }
-            previous?.let { runCatching { DocumentsContract.renameDocument(resolver, it, key.chapterStableId) } }
+            Logger.e(TAG, "writeTagMangaChapter failed key=${key.stableId}", error)
+            deleteDocumentSafely(tmp, "cleanup tmp tag manga chapter key=${key.stableId}")
+            previous?.let { renameDocumentSafely(it, key.chapterStableId, "restore previous tag manga chapter key=${key.stableId}") }
             throw error
         }
     }
@@ -172,10 +172,11 @@ class AndroidDownloadStorageProvider(
         try {
             DocumentsContract.renameDocument(resolver, tmp, key.chapterStableId)
                 ?: error("儲存提供者不支援完成下載檔案")
-            previous?.let { runCatching { DocumentsContract.deleteDocument(resolver, it) } }
+            previous?.let { deleteDocumentSafely(it, "delete previous RSS manga chapter key=${key.stableId}") }
         } catch (error: Throwable) {
-            runCatching { DocumentsContract.deleteDocument(resolver, tmp) }
-            previous?.let { runCatching { DocumentsContract.renameDocument(resolver, it, key.chapterStableId) } }
+            Logger.e(TAG, "writeRssMangaChapter failed key=${key.stableId}", error)
+            deleteDocumentSafely(tmp, "cleanup tmp RSS manga chapter key=${key.stableId}")
+            previous?.let { renameDocumentSafely(it, key.chapterStableId, "restore previous RSS manga chapter key=${key.stableId}") }
             throw error
         }
     }
@@ -220,6 +221,7 @@ class AndroidDownloadStorageProvider(
         val file = findChild(treeUri, root, QUEUE_FILE) ?: return emptyList()
         val bytes = resolver.openInputStream(file)?.use { it.readBytes() } ?: return emptyList()
         return runCatching { json.decodeFromString<List<DownloadQueueEntry>>(bytes.decodeToString()) }
+            .onFailure { Logger.w(TAG, "Failed to decode download queue", it) }
             .getOrDefault(emptyList())
     }
 
@@ -246,7 +248,7 @@ class AndroidDownloadStorageProvider(
         val root = downloadsRoot(treeUri) ?: return
         listChildren(treeUri, root)
             .filter { it.name.startsWith(key.threadPrefix) }
-            .forEach { runCatching { DocumentsContract.deleteDocument(resolver, it.uri) } }
+            .forEach { deleteDocumentSafely(it.uri, "delete thread download item prefix=${key.threadPrefix}") }
     }
 
     override suspend fun deleteTagMangaChapter(key: TagMangaChapterDownloadKey) {
@@ -310,23 +312,39 @@ class AndroidDownloadStorageProvider(
     private fun readManifestFromDir(treeUri: Uri, dir: Uri): ThreadPageDownloadManifest? {
         val file = findChild(treeUri, dir, "manifest.json") ?: return null
         val bytes = resolver.openInputStream(file)?.use { it.readBytes() } ?: return null
-        return runCatching { json.decodeFromString<ThreadPageDownloadManifest>(bytes.decodeToString()) }.getOrNull()
+        return runCatching { json.decodeFromString<ThreadPageDownloadManifest>(bytes.decodeToString()) }
+            .onFailure { Logger.d(TAG, "Failed to decode thread page manifest", it) }
+            .getOrNull()
     }
 
     private fun readTagMangaManifestFromDir(treeUri: Uri, dir: Uri): TagMangaChapterManifest? {
         val file = findChild(treeUri, dir, "manifest.json") ?: return null
         val bytes = resolver.openInputStream(file)?.use { it.readBytes() } ?: return null
-        return runCatching { json.decodeFromString<TagMangaChapterManifest>(bytes.decodeToString()) }.getOrNull()
+        return runCatching { json.decodeFromString<TagMangaChapterManifest>(bytes.decodeToString()) }
+            .onFailure { Logger.d(TAG, "Failed to decode tag manga manifest", it) }
+            .getOrNull()
     }
 
     private fun readRssMangaManifestFromDir(treeUri: Uri, dir: Uri): RssMangaChapterManifest? {
         val file = findChild(treeUri, dir, "manifest.json") ?: return null
         val bytes = resolver.openInputStream(file)?.use { it.readBytes() } ?: return null
-        return runCatching { json.decodeFromString<RssMangaChapterManifest>(bytes.decodeToString()) }.getOrNull()
+        return runCatching { json.decodeFromString<RssMangaChapterManifest>(bytes.decodeToString()) }
+            .onFailure { Logger.d(TAG, "Failed to decode RSS manga manifest", it) }
+            .getOrNull()
     }
 
     private fun deleteChildByName(treeUri: Uri, parent: Uri, name: String) {
-        findChild(treeUri, parent, name)?.let { runCatching { DocumentsContract.deleteDocument(resolver, it) } }
+        findChild(treeUri, parent, name)?.let { deleteDocumentSafely(it, "delete child name=$name") }
+    }
+
+    private fun deleteDocumentSafely(uri: Uri, operation: String) {
+        runCatching { DocumentsContract.deleteDocument(resolver, uri) }
+            .onFailure { Logger.w(TAG, "$operation failed", it) }
+    }
+
+    private fun renameDocumentSafely(uri: Uri, newName: String, operation: String) {
+        runCatching { DocumentsContract.renameDocument(resolver, uri, newName) }
+            .onFailure { Logger.w(TAG, "$operation failed", it) }
     }
 
     private fun findChild(treeUri: Uri, parent: Uri, name: String): Uri? =
@@ -362,6 +380,7 @@ class AndroidDownloadStorageProvider(
     private data class DocumentChild(val name: String, val uri: Uri)
 
     private companion object {
+        const val TAG = "AndroidDownloadStorageProvider"
         const val ROOT_DIR = "YamiboDownloads"
         const val IMAGES_DIR = "images"
         const val QUEUE_FILE = "queue.json"

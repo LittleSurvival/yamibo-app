@@ -15,6 +15,7 @@ import org.jetbrains.skia.Image
 import platform.Foundation.NSData
 import platform.Foundation.dataWithBytes
 import platform.UIKit.*
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.util.buildImageRequest
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 
@@ -66,7 +67,7 @@ private suspend fun downloadImageBytes(
                 ImageBytesResult(errorMessage = i18n("下載圖片失敗：圖片已下載但無法轉換成 PNG"))
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Logger.e(TAG, "Image request failed", e)
             ImageBytesResult(errorMessage = i18n("下載圖片失敗：{}", e.message ?: i18n("未知錯誤")))
         }
     }
@@ -79,10 +80,13 @@ private fun coil3.Image.toPngByteArray(): ByteArray? {
         ByteArray(data.size).also { bytes ->
             data.bytes.copyInto(bytes)
         }
-    } catch (_: Exception) {
+    } catch (error: Exception) {
+        Logger.w(TAG, "Failed to encode image as PNG", error)
         null
     }
 }
+
+private const val TAG = "ImageActionHandler"
 
 @OptIn(ExperimentalForeignApi::class)
 private fun ByteArray.toUIImage(): UIImage? {

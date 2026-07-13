@@ -1,5 +1,6 @@
 package me.thenano.yamibo.yamibo_app.thread.reader.components.thread
 
+import me.thenano.yamibo.yamibo_app.Logger
 import java.text.BreakIterator
 import java.util.Locale
 
@@ -40,5 +41,9 @@ private class AndroidBreakIteratorTextBoundarySegmenter(
                 boundary = iterator.next()
             }
         }.toIntArray()
-    }.getOrNull()
+    }
+        .onFailure { Logger.d(TAG, "BreakIterator boundary detection failed; using fallback segmenter", it) }
+        .getOrNull()
 }
+
+private const val TAG = "TextBoundarySegmenter"

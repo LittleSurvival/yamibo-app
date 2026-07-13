@@ -21,6 +21,7 @@ import kotlinx.coroutines.launch
 import me.thenano.yamibo.yamibo_app.LocalAppSettingsRepository
 import me.thenano.yamibo.yamibo_app.LocalBackupRepository
 import me.thenano.yamibo.yamibo_app.LocalBackupScheduler
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBar
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.i18n.localizedLabel
@@ -68,7 +69,10 @@ internal fun BackupSettingsScreen() {
                         refresh()
                         snackbarHostState.showSnackbar(i18n("已選擇備份資料夾"))
                     }
-                    .onFailure { snackbarHostState.showSnackbar(it.message ?: i18n("無法選擇備份資料夾")) }
+                    .onFailure { error ->
+                        Logger.e("BackupSettingsScreen", "Failed to select backup folder", error)
+                        snackbarHostState.showSnackbar(error.message ?: i18n("無法選擇備份資料夾"))
+                    }
             }
         },
         onBackupPicked = { uri -> pendingRestoreUri = uri },
@@ -138,7 +142,10 @@ internal fun BackupSettingsScreen() {
                                 i18n("還原完成：收藏 {}，設定 {}，閱讀紀錄 {}", it.favorites, it.settings, it.readingHistory)
                             )
                         }
-                        .onFailure { snackbarHostState.showSnackbar(it.message ?: i18n("還原備份失敗")) }
+                        .onFailure { error ->
+                            Logger.e("BackupSettingsScreen", "Failed to restore backup", error)
+                            snackbarHostState.showSnackbar(error.message ?: i18n("還原備份失敗"))
+                        }
                     working = false
                 }
             },
@@ -157,7 +164,10 @@ internal fun BackupSettingsScreen() {
                             refresh()
                             snackbarHostState.showSnackbar(i18n("已建立備份：{}", it.name))
                         }
-                        .onFailure { snackbarHostState.showSnackbar(it.message ?: i18n("建立備份失敗")) }
+                        .onFailure { error ->
+                            Logger.e("BackupSettingsScreen", "Failed to create backup", error)
+                            snackbarHostState.showSnackbar(error.message ?: i18n("建立備份失敗"))
+                        }
                     working = false
                 }
             },

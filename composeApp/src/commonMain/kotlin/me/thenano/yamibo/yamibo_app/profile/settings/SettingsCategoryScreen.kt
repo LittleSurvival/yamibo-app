@@ -25,6 +25,7 @@ import me.thenano.yamibo.yamibo_app.LocalSignReminderScheduler
 import me.thenano.yamibo.yamibo_app.LocalDiskCacheFactory
 import me.thenano.yamibo.yamibo_app.LocalFavoriteSyncRunner
 import me.thenano.yamibo.yamibo_app.LocalFavoriteUpdateRunner
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.core.cache.CacheStorageBreakdown
 import me.thenano.yamibo.yamibo_app.core.cache.CacheStorageUsage
 import me.thenano.yamibo.yamibo_app.components.storage.YamiboStorageUsageOverview
@@ -556,6 +557,7 @@ private fun StorageContent(snackbarHostState: SnackbarHostState) {
     suspend fun refreshCacheUsage() {
         cacheBreakdown = diskCacheFactory.getCacheStorageBreakdown()
         downloadSummary = runCatching { downloadRepository.getDownloadedContentSummary() }
+            .onFailure { Logger.w(TAG, "Failed to load downloaded content summary for storage settings", it) }
             .getOrDefault(DownloadedContentSummary())
         cacheSizeText = formatStorageSize(cacheBreakdown.usages.sumOf { it.bytes })
     }
@@ -616,7 +618,9 @@ private fun StorageContent(snackbarHostState: SnackbarHostState) {
 
     SettingsActionRow(
         title = i18n("立即清除所有緩存"),
-        subtitle = i18n("清除圖片、頁面與其他暫存資料，釋放目前已使用的儲存空間。\n目前緩存大小：{}", cacheSizeText),
+        subtitle = i18n("清除圖片、頁面與其他暫存資料，釋放目前已使用的儲存空間。") +
+            "\n" +
+            i18n("目前緩存大小：{}", cacheSizeText),
         onClick = {
             coroutineScope.launch {
                 diskCacheFactory.clearAllCache()
@@ -627,6 +631,8 @@ private fun StorageContent(snackbarHostState: SnackbarHostState) {
         },
     )
 }
+
+private const val TAG = "SettingsCategoryScreen"
 
 @Composable
 private fun DownloadStorageSummaryTable(

@@ -1,4 +1,4 @@
-package me.thenano.yamibo.yamibo_app.repository.download
+package me.thenano.yamibo.yamibo_app.repository
 
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.model.ThreadSummary
@@ -7,6 +7,18 @@ import io.github.littlesurvival.dto.value.TagId
 import io.github.littlesurvival.dto.value.ThreadId
 import io.github.littlesurvival.dto.value.UserId
 import kotlinx.coroutines.flow.StateFlow
+import me.thenano.yamibo.yamibo_app.repository.download.DownloadQueueEntry
+import me.thenano.yamibo.yamibo_app.repository.download.DownloadQueueSummary
+import me.thenano.yamibo.yamibo_app.repository.download.DownloadStatus
+import me.thenano.yamibo.yamibo_app.repository.download.DownloadTaskKey
+import me.thenano.yamibo.yamibo_app.repository.download.DownloadedContentGroup
+import me.thenano.yamibo.yamibo_app.repository.download.DownloadedContentSummary
+import me.thenano.yamibo.yamibo_app.repository.download.RssMangaChapterDownloadKey
+import me.thenano.yamibo.yamibo_app.repository.download.RssMangaChapterManifest
+import me.thenano.yamibo.yamibo_app.repository.download.TagMangaChapterDownloadKey
+import me.thenano.yamibo.yamibo_app.repository.download.TagMangaChapterManifest
+import me.thenano.yamibo.yamibo_app.repository.download.ThreadPageDownloadKey
+import me.thenano.yamibo.yamibo_app.repository.download.ThreadPageDownloadManifest
 
 interface DownloadRepository {
     val queue: StateFlow<List<DownloadQueueEntry>>

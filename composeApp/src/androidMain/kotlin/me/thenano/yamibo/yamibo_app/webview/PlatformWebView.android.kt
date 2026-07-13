@@ -14,6 +14,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import me.thenano.yamibo.yamibo_app.LocalAuthRepository
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import org.json.JSONArray
 
@@ -168,5 +169,7 @@ actual fun PlatformWebViewContent(
 
 private fun decodeEvaluatedHtml(value: String?): String {
     if (value.isNullOrBlank() || value == "null") return ""
-    return runCatching { JSONArray("[$value]").getString(0) }.getOrElse { value }
+    return runCatching { JSONArray("[$value]").getString(0) }
+        .onFailure { Logger.d("PlatformWebView", "Failed to decode evaluated HTML", it) }
+        .getOrElse { value }
 }

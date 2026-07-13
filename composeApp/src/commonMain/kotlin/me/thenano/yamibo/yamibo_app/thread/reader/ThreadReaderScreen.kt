@@ -2139,7 +2139,7 @@ internal fun ThreadReaderScreen(
             try {
                 readHistoryRepo.savePosition(history)
             } catch (error: Exception) {
-                println("READER_PERSIST|history|${error::class.simpleName}|${error.message.orEmpty()}")
+                Logger.e("ThreadReaderScreen", "Failed to persist reading history tid=${tid.value}", error)
             }
             try {
                 val historyCover = history.threadCover ?: coverUrl
@@ -2195,23 +2195,29 @@ internal fun ThreadReaderScreen(
                     )
                 }
             } catch (error: Exception) {
-                println("READER_PERSIST|catalog_history|${error::class.simpleName}|${error.message.orEmpty()}")
+                Logger.e("ThreadReaderScreen", "Failed to persist catalog reading history tid=${tid.value}", error)
             }
         }
         try {
             progressCoordinator.applyProgress(progressUpdates)
         } catch (error: Exception) {
-            println("READER_PERSIST|chapter|${error::class.simpleName}|${error.message.orEmpty()}")
+            Logger.e("ThreadReaderScreen", "Failed to persist chapter progress tid=${tid.value}", error)
         }
     }
 
     suspend fun persistCurrentReadingState() {
         if (!canWriteReadingState()) return
         val history = runCatching(::buildHistory)
-            .onFailure { error -> debugPerfLog("history_build_error|${error::class.simpleName}|${error.message.orEmpty()}") }
+            .onFailure { error ->
+                Logger.w("ThreadReaderScreen", "Failed to build reading history snapshot tid=${tid.value}", error)
+                debugPerfLog("history_build_error|${error::class.simpleName}|${error.message.orEmpty()}")
+            }
             .getOrNull()
         val progressUpdates = runCatching(::currentChapterUpdates)
-            .onFailure { error -> debugPerfLog("progress_build_error|${error::class.simpleName}|${error.message.orEmpty()}") }
+            .onFailure { error ->
+                Logger.w("ThreadReaderScreen", "Failed to build chapter progress updates tid=${tid.value}", error)
+                debugPerfLog("progress_build_error|${error::class.simpleName}|${error.message.orEmpty()}")
+            }
             .getOrDefault(emptyList())
         if (history != null || progressUpdates.isNotEmpty()) {
             lastReadingSnapshot = history to progressUpdates
@@ -2402,13 +2408,15 @@ internal fun ThreadReaderScreen(
                     try {
                         readHistoryRepo.savePosition(history)
                         progressCoordinator.applyProgress(currentChapterUpdates())
-                    } catch (_: Exception) {
+                    } catch (error: Exception) {
+                        Logger.e("ThreadReaderScreen", "Failed to persist selected cover reading state tid=${tid.value}", error)
                     }
                 }
             }
             try {
                 favoriteRepository.syncFavoriteMetadata(favoriteTarget(coverOverride = resolvedCoverUrl))
-            } catch (_: Exception) {
+            } catch (error: Exception) {
+                Logger.w("ThreadReaderScreen", "Failed to sync favorite metadata after cover selection tid=${tid.value}", error)
             }
             snackbarHostState.showSnackbar(i18n("已設為封面"))
         }
@@ -2717,7 +2725,8 @@ internal fun ThreadReaderScreen(
                     imageGeometryPriorityPostId = catalogPosition.anchorPostId
                     pendingTargetPid = null
                 }
-            } catch (_: Exception) {
+            } catch (error: Exception) {
+                Logger.w("ThreadReaderScreen", "Failed to restore catalog reading position tid=${tid.value}", error)
                 // Fall through to targetPid restore.
             }
         }
@@ -2742,7 +2751,8 @@ internal fun ThreadReaderScreen(
                     canPersistReadingState = true
                 }
                 hasResolvedInitialHistoryLookup = true
-            } catch (_: Exception) {
+            } catch (error: Exception) {
+                Logger.w("ThreadReaderScreen", "Failed to restore reading position tid=${tid.value}", error)
                 hasRestoredPosition = true
                 canPersistReadingState = true
                 hasResolvedInitialHistoryLookup = true
@@ -2863,12 +2873,12 @@ internal fun ThreadReaderScreen(
             } else {
                 val history = runCatching(::buildHistory)
                     .onFailure { error ->
-                        println("READER_PERSIST|history_snapshot|${error::class.simpleName}|${error.message.orEmpty()}")
+                        Logger.w("ThreadReaderScreen", "Failed to capture reading history snapshot tid=${tid.value}", error)
                     }
                     .getOrNull()
                 val progressUpdates = runCatching(::currentChapterUpdates)
                         .onFailure { error ->
-                            println("READER_PERSIST|chapter_snapshot|${error::class.simpleName}|${error.message.orEmpty()}")
+                            Logger.w("ThreadReaderScreen", "Failed to capture chapter progress snapshot tid=${tid.value}", error)
                         }
                         .getOrDefault(emptyList())
                 if (history != null || progressUpdates.isNotEmpty()) {
@@ -2960,7 +2970,8 @@ internal fun ThreadReaderScreen(
         if (!drawerState.isOpen || state != ReaderState.Success || !canPersistReadingState) return@LaunchedEffect
         try {
             persistCurrentReadingState()
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            Logger.e("ThreadReaderScreen", "Failed to persist reading state when drawer opened tid=${tid.value}", error)
         }
     }
 
@@ -4444,8 +4455,9 @@ internal fun ThreadReaderScreen(
                     scope.launch {
                         downloadRepository.enqueuePage(tid, threadInfo?.title ?: title, authorId, page)
                             .onSuccess { snackbarHostState.showSnackbar(i18n("已加入下載佇列")) }
-                            .onFailure {
-                                snackbarHostState.showSnackbar(it.message ?: i18n("下載失敗"))
+                            .onFailure { error ->
+                                Logger.e("ThreadReaderScreen", "Failed to enqueue page download tid=${tid.value} page=$page", error)
+                                snackbarHostState.showSnackbar(error.message ?: i18n("下載失敗"))
                                 navigator.navigate(IBackupSettingsScreen())
                             }
                     }
@@ -4455,8 +4467,9 @@ internal fun ThreadReaderScreen(
                     scope.launch {
                         downloadRepository.enqueueThread(tid, threadInfo?.title ?: title, authorId)
                             .onSuccess { snackbarHostState.showSnackbar(i18n("已加入完整 Thread 下載")) }
-                            .onFailure {
-                                snackbarHostState.showSnackbar(it.message ?: i18n("下載失敗"))
+                            .onFailure { error ->
+                                Logger.e("ThreadReaderScreen", "Failed to enqueue thread download tid=${tid.value}", error)
+                                snackbarHostState.showSnackbar(error.message ?: i18n("下載失敗"))
                                 if (!downloadRepository.isStorageReady()) {
                                     navigator.navigate(IBackupSettingsScreen())
                                 }
@@ -4472,8 +4485,9 @@ internal fun ThreadReaderScreen(
                             authorId,
                         )
                             .onSuccess { snackbarHostState.showSnackbar(i18n("已加入除最後一頁外的下載")) }
-                            .onFailure {
-                                snackbarHostState.showSnackbar(it.message ?: i18n("下載失敗"))
+                            .onFailure { error ->
+                                Logger.e("ThreadReaderScreen", "Failed to enqueue thread download except last page tid=${tid.value}", error)
+                                snackbarHostState.showSnackbar(error.message ?: i18n("下載失敗"))
                                 if (!downloadRepository.isStorageReady()) {
                                     navigator.navigate(IBackupSettingsScreen())
                                 }

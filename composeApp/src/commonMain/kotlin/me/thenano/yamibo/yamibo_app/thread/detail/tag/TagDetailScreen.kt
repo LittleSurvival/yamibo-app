@@ -576,8 +576,9 @@ internal fun TagDetailScreen(
                             tagName = currentTagName,
                             threads = currentThreads,
                             tagPage = currentPage,
-                        ).onFailure {
-                            snackbarHostState.showSnackbar(it.message ?: i18n("加入下載失敗"))
+                        ).onFailure { error ->
+                            Logger.e("TagDetailScreen", "Failed to enqueue current tag manga page tagId=${tagId.value} page=$currentPage", error)
+                            snackbarHostState.showSnackbar(error.message ?: i18n("加入下載失敗"))
                         }
                     }
                 })
@@ -586,7 +587,10 @@ internal fun TagDetailScreen(
                     scope.launch {
                         if (!ensureDownloadStorageReady()) return@launch
                         downloadRepository.enqueueTagMangaAllPages(tagId, currentTagName)
-                            .onFailure { snackbarHostState.showSnackbar(it.message ?: i18n("加入下載失敗")) }
+                            .onFailure { error ->
+                                Logger.e("TagDetailScreen", "Failed to enqueue all tag manga pages tagId=${tagId.value}", error)
+                                snackbarHostState.showSnackbar(error.message ?: i18n("加入下載失敗"))
+                            }
                     }
                 })
                 if (currentPageHasDownloads) {
@@ -795,7 +799,10 @@ internal fun TagDetailScreen(
                 scope.launch {
                     if (!ensureDownloadStorageReady()) return@launch
                     downloadRepository.enqueueTagMangaChapter(tagId, currentTagName, thread, currentPage)
-                        .onFailure { snackbarHostState.showSnackbar(it.message ?: i18n("加入下載失敗")) }
+                        .onFailure { error ->
+                            Logger.e("TagDetailScreen", "Failed to enqueue tag manga chapter tagId=${tagId.value} tid=${thread.tid.value}", error)
+                            snackbarHostState.showSnackbar(error.message ?: i18n("加入下載失敗"))
+                        }
                 }
             },
             onRefreshChapter = {
@@ -813,7 +820,10 @@ internal fun TagDetailScreen(
                 scope.launch {
                     if (!ensureDownloadStorageReady()) return@launch
                     downloadRepository.retry(downloadKey)
-                        .onFailure { snackbarHostState.showSnackbar(it.message ?: i18n("重試失敗")) }
+                        .onFailure { error ->
+                            Logger.e("TagDetailScreen", "Failed to retry tag manga chapter key=${downloadKey.stableId}", error)
+                            snackbarHostState.showSnackbar(error.message ?: i18n("重試失敗"))
+                        }
                 }
             },
             onClearChapterDownload = {
