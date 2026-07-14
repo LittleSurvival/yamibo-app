@@ -161,7 +161,12 @@ Gitee / Gitea mirror 的 ready manifest 必須指向各自 mirror release 的 AP
 
 見 `LICENSE`。
 
-
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=LittleSurvival/yamibo-app&type=Date)](https://star-history.com/#LittleSurvival/yamibo-app&Date)
+<a href="https://www.star-history.com/?repos=copymanga-copy20%2Fcopymanga-copy20&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=copymanga-copy20/copymanga-copy20&type=date&theme=dark&legend=top-left&sealed_token=WEdFbEITJox-W_HaOBIm5FXB0wwesn2uEgQFrpmk0mN70-cZl2prLizfq3kV4Cozynk_dY0FMg4HDjoyiUxhAnhgMunlxxXpt8tYlazt1cAgDWSZOZ5kLQ" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=copymanga-copy20/copymanga-copy20&type=date&legend=top-left&sealed_token=WEdFbEITJox-W_HaOBIm5FXB0wwesn2uEgQFrpmk0mN70-cZl2prLizfq3kV4Cozynk_dY0FMg4HDjoyiUxhAnhgMunlxxXpt8tYlazt1cAgDWSZOZ5kLQ" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=copymanga-copy20/copymanga-copy20&type=date&legend=top-left&sealed_token=WEdFbEITJox-W_HaOBIm5FXB0wwesn2uEgQFrpmk0mN70-cZl2prLizfq3kV4Cozynk_dY0FMg4HDjoyiUxhAnhgMunlxxXpt8tYlazt1cAgDWSZOZ5kLQ" />
+ </picture>
+</a>
