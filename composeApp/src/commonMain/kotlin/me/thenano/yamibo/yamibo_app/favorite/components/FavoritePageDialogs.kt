@@ -11,8 +11,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -23,6 +21,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import me.thenano.yamibo.yamibo_app.components.controls.YamiboMultiSelectDialog
 import me.thenano.yamibo.yamibo_app.components.controls.YamiboSingleSelectDialog
 import me.thenano.yamibo.yamibo_app.favorite.FavoriteBatchDownloadMode
 import me.thenano.yamibo.yamibo_app.favorite.FavoriteBatchDownloadScope
@@ -30,6 +29,8 @@ import me.thenano.yamibo.yamibo_app.favorite.FavoriteBatchDownloadType
 import me.thenano.yamibo.yamibo_app.favorite.FavoriteCollectionDraft
 import me.thenano.yamibo.yamibo_app.favorite.batchDownloadType
 import me.thenano.yamibo.yamibo_app.favorite.countByType
+import me.thenano.yamibo.yamibo_app.favorite.coerceFor
+import me.thenano.yamibo.yamibo_app.favorite.supportsExceptLastPageDownload
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.i18n.localizedLabel
 import me.thenano.yamibo.yamibo_app.repository.settings.FavoriteGridMode
@@ -67,52 +68,22 @@ internal fun FavoriteGridModeDialog(selected: FavoriteGridMode, onDismiss: () ->
 internal fun FavoriteBatchDownloadTypeDialog(
     scope: FavoriteBatchDownloadScope,
     selectedTypes: Set<FavoriteBatchDownloadType>,
-    onToggle: (FavoriteBatchDownloadType) -> Unit,
     onDismiss: () -> Unit,
-    onNext: () -> Unit,
+    onNext: (Set<FavoriteBatchDownloadType>) -> Unit,
 ) {
-    val colors = YamiboTheme.colors
     val counts = scope.countByType()
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(i18n("批量下載收藏"), color = colors.textStrong, fontWeight = FontWeight.Bold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                FavoriteBatchSummary(scope)
-                FavoriteBatchDownloadType.entries.forEach { type ->
-                    val count = counts[type] ?: 0
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .pointerInput(type, count) {
-                                detectTapGestures(onTap = { if (count > 0) onToggle(type) })
-                            },
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Checkbox(
-                            checked = type in selectedTypes,
-                            enabled = count > 0,
-                            onCheckedChange = { onToggle(type) },
-                            colors = CheckboxDefaults.colors(
-                                checkedColor = colors.brownDeep,
-                                uncheckedColor = colors.brownPrimary.copy(alpha = 0.65f),
-                                checkmarkColor = colors.creamBackground,
-                            ),
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = "${type.localizedBatchLabel()} · ${i18n("{} 項", count)}",
-                            color = if (count > 0) colors.textDark else colors.textDark.copy(alpha = 0.42f),
-                            fontSize = 14.sp,
-                            fontWeight = if (type in selectedTypes) FontWeight.SemiBold else FontWeight.Medium,
-                        )
-                    }
-                }
-            }
+    YamiboMultiSelectDialog(
+        title = i18n("批量下載收藏"),
+        options = FavoriteBatchDownloadType.entries,
+        selected = selectedTypes,
+        onConfirm = { confirmed ->
+            val nextSelection = confirmed.filterTo(mutableSetOf()) { (counts[it] ?: 0) > 0 }
+            onNext(nextSelection)
         },
-        confirmButton = { ActionChip(i18n("下一步"), onNext) },
-        dismissButton = { ActionChip(i18n("返回"), onDismiss) },
-        containerColor = colors.creamSurface,
+        onCancel = onDismiss,
+        label = { type -> i18n("{} ({})", type.localizedBatchLabel(), counts[type] ?: 0) },
+        confirmText = i18n("下一步"),
+        optionEnabled = { type -> (counts[type] ?: 0) > 0 },
     )
 }
 
@@ -126,51 +97,29 @@ internal fun FavoriteBatchDownloadModeDialog(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
 ) {
-    val colors = YamiboTheme.colors
     val selectedItemCount = scope.items.count { it.batchDownloadType() in selectedTypes }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(i18n("下載方式"), color = colors.textStrong, fontWeight = FontWeight.Bold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                FavoriteBatchSummary(scope)
-                Text(i18n("本次將處理 {} 項收藏。", selectedItemCount), color = colors.textDark, fontSize = 13.sp)
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .pointerInput(selectedMode) {
-                            detectTapGestures(onTap = { onSelectMode(FavoriteBatchDownloadMode.All) })
-                        },
-                    shape = RoundedCornerShape(14.dp),
-                    color = colors.brownPrimary.copy(alpha = 0.14f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, colors.brownDeep),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RadioButton(
-                            selected = selectedMode == FavoriteBatchDownloadMode.All,
-                            onClick = { onSelectMode(FavoriteBatchDownloadMode.All) },
-                            colors = RadioButtonDefaults.colors(selectedColor = colors.brownDeep),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Column {
-                            Text(i18n("全部下載"), color = colors.textStrong, fontWeight = FontWeight.SemiBold)
-                            Text(i18n("帖子、標籤漫畫與 RSS 收藏都走既有的全部下載流程。"), color = colors.textDark.copy(alpha = 0.68f), fontSize = 12.sp)
-                        }
-                    }
-                }
-            }
+    val modeOptions = if (scope.supportsExceptLastPageDownload(selectedTypes)) {
+        FavoriteBatchDownloadMode.entries
+    } else {
+        listOf(FavoriteBatchDownloadMode.All)
+    }
+    val selectedAvailableMode = selectedMode.coerceFor(scope, selectedTypes)
+    YamiboSingleSelectDialog(
+        title = i18n("下載方式"),
+        options = modeOptions,
+        selected = selectedAvailableMode,
+        onDismiss = onDismiss,
+        onSelect = onSelectMode,
+        label = { mode ->
+            "${mode.localizedBatchModeLabel()} · ${i18n("本次將處理 {} 項收藏。", selectedItemCount)}"
         },
-        confirmButton = { ActionChip(i18n("開始下載"), onConfirm) },
-        dismissButton = {
+        footer = {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 ActionChip(i18n("上一步"), onBack)
                 ActionChip(i18n("取消"), onDismiss)
+                ActionChip(i18n("開始下載"), onConfirm)
             }
         },
-        containerColor = colors.creamSurface,
     )
 }
 
@@ -196,6 +145,11 @@ internal fun FavoriteBatchDownloadType.localizedBatchLabel(): String = when (thi
     FavoriteBatchDownloadType.NormalThread -> i18n("一般帖子")
     FavoriteBatchDownloadType.TagManga -> i18n("標籤漫畫")
     FavoriteBatchDownloadType.RssSearch -> i18n("RSS收藏")
+}
+
+private fun FavoriteBatchDownloadMode.localizedBatchModeLabel(): String = when (this) {
+    FavoriteBatchDownloadMode.All -> i18n("全部下載")
+    FavoriteBatchDownloadMode.ExceptLastPage -> i18n("下載除最後一頁以外的全部頁")
 }
 
 @Composable

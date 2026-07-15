@@ -664,6 +664,7 @@ fun FavoritePage() {
                         selectedBatchTypes = scopeInfo.countByType()
                             .filterValues { it > 0 }
                             .keys
+                        selectedBatchMode = FavoriteBatchDownloadMode.All
                         showBatchTypeDialog = true
                     }
                 },
@@ -734,20 +735,12 @@ fun FavoritePage() {
         FavoriteBatchDownloadTypeDialog(
             scope = batchDownloadScope,
             selectedTypes = selectedBatchTypes,
-            onToggle = { type ->
-                if ((batchDownloadScope.countByType()[type] ?: 0) > 0) {
-                    selectedBatchTypes = if (type in selectedBatchTypes) {
-                        selectedBatchTypes - type
-                    } else {
-                        selectedBatchTypes + type
-                    }
-                }
-            },
             onDismiss = { showBatchTypeDialog = false },
-            onNext = {
-                if (selectedBatchTypes.isEmpty()) {
+            onNext = { confirmedTypes ->
+                if (confirmedTypes.isEmpty()) {
                     showSnackbarMessage(i18n("請至少選擇一種收藏類型"))
                 } else {
+                    selectedBatchTypes = confirmedTypes
                     showBatchTypeDialog = false
                     showBatchModeDialog = true
                 }
@@ -769,6 +762,7 @@ fun FavoritePage() {
             onConfirm = {
                 showBatchModeDialog = false
                 val items = batchDownloadScope.itemsForTypes(selectedBatchTypes)
+                val batchMode = selectedBatchMode.coerceFor(batchDownloadScope, selectedBatchTypes)
                 scope.launch {
                     if (!downloadRepository.isStorageReady()) {
                         showSnackbarMessage(i18n("請先設定備份資料夾"))
@@ -776,7 +770,7 @@ fun FavoritePage() {
                         return@launch
                     }
                     val result = withContext(Dispatchers.Default) {
-                        enqueueFavoriteBatchDownloads(downloadRepository, rssRepository, items)
+                        enqueueFavoriteBatchDownloads(downloadRepository, rssRepository, items, batchMode)
                     }
                     selectedItemIds = emptySet()
                     selectedCollectionIds = emptySet()

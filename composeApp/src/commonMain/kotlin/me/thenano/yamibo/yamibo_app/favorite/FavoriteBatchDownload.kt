@@ -17,6 +17,7 @@ internal enum class FavoriteBatchDownloadType {
 
 internal enum class FavoriteBatchDownloadMode {
     All,
+    ExceptLastPage,
 }
 
 internal data class FavoriteBatchDownloadScope(
@@ -78,10 +79,27 @@ internal fun FavoriteBatchDownloadScope.countByType(): Map<FavoriteBatchDownload
 internal fun FavoriteBatchDownloadScope.itemsForTypes(types: Set<FavoriteBatchDownloadType>): List<FavoriteItem> =
     items.filter { it.batchDownloadType() in types }
 
+internal fun FavoriteBatchDownloadType.supportsExceptLastPageDownload(): Boolean =
+    this == FavoriteBatchDownloadType.NovelThread || this == FavoriteBatchDownloadType.NormalThread
+
+internal fun FavoriteBatchDownloadScope.supportsExceptLastPageDownload(types: Set<FavoriteBatchDownloadType>): Boolean =
+    items.any { item -> item.batchDownloadType() in types && item.batchDownloadType().supportsExceptLastPageDownload() }
+
+internal fun FavoriteBatchDownloadMode.coerceFor(
+    scope: FavoriteBatchDownloadScope,
+    types: Set<FavoriteBatchDownloadType>,
+): FavoriteBatchDownloadMode =
+    if (this == FavoriteBatchDownloadMode.ExceptLastPage && !scope.supportsExceptLastPageDownload(types)) {
+        FavoriteBatchDownloadMode.All
+    } else {
+        this
+    }
+
 internal suspend fun enqueueFavoriteBatchDownloads(
     downloadRepository: DownloadRepository,
     rssRepository: RssSearchSubscriptionRepository,
     items: List<FavoriteItem>,
+    mode: FavoriteBatchDownloadMode = FavoriteBatchDownloadMode.All,
 ): FavoriteBatchDownloadResult {
     var queued = 0
     var skipped = 0
@@ -91,11 +109,22 @@ internal suspend fun enqueueFavoriteBatchDownloads(
     for (item in items) {
         val result = when (item.targetType) {
             FavoriteTargetType.ThreadNormal,
-            FavoriteTargetType.ThreadNovel -> downloadRepository.enqueueThread(
-                tid = ThreadId(item.targetId.toInt()),
-                title = item.title,
-                authorId = item.authorId,
-            )
+            FavoriteTargetType.ThreadNovel -> {
+                val threadId = ThreadId(item.targetId.toInt())
+                if (mode == FavoriteBatchDownloadMode.ExceptLastPage) {
+                    downloadRepository.enqueueThreadExceptLastPage(
+                        tid = threadId,
+                        title = item.title,
+                        authorId = item.authorId,
+                    )
+                } else {
+                    downloadRepository.enqueueThread(
+                        tid = threadId,
+                        title = item.title,
+                        authorId = item.authorId,
+                    )
+                }
+            }
             FavoriteTargetType.TagManga -> downloadRepository.enqueueTagMangaAllPages(
                 tagId = TagId(item.targetId.toInt()),
                 tagName = item.title,

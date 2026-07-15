@@ -78,24 +78,7 @@ class FavoriteBatchDownloadTest {
     @Test
     fun enqueueMapsSupportedFavoritesToAllDownloadApis() = runBlocking {
         val downloads = FakeDownloadRepository()
-        val rss = FakeRssRepository(
-            RssSearchSubscriptionRepository.SubscriptionSummary(
-                id = 40,
-                title = "RSS title",
-                query = "keyword",
-                forumId = null,
-                forumName = null,
-                enabled = true,
-                createdAt = 0,
-                updatedAt = 0,
-                lastRefreshStartedAt = null,
-                lastRefreshFinishedAt = null,
-                lastRefreshStatus = null,
-                lastRefreshMessage = null,
-                lastTotalCount = 0,
-                unreadCount = 0,
-            )
-        )
+        val rss = FakeRssRepository(rssSummary(id = 40, query = "keyword"))
 
         val result = enqueueFavoriteBatchDownloads(
             downloadRepository = downloads,
@@ -106,12 +89,64 @@ class FavoriteBatchDownloadTest {
                 favoriteItem(3, FavoriteStoreRepository.FavoriteTargetType.TagManga, 30),
                 favoriteItem(4, FavoriteStoreRepository.FavoriteTargetType.RssSearch, 40),
             ),
+            mode = FavoriteBatchDownloadMode.All,
         )
 
         assertEquals(FavoriteBatchDownloadResult(requested = 4, queued = 4, skipped = 0, failed = 0, unsupported = 0), result)
         assertEquals(
             listOf("thread:10:null", "thread:20:3", "tag:30", "rss:40:keyword"),
             downloads.calls,
+        )
+    }
+
+    @Test
+    fun enqueueExceptLastPageModeOnlyChangesThreadFavorites() = runBlocking {
+        val downloads = FakeDownloadRepository()
+        val rss = FakeRssRepository(rssSummary(id = 40, query = "keyword"))
+
+        val result = enqueueFavoriteBatchDownloads(
+            downloadRepository = downloads,
+            rssRepository = rss,
+            items = listOf(
+                favoriteItem(1, FavoriteStoreRepository.FavoriteTargetType.ThreadNormal, 10),
+                favoriteItem(2, FavoriteStoreRepository.FavoriteTargetType.ThreadNovel, 20, UserId(3)),
+                favoriteItem(3, FavoriteStoreRepository.FavoriteTargetType.TagManga, 30),
+                favoriteItem(4, FavoriteStoreRepository.FavoriteTargetType.RssSearch, 40),
+            ),
+            mode = FavoriteBatchDownloadMode.ExceptLastPage,
+        )
+
+        assertEquals(FavoriteBatchDownloadResult(requested = 4, queued = 4, skipped = 0, failed = 0, unsupported = 0), result)
+        assertEquals(
+            listOf("threadExceptLast:10:null", "threadExceptLast:20:3", "tag:30", "rss:40:keyword"),
+            downloads.calls,
+        )
+    }
+
+    @Test
+    fun exceptLastPageAvailabilityRequiresSelectedThreadTypes() {
+        val scope = FavoriteBatchDownloadScope(
+            directItemCount = 4,
+            selectedCollectionCount = 0,
+            expandedCollectionItemCount = 0,
+            items = listOf(
+                favoriteItem(1, FavoriteStoreRepository.FavoriteTargetType.ThreadNormal, 10),
+                favoriteItem(2, FavoriteStoreRepository.FavoriteTargetType.TagManga, 30),
+                favoriteItem(3, FavoriteStoreRepository.FavoriteTargetType.RssSearch, 40),
+            ),
+        )
+
+        assertEquals(
+            true,
+            scope.supportsExceptLastPageDownload(setOf(FavoriteBatchDownloadType.NormalThread, FavoriteBatchDownloadType.TagManga)),
+        )
+        assertEquals(false, scope.supportsExceptLastPageDownload(setOf(FavoriteBatchDownloadType.TagManga, FavoriteBatchDownloadType.RssSearch)))
+        assertEquals(
+            FavoriteBatchDownloadMode.All,
+            FavoriteBatchDownloadMode.ExceptLastPage.coerceFor(
+                scope,
+                setOf(FavoriteBatchDownloadType.TagManga, FavoriteBatchDownloadType.RssSearch),
+            ),
         )
     }
 
@@ -173,6 +208,23 @@ class FavoriteBatchDownloadTest {
             ),
             items = items.toList(),
         )
+
+    private fun rssSummary(id: Long, query: String) = RssSearchSubscriptionRepository.SubscriptionSummary(
+        id = id,
+        title = "RSS title",
+        query = query,
+        forumId = null,
+        forumName = null,
+        enabled = true,
+        createdAt = 0,
+        updatedAt = 0,
+        lastRefreshStartedAt = null,
+        lastRefreshFinishedAt = null,
+        lastRefreshStatus = null,
+        lastRefreshMessage = null,
+        lastTotalCount = 0,
+        unreadCount = 0,
+    )
 }
 
 private class FakeDownloadRepository(
@@ -199,7 +251,11 @@ private class FakeDownloadRepository(
         if (tid.value.toLong() in failedThreadIds) return Result.failure(IllegalStateException("failed"))
         return Result.success(Unit)
     }
-    override suspend fun enqueueThreadExceptLastPage(tid: ThreadId, title: String, authorId: UserId?) = Result.success(Unit)
+    override suspend fun enqueueThreadExceptLastPage(tid: ThreadId, title: String, authorId: UserId?): Result<Unit> {
+        calls += "threadExceptLast:${tid.value}:${authorId?.value}"
+        if (tid.value.toLong() in failedThreadIds) return Result.failure(IllegalStateException("failed"))
+        return Result.success(Unit)
+    }
     override suspend fun enqueueTagMangaChapter(tagId: TagId, tagName: String, thread: ThreadSummary, tagPage: Int) = Result.success(Unit)
     override suspend fun enqueueTagMangaCurrentPage(tagId: TagId, tagName: String, threads: List<ThreadSummary>, tagPage: Int) = Result.success(Unit)
     override suspend fun enqueueTagMangaAllPages(tagId: TagId, tagName: String): Result<Unit> {
