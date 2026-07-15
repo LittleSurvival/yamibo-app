@@ -223,6 +223,18 @@ class AppSettingsRepository(store: SettingsStore) : SettingsRegistry(store, pref
         default = "",
     )
 
+    /** 收藏更新檢查到離線內容更新時自動刷新 */
+    val favoriteUpdateAutoDownload by boolSetting(
+        name = "favorite_update_auto_download",
+        default = false,
+    )
+
+    /** 重新整理離線內容後自動更新 */
+    val downloadedContentRefreshAutoUpdate by boolSetting(
+        name = "downloaded_content_refresh_auto_update",
+        default = false,
+    )
+
     /** 啟動檢查更新間隔 */
     val appUpdateLastCheckAt by stringSetting(
         name = "app_update_last_check_at",

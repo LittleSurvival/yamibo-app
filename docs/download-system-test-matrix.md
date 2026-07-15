@@ -23,6 +23,11 @@
 | D-19 | 更新浮窗條件 | Unit + UI | 切換 Downloaded / UpdateAvailable | 只在最後頁且可更新時顯示 |
 | D-20 | 更新浮窗關閉 | UI | 點擊浮窗 `×` | 本次 Reader session 隱藏提示 |
 | D-21 | 最後頁底部刷新 | UI | 滑到最後頁內容末端 | 顯示重新整理最後一頁按鈕 |
+| D-22 | 收藏批量下載範圍 | Unit + UI | 選取收藏項與集合後開啟下載 | 集合展開、重複項去重，dialog 顯示正確計數 |
+| D-23 | 收藏批量下載映射 | Unit | 一般/小說/標籤/RSS 收藏各一項 | 走既有 full thread、tag all-pages、RSS all-pages enqueue API |
+| D-24 | 收藏選取操作列 | UI | 窄螢幕進入多選並切換選取組合 | 動作列為兩排，按鈕不重疊，內容平滑下推 |
+| D-25 | 收藏更新自動下載 | Unit + UI | 開啟偏好並建立 UpdateAvailable thread page | 只刷新 matching tid/author/page，不處理標籤/RSS 或非 UpdateAvailable 項 |
+| D-26 | 下載內容重新載入自動更新 | Unit + UI | 開啟偏好後按下載內容管理重新載入 | 只刷新目前佇列中 UpdateAvailable 的下載項目 |
 
 執行紀錄需填入日期、裝置序號、build variant、通過/失敗與證據路徑。
 
