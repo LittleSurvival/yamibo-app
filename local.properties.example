@@ -1,0 +1,44 @@
+﻿## Copy this file to local.properties and fill in values for your machine.
+## Do NOT commit local.properties: it may contain local paths and signing secrets.
+
+# Android SDK location used by Gradle.
+# Example on Windows:
+# sdk.dir=C\:\\Users\\your-name\\AppData\\Local\\Android\\Sdk
+
+sdk.dir=
+
+# Optional signing config for the releaseRun build type.
+# Use the same keystore as the installed release app when you want releaseRun
+# to upgrade/replace that app on a device.
+#
+# Important:
+# - The .keystore file contains the private signing key. Keep it private.
+# - A base64 certificate/signature is only useful for verification; it cannot
+#   sign an APK by itself.
+# - If any yamibo.releaseRun.* value is set, all four values are required.
+#
+# Example:
+# yamibo.releaseRun.storeFile=C\:\\Users\\your-name\\keys\\yamibo-release.keystore
+# yamibo.releaseRun.storePassword=your-store-password
+# yamibo.releaseRun.keyAlias=your-key-alias
+# yamibo.releaseRun.keyPassword=your-key-password
+
+yamibo.releaseRun.storeFile=
+yamibo.releaseRun.storePassword=
+yamibo.releaseRun.keyAlias=
+yamibo.releaseRun.keyPassword=
+
+# Optional local run behavior.
+# false or empty:
+#   Debug Run uses applicationId suffix ".debug" so it can install beside the
+#   release app without signature conflicts.
+#
+# true:
+#   Debug Run uses the release applicationId and the releaseRun signing config,
+#   so it can replace the installed release app. This requires all
+#   yamibo.releaseRun.* values above.
+#
+# Example:
+# yamibo.debug.useReleaseSignature=true
+
+yamibo.debug.useReleaseSignature=true
