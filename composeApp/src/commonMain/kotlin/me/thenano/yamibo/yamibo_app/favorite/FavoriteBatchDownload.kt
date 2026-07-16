@@ -37,6 +37,21 @@ internal data class FavoriteBatchDownloadResult(
     val unsupported: Int,
 )
 
+internal class FavoriteBatchDownloadSubmissionGate {
+    private var submitting = false
+    val isSubmitting: Boolean get() = submitting
+
+    fun tryStart(): Boolean {
+        if (submitting) return false
+        submitting = true
+        return true
+    }
+
+    fun finish() {
+        submitting = false
+    }
+}
+
 private data class FavoriteBatchTargetKey(
     val targetType: FavoriteTargetType,
     val targetId: Long,

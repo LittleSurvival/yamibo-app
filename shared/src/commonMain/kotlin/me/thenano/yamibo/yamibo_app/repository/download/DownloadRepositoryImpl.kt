@@ -415,14 +415,17 @@ class DownloadRepositoryImpl(
             else -> error(result.message())
         }
         queueTagMangaPage(tagId, tagName, first, 1)
+        drainQueue()
         val totalPages = first.pageNav?.totalPages ?: 1
         for (page in 2..totalPages) {
             when (val result = repository.fetchTagPage(tagId, page)) {
-                is YamiboResult.Success -> queueTagMangaPage(tagId, tagName, result.value, page)
+                is YamiboResult.Success -> {
+                    queueTagMangaPage(tagId, tagName, result.value, page)
+                    drainQueue()
+                }
                 else -> error(result.message())
             }
         }
-        drainQueue()
     }
 
     override suspend fun enqueueRssMangaChapter(
@@ -462,13 +465,14 @@ class DownloadRepositoryImpl(
         val first = repository.getCatalogPage(subscriptionId, 1)
             ?: error("RSS 目錄無法載入")
         queueRssMangaPage(subscriptionId, title, query, first.tagPage, 1)
+        drainQueue()
         val totalPages = first.tagPage.pageNav?.totalPages ?: 1
         for (page in 2..totalPages) {
             val catalogPage = repository.getCatalogPage(subscriptionId, page)
                 ?: error("RSS 第 $page 頁無法載入")
             queueRssMangaPage(subscriptionId, title, query, catalogPage.tagPage, page)
+            drainQueue()
         }
-        drainQueue()
     }
 
     override suspend fun refreshPage(tid: ThreadId, title: String, authorId: UserId?, page: Int): YamiboResult<ThreadPage> {
