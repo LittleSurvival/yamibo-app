@@ -746,3 +746,26 @@ HTTP 404，圖片來源不存在或已被移除,"HTTP 404; the image source does
 複製圖片失敗：圖片資料無法轉換為系統圖片,Failed to copy image: image data could not be converted to a system image,複製圖片失敗：圖片資料無法轉換為系統圖片,复制图片失败：图片资料无法转换为系统图片
 分享圖片失敗：圖片資料無法轉換為系統圖片,Failed to share image: image data could not be converted to a system image,分享圖片失敗：圖片資料無法轉換為系統圖片,分享图片失败：图片资料无法转换为系统图片
 儲存圖片失敗：圖片資料無法轉換為系統圖片,Failed to save image: image data could not be converted to a system image,儲存圖片失敗：圖片資料無法轉換為系統圖片,储存图片失败：图片资料无法转换为系统图片
+RSS收藏,RSS favorites,RSS收藏,RSS收藏
+一般帖子,Normal threads,一般帖子,一般帖子
+上一步,Previous,上一步,上一步
+下一步,Next,下一步,下一步
+下載方式,Download mode,下載方式,下载方式
+全部下載,Download all,全部下載,全部下载
+下載除最後一頁以外的全部頁,Download all pages except the last page,下載除最後一頁以外的全部頁,下载除最后一页以外的全部页
+小說帖子,Novel threads,小說帖子,小说帖子
+已加入 {} 項，失敗 {} 項，跳過 {} 項,"Queued {} item(s), failed {}, skipped {}",已加入 {} 項，失敗 {} 項，跳過 {} 項,已加入 {} 项，失败 {} 项，跳过 {} 项
+已加入下載佇列 {} 項,Queued {} download item(s),已加入下載佇列 {} 項,已加入下载队列 {} 项
+已選 {} 項，包含 {} 個集合；集合展開 {} 項，去重後 {} 項。,"Selected {} item(s), including {} collection(s); collections expand to {} item(s), {} after deduplication.",已選 {} 項，包含 {} 個集合；集合展開 {} 項，去重後 {} 項。,已选 {} 项，包含 {} 个集合；集合展开 {} 项，去重后 {} 项。
+帖子、標籤漫畫與 RSS 收藏都走既有的全部下載流程。,"Threads, tag manga, and RSS favorites all use the existing download-all flow.",帖子、標籤漫畫與 RSS 收藏都走既有的全部下載流程。,帖子、标签漫画与 RSS 收藏都走既有的全部下载流程。
+批量下載收藏,Batch download favorites,批量下載收藏,批量下载收藏
+更新檢查後自動刷新離線頁,Auto-refresh offline pages after update checks,更新檢查後自動刷新離線頁,更新检查后自动刷新离线页
+本次將處理 {} 項收藏。,This will process {} favorite item(s).,本次將處理 {} 項收藏。,本次将处理 {} 项收藏。
+沒有可下載的收藏,No downloadable favorites,沒有可下載的收藏,没有可下载的收藏
+請先設定備份資料夾,Please set the backup folder first,請先設定備份資料夾,请先设置备份文件夹
+請至少選擇一種收藏類型,Please select at least one favorite type,請至少選擇一種收藏類型,请至少选择一种收藏类型
+重新整理後自動更新離線內容,Auto-update offline content after refresh,重新整理後自動更新離線內容,重新整理后自动更新离线内容
+開啟後，只會自動刷新已確認可更新的離線頁面。,"When enabled, only offline pages confirmed as updatable are refreshed automatically.",開啟後，只會自動刷新已確認可更新的離線頁面。,开启后，只会自动刷新已确认可更新的离线页面。
+開啟後，重新整理已下載內容時會沿用目前目標刷新離線資料。,"When enabled, refreshing downloaded content keeps the current target for offline refreshes.",開啟後，重新整理已下載內容時會沿用目前目標刷新離線資料。,开启后，重新整理已下载内容时会沿用当前目标刷新离线资料。
+開始下載,Start download,開始下載,开始下载
+已自動刷新 {} 項可更新內容,Auto-refreshed {} updatable item(s),已自動刷新 {} 項可更新內容,已自动刷新 {} 项可更新内容

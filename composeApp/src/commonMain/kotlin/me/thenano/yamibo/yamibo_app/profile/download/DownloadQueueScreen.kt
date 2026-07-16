@@ -59,6 +59,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.thenano.yamibo.yamibo_app.LocalDownloadRepository
+import me.thenano.yamibo.yamibo_app.LocalAppSettingsRepository
 import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.components.controls.YamiboActionChip
 import me.thenano.yamibo.yamibo_app.components.controls.YamiboMultiSelectDialog
@@ -90,6 +91,7 @@ import me.thenano.yamibo.yamibo_app.repository.download.TagMangaChapterDownloadK
 import me.thenano.yamibo.yamibo_app.repository.download.ThreadPageDownloadKey
 import me.thenano.yamibo.yamibo_app.repository.download.buildDownloadedContentFilterOptions
 import me.thenano.yamibo.yamibo_app.repository.download.filterAndSortDownloadedContentGroups
+import me.thenano.yamibo.yamibo_app.util.state
 
 private enum class DownloadManagerTab(val title: String) {
     Queue(i18n("下載佇列")),
@@ -110,6 +112,8 @@ fun DownloadQueueScreen() {
     val colors = YamiboTheme.colors
     val navigator = LocalNavigator.current
     val repository = LocalDownloadRepository.current
+    val appSettingsRepository = LocalAppSettingsRepository.current
+    val downloadedContentRefreshAutoUpdate = appSettingsRepository.downloadedContentRefreshAutoUpdate.state()
     val entries by repository.queue.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -192,7 +196,18 @@ fun DownloadQueueScreen() {
                         }
                     },
                     onSelectFilterKeys = { keys -> selectedContentFilterKeys = keys.toList() },
-                    onRetryLoad = { contentReloadToken++ },
+                    onRetryLoad = {
+                        scope.launch {
+                            contentReloadToken++
+                            if (downloadedContentRefreshAutoUpdate) {
+                                val refreshed = refreshUpdateAvailableDownloads(entries, repository)
+                                if (refreshed > 0) {
+                                    reloadContentManagement()
+                                    snackbarHostState.showSnackbar(i18n("已自動刷新 {} 項可更新內容", refreshed))
+                                }
+                            }
+                        }
+                    },
                     onClearGroup = { group ->
                         scope.launch {
                             clearGroup(group, repository)
@@ -814,6 +829,30 @@ private suspend fun clearGroup(
         is TagMangaChapterDownloadKey -> repository.clearTagManga(TagId(firstKey.tagId))
         is RssMangaChapterDownloadKey -> repository.clearRssManga(firstKey.subscriptionId)
     }
+}
+
+private suspend fun refreshUpdateAvailableDownloads(
+    entries: List<DownloadQueueEntry>,
+    repository: DownloadRepository,
+): Int {
+    var refreshed = 0
+    entries
+        .filter { it.status == DownloadStatus.UpdateAvailable }
+        .distinctBy { it.key.stableId }
+        .forEach { entry ->
+            val result = when (val key = entry.key) {
+                is ThreadPageDownloadKey -> repository.refreshPage(
+                    ThreadId(key.tid),
+                    entry.title,
+                    key.authorId?.let(::UserId),
+                    key.page,
+                )
+                is TagMangaChapterDownloadKey -> repository.refreshTagMangaChapter(key)
+                is RssMangaChapterDownloadKey -> repository.refreshRssMangaChapter(key)
+            }
+            if (result is YamiboResult.Success) refreshed += 1
+        }
+    return refreshed
 }
 
 private fun formatBytes(bytes: Long): String {

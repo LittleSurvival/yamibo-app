@@ -238,6 +238,8 @@ private fun FavoriteSettingsContent(snackbarHostState: SnackbarHostState) {
     val sortMode = appSettingsRepository.favoriteSortMode.state()
     val sortDescending = appSettingsRepository.favoriteSortDescending.state()
     val updateInterval = appSettingsRepository.favoriteUpdateInterval.state()
+    val favoriteUpdateAutoDownload = appSettingsRepository.favoriteUpdateAutoDownload.state()
+    val downloadedContentRefreshAutoUpdate = appSettingsRepository.downloadedContentRefreshAutoUpdate.state()
     val syncState by favoriteSyncRunner.state.collectAsState()
     val coroutineScope = rememberCoroutineScope()
 
@@ -364,6 +366,22 @@ private fun FavoriteSettingsContent(snackbarHostState: SnackbarHostState) {
             }
         },
         modifier = Modifier.padding(horizontal = 4.dp),
+    )
+
+    Spacer(Modifier.height(18.dp))
+    SettingsToggleRow(
+        title = i18n("更新檢查後自動刷新離線頁"),
+        subtitle = i18n("開啟後，只會自動刷新已確認可更新的離線頁面。"),
+        checked = favoriteUpdateAutoDownload,
+        onCheckedChange = { appSettingsRepository.favoriteUpdateAutoDownload.setValue(it) },
+    )
+
+    Spacer(Modifier.height(10.dp))
+    SettingsToggleRow(
+        title = i18n("重新整理後自動更新離線內容"),
+        subtitle = i18n("開啟後，重新整理已下載內容時會沿用目前目標刷新離線資料。"),
+        checked = downloadedContentRefreshAutoUpdate,
+        onCheckedChange = { appSettingsRepository.downloadedContentRefreshAutoUpdate.setValue(it) },
     )
 
     Spacer(Modifier.height(18.dp))

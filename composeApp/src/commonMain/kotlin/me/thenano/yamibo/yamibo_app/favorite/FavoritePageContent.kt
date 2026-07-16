@@ -78,6 +78,7 @@ internal fun FavoritePageContent(
     onSelectAll: () -> Unit,
     onClearSelection: () -> Unit,
     onCancelSelection: () -> Unit,
+    onOpenBatchDownload: () -> Unit,
     onOpenMoveDialog: () -> Unit,
     onOpenMergeDialog: () -> Unit,
     onEditSelectedCollection: () -> Unit,
@@ -118,18 +119,22 @@ internal fun FavoritePageContent(
                 )
             }
             FavoritePageMode.Select -> {
-                HeaderRow(i18n("已選 {} 項", selectedCount), buildList {
-                    add(i18n("全選") to onSelectAll)
-                    if (selectedItemIds.isNotEmpty() && selectedCollectionIds.isEmpty()) {
-                        add(i18n("移動") to onOpenMoveDialog)
-                        add(i18n("合成集合") to onOpenMergeDialog)
-                        add(i18n("刪除") to onDeleteSelectedItems)
-                    }
-                    if (selectedCollectionIds.size == 1 && selectedItemIds.isEmpty()) add(i18n("編輯") to onEditSelectedCollection)
-                    if (selectedCollectionIds.isNotEmpty() && selectedItemIds.isEmpty() && openedCollection == null) add(i18n("解散") to onDissolveSelectedCollections)
-                    if (selectedCollectionIds.isNotEmpty() && selectedItemIds.isEmpty()) add(i18n("清空") to onClearSelection)
-                    add(i18n("返回") to onCancelSelection)
-                })
+                SelectionHeaderRows(
+                    title = i18n("已選 {} 項", selectedCount),
+                    actions = buildList {
+                        add(i18n("全選") to onSelectAll)
+                        if (selectedCount > 0) add(i18n("下載") to onOpenBatchDownload)
+                        if (selectedItemIds.isNotEmpty() && selectedCollectionIds.isEmpty()) {
+                            add(i18n("移動") to onOpenMoveDialog)
+                            add(i18n("合成集合") to onOpenMergeDialog)
+                            add(i18n("刪除") to onDeleteSelectedItems)
+                        }
+                        if (selectedCollectionIds.size == 1 && selectedItemIds.isEmpty()) add(i18n("編輯") to onEditSelectedCollection)
+                        if (selectedCollectionIds.isNotEmpty() && selectedItemIds.isEmpty() && openedCollection == null) add(i18n("解散") to onDissolveSelectedCollections)
+                        if (selectedCollectionIds.isNotEmpty() && selectedItemIds.isEmpty()) add(i18n("清空") to onClearSelection)
+                    },
+                    onCancel = onCancelSelection,
+                )
             }
         }
 

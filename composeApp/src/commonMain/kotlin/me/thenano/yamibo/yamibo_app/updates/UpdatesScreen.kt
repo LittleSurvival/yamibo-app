@@ -64,7 +64,7 @@ private sealed interface UpdatesScreenState {
     data class Error(val message: String) : UpdatesScreenState
 }
 
-private data class UpdateDownloadTargetKey(
+internal data class UpdateDownloadTargetKey(
     val targetId: Long,
     val authorId: Long?,
 )
@@ -74,6 +74,36 @@ private data class UpdateDownloadHintState(
     val hasUpdateAvailable: Boolean = false,
     val hasDownloaded: Boolean = false,
 )
+
+internal fun favoriteUpdateThreadTargetKeys(
+    events: List<FavoriteUpdateRepository.UpdateEvent>,
+): Set<UpdateDownloadTargetKey> =
+    events
+        .asSequence()
+        .filter {
+            it.targetType != FavoriteStoreRepository.FavoriteTargetType.TagManga &&
+                it.targetType != FavoriteStoreRepository.FavoriteTargetType.RssSearch
+        }
+        .map { UpdateDownloadTargetKey(it.targetId, it.authorId) }
+        .toSet()
+
+internal fun favoriteUpdateAutoRefreshEntries(
+    entries: List<me.thenano.yamibo.yamibo_app.repository.download.DownloadQueueEntry>,
+    targetKeys: Set<UpdateDownloadTargetKey>,
+): List<Pair<me.thenano.yamibo.yamibo_app.repository.download.DownloadQueueEntry, ThreadPageDownloadKey>> =
+    entries
+        .asSequence()
+        .filter { it.status == DownloadStatus.UpdateAvailable }
+        .mapNotNull { entry ->
+            val key = entry.key as? ThreadPageDownloadKey ?: return@mapNotNull null
+            val targetKey = UpdateDownloadTargetKey(
+                targetId = key.tid.toLong(),
+                authorId = key.authorId?.toLong(),
+            )
+            if (targetKey in targetKeys) entry to key else null
+        }
+        .distinctBy { it.second }
+        .toList()
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -86,6 +116,7 @@ fun UpdatesScreen() {
     val favoriteUpdateRefreshKey = favoriteUpdateRunState.refreshKey()
     val appSettingsRepository = LocalAppSettingsRepository.current
     val favoriteUpdateInterval = appSettingsRepository.favoriteUpdateInterval.state()
+    val favoriteUpdateAutoDownload = appSettingsRepository.favoriteUpdateAutoDownload.state()
     val favoriteUpdateHiddenRunId = appSettingsRepository.favoriteUpdateHiddenRunId.state()
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
@@ -102,14 +133,7 @@ fun UpdatesScreen() {
 
     val updateContent = state as? UpdatesScreenState.Success
     val updateDownloadTargetKeys = remember(updateContent?.events) {
-        updateContent?.events
-            ?.filter {
-                it.targetType != FavoriteStoreRepository.FavoriteTargetType.TagManga &&
-                    it.targetType != FavoriteStoreRepository.FavoriteTargetType.RssSearch
-            }
-            ?.map { UpdateDownloadTargetKey(it.targetId, it.authorId) }
-            ?.toSet()
-            .orEmpty()
+        favoriteUpdateThreadTargetKeys(updateContent?.events.orEmpty())
     }
     val updateDownloadHints by remember(downloadRepository, updateDownloadTargetKeys) {
         downloadRepository.queue
@@ -190,19 +214,36 @@ fun UpdatesScreen() {
         loadUpdateFilters()
     }
 
-    LaunchedEffect(updateContent?.events) {
-        updateContent?.events
+    LaunchedEffect(updateContent?.events, favoriteUpdateAutoDownload) {
+        val threadEvents = updateContent?.events
             ?.filter {
                 it.targetType != FavoriteStoreRepository.FavoriteTargetType.TagManga &&
                     it.targetType != FavoriteStoreRepository.FavoriteTargetType.RssSearch
             }
             ?.distinctBy { it.targetId to it.authorId }
-            ?.forEach { event ->
-                downloadRepository.markThreadUpdateAvailable(
-                    tid = ThreadId(event.targetId.toInt()),
-                    authorId = event.authorId?.toInt()?.let(::UserId),
-                )
-            }
+            .orEmpty()
+
+        threadEvents.forEach { event ->
+            downloadRepository.markThreadUpdateAvailable(
+                tid = ThreadId(event.targetId.toInt()),
+                authorId = event.authorId?.toInt()?.let(::UserId),
+            )
+        }
+
+        if (favoriteUpdateAutoDownload) {
+            favoriteUpdateAutoRefreshEntries(
+                entries = downloadRepository.queue.value,
+                targetKeys = favoriteUpdateThreadTargetKeys(threadEvents),
+            )
+                .forEach { (entry, key) ->
+                    downloadRepository.refreshPage(
+                        tid = ThreadId(key.tid),
+                        title = entry.title,
+                        authorId = key.authorId?.let(::UserId),
+                        page = key.page,
+                    )
+                }
+        }
     }
 
     DisposableEffect(isSelectMode, navigator) {

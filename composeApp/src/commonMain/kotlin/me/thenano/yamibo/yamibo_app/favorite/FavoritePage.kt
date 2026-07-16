@@ -31,6 +31,7 @@ import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository.*
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
 import me.thenano.yamibo.yamibo_app.repository.settings.FavoriteSortMode
 import me.thenano.yamibo.yamibo_app.profile.settings.access.IBackgroundAccessSetupScreen
+import me.thenano.yamibo.yamibo_app.profile.settings.backup.IBackupSettingsScreen
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.thread.detail.novel.INovelThreadDetailScreen
@@ -130,6 +131,8 @@ fun FavoritePage() {
     val favoriteShareRepository = LocalFavoriteShareRepository.current
     val favoriteSyncRepository = LocalFavoriteSyncRepository.current
     val favoriteSyncRunner = LocalFavoriteSyncRunner.current
+    val downloadRepository = LocalDownloadRepository.current
+    val rssRepository = LocalRssSearchSubscriptionRepository.current
     val readHistoryRepository = LocalReadHistoryRepository.current
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
@@ -182,6 +185,10 @@ fun FavoritePage() {
     var showImportPreviewDialog by remember { mutableStateOf(false) }
     var showImportTargetDialog by remember { mutableStateOf(false) }
     var importTargetSelection by remember { mutableStateOf<Set<FavoriteCategory>>(emptySet()) }
+    var showBatchTypeDialog by remember { mutableStateOf(false) }
+    var showBatchModeDialog by remember { mutableStateOf(false) }
+    var selectedBatchTypes by remember { mutableStateOf(setOf<FavoriteBatchDownloadType>()) }
+    var selectedBatchMode by remember { mutableStateOf(FavoriteBatchDownloadMode.All) }
 
     fun showSnackbarMessage(message: String) {
         scope.launch {
@@ -197,6 +204,15 @@ fun FavoritePage() {
             result.reusedItemCount,
             result.skippedDuplicateCount + result.unsupportedCount + result.invalidCount,
         )
+    }
+
+    fun batchDownloadResultMessage(result: FavoriteBatchDownloadResult): String {
+        val skipped = result.skipped + result.unsupported
+        return when {
+            result.requested == 0 -> i18n("沒有可下載的收藏")
+            result.failed == 0 && skipped == 0 -> i18n("已加入下載佇列 {} 項", result.queued)
+            else -> i18n("已加入 {} 項，失敗 {} 項，跳過 {} 項", result.queued, result.failed, skipped)
+        }
     }
 
     val favoriteShareFileActions = rememberFavoriteShareFileActions(
@@ -476,6 +492,11 @@ fun FavoritePage() {
         else -> FavoritePageMode.Normal
     }
     val searchEnabled = searchActive && trimmedSearchQuery.isNotBlank()
+    val batchDownloadScope = remember(ready?.content, selectedItemIds, selectedCollectionIds) {
+        ready?.content?.let { content ->
+            buildFavoriteBatchDownloadScope(content, selectedItemIds, selectedCollectionIds)
+        }
+    }
     val knownForumKeys = favoriteForumCounts.mapNotNullTo(mutableSetOf()) { it.forumKey }
     val normalizedFavoriteForumFilterKeys = selectedFavoriteForumFilterKeys
         .filterTo(mutableSetOf()) { key -> knownForumKeys.isEmpty() || key in knownForumKeys }
@@ -635,6 +656,18 @@ fun FavoritePage() {
                     selectedItemIds = emptySet()
                     selectedCollectionIds = emptySet()
                 },
+                onOpenBatchDownload = {
+                    val scopeInfo = batchDownloadScope ?: return@FavoritePageContent
+                    if (scopeInfo.items.isEmpty()) {
+                        showSnackbarMessage(i18n("沒有可下載的收藏"))
+                    } else {
+                        selectedBatchTypes = scopeInfo.countByType()
+                            .filterValues { it > 0 }
+                            .keys
+                        selectedBatchMode = FavoriteBatchDownloadMode.All
+                        showBatchTypeDialog = true
+                    }
+                },
                 onOpenMoveDialog = {
                     scope.launch {
                         val (categories, options) = withContext(Dispatchers.Default) {
@@ -695,6 +728,55 @@ fun FavoritePage() {
         YamiboSnackbarHost(
             hostState = snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp)
+        )
+    }
+
+    if (showBatchTypeDialog && batchDownloadScope != null) {
+        FavoriteBatchDownloadTypeDialog(
+            scope = batchDownloadScope,
+            selectedTypes = selectedBatchTypes,
+            onDismiss = { showBatchTypeDialog = false },
+            onNext = { confirmedTypes ->
+                if (confirmedTypes.isEmpty()) {
+                    showSnackbarMessage(i18n("請至少選擇一種收藏類型"))
+                } else {
+                    selectedBatchTypes = confirmedTypes
+                    showBatchTypeDialog = false
+                    showBatchModeDialog = true
+                }
+            },
+        )
+    }
+
+    if (showBatchModeDialog && batchDownloadScope != null) {
+        FavoriteBatchDownloadModeDialog(
+            scope = batchDownloadScope,
+            selectedTypes = selectedBatchTypes,
+            selectedMode = selectedBatchMode,
+            onSelectMode = { selectedBatchMode = it },
+            onBack = {
+                showBatchModeDialog = false
+                showBatchTypeDialog = true
+            },
+            onDismiss = { showBatchModeDialog = false },
+            onConfirm = {
+                showBatchModeDialog = false
+                val items = batchDownloadScope.itemsForTypes(selectedBatchTypes)
+                val batchMode = selectedBatchMode.coerceFor(batchDownloadScope, selectedBatchTypes)
+                scope.launch {
+                    if (!downloadRepository.isStorageReady()) {
+                        showSnackbarMessage(i18n("請先設定備份資料夾"))
+                        navigator.navigate(IBackupSettingsScreen())
+                        return@launch
+                    }
+                    val result = withContext(Dispatchers.Default) {
+                        enqueueFavoriteBatchDownloads(downloadRepository, rssRepository, items, batchMode)
+                    }
+                    selectedItemIds = emptySet()
+                    selectedCollectionIds = emptySet()
+                    showSnackbarMessage(batchDownloadResultMessage(result))
+                }
+            },
         )
     }
 

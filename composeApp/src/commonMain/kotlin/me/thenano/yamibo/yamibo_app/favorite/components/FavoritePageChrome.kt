@@ -5,9 +5,11 @@ import me.thenano.yamibo.yamibo_app.components.navigation.NavigationBackSymbol
 
 
 import YamiboIcons
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -25,6 +27,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.animation.core.tween
 import me.thenano.yamibo.yamibo_app.favorite.FavoriteDialogButton
 import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository.FavoriteCategory
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
@@ -43,6 +47,44 @@ fun HeaderRow(title: String, actions: List<Pair<String, () -> Unit>>) {
         actions.forEachIndexed { index, action ->
             ActionChip(action.first, action.second)
             if (index != actions.lastIndex) Spacer(Modifier.width(6.dp))
+        }
+    }
+}
+
+@Composable
+fun SelectionHeaderRows(
+    title: String,
+    actions: List<Pair<String, () -> Unit>>,
+    onCancel: () -> Unit,
+) {
+    val colors = YamiboTheme.colors
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .animateContentSize(animationSpec = tween(durationMillis = 220))
+            .padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                title,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = colors.textStrong,
+                modifier = Modifier.weight(1f),
+            )
+            ActionChip(i18n("返回"), onCancel)
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            actions.forEach { action ->
+                ActionChip(action.first, action.second)
+            }
         }
     }
 }
