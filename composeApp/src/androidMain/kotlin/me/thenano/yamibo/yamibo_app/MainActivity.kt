@@ -18,6 +18,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import io.github.littlesurvival.YamiboClient
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import me.thenano.yamibo.yamibo_app.core.cache.DiskCacheFactory
 import me.thenano.yamibo.yamibo_app.db.DatabaseFactory
@@ -100,6 +104,10 @@ class MainActivity : ComponentActivity() {
 
             /** Navigator Logic */
             val navigator = rememberRestorableNavigator()
+            val appCoroutineScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main) }
+            DisposableEffect(appCoroutineScope) {
+                onDispose { appCoroutineScope.cancel() }
+            }
             DisposableEffect(navigator) {
                 val callback = onBackPressedDispatcher.addCallback(this@MainActivity) {
                     val exitInterval = 2000L // 2 seconds
@@ -259,6 +267,7 @@ class MainActivity : ComponentActivity() {
 
             /** Provide Repositories */
             CompositionLocalProvider(
+                LocalAppCoroutineScope provides appCoroutineScope,
                 LocalNavigator provides navigator,
                 LocalAuthRepository provides authRepository,
                 LocalAppUpdateRepository provides appUpdateRepository,
