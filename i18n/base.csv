@@ -756,6 +756,9 @@ RSS收藏,RSS favorites,RSS收藏,RSS收藏
 小說帖子,Novel threads,小說帖子,小说帖子
 已加入 {} 項，失敗 {} 項，跳過 {} 項,"Queued {} item(s), failed {}, skipped {}",已加入 {} 項，失敗 {} 項，跳過 {} 項,已加入 {} 项，失败 {} 项，跳过 {} 项
 已加入下載佇列 {} 項,Queued {} download item(s),已加入下載佇列 {} 項,已加入下载队列 {} 项
+正在加入下載佇列 {} 項,Queuing {} download item(s),正在加入下載佇列 {} 項,正在加入下载队列 {} 项
+上一批收藏正在加入下載佇列,The previous favorite batch is still being queued,上一批收藏正在加入下載佇列,上一批收藏正在加入下载队列
+加入下載佇列失敗：{},Failed to queue downloads: {},加入下載佇列失敗：{},加入下载队列失败：{}
 已選 {} 項，包含 {} 個集合；集合展開 {} 項，去重後 {} 項。,"Selected {} item(s), including {} collection(s); collections expand to {} item(s), {} after deduplication.",已選 {} 項，包含 {} 個集合；集合展開 {} 項，去重後 {} 項。,已选 {} 项，包含 {} 个集合；集合展开 {} 项，去重后 {} 项。
 帖子、標籤漫畫與 RSS 收藏都走既有的全部下載流程。,"Threads, tag manga, and RSS favorites all use the existing download-all flow.",帖子、標籤漫畫與 RSS 收藏都走既有的全部下載流程。,帖子、标签漫画与 RSS 收藏都走既有的全部下载流程。
 批量下載收藏,Batch download favorites,批量下載收藏,批量下载收藏

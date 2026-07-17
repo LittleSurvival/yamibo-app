@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.littlesurvival.dto.value.TagId
 import io.github.littlesurvival.dto.value.ThreadId
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -135,6 +136,7 @@ fun FavoritePage() {
     val rssRepository = LocalRssSearchSubscriptionRepository.current
     val readHistoryRepository = LocalReadHistoryRepository.current
     val navigator = LocalNavigator.current
+    val appScope = LocalAppCoroutineScope.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     val favoriteGridMode = appSettingsRepository.favoriteGridMode.state()
@@ -189,6 +191,7 @@ fun FavoritePage() {
     var showBatchModeDialog by remember { mutableStateOf(false) }
     var selectedBatchTypes by remember { mutableStateOf(setOf<FavoriteBatchDownloadType>()) }
     var selectedBatchMode by remember { mutableStateOf(FavoriteBatchDownloadMode.All) }
+    val batchDownloadSubmissionGate = remember { FavoriteBatchDownloadSubmissionGate() }
 
     fun showSnackbarMessage(message: String) {
         scope.launch {
@@ -658,7 +661,9 @@ fun FavoritePage() {
                 },
                 onOpenBatchDownload = {
                     val scopeInfo = batchDownloadScope ?: return@FavoritePageContent
-                    if (scopeInfo.items.isEmpty()) {
+                    if (batchDownloadSubmissionGate.isSubmitting) {
+                        showSnackbarMessage(i18n("上一批收藏正在加入下載佇列"))
+                    } else if (scopeInfo.items.isEmpty()) {
                         showSnackbarMessage(i18n("沒有可下載的收藏"))
                     } else {
                         selectedBatchTypes = scopeInfo.countByType()
@@ -760,21 +765,31 @@ fun FavoritePage() {
             },
             onDismiss = { showBatchModeDialog = false },
             onConfirm = {
+                if (!batchDownloadSubmissionGate.tryStart()) return@FavoriteBatchDownloadModeDialog
                 showBatchModeDialog = false
                 val items = batchDownloadScope.itemsForTypes(selectedBatchTypes)
                 val batchMode = selectedBatchMode.coerceFor(batchDownloadScope, selectedBatchTypes)
-                scope.launch {
-                    if (!downloadRepository.isStorageReady()) {
-                        showSnackbarMessage(i18n("請先設定備份資料夾"))
-                        navigator.navigate(IBackupSettingsScreen())
-                        return@launch
+                selectedItemIds = emptySet()
+                selectedCollectionIds = emptySet()
+                showSnackbarMessage(i18n("正在加入下載佇列 {} 項", items.size))
+                appScope.launch {
+                    try {
+                        if (!downloadRepository.isStorageReady()) {
+                            showSnackbarMessage(i18n("請先設定備份資料夾"))
+                            navigator.navigate(IBackupSettingsScreen())
+                            return@launch
+                        }
+                        val result = withContext(Dispatchers.Default) {
+                            enqueueFavoriteBatchDownloads(downloadRepository, rssRepository, items, batchMode)
+                        }
+                        showSnackbarMessage(batchDownloadResultMessage(result))
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Throwable) {
+                        showSnackbarMessage(i18n("加入下載佇列失敗：{}", error.message ?: i18n("未知錯誤")))
+                    } finally {
+                        batchDownloadSubmissionGate.finish()
                     }
-                    val result = withContext(Dispatchers.Default) {
-                        enqueueFavoriteBatchDownloads(downloadRepository, rssRepository, items, batchMode)
-                    }
-                    selectedItemIds = emptySet()
-                    selectedCollectionIds = emptySet()
-                    showSnackbarMessage(batchDownloadResultMessage(result))
                 }
             },
         )

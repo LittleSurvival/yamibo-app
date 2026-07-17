@@ -1,6 +1,7 @@
 ﻿package me.thenano.yamibo.yamibo_app
 
 import androidx.compose.runtime.compositionLocalOf
+import kotlinx.coroutines.CoroutineScope
 import me.thenano.yamibo.yamibo_app.core.cache.DiskCacheFactory
 import me.thenano.yamibo.yamibo_app.repository.AuthRepository
 import me.thenano.yamibo.yamibo_app.repository.AppUpdateRepository
@@ -37,6 +38,9 @@ import me.thenano.yamibo.yamibo_app.favorite.sync.FavoriteSyncRunner
 import me.thenano.yamibo.yamibo_app.favorite.updates.FavoriteUpdateRunner
 import me.thenano.yamibo.yamibo_app.profile.settings.backup.BackupScheduler
 import me.thenano.yamibo.yamibo_app.profile.settings.sign.SignReminderScheduler
+
+val LocalAppCoroutineScope =
+    compositionLocalOf<CoroutineScope> { error("LocalAppCoroutineScope not provided") }
 
 val LocalAuthRepository =
     compositionLocalOf<AuthRepository> { error("LocalAuthRepository not provided") }

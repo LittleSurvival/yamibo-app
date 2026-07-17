@@ -32,6 +32,18 @@ import kotlin.test.assertEquals
 
 class FavoriteBatchDownloadTest {
     @Test
+    fun submissionGateRejectsDuplicateUntilFinished() {
+        val gate = FavoriteBatchDownloadSubmissionGate()
+
+        assertEquals(true, gate.tryStart())
+        assertEquals(true, gate.isSubmitting)
+        assertEquals(false, gate.tryStart())
+        gate.finish()
+        assertEquals(false, gate.isSubmitting)
+        assertEquals(true, gate.tryStart())
+    }
+
+    @Test
     fun expandsCollectionsAndDeduplicatesByItemAndTarget() {
         val normal = favoriteItem(1, FavoriteStoreRepository.FavoriteTargetType.ThreadNormal, 100)
         val sameItem = normal.copy()

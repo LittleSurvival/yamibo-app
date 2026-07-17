@@ -3,6 +3,7 @@ package me.thenano.yamibo.yamibo_app.repository.download
 import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
+import java.io.FileNotFoundException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -84,6 +85,7 @@ class AndroidDownloadStorageProvider(
         val treeUri = selectedTreeUri() ?: return emptyList()
         val root = downloadsRoot(treeUri) ?: return emptyList()
         return listChildren(treeUri, root)
+            .filter { isCompletedThreadDownloadDirectory(it.name) }
             .mapNotNull { readManifestFromDir(treeUri, it.uri) }
     }
 
@@ -358,14 +360,19 @@ class AndroidDownloadStorageProvider(
             DocumentsContract.Document.COLUMN_DISPLAY_NAME,
         )
         val items = mutableListOf<DocumentChild>()
-        resolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
-            val idIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
-            val nameIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
-            while (cursor.moveToNext()) {
-                val childId = cursor.getString(idIndex)
-                val childName = cursor.getString(nameIndex).orEmpty()
-                items += DocumentChild(childName, DocumentsContract.buildDocumentUriUsingTree(treeUri, childId))
+        try {
+            resolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+                val idIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                val nameIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                while (cursor.moveToNext()) {
+                    val childId = cursor.getString(idIndex)
+                    val childName = cursor.getString(nameIndex).orEmpty()
+                    items += DocumentChild(childName, DocumentsContract.buildDocumentUriUsingTree(treeUri, childId))
+                }
             }
+        } catch (error: Exception) {
+            if (!error.isMissingDocumentFailure()) throw error
+            Logger.d(TAG, "Document disappeared while listing children uri=$parent", error)
         }
         return items
     }
@@ -385,4 +392,17 @@ class AndroidDownloadStorageProvider(
         const val IMAGES_DIR = "images"
         const val QUEUE_FILE = "queue.json"
     }
+}
+internal fun isCompletedThreadDownloadDirectory(name: String): Boolean =
+    name.startsWith("thread_") &&
+        !name.endsWith(".tmp") &&
+        !name.endsWith(".previous")
+
+internal fun Throwable.isMissingDocumentFailure(): Boolean {
+    var error: Throwable? = this
+    while (error != null) {
+        if (error is FileNotFoundException) return true
+        error = error.cause
+    }
+    return false
 }

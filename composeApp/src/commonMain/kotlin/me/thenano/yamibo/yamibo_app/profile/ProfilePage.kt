@@ -42,7 +42,19 @@ import me.thenano.yamibo.yamibo_app.profile.support.ISupportAppDevelopmentScreen
 import me.thenano.yamibo.yamibo_app.repository.settings.SignInMode
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme.colors
+import me.thenano.yamibo.yamibo_app.repository.download.DownloadQueueEntry
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadStatus
+
+internal fun shouldShowDownloadBadge(queue: List<DownloadQueueEntry>): Boolean =
+    queue.any { entry ->
+        when (entry.status) {
+            DownloadStatus.Queued,
+            DownloadStatus.Downloading,
+            DownloadStatus.Failed,
+            DownloadStatus.UpdateAvailable -> true
+            else -> false
+        }
+    }
 
 @Composable
 fun ProfilePage(
@@ -59,12 +71,7 @@ fun ProfilePage(
     val snackbarHostState = remember { SnackbarHostState() }
     val hasDownloadBadge by remember(downloadRepository) {
         downloadRepository.queue
-            .map { queue ->
-                queue.any {
-                    it.status == DownloadStatus.Failed ||
-                        it.status == DownloadStatus.UpdateAvailable
-                }
-            }
+            .map(::shouldShowDownloadBadge)
             .distinctUntilChanged()
     }.collectAsState(false)
 
