@@ -75,7 +75,12 @@ internal fun UserSpaceSectionContent(
             is UserSpaceScreenContent.Blogs -> {
                 if (content.page.blogs.isEmpty()) item { UserSpaceEmptyListMessage(emptyMessage(selectedTab, isSelf)) }
                 items(content.page.blogs, key = { it.bId.value }) { blog ->
-                    BlogCard(blog, onClick = { onBlogClick(blog) }, onUserClick = onUserClick)
+                    BlogCard(
+                        blog = blog,
+                        onClick = { onBlogClick(blog) },
+                        onUserClick = onUserClick,
+                        onActionClick = { action -> onOpenWebView(action.name, action.url) },
+                    )
                 }
                 content.page.pageNav?.let { nav -> item { UserSpacePageNavigation(nav, currentPage, onPageChange) } }
             }
@@ -117,4 +122,3 @@ private fun emptyMessage(tab: UserSpaceSubPage, isSelf: Boolean): String = when 
 private fun UserSpacePageNavigation(pageNav: PageNav, currentPage: Int, onPageChange: (Int) -> Unit) {
     YamiboPageNavigation(pageNav = pageNav, currentPage = currentPage, onPageChange = onPageChange)
 }
-

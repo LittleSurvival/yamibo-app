@@ -18,7 +18,9 @@ import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.model.PageNav
 import io.github.littlesurvival.dto.model.User
 import io.github.littlesurvival.dto.page.BlogComment
+import io.github.littlesurvival.dto.page.BlogInfo
 import io.github.littlesurvival.dto.page.BlogPage
+import io.github.littlesurvival.dto.page.ManageButton
 import io.github.littlesurvival.dto.value.BlogId
 import io.github.littlesurvival.dto.value.UserId
 import kotlinx.coroutines.launch
@@ -154,8 +156,13 @@ fun BlogReaderScreen(
                                 BlogCommentCard(
                                     comment = comment,
                                     onUserClick = { user -> navigator.navigate(IUserSpaceScreen(user.uid, user.name)) },
-                                    onReplyClick = { url ->
-                                        navigator.navigate(IPlatformWebView(YamiboRoute.Domain.toFullLink(url), title = i18n("回覆")))
+                                    onActionClick = { action ->
+                                        navigator.navigate(
+                                            IPlatformWebView(
+                                                YamiboRoute.Domain.toFullLink(action.url),
+                                                title = action.name,
+                                            )
+                                        )
                                     },
                                 )
                             }
@@ -258,10 +265,25 @@ private fun RootBlogCard(
 
 @Composable
 private fun BlogActionRow(page: BlogPage, onUrlClick: (String, String) -> Unit) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        page.blogInfo.collectUrl?.let { BlogSmallButton(i18n("收藏")) { onUrlClick(i18n("收藏日志"), it) } }
-        page.blogInfo.shareUrl?.let { BlogSmallButton(i18n("分享")) { onUrlClick(i18n("分享日志"), it) } }
-        page.blogInfo.inviteUrl?.let { BlogSmallButton(i18n("邀請")) { onUrlClick(i18n("邀請閱讀"), it) } }
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        resolveRootBlogActions(page.rootBlog.manageButtons, page.blogInfo).forEach { action ->
+            BlogSmallButton(action.name) { onUrlClick(action.name, action.url) }
+        }
+    }
+}
+
+internal fun resolveRootBlogActions(
+    parsedActions: List<ManageButton>,
+    blogInfo: BlogInfo,
+): List<ManageButton> {
+    if (parsedActions.isNotEmpty()) return parsedActions
+    return buildList {
+        blogInfo.collectUrl?.let { add(ManageButton("收藏", it)) }
+        blogInfo.shareUrl?.let { add(ManageButton("分享", it)) }
+        blogInfo.inviteUrl?.let { add(ManageButton("邀請", it)) }
     }
 }
 
@@ -285,7 +307,7 @@ private fun BlogCommentSectionTitle(count: Int) {
 private fun BlogCommentCard(
     comment: BlogComment,
     onUserClick: (User) -> Unit,
-    onReplyClick: (String) -> Unit,
+    onActionClick: (ManageButton) -> Unit,
 ) {
     val colors = YamiboTheme.colors
     Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp)) {
@@ -305,18 +327,21 @@ private fun BlogCommentCard(
                 )
                 Text(comment.timeInfo.text, color = colors.brownLight, fontSize = 12.sp)
             }
-            comment.replyUrl?.let { url ->
-                Text(
-                    text = i18n("回覆"),
-                    modifier = Modifier.clickable { onReplyClick(url) }.padding(6.dp),
-                    color = colors.orangeAccent,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
         }
         Spacer(Modifier.height(10.dp))
         HtmlRenderer(html = comment.contentHtml, modifier = Modifier.fillMaxWidth())
+        if (comment.manageButtons.isNotEmpty()) {
+            Spacer(Modifier.height(10.dp))
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                comment.manageButtons.forEach { action ->
+                    BlogSmallButton(action.name) { onActionClick(action) }
+                }
+            }
+        }
     }
     HorizontalDivider(color = colors.brownLight.copy(alpha = 0.35f))
 }
