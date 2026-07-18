@@ -1,4 +1,4 @@
-﻿package me.thenano.yamibo.yamibo_app.forum.search
+package me.thenano.yamibo.yamibo_app.forum.search
 
 import androidx.compose.animation.AnimatedContent
 import me.thenano.yamibo.yamibo_app.components.navigation.NavigationBackSymbol
@@ -117,7 +117,7 @@ fun SearchScreen(fid: ForumId?) {
     val favoriteRepository = LocalFavoriteRepository.current
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
     val focusRequester = remember { FocusRequester() }
     var searchFieldPlaced by remember { mutableStateOf(false) }
 
@@ -215,7 +215,7 @@ fun SearchScreen(fid: ForumId?) {
             searchPage = searchPage,
         )
         if (result !is YamiboResult.Success) {
-            snackbarHostState.showSnackbar(i18n("保存失敗"))
+            feedbackController.post(i18n("保存失敗"))
             return null
         }
 
@@ -240,11 +240,11 @@ fun SearchScreen(fid: ForumId?) {
             if (existingSubscription == null) {
                 rssRepository.delete(result.value)
             }
-            snackbarHostState.showSnackbar(i18n("保存失敗"))
+            feedbackController.post(i18n("保存失敗"))
             return null
         }
 
-        snackbarHostState.showSnackbar(
+        feedbackController.post(
             if (existingSubscription == null) i18n("已收藏為 RSS 訂閱") else i18n("已收藏此 RSS 訂閱")
         )
         return result.value
@@ -357,7 +357,7 @@ fun SearchScreen(fid: ForumId?) {
                             val keyword = query.trim()
                             val currentState = state as? SearchState.Success
                             if (currentState == null) {
-                                scope.launch { snackbarHostState.showSnackbar(i18n("保存失敗")) }
+                                    feedbackController.post(i18n("保存失敗"))
                             } else {
                                 scope.launch {
                                     val subscriptionId = saveRssFavorite(keyword, currentState.page)
@@ -371,7 +371,7 @@ fun SearchScreen(fid: ForumId?) {
                             val keyword = query.trim()
                             val currentState = state as? SearchState.Success
                             if (currentState == null) {
-                                scope.launch { snackbarHostState.showSnackbar(i18n("保存失敗")) }
+                                feedbackController.post(i18n("保存失敗"))
                             } else {
                                 scope.launch { openRssFavoritePicker(keyword, currentState.page) }
                             }
@@ -381,7 +381,6 @@ fun SearchScreen(fid: ForumId?) {
             }
         }
 
-        YamiboSnackbarHost(hostState = snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
     }
 
     pendingRssFavorite?.let { pending ->

@@ -1,4 +1,4 @@
-﻿package me.thenano.yamibo.yamibo_app.updates
+package me.thenano.yamibo.yamibo_app.updates
 
 import YamiboIcons
 import androidx.compose.foundation.background
@@ -120,7 +120,7 @@ fun UpdatesScreen() {
     val favoriteUpdateHiddenRunId = appSettingsRepository.favoriteUpdateHiddenRunId.state()
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
 
     var state by remember { mutableStateOf<UpdatesScreenState>(UpdatesScreenState.Loading) }
     var isRefreshing by remember { mutableStateOf(false) }
@@ -263,7 +263,6 @@ fun UpdatesScreen() {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = colors.creamBackground,
-        snackbarHost = { YamiboSnackbarHost(hostState = snackbarHostState) },
         topBar = {
             if (isSelectMode) {
                 UpdatesSelectTopBar(
@@ -279,7 +278,7 @@ fun UpdatesScreen() {
                             isSelectMode = false
                             selectedEventIds = emptySet()
                             loadUpdates()
-                            snackbarHostState.showSnackbar(i18n("已刪除全部更新紀錄"))
+                            feedbackController.post(i18n("已刪除全部更新紀錄"))
                         }
                     },
                     onCancel = {
@@ -294,7 +293,7 @@ fun UpdatesScreen() {
                                 isSelectMode = false
                                 selectedEventIds = emptySet()
                                 loadUpdates()
-                                snackbarHostState.showSnackbar(i18n("已刪除 {} 項紀錄", deletedCount))
+                                feedbackController.post(i18n("已刪除 {} 項紀錄", deletedCount))
                             }
                         }
                     },
@@ -379,14 +378,14 @@ fun UpdatesScreen() {
                                         scope.launch {
                                             favoriteUpdateRunner.cancelUpdate(runId)
                                             loadUpdates()
-                                            snackbarHostState.showSnackbar(i18n("已取消收藏更新檢查"), duration = SnackbarDuration.Short)
+                                            feedbackController.post(i18n("已取消收藏更新檢查"), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
                                         }
                                     },
                                     onInterruptFavoriteUpdate = { runId ->
                                         scope.launch {
                                             favoriteUpdateRunner.interruptUpdate(runId)
                                             loadUpdates()
-                                            snackbarHostState.showSnackbar(i18n("已中斷收藏更新檢查"), duration = SnackbarDuration.Short)
+                                            feedbackController.post(i18n("已中斷收藏更新檢查"), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
                                         }
                                     },
                                     onResumeFavoriteUpdate = {
@@ -395,13 +394,13 @@ fun UpdatesScreen() {
                                                 is FavoriteUpdateRunner.LaunchResult.Started -> {
                                                     appSettingsRepository.favoriteUpdateHiddenRunId.setValue("")
                                                     loadUpdates()
-                                                    snackbarHostState.showSnackbar(i18n("繼續檢查收藏更新"), duration = SnackbarDuration.Short)
+                                                    feedbackController.post(i18n("繼續檢查收藏更新"), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
                                                 }
                                                 is FavoriteUpdateRunner.LaunchResult.Rejected -> {
-                                                    snackbarHostState.showSnackbar(i18n(result.reason), duration = SnackbarDuration.Short)
+                                                    feedbackController.post(i18n(result.reason), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
                                                 }
                                                 null -> {
-                                                    snackbarHostState.showSnackbar(i18n("沒有可繼續的收藏更新任務"), duration = SnackbarDuration.Short)
+                                                    feedbackController.post(i18n("沒有可繼續的收藏更新任務"), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
                                                 }
                                             }
                                         }
@@ -411,9 +410,9 @@ fun UpdatesScreen() {
                                         scope.launch {
                                             appSettingsRepository.favoriteUpdateInterval.setValue(interval)
                                             favoriteUpdateRunner.schedulePeriodicUpdate(interval)
-                                            snackbarHostState.showSnackbar(
+                                            feedbackController.post(
                                                 i18n("刷新週期已改為 {}", interval.localizedLabel()),
-                                                duration = SnackbarDuration.Short,
+                                                duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short,
                                             )
                                         }
                                     },
@@ -482,13 +481,13 @@ fun UpdatesScreen() {
                         when (val result = favoriteUpdateRunner.startGlobalRefresh()) {
                             is FavoriteUpdateRunner.LaunchResult.Started -> {
                                 appSettingsRepository.favoriteUpdateHiddenRunId.setValue("")
-                                snackbarHostState.showSnackbar(
+                                feedbackController.post(
                                     i18n("開始全域刷新收藏更新"),
-                                    duration = SnackbarDuration.Short
+                                    duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short
                                 )
                             }
                             is FavoriteUpdateRunner.LaunchResult.Rejected -> {
-                                snackbarHostState.showSnackbar(i18n(result.reason), duration = SnackbarDuration.Short)
+                                feedbackController.post(i18n(result.reason), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
                             }
                         }
                     }

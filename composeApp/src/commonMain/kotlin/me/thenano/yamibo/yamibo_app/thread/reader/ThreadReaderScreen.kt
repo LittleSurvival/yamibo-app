@@ -699,7 +699,9 @@ internal fun ThreadReaderScreen(
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
     val authRepo = LocalAuthRepository.current
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
+    val confirmationController = me.thenano.yamibo.yamibo_app.LocalAppConfirmationController.current
+    val appTaskManager = me.thenano.yamibo.yamibo_app.LocalAppTaskManager.current
 
     val readerUsesBrownSystemBar = showMenu || showSettingsPanel || drawerState.isOpen
     SystemBarsEffect(
@@ -767,6 +769,7 @@ internal fun ThreadReaderScreen(
     }
     var isFavorited by remember { mutableStateOf(false) }
     var favoriteRefreshToken by remember { mutableIntStateOf(0) }
+    val favoriteRepositoryRevision by favoriteRepository.favoriteItemRevision.collectAsState()
     var pendingFavoriteRemovalSelection by remember { mutableStateOf<FavoriteLocationSelection?>(null) }
     var pendingFavoriteRemovalSuccessMessage by remember { mutableStateOf(i18n("已取消收藏")) }
     var showFavoriteRemovalConfirm by remember { mutableStateOf(false) }
@@ -835,14 +838,27 @@ internal fun ThreadReaderScreen(
         isFavorited = selection.item != null
     }
 
+    fun launchFavoriteTask(action: String, operation: suspend () -> Unit) {
+        appTaskManager.launch(
+            key = me.thenano.yamibo.yamibo_app.task.AppTaskKey("favorite:$action:thread:${tid.value}"),
+            operation = operation,
+        )
+    }
+
+    fun launchDownloadTask(action: String, operation: suspend () -> Unit) {
+        appTaskManager.launch(
+            key = me.thenano.yamibo.yamibo_app.task.AppTaskKey("download:$action:thread:${tid.value}"),
+            operation = operation,
+        )
+    }
+
     suspend fun completeFavoriteAdd(syncToRemote: Boolean) {
         completeFavoriteAddWithFeedback(
             favoriteRepository = favoriteRepository,
             favoriteSyncRepository = favoriteSyncRepository,
             target = favoriteTarget(),
             syncToRemote = syncToRemote,
-            snackbarHostState = snackbarHostState,
-            onRefreshRequested = { favoriteRefreshToken += 1 },
+            feedbackController = feedbackController,
         )
     }
 
@@ -852,9 +868,7 @@ internal fun ThreadReaderScreen(
             favoriteSyncRepository = favoriteSyncRepository,
             target = favoriteTarget(),
             syncToRemote = syncToRemote,
-            scope = scope,
-            snackbarHostState = snackbarHostState,
-            onRefreshRequested = { favoriteRefreshToken += 1 },
+            feedbackController = feedbackController,
         )
     }
 
@@ -864,13 +878,12 @@ internal fun ThreadReaderScreen(
             favoriteSyncRepository = favoriteSyncRepository,
             target = favoriteTarget(),
             removeRemote = removeRemote,
-            scope = scope,
-            snackbarHostState = snackbarHostState,
+            feedbackController = feedbackController,
+            confirmationController = confirmationController,
+            appTaskManager = appTaskManager,
             successMessage = pendingFavoriteRemovalSuccessMessage,
             failureMessage = i18n("取消收藏失敗"),
-            onRefreshRequested = { favoriteRefreshToken += 1 },
         )
-        pendingFavoriteRemovalSelection = null
     }
 
     suspend fun maybePromptRemoteRemoval() {
@@ -918,7 +931,7 @@ internal fun ThreadReaderScreen(
         }
     }
 
-    LaunchedEffect(tid, threadType, authorId, coverUrl, threadInfo?.forum?.fid, threadInfo?.forum?.name, title, favoriteRefreshToken) {
+    LaunchedEffect(tid, threadType, authorId, coverUrl, threadInfo?.forum?.fid, threadInfo?.forum?.name, title, favoriteRefreshToken, favoriteRepositoryRevision) {
         refreshFavoriteState()
     }
 
@@ -932,17 +945,17 @@ internal fun ThreadReaderScreen(
         val formHash = getFormHash()
         val fId = threadInfo?.forum?.fid
         if (formHash == null || fId == null) {
-            snackbarHostState.showSnackbar(i18n("獲取登入資訊失敗，請重新登入"))
+            feedbackController.post(i18n("獲取登入資訊失敗，請重新登入"))
             false
         } else {
             when (val res = threadRepository.votePoll(fId, tid, optionIds, formHash)) {
                 is YamiboResult.Success -> {
-                    snackbarHostState.showSnackbar(i18n("投票成功，正在刷新頁面..."))
+                    feedbackController.post(i18n("投票成功，正在刷新頁面..."))
                     refreshThreadAfterVote?.invoke()
                     true
                 }
                 else -> {
-                    snackbarHostState.showSnackbar(i18n("投票失敗: {}", i18n(res.message())))
+                    feedbackController.post(i18n("投票失敗: {}", i18n(res.message())))
                     false
                 }
             }
@@ -952,12 +965,12 @@ internal fun ThreadReaderScreen(
     val handleRate: (PostId, Int, String, Boolean) -> Unit = { pid, score, reason, noticeAuthor ->
         val formHash = getFormHash()
         if (formHash == null) {
-            scope.launch { snackbarHostState.showSnackbar(i18n("獲取登入資訊失敗，請重新登入")) }
+                    feedbackController.post(i18n("獲取登入資訊失敗，請重新登入"))
         } else {
             scope.launch {
                 when (val res = threadRepository.ratePost(tid, pid, score, reason, formHash, noticeAuthor)) {
-                    is YamiboResult.Success -> snackbarHostState.showSnackbar(i18n("評分成功，刷新後更新評分/點評狀態"))
-                    else -> snackbarHostState.showSnackbar(i18n("評分失敗: {}", i18n(res.message())))
+                    is YamiboResult.Success -> feedbackController.post(i18n("評分成功，刷新後更新評分/點評狀態"))
+                    else -> feedbackController.post(i18n("評分失敗: {}", i18n(res.message())))
                 }
             }
         }
@@ -966,12 +979,12 @@ internal fun ThreadReaderScreen(
     val handleComment: (PostId, String) -> Unit = { pid, message ->
         val formHash = getFormHash()
         if (formHash == null) {
-            scope.launch { snackbarHostState.showSnackbar(i18n("獲取登入資訊失敗，請重新登入")) }
+                    feedbackController.post(i18n("獲取登入資訊失敗，請重新登入"))
         } else {
             scope.launch {
                 when (val res = threadRepository.commentPost(tid, pid, message, formHash)) {
-                    is YamiboResult.Success -> snackbarHostState.showSnackbar(i18n("點評成功，刷新後更新評分/點評狀態"))
-                    else -> snackbarHostState.showSnackbar(i18n("點評失敗: {}", i18n(res.message())))
+                    is YamiboResult.Success -> feedbackController.post(i18n("點評成功，刷新後更新評分/點評狀態"))
+                    else -> feedbackController.post(i18n("點評失敗: {}", i18n(res.message())))
                 }
             }
         }
@@ -984,7 +997,7 @@ internal fun ThreadReaderScreen(
                 title = i18n("發表回復"),
                 initialUrl = replyPageUrl,
                 successCondition = { url -> url.contains("mod=viewthread") && url.contains("tid=") },
-                    onSuccess = { scope.launch { snackbarHostState.showSnackbar(i18n("回復已發表，請刷新頁面查看")) } },
+            onSuccess = { feedbackController.post(i18n("回復已發表，請刷新頁面查看")) },
             )
         )
     }
@@ -2286,7 +2299,7 @@ internal fun ThreadReaderScreen(
         if (previous != null) {
             val newlyDownloaded = (downloadedPages - previous).minOrNull()
             if (newlyDownloaded != null) {
-                snackbarHostState.showSnackbar(i18n("下載完成：第 {} 頁", newlyDownloaded))
+                feedbackController.post(i18n("下載完成：第 {} 頁", newlyDownloaded))
             }
         }
         observedDownloadedPages = downloadedPages
@@ -2418,7 +2431,7 @@ internal fun ThreadReaderScreen(
             } catch (error: Exception) {
                 Logger.w("ThreadReaderScreen", "Failed to sync favorite metadata after cover selection tid=${tid.value}", error)
             }
-            snackbarHostState.showSnackbar(i18n("已設為封面"))
+            feedbackController.post(i18n("已設為封面"))
         }
     }
 
@@ -2429,7 +2442,7 @@ internal fun ThreadReaderScreen(
         scope.launch {
             val saved = contentCoverRepository.setManualCover(key, resolvedCoverUrl)
             if (saved) {
-                snackbarHostState.showSnackbar(savedMessage)
+                feedbackController.post(savedMessage)
             }
         }
     }
@@ -2491,7 +2504,7 @@ internal fun ThreadReaderScreen(
                     loadSucceeded = true
                 }
                 else -> {
-                    snackbarHostState.showSnackbar(i18n("刷新失敗: {}，嘗試讀取緩存", i18n(result.message())))
+                    feedbackController.post(i18n("刷新失敗: {}，嘗試讀取緩存", i18n(result.message())))
                     if (loadFromCache()) {
                         loadSucceeded = true
                     } else if (page == initialPage || page == 1) {
@@ -2520,7 +2533,7 @@ internal fun ThreadReaderScreen(
                         failedAutoLoadPages[page] = i18n(result.message())
                     }
                     if (page == initialPage || page == 1) state = ReaderState.Error(i18n(result.message()))
-                    else snackbarHostState.showSnackbar(i18n("載入失敗: {}", i18n(result.message())))
+                    else feedbackController.post(i18n("載入失敗: {}", i18n(result.message())))
                 }
             }
         }
@@ -2562,7 +2575,7 @@ internal fun ThreadReaderScreen(
             }
             hasRestoredPosition = true
             if (nearestPost.pid.value.toLong() != targetPidLong) {
-                snackbarHostState.showSnackbar(i18n("找不到指定的樓層，已跳轉至最接近的樓層"))
+                feedbackController.post(i18n("找不到指定的樓層，已跳轉至最接近的樓層"))
             }
         }
     }
@@ -3278,8 +3291,7 @@ internal fun ThreadReaderScreen(
             LocalImageSetCatalogCoverLabel provides catalogCoverLabel,
             LocalImageActionMessageListener provides { message ->
                 scope.launch {
-                    snackbarHostState.currentSnackbarData?.dismiss()
-                    snackbarHostState.showSnackbar(message)
+                    feedbackController.post(message)
                 }
             },
         ) {
@@ -4288,7 +4300,7 @@ internal fun ThreadReaderScreen(
                                 if (targetIndex != null) {
                                     listState.animateScrollToItem(targetIndex)
                                 } else {
-                                    snackbarHostState.showSnackbar(i18n("目前無法定位跳轉位置"))
+                                    feedbackController.post(i18n("目前無法定位跳轉位置"))
                                 }
                             }
                         },
@@ -4310,7 +4322,7 @@ internal fun ThreadReaderScreen(
                             drawerState.open()
                         }
                     },
-                    onFavorite = { scope.launch { toggleFavoriteQuickWithFeedback() } },
+                    onFavorite = { launchFavoriteTask("toggle") { toggleFavoriteQuickWithFeedback() } },
                     onFavoriteLongPress = {
                         scope.launch {
                             val target = favoriteTarget()
@@ -4334,7 +4346,7 @@ internal fun ThreadReaderScreen(
                                 initialUrl = replyUrl,
                                 successCondition = { url -> url.contains("mod=viewthread") && url.contains("tid=") },
                                 onSuccess = {
-                                scope.launch { snackbarHostState.showSnackbar(i18n("回復已發表，請刷新頁面查看")) }
+                        feedbackController.post(i18n("回復已發表，請刷新頁面查看"))
                                 },
                             )
                         )
@@ -4452,24 +4464,24 @@ internal fun ThreadReaderScreen(
                 onDownloadPage = {
                     val page = downloadSheetPage
                     showDownloadSheet = false
-                    scope.launch {
+                    launchDownloadTask("page:$page") {
                         downloadRepository.enqueuePage(tid, threadInfo?.title ?: title, authorId, page)
-                            .onSuccess { snackbarHostState.showSnackbar(i18n("已加入下載佇列")) }
+                            .onSuccess { feedbackController.post(i18n("已加入下載佇列")) }
                             .onFailure { error ->
                                 Logger.e("ThreadReaderScreen", "Failed to enqueue page download tid=${tid.value} page=$page", error)
-                                snackbarHostState.showSnackbar(error.message ?: i18n("下載失敗"))
+                                feedbackController.post(error.message ?: i18n("下載失敗"))
                                 navigator.navigate(IBackupSettingsScreen())
                             }
                     }
                 },
                 onDownloadThread = {
                     showDownloadSheet = false
-                    scope.launch {
+                    launchDownloadTask("all") {
                         downloadRepository.enqueueThread(tid, threadInfo?.title ?: title, authorId)
-                            .onSuccess { snackbarHostState.showSnackbar(i18n("已加入完整 Thread 下載")) }
+                            .onSuccess { feedbackController.post(i18n("已加入完整 Thread 下載")) }
                             .onFailure { error ->
                                 Logger.e("ThreadReaderScreen", "Failed to enqueue thread download tid=${tid.value}", error)
-                                snackbarHostState.showSnackbar(error.message ?: i18n("下載失敗"))
+                                feedbackController.post(error.message ?: i18n("下載失敗"))
                                 if (!downloadRepository.isStorageReady()) {
                                     navigator.navigate(IBackupSettingsScreen())
                                 }
@@ -4478,16 +4490,16 @@ internal fun ThreadReaderScreen(
                 },
                 onDownloadThreadExceptLastPage = {
                     showDownloadSheet = false
-                    scope.launch {
+                    launchDownloadTask("except-last") {
                         downloadRepository.enqueueThreadExceptLastPage(
                             tid,
                             threadInfo?.title ?: title,
                             authorId,
                         )
-                            .onSuccess { snackbarHostState.showSnackbar(i18n("已加入除最後一頁外的下載")) }
+                            .onSuccess { feedbackController.post(i18n("已加入除最後一頁外的下載")) }
                             .onFailure { error ->
                                 Logger.e("ThreadReaderScreen", "Failed to enqueue thread download except last page tid=${tid.value}", error)
-                                snackbarHostState.showSnackbar(error.message ?: i18n("下載失敗"))
+                                feedbackController.post(error.message ?: i18n("下載失敗"))
                                 if (!downloadRepository.isStorageReady()) {
                                     navigator.navigate(IBackupSettingsScreen())
                                 }
@@ -4497,17 +4509,17 @@ internal fun ThreadReaderScreen(
                 onClearPage = {
                     val page = downloadSheetPage
                     showDownloadSheet = false
-                    scope.launch {
+                    launchDownloadTask("clear-page:$page") {
                         downloadRepository.clearPage(ThreadPageDownloadKey(tid.value, page, authorId?.value))
-                        snackbarHostState.showSnackbar(i18n("已清除目前頁下載"))
+                        feedbackController.post(i18n("已清除目前頁下載"))
                     }
                 },
                 onClearThread = {
                     val page = currentVisiblePageForAction()
                     showDownloadSheet = false
-                    scope.launch {
+                    launchDownloadTask("clear-thread") {
                         downloadRepository.clearThread(ThreadPageDownloadKey(tid.value, page, authorId?.value))
-                        snackbarHostState.showSnackbar(i18n("已清除整個 Thread 下載"))
+                        feedbackController.post(i18n("已清除整個 Thread 下載"))
                     }
                 },
             )
@@ -4563,13 +4575,6 @@ internal fun ThreadReaderScreen(
             }
         }
 
-        YamiboSnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 72.dp)
-        )
     }
 
     if (showRefreshDownloadedDialog) {
@@ -4588,11 +4593,11 @@ internal fun ThreadReaderScreen(
                                 is YamiboResult.Success -> {
                                     loadedPages = loadedPages - page
                                     loadPage(page)
-                                    snackbarHostState.showSnackbar(i18n("已刷新下載內容"))
+                                    feedbackController.post(i18n("已刷新下載內容"))
                                 }
                                 else -> {
                                     state = ReaderState.Success
-                                    snackbarHostState.showSnackbar(i18n("刷新失敗: {}", i18n(result.message())))
+                                    feedbackController.post(i18n("刷新失敗: {}", i18n(result.message())))
                                 }
                             }
                         }
@@ -4657,7 +4662,7 @@ internal fun ThreadReaderScreen(
                         favoriteRepository.setItemLocations(existing.id, selectedCategories, selectedCollections)
                         showFavoriteDialog = false
                         favoriteRefreshToken += 1
-                        snackbarHostState.showSnackbar(i18n("已更新收藏路徑"))
+                        feedbackController.post(i18n("已更新收藏路徑"))
                     }
                 }
             }
@@ -4690,7 +4695,7 @@ internal fun ThreadReaderScreen(
         FavoriteAddSyncConfirmDialog(
             onDismiss = {
                 showFavoriteAddSyncConfirm = false
-                scope.launch { completeSavedFavoriteSync(syncToRemote = false) }
+                launchFavoriteTask("sync") { completeSavedFavoriteSync(syncToRemote = false) }
             },
             onConfirm = { rememberChoice, syncRemote ->
                 showFavoriteAddSyncConfirm = false
@@ -4698,7 +4703,7 @@ internal fun ThreadReaderScreen(
                     appSettingsRepository.favoriteAddSyncPromptEnabled.setValue(false)
                     appSettingsRepository.favoriteAddSyncDefault.setValue(syncRemote)
                 }
-                scope.launch { completeSavedFavoriteSync(syncRemote) }
+                launchFavoriteTask("sync") { completeSavedFavoriteSync(syncRemote) }
             },
         )
     }
@@ -4715,7 +4720,7 @@ internal fun ThreadReaderScreen(
                     appSettingsRepository.favoriteRemoveSyncPromptEnabled.setValue(false)
                     appSettingsRepository.favoriteRemoveSyncDefault.setValue(syncRemote)
                 }
-                scope.launch { completeFavoriteRemoval(syncRemote) }
+                launchFavoriteTask("remove") { completeFavoriteRemoval(syncRemote) }
             },
         )
     }
@@ -4758,9 +4763,9 @@ internal fun ThreadReaderScreen(
                         bookmarked = next,
                     )
                     reloadPostBookMarks()
-                    snackbarHostState.showSnackbar(
+                    feedbackController.post(
                         if (next) i18n("已新增書籤") else i18n("已移除書籤"),
-                        duration = SnackbarDuration.Short,
+                        duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short,
                     )
                 }
             },
@@ -4772,7 +4777,7 @@ internal fun ThreadReaderScreen(
                         title = post.title.ifBlank { i18n("（無標題）") },
                         read = true,
                     )
-                    snackbarHostState.showSnackbar(i18n("已標為已讀"), duration = SnackbarDuration.Short)
+                    feedbackController.post(i18n("已標為已讀"), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
                 }
             },
             onMarkUnread = {
@@ -4783,7 +4788,7 @@ internal fun ThreadReaderScreen(
                         title = post.title.ifBlank { i18n("（無標題）") },
                         read = false,
                     )
-                    snackbarHostState.showSnackbar(i18n("已標為未讀"), duration = SnackbarDuration.Short)
+                    feedbackController.post(i18n("已標為未讀"), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
                 }
             },
             onClearHistory = {
@@ -4802,7 +4807,7 @@ internal fun ThreadReaderScreen(
                             }
                         }
                     }
-                    snackbarHostState.showSnackbar(i18n("已清除全部閱讀紀錄"), duration = SnackbarDuration.Short)
+                    feedbackController.post(i18n("已清除全部閱讀紀錄"), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
                 }
             },
         )

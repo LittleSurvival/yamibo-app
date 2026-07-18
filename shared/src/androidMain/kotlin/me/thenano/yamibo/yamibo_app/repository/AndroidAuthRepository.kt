@@ -9,13 +9,15 @@ import kotlinx.coroutines.delay
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.store.auth.CookieStore
 import me.thenano.yamibo.yamibo_app.store.auth.UserStore
+import me.thenano.yamibo.yamibo_app.store.forum.ForumFavoriteStore
 import me.thenano.yamibo.yamibo_app.util.auth.parseCookieStringToMap
 import kotlin.time.Duration.Companion.milliseconds
 
 class AndroidAuthRepository(
     override val cookieStore: CookieStore,
     override val userStore: UserStore,
-    override val yamiboClient: YamiboClient
+    override val yamiboClient: YamiboClient,
+    private val forumFavoriteStore: ForumFavoriteStore? = null,
 ) : AuthRepository {
     override suspend fun isLoggedIn(): Boolean {
         return parseCookieStringToMap(cookieStore.load()).containsKey(authCookieKey)
@@ -77,6 +79,7 @@ class AndroidAuthRepository(
     override suspend fun logOut() {
         cookieStore.clear()
         userStore.clear()
+        forumFavoriteStore?.clear()
         /** remove cookie from webview */
         CookieManager.getInstance().apply {
             removeAllCookies(null)

@@ -5,6 +5,7 @@ import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.page.RatePopoutPage
 import io.github.littlesurvival.dto.page.RateResultPopoutPage
 import io.github.littlesurvival.dto.page.ThreadPage
+import io.github.littlesurvival.dto.page.AddFavoriteResult
 import io.github.littlesurvival.dto.page.VotersPopoutScreen
 import io.github.littlesurvival.dto.value.FormHash
 import io.github.littlesurvival.dto.value.ForumId
@@ -51,7 +52,7 @@ class IOSThreadRepository(
         return yamiboClient.fetchFindPost(threadId = tid, authorId = authorId, postId = postId)
     }
 
-    override suspend fun addFavorite(tid: ThreadId, formHash: FormHash): YamiboResult<String> {
+    override suspend fun addFavorite(tid: ThreadId, formHash: FormHash): YamiboResult<AddFavoriteResult> {
         yamiboClient.setCookie(cookieStore.load() ?: "")
         return yamiboClient.fetchAddFavorite(tid, formHash)
     }

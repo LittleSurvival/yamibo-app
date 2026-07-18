@@ -282,6 +282,14 @@ Current cache size: {}","清除圖片、頁面與其他暫存資料，釋放目�
 已經是第一話,Already the first episode,已經是第一話,已經是第一話
 已設為封面,Already set as cover,已設為封面,已設為封面
 已同步至百合會,Already synced to Yamibo,已同步至百合會,已同步至百合會
+同步至百合會失敗：{},Failed to sync to Yamibo: {},同步至百合會失敗：{},同步至百合會失敗：{}
+百合會已收藏，但未取得收藏識別碼,Bookmarked on Yamibo but no favorite ID was returned,百合會已收藏，但未取得收藏識別碼,百合會已收藏，但未取得收藏識別碼
+百合會收藏識別碼不可用。請到收藏頁使用「同步百合會收藏」重新對齊識別碼後再試。,The Yamibo favorite ID is unavailable. Use Sync Yamibo Favorites on the Favorites page to realign IDs before retrying.,百合會收藏識別碼不可用。請到收藏頁使用「同步百合會收藏」重新對齊識別碼後再試。,百合会收藏标识码不可用。请到收藏页使用“同步百合会收藏”重新对齐标识码后再试。
+正在收藏本版...,Bookmarking this forum...,正在收藏本版...,正在收藏本版...
+已收藏本版,Forum bookmarked,已收藏本版,已收藏本版
+正在解除本版收藏...,Removing forum bookmark...,正在解除本版收藏...,正在解除本版收藏...
+已解除本版收藏,Forum bookmark removed,已解除本版收藏,已解除本版收藏
+已從百合會取消收藏,Removed from Yamibo favorites,已從百合會取消收藏,已從百合會取消收藏
 同步過程發生錯誤,An error occurred during synchronization,同步過程發生錯誤,同步過程發生錯誤
 Android 的背景同步依賴前景通知。開始同步後，只要通知已成功出現，再縮小 App 也能持續執行。,"Android's background sync relies on foreground notifications. After synchronization is started, as long as the notification appears successfully, the app will continue to execute when it is reduced in size.",Android 的背景同步依賴前景通知。開始同步後，只要通知已成功出現，再縮小 App 也能持續執行。,Android 的背景同步依賴前景通知。開始同步後，只要通知已成功出現，再縮小 App 也能持續執行。
 公告,announcement,公告,公告
@@ -831,4 +839,8 @@ WebView 打開,WebView open,WebView 打開,WebView 打開
 已設為標籤封面,Set as tag cover,已設為標籤封面,已設為標籤封面
 已設為RSS封面,Set as RSS cover,已設為RSS封面,已設為RSS封面
 RSS搜尋目錄,RSS search directory,RSS搜尋目錄,RSS搜尋目錄
+保留本地收藏,Keep local favorite,保留本地收藏,保留本地收藏
+僅解除本地收藏,Remove local favorite only,僅解除本地收藏,仅移除本地收藏
+已解除本地收藏，百合會收藏仍可能存在,"Local favorite removed; the Yamibo favorite may still exist",已解除本地收藏，百合會收藏仍可能存在,已移除本地收藏，百合会收藏可能仍然存在
+無法從百合會解除收藏,Unable to remove Yamibo favorite,無法從百合會解除收藏,无法移除百合会收藏
 RSS搜尋目錄(#{}),RSS search directory (#{}),RSS搜尋目錄(#{}),RSS搜尋目錄(#{})

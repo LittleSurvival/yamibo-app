@@ -3,6 +3,8 @@ package me.thenano.yamibo.yamibo_app.repository
 import io.github.littlesurvival.YamiboClient
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.page.FilterType
+import io.github.littlesurvival.dto.page.AddFavoriteResult
+import io.github.littlesurvival.dto.page.FavoriteType
 import io.github.littlesurvival.dto.page.ForumPage
 import io.github.littlesurvival.dto.page.HomePage
 import io.github.littlesurvival.dto.page.OrderType
@@ -11,6 +13,8 @@ import io.github.littlesurvival.dto.value.FormHash
 import io.github.littlesurvival.dto.value.ForumId
 import io.github.littlesurvival.dto.value.SearchId
 import me.thenano.yamibo.yamibo_app.store.auth.CookieStore
+import me.thenano.yamibo.yamibo_app.repository.forum.ForumFavoriteSynchronizer
+import me.thenano.yamibo.yamibo_app.store.forum.ForumFavoriteStore
 import kotlin.time.Duration.Companion.hours
 
 import me.thenano.yamibo.yamibo_app.core.cache.DiskCacheFactory
@@ -18,11 +22,17 @@ import me.thenano.yamibo.yamibo_app.core.cache.DiskCacheFactory
 class IOSForumRepository(
     private val cookieStore: CookieStore,
     private val yamiboClient: YamiboClient,
-    diskCacheFactory: DiskCacheFactory
+    diskCacheFactory: DiskCacheFactory,
+    private val forumFavoriteStore: ForumFavoriteStore,
 ) : ForumRepository {
 
     private val homeCache = diskCacheFactory.create<HomePage>("home_page", maxSize = 1, expiration = 12.hours)
     private val forumCache = diskCacheFactory.create<ForumPage>("forum_page", maxSize = 60, expiration = 2.hours)
+    private val favoriteSynchronizer = ForumFavoriteSynchronizer(forumFavoriteStore) { page ->
+        yamiboClient.fetchFavoritePage(type = FavoriteType.Forum, page = page)
+    }
+
+    override val favoriteForums = forumFavoriteStore.favorites
 
     companion object {
         private const val HOME_CACHE_KEY = "main"
@@ -34,6 +44,7 @@ class IOSForumRepository(
 
         if (result is YamiboResult.Success) {
             homeCache.set(HOME_CACHE_KEY, result.value)
+            favoriteSynchronizer.applyHomePage(result.value)
         }
         return result
     }
@@ -71,9 +82,20 @@ class IOSForumRepository(
         return yamiboClient.fetchSearchById(query, searchId, page)
     }
 
-    override suspend fun addFavorite(forumId: ForumId, formHash: FormHash): YamiboResult<String> {
+    override suspend fun addFavorite(forumId: ForumId, formHash: FormHash): YamiboResult<AddFavoriteResult> {
         yamiboClient.setCookie(cookieStore.load() ?: "")
-        return yamiboClient.fetchAddFavorite(forumId, formHash)
+        val result = yamiboClient.fetchAddFavorite(forumId, formHash)
+        if (result is YamiboResult.Success) {
+            forumFavoriteStore.upsert(forumId, result.value.favId)
+        }
+        return result
+    }
+
+    override suspend fun removeFavorite(forumId: ForumId, formHash: FormHash): YamiboResult<String> {
+        yamiboClient.setCookie(cookieStore.load() ?: "")
+        return favoriteSynchronizer.removeFavorite(forumId) { favoriteId ->
+            yamiboClient.fetchRemoveFavorite(favoriteId, formHash)
+        }
     }
 
     override fun getCachedHomePage(): HomePage? = homeCache.get(HOME_CACHE_KEY)

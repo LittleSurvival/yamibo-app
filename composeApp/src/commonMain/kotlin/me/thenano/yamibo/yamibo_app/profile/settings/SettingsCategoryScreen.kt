@@ -67,7 +67,7 @@ internal fun SettingsCategoryScreen(category: String) {
         else -> i18n("設定")
     }
 
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
 
     Scaffold(
         topBar = {
@@ -77,7 +77,6 @@ internal fun SettingsCategoryScreen(category: String) {
                 onBack = { navigator.pop() },
             )
         },
-        snackbarHost = { YamiboSnackbarHost(snackbarHostState) },
         containerColor = colors.creamBackground,
     ) { paddingValues ->
         Column(
@@ -88,12 +87,12 @@ internal fun SettingsCategoryScreen(category: String) {
                 .padding(20.dp),
         ) {
             when (category) {
-                "appearance" -> AppearanceContent(snackbarHostState)
+                "appearance" -> AppearanceContent(feedbackController)
                 "language" -> LanguageContent()
                 "novel_reader" -> NovelReaderContent()
                 "manga_reader" -> MangaReaderContent()
-                "favorite" -> FavoriteSettingsContent(snackbarHostState)
-                "storage" -> StorageContent(snackbarHostState)
+                "favorite" -> FavoriteSettingsContent(feedbackController)
+                "storage" -> StorageContent(feedbackController)
                 "sign" -> SignSettingsContent()
             }
         }
@@ -113,7 +112,7 @@ private fun SectionLabel(text: String) {
 }
 
 @Composable
-private fun AppearanceContent(snackbarHostState: SnackbarHostState) {
+private fun AppearanceContent(feedbackController: me.thenano.yamibo.yamibo_app.feedback.AppFeedbackController) {
     val appSettingsRepo = LocalAppSettingsRepository.current
     val themeMode = appSettingsRepo.themeMode.state()
     val themeScheme = appSettingsRepo.themeScheme.state()
@@ -137,7 +136,7 @@ private fun AppearanceContent(snackbarHostState: SnackbarHostState) {
 
     Spacer(Modifier.height(24.dp))
     SectionLabel(i18n("字體"))
-    FontManagementSetting(snackbarHostState)
+    FontManagementSetting(feedbackController)
     Spacer(Modifier.height(18.dp))
     AppFontSelectorSetting()
     Spacer(Modifier.height(18.dp))
@@ -223,7 +222,7 @@ private fun MangaReaderContent() {
 }
 
 @Composable
-private fun FavoriteSettingsContent(snackbarHostState: SnackbarHostState) {
+private fun FavoriteSettingsContent(feedbackController: me.thenano.yamibo.yamibo_app.feedback.AppFeedbackController) {
     val colors = YamiboTheme.colors
     val navigator = LocalNavigator.current
     val appSettingsRepository = LocalAppSettingsRepository.current
@@ -361,7 +360,7 @@ private fun FavoriteSettingsContent(snackbarHostState: SnackbarHostState) {
             coroutineScope.launch {
                 favoriteUpdateRunner.schedulePeriodicUpdate(interval)
                 if (interval == FavoriteUpdateInterval.SMART) {
-                    snackbarHostState.showSnackbar(i18n("智能更新策略尚未接入，暫停週期背景檢查。"))
+                    feedbackController.post(i18n("智能更新策略尚未接入，暫停週期背景檢查。"))
                 }
             }
         },
@@ -449,7 +448,7 @@ private fun FavoriteSettingsContent(snackbarHostState: SnackbarHostState) {
                             navigator.navigate(IFavoriteSyncProgressScreen(result.runId))
                         }
                         is me.thenano.yamibo.yamibo_app.favorite.sync.FavoriteSyncRunner.LaunchResult.Rejected -> {
-                            snackbarHostState.showSnackbar(result.reason)
+                            feedbackController.post(result.reason)
                             if (result.requiresBackgroundAccessSetup) {
                                 navigator.navigate(IBackgroundAccessSetupScreen())
                             }
@@ -559,7 +558,7 @@ private fun RowScope.SettingsRowDescription(
 }
 
 @Composable
-private fun StorageContent(snackbarHostState: SnackbarHostState) {
+private fun StorageContent(feedbackController: me.thenano.yamibo.yamibo_app.feedback.AppFeedbackController) {
     val colors = YamiboTheme.colors
     val navigator = LocalNavigator.current
     val appSettingsRepo = LocalAppSettingsRepository.current
@@ -644,7 +643,7 @@ private fun StorageContent(snackbarHostState: SnackbarHostState) {
                 diskCacheFactory.clearAllCache()
                 cacheSizeText = "0 kB"
                 cacheBreakdown = cacheBreakdown.copy(usages = emptyList())
-                snackbarHostState.showSnackbar(i18n("已清除所有緩存"))
+                feedbackController.post(i18n("已清除所有緩存"))
             }
         },
     )

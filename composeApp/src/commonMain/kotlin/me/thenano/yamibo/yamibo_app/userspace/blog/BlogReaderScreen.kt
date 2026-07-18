@@ -40,6 +40,7 @@ import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl.HtmlRenderer
 import me.thenano.yamibo.yamibo_app.userspace.IUserSpaceScreen
+import me.thenano.yamibo.yamibo_app.task.isActive
 import me.thenano.yamibo.yamibo_app.webview.IPlatformWebView
 
 private sealed interface BlogReaderState {
@@ -59,7 +60,12 @@ fun BlogReaderScreen(
     val authRepository = LocalAuthRepository.current
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
+    val appTaskManager = me.thenano.yamibo.yamibo_app.LocalAppTaskManager.current
+    val appTasks by appTaskManager.tasks.collectAsState()
+    val commentTaskKey = remember(blogId) {
+        me.thenano.yamibo.yamibo_app.task.AppTaskKey("blog-comment:$blogId")
+    }
     var currentPage by remember(blogId, userId) { mutableIntStateOf(1) }
     var state by remember(blogId, userId) {
         mutableStateOf(
@@ -68,7 +74,7 @@ fun BlogReaderScreen(
         )
     }
     var commentText by remember(blogId) { mutableStateOf("") }
-    var submitting by remember { mutableStateOf(false) }
+    var handledCommentSubmissionId by remember(blogId) { mutableStateOf<Long?>(null) }
 
     suspend fun loadPage(page: Int, preferCache: Boolean = true) {
         if (preferCache) {
@@ -92,10 +98,20 @@ fun BlogReaderScreen(
         if (state is BlogReaderState.Loading) loadPage(1)
     }
 
+    val commentTaskState = appTasks[commentTaskKey]
+    val submitting = commentTaskState?.isActive == true
+    LaunchedEffect(commentTaskState) {
+        val succeeded = commentTaskState as? me.thenano.yamibo.yamibo_app.task.AppTaskState.Succeeded
+            ?: return@LaunchedEffect
+        if (handledCommentSubmissionId == succeeded.submissionId) return@LaunchedEffect
+        handledCommentSubmissionId = succeeded.submissionId
+        commentText = ""
+        loadPage(currentPage, preferCache = false)
+    }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = colors.creamBackground,
-        snackbarHost = { YamiboSnackbarHost(hostState = snackbarHostState) },
         topBar = {
             BlogReaderTopBar(
                 title = i18n("日志"),
@@ -162,24 +178,30 @@ fun BlogReaderScreen(
                                     val formHash = user?.formHash
                                     val message = commentText.trim()
                                     when {
-                                        formHash == null -> scope.launch {
-                                            snackbarHostState.showSnackbar(i18n("請先登入後再評論"), duration = SnackbarDuration.Short)
+                                        formHash == null -> {
+                                            feedbackController.post(i18n("請先登入後再評論"), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
                                         }
-                                        message.isBlank() -> scope.launch {
-                                            snackbarHostState.showSnackbar(i18n("請輸入評論內容"), duration = SnackbarDuration.Short)
+                                        message.isBlank() -> {
+                                            feedbackController.post(i18n("請輸入評論內容"), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
                                         }
-                                        else -> scope.launch {
-                                            submitting = true
+                                        else -> appTaskManager.submit(
+                                            key = commentTaskKey,
+                                        ) {
                                             when (val result = repository.postBlogComment(blogId, page.rootBlog.author.uid, message, formHash)) {
                                                 is YamiboResult.Success -> {
-                                                    commentText = ""
                                                     repository.clearCachedBlog(blogId)
-                                                    snackbarHostState.showSnackbar(result.value, duration = SnackbarDuration.Short)
-                                                    loadPage(currentPage, preferCache = false)
+                                                    me.thenano.yamibo.yamibo_app.task.AppTaskResult.Success(
+                                                        feedback = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackEvent(result.value),
+                                                    )
                                                 }
-                                                else -> snackbarHostState.showSnackbar(i18n(result.message()), duration = SnackbarDuration.Short)
+                                                else -> {
+                                                    val reason = i18n(result.message())
+                                                    me.thenano.yamibo.yamibo_app.task.AppTaskResult.Failure(
+                                                        message = reason,
+                                                        feedback = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackEvent(reason),
+                                                    )
+                                                }
                                             }
-                                            submitting = false
                                         }
                                     }
                                 },

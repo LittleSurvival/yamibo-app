@@ -38,6 +38,7 @@ import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl.HtmlRenderer
+import me.thenano.yamibo.yamibo_app.task.isActive
 
 private sealed interface PrivateMessageState {
     data object Loading : PrivateMessageState
@@ -56,7 +57,9 @@ fun PrivateMessageScreen(
     val currentUser = authRepository.currentUser()
     val navigator = me.thenano.yamibo.yamibo_app.navigation.LocalNavigator.current
     val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
+    val appTaskManager = me.thenano.yamibo.yamibo_app.LocalAppTaskManager.current
+    val appTasks by appTaskManager.tasks.collectAsState()
     val listState = rememberLazyListState()
     var currentPage by remember(toUser) { mutableIntStateOf(1) }
     var state by remember(toUser) {
@@ -66,7 +69,7 @@ fun PrivateMessageScreen(
         )
     }
     var input by remember(toUser) { mutableStateOf("") }
-    var sending by remember { mutableStateOf(false) }
+    var handledSendSubmissionId by remember(toUser) { mutableStateOf<Long?>(null) }
 
     suspend fun loadPage(page: Int? = null, preferCache: Boolean = true) {
         if (preferCache) {
@@ -95,10 +98,23 @@ fun PrivateMessageScreen(
         if (size > 0) listState.animateScrollToItem(size - 1)
     }
 
+    val sendTaskKey = (state as? PrivateMessageState.Success)?.page?.let { page ->
+        me.thenano.yamibo.yamibo_app.task.AppTaskKey("message-send:${page.pmId}")
+    }
+    val sendTaskState = sendTaskKey?.let(appTasks::get)
+    val sending = sendTaskState?.isActive == true
+    LaunchedEffect(sendTaskState) {
+        val succeeded = sendTaskState as? me.thenano.yamibo.yamibo_app.task.AppTaskState.Succeeded
+            ?: return@LaunchedEffect
+        if (handledSendSubmissionId == succeeded.submissionId) return@LaunchedEffect
+        handledSendSubmissionId = succeeded.submissionId
+        input = ""
+        loadPage(page = null, preferCache = false)
+    }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = colors.creamBackground,
-        snackbarHost = { YamiboSnackbarHost(hostState = snackbarHostState) },
         topBar = {
             PrivateMessageTopBar(
                 title = (state as? PrivateMessageState.Success)?.page?.title
@@ -122,24 +138,29 @@ fun PrivateMessageScreen(
                     val formHash = authRepository.currentUser()?.formHash
                     val message = input.trim()
                     when {
-                        formHash == null -> scope.launch {
-                            snackbarHostState.showSnackbar(i18n("請先登入後再發送消息"), duration = SnackbarDuration.Short)
+                        formHash == null -> {
+                            feedbackController.post(i18n("請先登入後再發送消息"), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
                         }
-                        message.isBlank() -> scope.launch {
-                            snackbarHostState.showSnackbar(i18n("請輸入內容"), duration = SnackbarDuration.Short)
+                        message.isBlank() -> {
+                            feedbackController.post(i18n("請輸入內容"), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
                         }
-                        else -> scope.launch {
-                            sending = true
+                        else -> appTaskManager.submit(
+                            key = requireNotNull(sendTaskKey),
+                        ) {
                             when (val result = repository.sendPrivateMessage(page.pmId, page.toUser, message, formHash)) {
                                 is YamiboResult.Success -> {
-                                input = ""
-                                repository.clearPrivateMessagePages(toUser)
-                                repository.clearMessagePages()
-                                loadPage(page = null, preferCache = false)
+                                    repository.clearPrivateMessagePages(toUser)
+                                    repository.clearMessagePages()
+                                    me.thenano.yamibo.yamibo_app.task.AppTaskResult.Success()
+                                }
+                                else -> {
+                                    val reason = i18n(result.message())
+                                    me.thenano.yamibo.yamibo_app.task.AppTaskResult.Failure(
+                                        message = reason,
+                                        feedback = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackEvent(reason),
+                                    )
+                                }
                             }
-                                else -> snackbarHostState.showSnackbar(i18n(result.message()), duration = SnackbarDuration.Short)
-                            }
-                            sending = false
                         }
                     }
                 },

@@ -56,9 +56,11 @@ import io.github.littlesurvival.dto.value.ThreadId
 import io.github.littlesurvival.dto.value.TagId
 import io.github.littlesurvival.dto.value.UserId
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.thenano.yamibo.yamibo_app.LocalDownloadRepository
+import me.thenano.yamibo.yamibo_app.LocalAppTaskManager
 import me.thenano.yamibo.yamibo_app.LocalAppSettingsRepository
 import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.components.controls.YamiboActionChip
@@ -92,6 +94,8 @@ import me.thenano.yamibo.yamibo_app.repository.download.ThreadPageDownloadKey
 import me.thenano.yamibo.yamibo_app.repository.download.buildDownloadedContentFilterOptions
 import me.thenano.yamibo.yamibo_app.repository.download.filterAndSortDownloadedContentGroups
 import me.thenano.yamibo.yamibo_app.util.state
+import me.thenano.yamibo.yamibo_app.task.AppTaskKey
+import me.thenano.yamibo.yamibo_app.task.isActive
 
 private enum class DownloadManagerTab(val title: String) {
     Queue(i18n("下載佇列")),
@@ -115,7 +119,8 @@ fun DownloadQueueScreen() {
     val appSettingsRepository = LocalAppSettingsRepository.current
     val downloadedContentRefreshAutoUpdate = appSettingsRepository.downloadedContentRefreshAutoUpdate.state()
     val entries by repository.queue.collectAsState()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
+    val appTaskManager = LocalAppTaskManager.current
     val scope = rememberCoroutineScope()
     var summary by remember { mutableStateOf(DownloadQueueSummary()) }
     var folderReady by remember { mutableStateOf(true) }
@@ -154,7 +159,6 @@ fun DownloadQueueScreen() {
                 onBack = navigator::pop,
             )
         },
-        snackbarHost = { YamiboSnackbarHost(snackbarHostState) },
         containerColor = colors.creamBackground,
     ) { padding ->
         Column(
@@ -170,14 +174,22 @@ fun DownloadQueueScreen() {
                     summary = summary,
                     folderReady = folderReady,
                     onOpenSettings = { navigator.navigate(IBackupSettingsScreen()) },
-                    onPauseAll = repository::pauseAll,
-                    onResumeAll = repository::resumeAll,
+                    onPauseAll = {
+                        appTaskManager.launch(AppTaskKey("download-control:pause-all")) {
+                            repository.pauseAll()
+                        }
+                    },
+                    onResumeAll = {
+                        appTaskManager.launch(AppTaskKey("download-control:resume-all")) {
+                            repository.resumeAll()
+                        }
+                    },
                     onRetry = { entry ->
-                        scope.launch {
+                        appTaskManager.launch(AppTaskKey("download-control:retry:${entry.key.stableId}")) {
                             repository.retry(entry.key)
                                 .onFailure { error ->
                                     Logger.e("DownloadQueueScreen", "Failed to retry download key=${entry.key.stableId}", error)
-                                    snackbarHostState.showSnackbar(error.message ?: i18n("重試失敗"))
+                                    feedbackController.post(error.message ?: i18n("重試失敗"))
                                 }
                         }
                     },
@@ -203,39 +215,47 @@ fun DownloadQueueScreen() {
                                 val refreshed = refreshUpdateAvailableDownloads(entries, repository)
                                 if (refreshed > 0) {
                                     reloadContentManagement()
-                                    snackbarHostState.showSnackbar(i18n("已自動刷新 {} 項可更新內容", refreshed))
+                                    feedbackController.post(i18n("已自動刷新 {} 項可更新內容", refreshed))
                                 }
                             }
                         }
                     },
                     onClearGroup = { group ->
-                        scope.launch {
+                        val handle = appTaskManager.launch(AppTaskKey("download-control:clear-group:${group.id}")) {
                             clearGroup(group, repository)
                                 .onSuccess {
                                     reloadContentManagement()
-                                    snackbarHostState.showSnackbar(i18n("已清除下載內容"))
+                                    feedbackController.post(i18n("已清除下載內容"))
                                 }
                                 .onFailure { error ->
                                     Logger.e("DownloadQueueScreen", "Failed to clear download group id=${group.id}", error)
-                                    snackbarHostState.showSnackbar(error.message ?: i18n("清除失敗"))
+                                    feedbackController.post(error.message ?: i18n("清除失敗"))
                                 }
+                        }
+                        scope.launch {
+                            handle.state.first { !it.isActive }
+                            reloadContentManagement()
                         }
                     },
                     onClearItem = { item ->
-                        scope.launch {
+                        val handle = appTaskManager.launch(AppTaskKey("download-control:clear-item:${item.key.stableId}")) {
                             clearItem(item.key, repository)
                                 .onSuccess {
                                     reloadContentManagement()
-                                    snackbarHostState.showSnackbar(i18n("已清除下載內容"))
+                                    feedbackController.post(i18n("已清除下載內容"))
                                 }
                                 .onFailure { error ->
                                     Logger.e("DownloadQueueScreen", "Failed to clear download item key=${item.key.stableId}", error)
-                                    snackbarHostState.showSnackbar(error.message ?: i18n("清除失敗"))
+                                    feedbackController.post(error.message ?: i18n("清除失敗"))
                                 }
+                        }
+                        scope.launch {
+                            handle.state.first { !it.isActive }
+                            reloadContentManagement()
                         }
                     },
                     onRefreshItem = { item ->
-                        scope.launch {
+                        val handle = appTaskManager.launch(AppTaskKey("download-control:refresh:${item.key.stableId}")) {
                             val result = when (val key = item.key) {
                                 is ThreadPageDownloadKey -> repository.refreshPage(
                                     ThreadId(key.tid),
@@ -249,10 +269,14 @@ fun DownloadQueueScreen() {
                             when (result) {
                                 is YamiboResult.Success -> {
                                     reloadContentManagement()
-                                    snackbarHostState.showSnackbar(i18n("已重新載入下載內容"))
+                                    feedbackController.post(i18n("已重新載入下載內容"))
                                 }
-                                else -> snackbarHostState.showSnackbar(i18n("重新載入失敗：{}", i18n(result.message())))
+                                else -> feedbackController.post(i18n("重新載入失敗：{}", i18n(result.message())))
                             }
+                        }
+                        scope.launch {
+                            handle.state.first { !it.isActive }
+                            reloadContentManagement()
                         }
                     },
                 )

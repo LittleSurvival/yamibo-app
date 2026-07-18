@@ -1,4 +1,4 @@
-﻿package me.thenano.yamibo.yamibo_app.favorite
+package me.thenano.yamibo.yamibo_app.favorite
 
 
 import androidx.compose.foundation.background
@@ -136,9 +136,9 @@ fun FavoritePage() {
     val rssRepository = LocalRssSearchSubscriptionRepository.current
     val readHistoryRepository = LocalReadHistoryRepository.current
     val navigator = LocalNavigator.current
-    val appScope = LocalAppCoroutineScope.current
+    val appTaskManager = LocalAppTaskManager.current
     val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
     val favoriteGridMode = appSettingsRepository.favoriteGridMode.state()
     val sortMode = appSettingsRepository.favoriteSortMode.state()
     val sortDescending = appSettingsRepository.favoriteSortDescending.state()
@@ -195,8 +195,7 @@ fun FavoritePage() {
 
     fun showSnackbarMessage(message: String) {
         scope.launch {
-            snackbarHostState.currentSnackbarData?.dismiss()
-            snackbarHostState.showSnackbar(message)
+            feedbackController.post(message)
         }
     }
 
@@ -730,10 +729,6 @@ fun FavoritePage() {
             )
         }
 
-        YamiboSnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp)
-        )
     }
 
     if (showBatchTypeDialog && batchDownloadScope != null) {
@@ -772,7 +767,9 @@ fun FavoritePage() {
                 selectedItemIds = emptySet()
                 selectedCollectionIds = emptySet()
                 showSnackbarMessage(i18n("正在加入下載佇列 {} 項", items.size))
-                appScope.launch {
+                appTaskManager.launch(
+                    key = me.thenano.yamibo.yamibo_app.task.AppTaskKey("download:favorite-batch"),
+                ) {
                     try {
                         if (!downloadRepository.isStorageReady()) {
                             showSnackbarMessage(i18n("請先設定備份資料夾"))

@@ -69,7 +69,7 @@ internal fun CommentReaderScreen(
     val authRepo = LocalAuthRepository.current
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
     val platformContext = LocalPlatformContext.current
     val listState = rememberLazyListState()
     val htmlLinkContext = remember(tid, postTitle, authorId) {
@@ -102,7 +102,7 @@ internal fun CommentReaderScreen(
                 title = i18n("發表回復"),
                 initialUrl = replyPageUrl,
                 successCondition = { url -> url.contains("mod=viewthread") && url.contains("tid=") },
-                    onSuccess = { scope.launch { snackbarHostState.showSnackbar(i18n("回復已發表，請刷新頁面查看")) } },
+            onSuccess = { feedbackController.post(i18n("回復已發表，請刷新頁面查看")) },
             )
         )
     }
@@ -264,7 +264,7 @@ internal fun CommentReaderScreen(
             listState.animateScrollToItem(index)
             targetCommentHandled = true
         } else if (isCommentComplete) {
-            snackbarHostState.showSnackbar(i18n("無法精準定位該評論"))
+            feedbackController.post(i18n("無法精準定位該評論"))
             targetCommentHandled = true
         }
     }
@@ -272,9 +272,6 @@ internal fun CommentReaderScreen(
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = colors.creamBackground,
-        snackbarHost = {
-            YamiboSnackbarHost(hostState = snackbarHostState)
-        },
         topBar = {
             ThreadTopBar(
                 title = postTitle,
@@ -345,26 +342,26 @@ internal fun CommentReaderScreen(
                                     onRate = { score, reason, noticeAuthor ->
                                         val formHash = getFormHash()
                                         if (formHash == null) {
-                                            scope.launch { snackbarHostState.showSnackbar(i18n("獲取登入資訊失敗，請重新登入")) }
+                feedbackController.post(i18n("獲取登入資訊失敗，請重新登入"))
                                             return@PostRenderer
                                         }
                                         scope.launch {
                                             when (val res = threadRepository.ratePost(tid, post.pid, score, reason, formHash, noticeAuthor)) {
-                                                is YamiboResult.Success -> snackbarHostState.showSnackbar(i18n("評分成功，刷新後更新評分/點評狀態"))
-                                                else -> snackbarHostState.showSnackbar(i18n("評分失敗: {}", i18n(res.message())))
+                                                is YamiboResult.Success -> feedbackController.post(i18n("評分成功，刷新後更新評分/點評狀態"))
+                                                else -> feedbackController.post(i18n("評分失敗: {}", i18n(res.message())))
                                             }
                                         }
                                     },
                                     onComment = { message ->
                                         val formHash = getFormHash()
                                         if (formHash == null) {
-                                            scope.launch { snackbarHostState.showSnackbar(i18n("獲取登入資訊失敗，請重新登入")) }
+                feedbackController.post(i18n("獲取登入資訊失敗，請重新登入"))
                                             return@PostRenderer
                                         }
                                         scope.launch {
                                             when (val res = threadRepository.commentPost(tid, post.pid, message, formHash)) {
-                                                is YamiboResult.Success -> snackbarHostState.showSnackbar(i18n("點評成功，刷新後更新評分/點評狀態"))
-                                                else -> snackbarHostState.showSnackbar(i18n("點評失敗: {}", i18n(res.message())))
+                                                is YamiboResult.Success -> feedbackController.post(i18n("點評成功，刷新後更新評分/點評狀態"))
+                                                else -> feedbackController.post(i18n("點評失敗: {}", i18n(res.message())))
                                             }
                                         }
                                     },
@@ -416,7 +413,7 @@ internal fun CommentReaderScreen(
                                                             threadRepository.fetchThread(tid, null, nextPage)) {
                                                             is YamiboResult.Success -> result.value
                                                             else -> {
-                                                                snackbarHostState.showSnackbar(i18n("載入失敗: {}", i18n(result.message())))
+                                                                feedbackController.post(i18n("載入失敗: {}", i18n(result.message())))
                                                                 isLoadingMore = false
                                                                 return@launch
                                                             }
@@ -486,7 +483,7 @@ internal fun CommentReaderScreen(
                 },
                 onSettings = {
                     scope.launch {
-                        snackbarHostState.showSnackbar(i18n("設定功能開發中"))
+                        feedbackController.post(i18n("設定功能開發中"))
                     }
                 },
                 modifier = Modifier
@@ -506,14 +503,14 @@ internal fun CommentReaderScreen(
                             initialUrl = replyUrl,
                             successCondition = { url -> url.contains("mod=viewthread") && url.contains("tid=") },
                             onSuccess = {
-                                scope.launch { snackbarHostState.showSnackbar(i18n("回復已發表，請刷新頁面查看")) }
+                        feedbackController.post(i18n("回復已發表，請刷新頁面查看"))
                             },
                         )
                     )
                 },
                 onFavorite = {
                     scope.launch {
-                        snackbarHostState.showSnackbar(i18n("收藏功能開發中"))
+                        feedbackController.post(i18n("收藏功能開發中"))
                     }
                 },
                 onShare = {

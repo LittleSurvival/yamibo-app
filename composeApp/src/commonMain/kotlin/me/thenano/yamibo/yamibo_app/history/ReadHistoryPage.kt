@@ -1,4 +1,4 @@
-﻿package me.thenano.yamibo.yamibo_app.history
+package me.thenano.yamibo.yamibo_app.history
 
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 
@@ -59,7 +59,9 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
     val favoriteSyncRepository = LocalFavoriteSyncRepository.current
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
+    val confirmationController = me.thenano.yamibo.yamibo_app.LocalAppConfirmationController.current
+    val appTaskManager = me.thenano.yamibo.yamibo_app.LocalAppTaskManager.current
     val allLabel = i18n("全部")
     val filterPrefix = i18n("篩選")
 
@@ -83,6 +85,8 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
         mutableStateOf<List<FavoriteStoreRepository.FavoriteCollectionOption>>(emptyList())
     }
     var favoriteRefreshToken by remember { mutableIntStateOf(0) }
+    val favoriteRepositoryRevision by favoriteRepository.favoriteItemRevision.collectAsState()
+    val effectiveFavoriteRefreshToken = favoriteRefreshToken + favoriteRepositoryRevision.toInt()
     var pendingFavoriteRemovalTarget by remember { mutableStateOf<FavoriteTargetPayload?>(null) }
     var pendingFavoriteRemovalSelection by remember { mutableStateOf<FavoriteLocationSelection?>(null) }
     var pendingFavoriteRemovalSuccessMessage by remember { mutableStateOf(i18n("已移除收藏")) }
@@ -259,6 +263,17 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
         )
     }
 
+    fun launchFavoriteTask(
+        action: String,
+        target: FavoriteTargetPayload,
+        operation: suspend () -> Unit,
+    ) {
+        appTaskManager.launch(
+            key = me.thenano.yamibo.yamibo_app.task.AppTaskKey("favorite:$action:${target.taskIdentity()}"),
+            operation = operation,
+        )
+    }
+
     suspend fun openFavoriteDialogWithSelection(target: FavoriteTargetPayload) {
         favoriteDialogCategories = favoriteRepository.getCategories()
         favoriteCollectionOptions = favoriteRepository.getCollectionOptions()
@@ -272,67 +287,42 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
         val syncResult = withContext(Dispatchers.Default) {
             addFavoriteAndMaybeSync(favoriteRepository, favoriteSyncRepository, target, syncToRemote)
         }
-        favoriteRefreshToken += 1
         val message = when {
             syncResult == null -> i18n("已加入收藏，預設存入未分類")
             syncResult.success -> i18n("已加入收藏，{}", (syncResult.message?.let { i18n(it) }?.takeIf { it.isNotBlank() } ?: i18n("已同步到百合會。")))
             else -> i18n("已加入收藏，但同步失敗：{}", (syncResult.message?.let { i18n(it) }?.takeIf { it.isNotBlank() } ?: i18n("請稍後再試")))
         }
-        snackbarHostState.showSnackbar(message)
+        feedbackController.post(message)
     }
 
     suspend fun completeSavedFavoriteSync(target: FavoriteTargetPayload, syncToRemote: Boolean) {
-        val syncingSnackbarJob = if (syncToRemote) {
-            scope.launch {
-                snackbarHostState.showSnackbar(
-                    message = i18n("正在同步到百合會..."),
-                    duration = SnackbarDuration.Indefinite,
-                )
-            }
-        } else {
-            null
+        val feedbackGroup = "favorite-sync:${target.taskIdentity()}"
+        if (syncToRemote) {
+            feedbackController.post(i18n("正在同步到百合會..."), groupKey = feedbackGroup)
         }
         val syncResult = withContext(Dispatchers.Default) {
             syncExistingFavoriteIfRequested(favoriteRepository, favoriteSyncRepository, target, syncToRemote)
         }
-        syncingSnackbarJob?.cancel()
-        snackbarHostState.currentSnackbarData?.dismiss()
-        favoriteRefreshToken += 1
         val message = when {
             syncResult == null -> i18n("已加入本地收藏，預設存入未分類")
             syncResult.success -> i18n("已加入本地收藏，{}", (syncResult.message?.let { i18n(it) }?.takeIf { it.isNotBlank() } ?: i18n("已同步到百合會。")))
             else -> i18n("已加入本地收藏，但同步到百合會失敗：{}", (syncResult.message?.let { i18n(it) }?.takeIf { it.isNotBlank() } ?: i18n("請稍後再試")))
         }
-        snackbarHostState.showSnackbar(message)
+        feedbackController.post(message, groupKey = feedbackGroup)
     }
 
     suspend fun completeFavoriteRemoval(target: FavoriteTargetPayload, removeRemote: Boolean) {
-        val syncingSnackbarJob = if (removeRemote) {
-            scope.launch {
-                snackbarHostState.showSnackbar(
-                    message = i18n("正在從百合會移除收藏..."),
-                    duration = SnackbarDuration.Indefinite,
-                )
-            }
-        } else {
-            null
-        }
-        val removeResult = withContext(Dispatchers.Default) {
-            removeFavoriteWithSync(
-                favoriteRepository = favoriteRepository,
-                favoriteSyncRepository = favoriteSyncRepository,
-                target = target,
-                removeRemote = removeRemote,
-            )
-        }
-        syncingSnackbarJob?.cancel()
-        snackbarHostState.currentSnackbarData?.dismiss()
-        favoriteRefreshToken += 1
-        snackbarHostState.showSnackbar(
-            if (removeResult.success) pendingFavoriteRemovalSuccessMessage else removeResult.message?.let { i18n(it) }?.takeIf { it.isNotBlank() } ?: i18n("移除收藏失敗"),
+        completeFavoriteRemovalWithFeedback(
+            favoriteRepository = favoriteRepository,
+            favoriteSyncRepository = favoriteSyncRepository,
+            target = target,
+            removeRemote = removeRemote,
+            feedbackController = feedbackController,
+            confirmationController = confirmationController,
+            appTaskManager = appTaskManager,
+            successMessage = pendingFavoriteRemovalSuccessMessage,
+            failureMessage = i18n("移除收藏失敗"),
         )
-        pendingFavoriteRemovalTarget = null
-        pendingFavoriteRemovalSelection = null
     }
 
     suspend fun maybePromptRemoteRemoval(target: FavoriteTargetPayload) {
@@ -467,7 +457,7 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
                             selectedItems = emptySet()
                             mode = PageMode.Normal
                             state = HistoryState.Empty
-                            snackbarHostState.showSnackbar(i18n("已刷新閱讀歷史紀錄"))
+                            feedbackController.post(i18n("已刷新閱讀歷史紀錄"))
                         }
                     },
                     onCancel = {
@@ -482,7 +472,7 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
                                 selectedItems = emptySet()
                                 mode = PageMode.Normal
                                 loadPage(1)
-                                snackbarHostState.showSnackbar(i18n("已刪除 {} 項紀錄", deletedAmount))
+                                feedbackController.post(i18n("已刪除 {} 項紀錄", deletedAmount))
                             }
                         }
                     },
@@ -541,7 +531,7 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
                                                 scope.launch {
                                                     readHistoryRepo.deleteHistoryBatch(listOf(history))
                                                     loadPage(currentPage)
-                                                    snackbarHostState.showSnackbar(i18n("已刪除這筆紀錄"))
+                                                    feedbackController.post(i18n("已刪除這筆紀錄"))
                                                 }
                                             },
                                             onFavorite = {
@@ -560,7 +550,7 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
                                                     )
                                                 }
                                             },
-                                            favoriteRefreshToken = favoriteRefreshToken,
+            favoriteRefreshToken = effectiveFavoriteRefreshToken,
                                             navigator = navigator
                                         )
                                         is ReadHistoryRepository.TagMangaReadingHistory -> TagHistoryItem(
@@ -575,7 +565,7 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
                                                 scope.launch {
                                                     readHistoryRepo.deleteMangaTagHistory(history.tagId)
                                                     loadPage(currentPage)
-                                                    snackbarHostState.showSnackbar(i18n("已刪除這筆紀錄"))
+                                                    feedbackController.post(i18n("已刪除這筆紀錄"))
                                                 }
                                             },
                                             onFavorite = {
@@ -600,7 +590,7 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
                                                     )
                                                 }
                                             },
-                                            favoriteRefreshToken = favoriteRefreshToken,
+            favoriteRefreshToken = effectiveFavoriteRefreshToken,
                                             navigator = navigator
                                         )
                                         is ReadHistoryRepository.TagCatalogReadingHistory -> TagCatalogHistoryItem(
@@ -615,7 +605,7 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
                                                 scope.launch {
                                                     readHistoryRepo.deleteTagCatalogThreadHistory(history.tagId)
                                                     loadPage(currentPage)
-                                                    snackbarHostState.showSnackbar(i18n("已刪除這筆紀錄"))
+                                                    feedbackController.post(i18n("已刪除這筆紀錄"))
                                                 }
                                             },
                                             onFavorite = {
@@ -640,7 +630,7 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
                                                     )
                                                 }
                                             },
-                                            favoriteRefreshToken = favoriteRefreshToken,
+            favoriteRefreshToken = effectiveFavoriteRefreshToken,
                                             navigator = navigator
                                         )
                                         is ReadHistoryRepository.RssSearchReadingHistory -> RssHistoryItem(
@@ -655,7 +645,7 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
                                                 scope.launch {
                                                     readHistoryRepo.deleteRssSearchHistory(history.subscriptionId)
                                                     loadPage(currentPage)
-                                                    snackbarHostState.showSnackbar(i18n("已刪除這筆紀錄"))
+                                                    feedbackController.post(i18n("已刪除這筆紀錄"))
                                                 }
                                             },
                                             onFavorite = {
@@ -680,7 +670,7 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
                                                     )
                                                 }
                                             },
-                                            favoriteRefreshToken = favoriteRefreshToken,
+            favoriteRefreshToken = effectiveFavoriteRefreshToken,
                                             navigator = navigator,
                                         )
                                         is ReadHistoryRepository.RssCatalogReadingHistory -> RssCatalogHistoryItem(
@@ -695,7 +685,7 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
                                                 scope.launch {
                                                     readHistoryRepo.deleteRssCatalogThreadHistory(history.subscriptionId)
                                                     loadPage(currentPage)
-                                                    snackbarHostState.showSnackbar(i18n("已刪除這筆紀錄"))
+                                                    feedbackController.post(i18n("已刪除這筆紀錄"))
                                                 }
                                             },
                                             onFavorite = {
@@ -720,7 +710,7 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
                                                     )
                                                 }
                                             },
-                                            favoriteRefreshToken = favoriteRefreshToken,
+            favoriteRefreshToken = effectiveFavoriteRefreshToken,
                                             navigator = navigator,
                                         )
                                         else -> {}
@@ -750,10 +740,6 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
                 }
             }
 
-            YamiboSnackbarHost(
-                hostState = snackbarHostState,
-                modifier = Modifier.align(Alignment.BottomCenter)
-            )
         }
     }
 
@@ -807,7 +793,7 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
                         favoriteRepository.setItemLocations(existing.id, selectedCategories, selectedCollections)
                         favoriteDialogTarget = null
                         favoriteRefreshToken += 1
-                        snackbarHostState.showSnackbar(i18n("收藏位置已更新"))
+                        feedbackController.post(i18n("收藏位置已更新"))
                     }
                 }
             }
@@ -845,7 +831,7 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
                 showFavoriteAddSyncConfirm = false
                 pendingFavoriteRemovalTarget = null
                 if (target != null) {
-                    scope.launch { completeSavedFavoriteSync(target, syncToRemote = false) }
+                    launchFavoriteTask("sync", target) { completeSavedFavoriteSync(target, syncToRemote = false) }
                 }
             },
             onConfirm = { rememberChoice, syncRemote ->
@@ -856,7 +842,7 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
                     appSettingsRepository.favoriteAddSyncDefault.setValue(syncRemote)
                 }
                 pendingFavoriteRemovalTarget = null
-                scope.launch { completeSavedFavoriteSync(target, syncRemote) }
+                launchFavoriteTask("sync", target) { completeSavedFavoriteSync(target, syncRemote) }
             },
         )
     }
@@ -875,7 +861,7 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
                     appSettingsRepository.favoriteRemoveSyncPromptEnabled.setValue(false)
                     appSettingsRepository.favoriteRemoveSyncDefault.setValue(syncRemote)
                 }
-                scope.launch { completeFavoriteRemoval(target, syncRemote) }
+                launchFavoriteTask("remove", target) { completeFavoriteRemoval(target, syncRemote) }
             },
         )
     }

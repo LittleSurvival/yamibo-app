@@ -170,7 +170,7 @@ internal fun CatalogFavoriteRemovalDialogs(
     showRemovalConfirm: Boolean,
     showMultiPathDialog: Boolean,
     pendingSelection: FavoriteLocationSelection?,
-    snackbarHostState: SnackbarHostState,
+    feedbackController: me.thenano.yamibo.yamibo_app.feedback.AppFeedbackController,
     setShowRemovalConfirm: (Boolean) -> Unit,
     setShowMultiPathDialog: (Boolean) -> Unit,
     clearPendingSelection: () -> Unit,
@@ -195,7 +195,7 @@ internal fun CatalogFavoriteRemovalDialogs(
                     } else {
                         withContext(Dispatchers.Default) { removeFavorite() }
                         onRemoved()
-                        snackbarHostState.showSnackbar(i18n("已移除收藏"))
+                        feedbackController.post(i18n("已移除收藏"))
                         clearPendingSelection()
                     }
                 }
@@ -215,7 +215,7 @@ internal fun CatalogFavoriteRemovalDialogs(
                 scope.launch {
                     withContext(Dispatchers.Default) { removeFavorite() }
                     onRemoved()
-                    snackbarHostState.showSnackbar(i18n("已從所有位置移除收藏"))
+                    feedbackController.post(i18n("已從所有位置移除收藏"))
                     clearPendingSelection()
                 }
             },

@@ -1,4 +1,4 @@
-﻿package me.thenano.yamibo.yamibo_app.profile.settings.backup
+package me.thenano.yamibo.yamibo_app.profile.settings.backup
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -43,7 +43,7 @@ internal fun BackupSettingsScreen() {
     val repository = LocalBackupRepository.current
     val scheduler = LocalBackupScheduler.current
     val appSettingsRepository = LocalAppSettingsRepository.current
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
     val coroutineScope = rememberCoroutineScope()
     val backupInterval = appSettingsRepository.backupInterval.state()
     val maxAutoFiles = appSettingsRepository.backupMaxAutoFiles.state()
@@ -67,11 +67,11 @@ internal fun BackupSettingsScreen() {
                 repository.setSelectedFolder(uri)
                     .onSuccess {
                         refresh()
-                        snackbarHostState.showSnackbar(i18n("已選擇備份資料夾"))
+                        feedbackController.post(i18n("已選擇備份資料夾"))
                     }
                     .onFailure { error ->
                         Logger.e("BackupSettingsScreen", "Failed to select backup folder", error)
-                        snackbarHostState.showSnackbar(error.message ?: i18n("無法選擇備份資料夾"))
+                        feedbackController.post(error.message ?: i18n("無法選擇備份資料夾"))
                     }
             }
         },
@@ -88,7 +88,6 @@ internal fun BackupSettingsScreen() {
                 onBack = { navigator.pop() },
             )
         },
-        snackbarHost = { YamiboSnackbarHost(snackbarHostState) },
         containerColor = colors.creamBackground,
     ) { paddingValues ->
         Column(
@@ -138,13 +137,13 @@ internal fun BackupSettingsScreen() {
                     repository.restoreBackup(uri, mode)
                         .onSuccess {
                             refresh()
-                            snackbarHostState.showSnackbar(
+                            feedbackController.post(
                                 i18n("還原完成：收藏 {}，設定 {}，閱讀紀錄 {}", it.favorites, it.settings, it.readingHistory)
                             )
                         }
                         .onFailure { error ->
                             Logger.e("BackupSettingsScreen", "Failed to restore backup", error)
-                            snackbarHostState.showSnackbar(error.message ?: i18n("還原備份失敗"))
+                            feedbackController.post(error.message ?: i18n("還原備份失敗"))
                         }
                     working = false
                 }
@@ -162,11 +161,11 @@ internal fun BackupSettingsScreen() {
                     repository.createBackup(automatic = false, customName = name.takeIf { it.isNotBlank() })
                         .onSuccess {
                             refresh()
-                            snackbarHostState.showSnackbar(i18n("已建立備份：{}", it.name))
+                            feedbackController.post(i18n("已建立備份：{}", it.name))
                         }
                         .onFailure { error ->
                             Logger.e("BackupSettingsScreen", "Failed to create backup", error)
-                            snackbarHostState.showSnackbar(error.message ?: i18n("建立備份失敗"))
+                            feedbackController.post(error.message ?: i18n("建立備份失敗"))
                         }
                     working = false
                 }

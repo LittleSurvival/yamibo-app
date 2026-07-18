@@ -33,6 +33,8 @@ import me.thenano.yamibo.yamibo_app.favorite.sync.FavoriteSyncRunner
 import me.thenano.yamibo.yamibo_app.favorite.updates.AndroidFavoriteUpdateScheduler
 import me.thenano.yamibo.yamibo_app.favorite.updates.FavoriteUpdateRunner
 import me.thenano.yamibo.yamibo_app.i18n.i18n
+import me.thenano.yamibo.yamibo_app.confirmation.AppConfirmationController
+import me.thenano.yamibo.yamibo_app.feedback.AppFeedbackController
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.navigation.rememberRestorableNavigator
 import me.thenano.yamibo.yamibo_app.profile.settings.access.AndroidBackgroundAccessRepository
@@ -60,10 +62,12 @@ import me.thenano.yamibo.yamibo_app.repository.settings.SettingsImageReaderModeO
 import me.thenano.yamibo.yamibo_app.repository.userspace.BlogRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.userspace.UserSpaceRepositoryImpl
 import me.thenano.yamibo.yamibo_app.store.AndroidCookieStore
+import me.thenano.yamibo.yamibo_app.store.AndroidForumFavoriteStore
 import me.thenano.yamibo.yamibo_app.store.AndroidUserStore
 import me.thenano.yamibo.yamibo_app.store.settings.AndroidSettingsStore
 import me.thenano.yamibo.yamibo_app.update.AndroidAppUpdatePlatform
 import me.thenano.yamibo.yamibo_app.util.state
+import me.thenano.yamibo.yamibo_app.task.AppTaskManager
 import kotlin.time.Duration.Companion.milliseconds
 
 class MainActivity : ComponentActivity() {
@@ -105,8 +109,19 @@ class MainActivity : ComponentActivity() {
             /** Navigator Logic */
             val navigator = rememberRestorableNavigator()
             val appCoroutineScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main) }
-            DisposableEffect(appCoroutineScope) {
-                onDispose { appCoroutineScope.cancel() }
+            val appFeedbackController = remember { AppFeedbackController() }
+            val appConfirmationController = remember(appCoroutineScope) {
+                AppConfirmationController(appCoroutineScope)
+            }
+            val appTaskManager = remember(appCoroutineScope, appFeedbackController) {
+                AppTaskManager(appCoroutineScope, appFeedbackController)
+            }
+            DisposableEffect(appCoroutineScope, appFeedbackController, appConfirmationController) {
+                onDispose {
+                    appConfirmationController.close()
+                    appFeedbackController.close()
+                    appCoroutineScope.cancel()
+                }
             }
             DisposableEffect(navigator) {
                 val callback = onBackPressedDispatcher.addCallback(this@MainActivity) {
@@ -130,6 +145,7 @@ class MainActivity : ComponentActivity() {
             /** Store Logic */
             val cookieStore = remember { AndroidCookieStore(context) }
             val userStore = remember { AndroidUserStore(context) }
+            val forumFavoriteStore = remember { AndroidForumFavoriteStore(context) }
             val settingsStore = remember { AndroidSettingsStore(context) }
             val appSettingsRepository = remember { AppSettingsRepository(settingsStore) }
             val novelReaderSettingsRepository = remember { NovelReaderSettingsRepository(settingsStore) }
@@ -148,7 +164,7 @@ class MainActivity : ComponentActivity() {
             /** Repository Logic */
             val yamiboClient = remember { YamiboClient(timeoutMillis = 60_000L) }
             val authRepository = remember {
-                AndroidAuthRepository(cookieStore, userStore, yamiboClient)
+                AndroidAuthRepository(cookieStore, userStore, yamiboClient, forumFavoriteStore)
             }
             val dbFactory = remember { DatabaseFactory(context) }
             val diskCacheFactory = remember {
@@ -158,7 +174,9 @@ class MainActivity : ComponentActivity() {
                 )
             }
             
-            val forumRepository = remember { AndroidForumRepository(cookieStore, yamiboClient, diskCacheFactory) }
+            val forumRepository = remember {
+                AndroidForumRepository(cookieStore, yamiboClient, diskCacheFactory, forumFavoriteStore)
+            }
             val threadRepository = remember { AndroidThreadRepository(cookieStore, yamiboClient, diskCacheFactory) }
             val userSpaceRepository = remember { UserSpaceRepositoryImpl(cookieStore, yamiboClient, diskCacheFactory) }
             val blogRepository = remember { BlogRepositoryImpl(cookieStore, yamiboClient, diskCacheFactory) }
@@ -268,6 +286,9 @@ class MainActivity : ComponentActivity() {
             /** Provide Repositories */
             CompositionLocalProvider(
                 LocalAppCoroutineScope provides appCoroutineScope,
+                LocalAppFeedbackController provides appFeedbackController,
+                LocalAppConfirmationController provides appConfirmationController,
+                LocalAppTaskManager provides appTaskManager,
                 LocalNavigator provides navigator,
                 LocalAuthRepository provides authRepository,
                 LocalAppUpdateRepository provides appUpdateRepository,

@@ -1,4 +1,4 @@
-﻿package me.thenano.yamibo.yamibo_app.thread.reader
+package me.thenano.yamibo.yamibo_app.thread.reader
 
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 
@@ -47,8 +47,6 @@ import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.model.ThreadSummary
 import io.github.littlesurvival.dto.value.*
 import io.github.littlesurvival.dto.page.*
-import kotlinx.coroutines.DelicateCoroutinesApi
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
@@ -83,6 +81,9 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import coil3.SingletonImageLoader
 import me.thenano.yamibo.yamibo_app.thread.detail.novel.INovelThreadDetailScreen
 import me.thenano.yamibo.yamibo_app.LocalAuthRepository
+import me.thenano.yamibo.yamibo_app.LocalAppTaskManager
+import me.thenano.yamibo.yamibo_app.task.AppTaskDuplicatePolicy
+import me.thenano.yamibo.yamibo_app.task.AppTaskKey
 import me.thenano.yamibo.yamibo_app.util.shareText
 import me.thenano.yamibo.yamibo_app.util.state
 import coil3.compose.LocalPlatformContext
@@ -136,7 +137,8 @@ fun ImagesReaderScreen(
     )
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
+    val appTaskManager = LocalAppTaskManager.current
     val historyRepo = LocalReadHistoryRepository.current
     val contentCoverRepository = LocalContentCoverRepository.current
     val threadRepository = LocalThreadRepository.current
@@ -326,7 +328,7 @@ fun ImagesReaderScreen(
                     activeTid = currentThreads.first().tid
                 }
             } else {
-                snackbarHostState.showSnackbar(i18n("無法載入閱讀目錄"))
+                feedbackController.post(i18n("無法載入閱讀目錄"))
             }
         }
     }
@@ -413,7 +415,7 @@ fun ImagesReaderScreen(
         }
         val previous = observedDownloadedTagChapter
         if (previous == false && downloaded) {
-            snackbarHostState.showSnackbar(i18n("下載完成"))
+            feedbackController.post(i18n("下載完成"))
         }
         observedDownloadedTagChapter = downloaded
     }
@@ -579,8 +581,11 @@ fun ImagesReaderScreen(
             val tagPageSnap = currentTagPage
             val currentCoverSnap = actualImageList.getOrNull(1) ?: actualImageList.getOrNull(0)
             
-            @OptIn(DelicateCoroutinesApi::class)
-            GlobalScope.launch {
+            appTaskManager.launch(
+                key = AppTaskKey("reader-history:${activeTidSnap.value}"),
+                duplicatePolicy = AppTaskDuplicatePolicy.AllowParallel,
+                instanceId = "${tagPageSnap}:${snapshotPage}:${currentTimeMillis()}",
+            ) {
                 if (tagId != null && tagName != null) {
                     val finalCover = if (actualImageList.isEmpty()) {
                         historyRepo.getTagMangaReaderModeHistoryPosition(tagId)?.coverUrl
@@ -825,7 +830,7 @@ fun ImagesReaderScreen(
                             activeTid = currentThreads.first().tid
                         }
                     } else {
-                        snackbarHostState.showSnackbar(i18n("無法載入下一頁"))
+                        feedbackController.post(i18n("無法載入下一頁"))
                     }
                 }
                 delay(600.milliseconds)
@@ -853,7 +858,7 @@ fun ImagesReaderScreen(
                             activeTid = currentThreads.last().tid
                         }
                     } else {
-                        snackbarHostState.showSnackbar(i18n("無法載入上一頁"))
+                        feedbackController.post(i18n("無法載入上一頁"))
                     }
                 }
                 delay(600.milliseconds)
@@ -1575,10 +1580,10 @@ fun ImagesReaderScreen(
                                             actualImageList = result.value
                                             isDownloadedTagChapter = true
                                             currentPage = currentPage.coerceIn(0, (actualImageList.size - 1).coerceAtLeast(0))
-                                            snackbarHostState.showSnackbar(i18n("已重新整理下載"))
+                                            feedbackController.post(i18n("已重新整理下載"))
                                         }
                                         else -> {
-                                            snackbarHostState.showSnackbar(i18n("重新整理下載失敗：{}", i18n(result.message())))
+                                            feedbackController.post(i18n("重新整理下載失敗：{}", i18n(result.message())))
                                         }
                                     }
                                     isLoadingImages = false
@@ -1730,27 +1735,18 @@ fun ImagesReaderScreen(
                             coverKey,
                             imageUrl,
                         )
-                        if (saved) snackbarHostState.showSnackbar(i18n("已設為封面"))
+                        if (saved) feedbackController.post(i18n("已設為封面"))
                     }
                 }
             } else null,
             onMessage = { message ->
                 scope.launch {
-                    snackbarHostState.currentSnackbarData?.dismiss()
-                    snackbarHostState.showSnackbar(message)
+                    feedbackController.post(message)
                 }
             },
             onDismiss = { showContextMenu = false },
             isBottomSheet = true
         )
 
-        // Snackbar
-        YamiboSnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 72.dp)
-        )
     }
 }
