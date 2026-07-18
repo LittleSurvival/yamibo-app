@@ -1,4 +1,4 @@
-﻿package me.thenano.yamibo.yamibo_app.favorite
+package me.thenano.yamibo.yamibo_app.favorite
 
 
 import androidx.compose.foundation.BorderStroke
@@ -46,7 +46,7 @@ internal fun FavoriteCategoryEditorScreen(categoryId: Long?) {
     val favoriteRepository = LocalFavoriteRepository.current
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
     val listState = rememberLazyListState()
     val density = LocalDensity.current
     val rowStridePx = with(density) { (EditorRowHeight + EditorRowSpacing).toPx() }
@@ -82,7 +82,7 @@ internal fun FavoriteCategoryEditorScreen(categoryId: Long?) {
     suspend fun createCategoryIfNeeded(): Boolean {
         if (workingCategoryId != 0L) return true
         if (categoryName.isBlank()) {
-            snackbarHostState.showSnackbar(i18n("請先輸入類別名稱"))
+            feedbackController.post(i18n("請先輸入類別名稱"))
             return false
         }
         return try {
@@ -95,7 +95,7 @@ internal fun FavoriteCategoryEditorScreen(categoryId: Long?) {
             reloadCollections()
             true
         } catch (error: IllegalArgumentException) {
-            snackbarHostState.showSnackbar(error.message?.let { i18n(it) }?.takeIf { it.isNotBlank() } ?: i18n("建立類別失敗"))
+            feedbackController.post(error.message?.let { i18n(it) }?.takeIf { it.isNotBlank() } ?: i18n("建立類別失敗"))
             false
         }
     }
@@ -148,9 +148,6 @@ internal fun FavoriteCategoryEditorScreen(categoryId: Long?) {
 
     Scaffold(
         containerColor = colors.creamBackground,
-        snackbarHost = {
-            YamiboSnackbarHost(snackbarHostState)
-        },
         topBar = {
             YamiboTopBar(
                 title = if (categoryId == null) i18n("新增類別") else i18n("編輯類別"),
@@ -166,7 +163,7 @@ internal fun FavoriteCategoryEditorScreen(categoryId: Long?) {
                                         return@launch
                                     }
                                     if (categoryName.isBlank()) {
-                                        snackbarHostState.showSnackbar(i18n("請輸入類別名稱"))
+                                        feedbackController.post(i18n("請輸入類別名稱"))
                                         return@launch
                                     }
                                     if (workingCategoryId == 0L) {
@@ -178,7 +175,7 @@ internal fun FavoriteCategoryEditorScreen(categoryId: Long?) {
                                     }
                                     navigator.pop()
                                 } catch (error: IllegalArgumentException) {
-                                    snackbarHostState.showSnackbar(error.message?.let { i18n(it) }?.takeIf { it.isNotBlank() } ?: i18n("保存失敗"))
+                                    feedbackController.post(error.message?.let { i18n(it) }?.takeIf { it.isNotBlank() } ?: i18n("保存失敗"))
                                 }
                             }
                         },
@@ -388,7 +385,7 @@ internal fun FavoriteCategoryEditorScreen(categoryId: Long?) {
                         showCollectionDialog = false
                         reloadCollections()
                     } catch (error: IllegalArgumentException) {
-                        snackbarHostState.showSnackbar(error.message?.let { i18n(it) }?.takeIf { it.isNotBlank() } ?: i18n("保存失敗"))
+                        feedbackController.post(error.message?.let { i18n(it) }?.takeIf { it.isNotBlank() } ?: i18n("保存失敗"))
                     }
                 }
             },

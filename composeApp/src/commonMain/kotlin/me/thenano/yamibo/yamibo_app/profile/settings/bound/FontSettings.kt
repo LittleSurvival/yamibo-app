@@ -1,4 +1,4 @@
-﻿package me.thenano.yamibo.yamibo_app.profile.settings.bound
+package me.thenano.yamibo.yamibo_app.profile.settings.bound
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
@@ -48,7 +48,7 @@ import me.thenano.yamibo.yamibo_app.util.state
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun FontManagementSetting(
-    snackbarHostState: SnackbarHostState,
+    feedbackController: me.thenano.yamibo.yamibo_app.feedback.AppFeedbackController,
     modifier: Modifier = Modifier,
 ) {
     val fontRepository = LocalFontRepository.current
@@ -75,18 +75,18 @@ fun FontManagementSetting(
                 onPicked = { sourceUri, displayName ->
                     coroutineScope.launch {
                         when (val result = fontRepository.loadFontFile(sourceUri, displayName)) {
-                            is FontLoadResult.Success -> snackbarHostState.showSnackbar(
+                            is FontLoadResult.Success -> feedbackController.post(
                                 i18n("已載入字體：{}", result.font.name)
                             )
 
-                            is FontLoadResult.Unsupported -> snackbarHostState.showSnackbar(i18n(result.message))
-                            is FontLoadResult.Failure -> snackbarHostState.showSnackbar(i18n(result.message))
+                            is FontLoadResult.Unsupported -> feedbackController.post(i18n(result.message))
+                            is FontLoadResult.Failure -> feedbackController.post(i18n(result.message))
                         }
                     }
                 },
                 onUnavailable = {
                     coroutineScope.launch {
-                        snackbarHostState.showSnackbar(
+                        feedbackController.post(
                             i18n(fontRepository.platformUnavailableMessage ?: "此平台暫不支援載入字體")
                         )
                     }
@@ -98,7 +98,7 @@ fun FontManagementSetting(
                     onClick = {
                         fontRepository.deleteFont(font.id)
                         coroutineScope.launch {
-                            snackbarHostState.showSnackbar(i18n("已刪除字體：{}", font.name))
+                            feedbackController.post(i18n("已刪除字體：{}", font.name))
                         }
                     },
                 )

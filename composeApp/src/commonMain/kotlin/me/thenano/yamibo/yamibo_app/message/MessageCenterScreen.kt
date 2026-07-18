@@ -63,7 +63,7 @@ fun MessageCenterScreen(
     val authRepository = LocalAuthRepository.current
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
     val currentUser = authRepository.currentUser()
 
     var selectedTab by remember { mutableStateOf(initialTab) }
@@ -106,7 +106,6 @@ fun MessageCenterScreen(
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = colors.creamBackground,
-        snackbarHost = { YamiboSnackbarHost(hostState = snackbarHostState) },
         topBar = {
             if (mainTabTopBar) {
                 MessageCenterMainTopBar(
@@ -177,7 +176,7 @@ fun MessageCenterScreen(
                             onOpenPrivateMessage = { user -> navigator.navigate(IPrivateMessageScreen(user.uid, user.name)) },
                             onMessageAction = {
                                 scope.launch {
-                                    snackbarHostState.showSnackbar(i18n("TODO: 消息互動尚未接入"), duration = SnackbarDuration.Short)
+                                    feedbackController.post(i18n("TODO: 消息互動尚未接入"), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
                                 }
                             },
                         )

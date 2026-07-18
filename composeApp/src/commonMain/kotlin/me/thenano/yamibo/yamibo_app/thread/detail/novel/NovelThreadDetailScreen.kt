@@ -1,4 +1,4 @@
-﻿package me.thenano.yamibo.yamibo_app.thread.detail.novel
+package me.thenano.yamibo.yamibo_app.thread.detail.novel
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -62,7 +62,9 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
     val contentCoverRepository = LocalContentCoverRepository.current
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
+    val confirmationController = me.thenano.yamibo.yamibo_app.LocalAppConfirmationController.current
+    val appTaskManager = me.thenano.yamibo.yamibo_app.LocalAppTaskManager.current
     val platformContext = LocalPlatformContext.current
 
     var state by remember { mutableStateOf<ThreadState>(ThreadState.Loading) }
@@ -82,6 +84,7 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
     var isFavorited by remember { mutableStateOf(false) }
     var favoritePaths by remember { mutableStateOf<List<String>>(emptyList()) }
     var favoriteRefreshToken by remember { mutableStateOf(0) }
+    val favoriteRepositoryRevision by favoriteRepository.favoriteItemRevision.collectAsState()
     var pendingFavoriteRemovalSelection by remember { mutableStateOf<FavoriteLocationSelection?>(null) }
     var pendingFavoriteRemovalSuccessMessage by remember { mutableStateOf(i18n("已移除收藏")) }
     var showFavoriteRemovalConfirm by remember { mutableStateOf(false) }
@@ -179,14 +182,20 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
         favoritePaths = selection.paths
     }
 
+    fun launchFavoriteTask(action: String, operation: suspend () -> Unit) {
+        appTaskManager.launch(
+            key = me.thenano.yamibo.yamibo_app.task.AppTaskKey("favorite:$action:thread:${tid.value}"),
+            operation = operation,
+        )
+    }
+
     suspend fun completeFavoriteAdd(syncToRemote: Boolean) {
         completeFavoriteAddWithFeedback(
             favoriteRepository = favoriteRepository,
             favoriteSyncRepository = favoriteSyncRepository,
             target = favoriteTarget(),
             syncToRemote = syncToRemote,
-            snackbarHostState = snackbarHostState,
-            onRefreshRequested = { favoriteRefreshToken += 1 },
+            feedbackController = feedbackController,
         )
     }
 
@@ -196,9 +205,7 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
             favoriteSyncRepository = favoriteSyncRepository,
             target = favoriteTarget(),
             syncToRemote = syncToRemote,
-            scope = scope,
-            snackbarHostState = snackbarHostState,
-            onRefreshRequested = { favoriteRefreshToken += 1 },
+            feedbackController = feedbackController,
         )
     }
 
@@ -208,13 +215,12 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
             favoriteSyncRepository = favoriteSyncRepository,
             target = favoriteTarget(),
             removeRemote = removeRemote,
-            scope = scope,
-            snackbarHostState = snackbarHostState,
+            feedbackController = feedbackController,
+            confirmationController = confirmationController,
+            appTaskManager = appTaskManager,
             successMessage = pendingFavoriteRemovalSuccessMessage,
             failureMessage = i18n("移除收藏失敗"),
-            onRefreshRequested = { favoriteRefreshToken += 1 },
         )
-        pendingFavoriteRemovalSelection = null
     }
 
     suspend fun maybePromptRemoteRemoval() {
@@ -266,6 +272,7 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
         tid,
         authorId,
         favoriteRefreshToken,
+        favoriteRepositoryRevision,
         canonicalCover?.resolvedUrl,
         (state as? ThreadState.Success)?.page?.thread?.title,
     ) {
@@ -305,9 +312,6 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = colors.creamBackground,
-        snackbarHost = {
-            YamiboSnackbarHost(hostState = snackbarHostState)
-        },
         topBar = {
             ThreadTopBar(
                 title =
@@ -360,9 +364,9 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
                                     }
 
                                     else -> {
-                                        snackbarHostState.showSnackbar(
+                                        feedbackController.post(
                                             message = i18n("重新整理帖子失敗：{}", i18n(result.message())),
-                                            duration = SnackbarDuration.Short,
+                                            duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short,
                                         )
                                     }
                                 }
@@ -399,9 +403,9 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
                                         if (result is YamiboResult.Success) {
                                             pagePostsCache[page] = result.value.posts
                                         } else {
-                                            snackbarHostState.showSnackbar(
+                                            feedbackController.post(
                                                 message = i18n("載入第 {} 頁失敗: {}", page, i18n(result.message())),
-                                                duration = SnackbarDuration.Short
+                                                duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short
                                             )
                                         }
                                     }
@@ -420,7 +424,7 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
                                 )
                             },
                             onPostLongPress = { actionPost = it },
-                            onFavorite = { scope.launch { toggleFavorite() } },
+                            onFavorite = { launchFavoriteTask("toggle") { toggleFavorite() } },
                             onFavoriteLongPress = {
                                 scope.launch {
                                     val selection = favoriteRepository.getFavoriteLocationSelection(favoriteTarget())
@@ -464,7 +468,7 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
                                 }
                             },
                             isFavorited = isFavorited,
-                            snackbarHostState = snackbarHostState,
+                            feedbackController = feedbackController,
                             scope = scope,
                             platformContext = platformContext,
                             noteContent = detailNote?.content.orEmpty(),
@@ -543,7 +547,7 @@ if (showFavoriteDialog) {
                     favoriteRepository.setItemLocations(existing.id, selectedCategories, selectedCollections)
                     showFavoriteDialog = false
                     favoriteRefreshToken += 1
-                    snackbarHostState.showSnackbar(i18n("收藏位置已更新"))
+                    feedbackController.post(i18n("收藏位置已更新"))
                 }
             }
         }
@@ -576,7 +580,7 @@ if (showFavoriteAddSyncConfirm) {
     FavoriteAddSyncConfirmDialog(
         onDismiss = {
             showFavoriteAddSyncConfirm = false
-            scope.launch { completeSavedFavoriteSync(syncToRemote = false) }
+            launchFavoriteTask("sync") { completeSavedFavoriteSync(syncToRemote = false) }
         },
         onConfirm = { rememberChoice, syncRemote ->
             showFavoriteAddSyncConfirm = false
@@ -584,7 +588,7 @@ if (showFavoriteAddSyncConfirm) {
                 appSettingsRepo.favoriteAddSyncPromptEnabled.setValue(false)
                 appSettingsRepo.favoriteAddSyncDefault.setValue(syncRemote)
             }
-            scope.launch { completeSavedFavoriteSync(syncRemote) }
+            launchFavoriteTask("sync") { completeSavedFavoriteSync(syncRemote) }
         },
     )
 }
@@ -601,7 +605,7 @@ if (showFavoriteRemoveSyncConfirm) {
                 appSettingsRepo.favoriteRemoveSyncPromptEnabled.setValue(false)
                 appSettingsRepo.favoriteRemoveSyncDefault.setValue(syncRemote)
             }
-            scope.launch { completeFavoriteRemoval(syncRemote) }
+            launchFavoriteTask("remove") { completeFavoriteRemoval(syncRemote) }
         },
     )
 }
@@ -638,9 +642,9 @@ if (showNoteDialog) {
                     content = content,
                 )
                 reloadNote()
-                snackbarHostState.showSnackbar(
+                feedbackController.post(
                     if (content.isBlank()) i18n("已刪除筆記") else i18n("已保存筆記"),
-                    duration = SnackbarDuration.Short,
+                    duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short,
                 )
             }
         },
@@ -653,7 +657,7 @@ if (showNoteDialog) {
                     authorId = noteAuthorId,
                 )
                 reloadNote()
-                snackbarHostState.showSnackbar(i18n("已刪除筆記"), duration = SnackbarDuration.Short)
+                feedbackController.post(i18n("已刪除筆記"), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
             }
         },
     )
@@ -678,9 +682,9 @@ actionPost?.let { post ->
                     bookmarked = next,
                 )
                 reloadPostBookMarks()
-                snackbarHostState.showSnackbar(
+                feedbackController.post(
                     if (next) i18n("已新增書籤") else i18n("已移除書籤"),
-                    duration = SnackbarDuration.Short,
+                    duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short,
                 )
             }
         },
@@ -703,9 +707,9 @@ actionPost?.let { post ->
                     read = next,
                 )
                 reloadPostBookMarks()
-                snackbarHostState.showSnackbar(
+                feedbackController.post(
                     if (next) i18n("已標為已讀") else i18n("已標為未讀"),
-                    duration = SnackbarDuration.Short,
+                    duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short,
                 )
             }
         },
@@ -723,7 +727,7 @@ actionPost?.let { post ->
                 readHistoryRepo.deleteHistory(tid, ReadHistoryRepository.ThreadEntryType.Novel, authorId)
                 readHistory = null
                 reloadPostBookMarks()
-                snackbarHostState.showSnackbar(i18n("已清除全部閱讀紀錄"), duration = SnackbarDuration.Short)
+                feedbackController.post(i18n("已清除全部閱讀紀錄"), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
             }
         },
     )
@@ -746,7 +750,7 @@ private fun ThreadContent(
     isFavorited: Boolean,
     onContinueRead: () -> Unit,
     readingProgressText: String?,
-    snackbarHostState: SnackbarHostState,
+    feedbackController: me.thenano.yamibo.yamibo_app.feedback.AppFeedbackController,
     scope: CoroutineScope,
     platformContext: PlatformContext,
     noteContent: String,
@@ -779,9 +783,9 @@ private fun ThreadContent(
                 onNoteClick = onNoteClick,
                 onCopy = { message ->
                     scope.launch {
-                        snackbarHostState.showSnackbar(
+                        feedbackController.post(
                             message = message,
-                            duration = SnackbarDuration.Short
+                            duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short
                         )
                     }
                 }

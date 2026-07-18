@@ -4,6 +4,10 @@ import io.github.littlesurvival.dto.value.ForumId
 import io.github.littlesurvival.dto.value.TagId
 import io.github.littlesurvival.dto.value.ThreadId
 import io.github.littlesurvival.dto.value.UserId
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository
 import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository.Companion.DEFAULT_CATEGORY_NAME
@@ -26,6 +30,8 @@ import me.thenano.yamibo.yamiboapp.LocalFavoriteItem
 class FavoriteStoreRepositoryImpl(
     private val db: Database
 ) : FavoriteStoreRepository {
+    private val favoriteItemRevisionState = MutableStateFlow(0L)
+    override val favoriteItemRevision: StateFlow<Long> = favoriteItemRevisionState.asStateFlow()
     private val categoryQueries = db.localFavoriteCategoryQueries
     private val collectionQueries = db.localFavoriteCollectionQueries
     private val itemQueries = db.localFavoriteItemQueries
@@ -327,6 +333,7 @@ class FavoriteStoreRepositoryImpl(
             categoryIds = categoryIds,
             collectionIds = collectionIds
         )
+        notifyFavoriteItemsChanged()
     }
 
     override suspend fun addNovelThreadFavorite(
@@ -352,6 +359,7 @@ class FavoriteStoreRepositoryImpl(
             categoryIds = categoryIds,
             collectionIds = collectionIds
         )
+        notifyFavoriteItemsChanged()
     }
 
     override suspend fun addTagMangaFavorite(
@@ -406,6 +414,7 @@ class FavoriteStoreRepositoryImpl(
 
         mergeCategories(itemId, normalizedCategories)
         mergeCollections(itemId, normalizedCollections)
+        notifyFavoriteItemsChanged()
     }
 
     override suspend fun addRssSearchFavorite(
@@ -425,6 +434,7 @@ class FavoriteStoreRepositoryImpl(
             categoryIds = categoryIds,
             collectionIds = collectionIds,
         )
+        notifyFavoriteItemsChanged()
     }
 
     override suspend fun isThreadFavorited(
@@ -559,6 +569,11 @@ class FavoriteStoreRepositoryImpl(
                 deleteFavoriteItemById(itemId)
             }
         }
+        notifyFavoriteItemsChanged()
+    }
+
+    private fun notifyFavoriteItemsChanged() {
+        favoriteItemRevisionState.update { it + 1L }
     }
 
     private suspend fun addThreadFavorite(

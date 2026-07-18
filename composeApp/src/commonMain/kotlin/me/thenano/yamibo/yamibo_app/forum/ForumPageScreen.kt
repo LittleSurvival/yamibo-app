@@ -1,6 +1,5 @@
 package me.thenano.yamibo.yamibo_app.forum
 
-
 import YamiboIcons
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -38,7 +37,6 @@ import me.thenano.yamibo.yamibo_app.components.controls.YamiboSingleSelectDialog
 import me.thenano.yamibo.yamibo_app.components.feedback.YamiboDetailedErrorContent
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBar
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBarIconAction
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.forum.components.*
 import me.thenano.yamibo.yamibo_app.forum.search.ISearchScreen
@@ -72,7 +70,10 @@ fun ForumPageScreen(fid: ForumId, name: String) {
     val authRepository = LocalAuthRepository.current
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
+    val appTaskManager = me.thenano.yamibo.yamibo_app.LocalAppTaskManager.current
+    val favoriteForums by forumRepository.favoriteForums.collectAsState()
+    val isFavoriteForum = fid in favoriteForums
 
     var state by remember { mutableStateOf<ForumState>(ForumState.Loading) }
     var currentPage by remember { mutableIntStateOf(1) }
@@ -161,9 +162,6 @@ fun ForumPageScreen(fid: ForumId, name: String) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = colors.creamBackground,
-        snackbarHost = {
-            YamiboSnackbarHost(hostState = snackbarHostState)
-        },
         topBar = {
             /** Sticky top bar: back + forum name (always visible) */
             val forumName =
@@ -183,7 +181,7 @@ fun ForumPageScreen(fid: ForumId, name: String) {
                             successCondition = { url -> url.contains("mod=forumdisplay") && url.contains("fid=") },
                             onSuccess = {
                                 scope.launch {
-                                    snackbarHostState.showSnackbar(i18n("帖子已發表，請刷新頁面查看"))
+                                    feedbackController.post(i18n("帖子已發表，請刷新頁面查看"))
                                 }
                             },
                         )
@@ -192,22 +190,43 @@ fun ForumPageScreen(fid: ForumId, name: String) {
                 onStarClick = {
                     val formHash = authRepository.currentUser()?.formHash
                     if (formHash == null) {
-                        scope.launch {
-                            snackbarHostState.showSnackbar(
-                                message = i18n("未登入，請先登入後再收藏"),
-                                duration = SnackbarDuration.Short
-                            )
-                        }
+                        feedbackController.post(
+                            message = i18n("未登入，請先登入後再收藏"),
+                            duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short
+                        )
                         return@ForumTopBar
                     }
-                    scope.launch {
-                        val result = forumRepository.addFavorite(fid, formHash)
-                        snackbarHostState.showSnackbar(
-                            message = i18n(result.message()),
-                            duration = SnackbarDuration.Short
-                        )
+                    val removeFavorite = isFavoriteForum
+                    val feedbackGroup = "forum-favorite:${fid.value}"
+                    appTaskManager.launch(
+                        key = me.thenano.yamibo.yamibo_app.task.AppTaskKey("forum-favorite-toggle:${fid.value}"),
+                    ) {
+                        if (removeFavorite) {
+                            feedbackController.post(i18n("正在解除本版收藏..."), groupKey = feedbackGroup)
+                            val result = forumRepository.removeFavorite(fid, formHash)
+                            feedbackController.post(
+                                message = if (result is YamiboResult.Success) {
+                                    i18n("已解除本版收藏")
+                                } else {
+                                    i18n(result.message())
+                                },
+                                groupKey = feedbackGroup,
+                            )
+                        } else {
+                            feedbackController.post(i18n("正在收藏本版..."), groupKey = feedbackGroup)
+                            val result = forumRepository.addFavorite(fid, formHash)
+                            feedbackController.post(
+                                message = if (result is YamiboResult.Success) {
+                                    i18n("已收藏本版")
+                                } else {
+                                    i18n(result.message())
+                                },
+                                groupKey = feedbackGroup,
+                            )
+                        }
                     }
                 },
+                isFavorite = isFavoriteForum,
                 onHomeClick = {
                     navigator.popToRoot()
                     navigator.replace(IMainScreen(MainTab.Home))
@@ -258,9 +277,9 @@ fun ForumPageScreen(fid: ForumId, name: String) {
 
                                     else -> {
                                         val msg = i18n(result.message())
-                                        snackbarHostState.showSnackbar(
+                                        feedbackController.post(
                                             message = i18n("刷新失敗：{}", msg),
-                                            duration = SnackbarDuration.Short
+                                            duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short
                                         )
                                     }
                                 }
@@ -291,9 +310,9 @@ fun ForumPageScreen(fid: ForumId, name: String) {
                                     }
                                     is PinnedItem.Announcement -> {
                                         scope.launch {
-                                            snackbarHostState.showSnackbar(
+                                            feedbackController.post(
                                                 i18n("暫不支持跳轉到公告頁"),
-                                                duration = SnackbarDuration.Short
+                                                duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short
                                             )
                                         }
                                     }
@@ -375,6 +394,7 @@ fun ForumPageScreen(fid: ForumId, name: String) {
 @Composable
 private fun ForumTopBar(
     title: String,
+    isFavorite: Boolean,
     onBack: () -> Unit,
     onSearch: () -> Unit,
     onPostThread: () -> Unit,
@@ -420,10 +440,15 @@ private fun ForumTopBar(
                         }
                     )
                     DropdownMenuItem(
-                        text = { Text(i18n("收藏本版"), color = colors.textStrong) },
+                        text = {
+                            Text(
+                                i18n(if (isFavorite) "解除收藏" else "收藏本版"),
+                                color = colors.textStrong,
+                            )
+                        },
                         leadingIcon = {
                             Icon(
-                                imageVector = YamiboIcons.StarOutline,
+                                imageVector = if (isFavorite) YamiboIcons.StarFilled else YamiboIcons.StarOutline,
                                 contentDescription = null,
                                 tint = colors.brownPrimary
                             )

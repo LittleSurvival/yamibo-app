@@ -68,7 +68,7 @@ fun ProfilePage(
     val navigator = LocalNavigator.current
     val coroutineScope = rememberCoroutineScope()
     val colors = colors
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
     val hasDownloadBadge by remember(downloadRepository) {
         downloadRepository.queue
             .map(::shouldShowDownloadBadge)
@@ -250,8 +250,7 @@ fun ProfilePage(
                                             refreshSignStatus()
                                             snackbarMessage.let { message ->
                                                 coroutineScope.launch {
-                                                    snackbarHostState.currentSnackbarData?.dismiss()
-                                                    snackbarHostState.showSnackbar(message)
+                                                    feedbackController.post(message)
                                                 }
                                             }
                                         }
@@ -260,16 +259,14 @@ fun ProfilePage(
                                         coroutineScope.launch {
                                             isSigning = false
                                             refreshSignStatus()
-                                            snackbarHostState.currentSnackbarData?.dismiss()
-                                            snackbarHostState.showSnackbar(i18n("百合會維護中...現在不是簽到的好時機呢"))
+                                            feedbackController.post(i18n("百合會維護中...現在不是簽到的好時機呢"))
                                         }
                                     },
                                     onLoadFailed = { reason ->
                                         coroutineScope.launch {
                                             isSigning = false
                                             refreshSignStatus()
-                                            snackbarHostState.currentSnackbarData?.dismiss()
-                                            snackbarHostState.showSnackbar(i18n("簽到頁載入失敗：{}", reason))
+                                            feedbackController.post(i18n("簽到頁載入失敗：{}", reason))
                                         }
                                     },
                                 )
@@ -356,12 +353,6 @@ fun ProfilePage(
             Spacer(Modifier.height(24.dp))
         }
 
-        YamiboSnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 12.dp)
-        )
     }
 }
 

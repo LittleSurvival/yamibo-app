@@ -4,8 +4,11 @@ import io.github.littlesurvival.dto.value.ForumId
 import io.github.littlesurvival.dto.value.TagId
 import io.github.littlesurvival.dto.value.ThreadId
 import io.github.littlesurvival.dto.value.UserId
+import kotlinx.coroutines.flow.StateFlow
 
 interface FavoriteStoreRepository {
+    val favoriteItemRevision: StateFlow<Long>
+
     enum class FavoriteTargetType {
         ThreadNormal,
         ThreadNovel,

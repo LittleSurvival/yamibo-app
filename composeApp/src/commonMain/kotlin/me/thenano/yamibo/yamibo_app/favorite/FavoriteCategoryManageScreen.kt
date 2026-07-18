@@ -1,4 +1,4 @@
-﻿package me.thenano.yamibo.yamibo_app.favorite
+package me.thenano.yamibo.yamibo_app.favorite
 
 
 import androidx.compose.foundation.BorderStroke
@@ -44,7 +44,7 @@ internal fun FavoriteCategoryManageScreen() {
     val favoriteRepository = LocalFavoriteRepository.current
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
     val listState = rememberLazyListState()
     val density = LocalDensity.current
     val rowStridePx = with(density) { (ManageRowHeight + ManageRowSpacing).toPx() }
@@ -77,7 +77,7 @@ internal fun FavoriteCategoryManageScreen() {
                 favoriteRepository.getCategoryDeletePreview(categoryId)
             } ?: return@launch
             if (preview.isDefaultCategory) {
-                snackbarHostState.showSnackbar(i18n("{}類別不可刪除", FavoriteRepositoryContract.DEFAULT_CATEGORY_NAME))
+                feedbackController.post(i18n("{}類別不可刪除", FavoriteRepositoryContract.DEFAULT_CATEGORY_NAME))
                 return@launch
             }
             moveItemsToDefaultOnDelete = true
@@ -116,9 +116,6 @@ internal fun FavoriteCategoryManageScreen() {
 
     Scaffold(
         containerColor = colors.creamBackground,
-        snackbarHost = {
-            YamiboSnackbarHost(snackbarHostState)
-        },
         topBar = {
             YamiboTopBar(
                 title = i18n("管理類別"),

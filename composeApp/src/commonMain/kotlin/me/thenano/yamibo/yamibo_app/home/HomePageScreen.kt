@@ -76,7 +76,7 @@ fun HomePageScreen(
     val forumRepository = LocalForumRepository.current
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
 
     var state by remember { mutableStateOf<HomeState>(HomeState.Loading) }
     var isRefreshing by remember { mutableStateOf(false) }
@@ -146,9 +146,9 @@ fun HomePageScreen(
                                     state = HomeState.Success(result.value)
 
                                 else -> {
-                                    snackbarHostState.showSnackbar(
+                                    feedbackController.post(
                                         message = i18n(result.message()),
-                                        duration = SnackbarDuration.Short
+                                        duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short
                                     )
                                 }
                             }
@@ -161,11 +161,6 @@ fun HomePageScreen(
                 }
         }
 
-        /** Snackbar overlay */
-        YamiboSnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
-        )
     }
 }
 

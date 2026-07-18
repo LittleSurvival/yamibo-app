@@ -140,6 +140,14 @@ tip：長按可詳細編輯收藏路徑,Tip: Long press to edit the favorite pat
 已匯入到本地,Imported to local,已匯入到本地,已汇入到本地
 已取消收藏更新檢查,Favorite update check canceled,已取消收藏更新檢查,已取消收藏更新检查
 已同步至百合會,Already synced to Yamibo,已同步至百合會,已同步至百合会
+同步至百合會失敗：{},Failed to sync to Yamibo: {},同步至百合會失敗：{},同步至百合会失败：{}
+百合會已收藏，但未取得收藏識別碼,Bookmarked on Yamibo but no favorite ID was returned,百合會已收藏，但未取得收藏識別碼,百合会已收藏，但未获取收藏标识码
+百合會收藏識別碼不可用。請到收藏頁使用「同步百合會收藏」重新對齊識別碼後再試。,The Yamibo favorite ID is unavailable. Use Sync Yamibo Favorites on the Favorites page to realign IDs before retrying.,百合會收藏識別碼不可用。請到收藏頁使用「同步百合會收藏」重新對齊識別碼後再試。,百合会收藏标识码不可用。请到收藏页使用“同步百合会收藏”重新对齐标识码后再试。
+正在收藏本版...,Bookmarking this forum...,正在收藏本版...,正在收藏本版...
+已收藏本版,Forum bookmarked,已收藏本版,已收藏本版
+正在解除本版收藏...,Removing forum bookmark...,正在解除本版收藏...,正在解除本版收藏...
+已解除本版收藏,Forum bookmark removed,已解除本版收藏,已解除本版收藏
+已從百合會取消收藏,Removed from Yamibo favorites,已從百合會取消收藏,已从百合会取消收藏
 已就緒,Ready,已就緒,已就绪
 已從所有位置移除收藏,Favorite removed from all locations,已從所有位置移除收藏,已从所有位置移除收藏
 已新增書籤,Bookmark added,已新增書籤,已新增书签
@@ -772,3 +780,12 @@ RSS收藏,RSS favorites,RSS收藏,RSS收藏
 開啟後，重新整理已下載內容時會沿用目前目標刷新離線資料。,"When enabled, refreshing downloaded content keeps the current target for offline refreshes.",開啟後，重新整理已下載內容時會沿用目前目標刷新離線資料。,开启后，重新整理已下载内容时会沿用当前目标刷新离线资料。
 開始下載,Start download,開始下載,开始下载
 已自動刷新 {} 項可更新內容,Auto-refreshed {} updatable item(s),已自動刷新 {} 項可更新內容,已自动刷新 {} 项可更新内容
+保留本地收藏,Keep local favorite,保留本地收藏,保留本地收藏
+僅解除本地收藏,Remove local favorite only,僅解除本地收藏,仅移除本地收藏
+已解除本地收藏，百合會收藏仍可能存在,"Local favorite removed; the Yamibo favorite may still exist",已解除本地收藏，百合會收藏仍可能存在,已移除本地收藏，百合会收藏可能仍然存在
+無法從百合會解除收藏,Unable to remove Yamibo favorite,無法從百合會解除收藏,无法移除百合会收藏
+找不到本地收藏，未送出百合會解除收藏請求,"Local favorite not found; no Yamibo removal request was sent",找不到本地收藏，未送出百合會解除收藏請求,找不到本地收藏，未发送百合会移除收藏请求
+無法取得這個看板的收藏識別碼，請重新整理後再試。,Unable to get this forum's favorite ID. Refresh and try again.,無法取得這個看板的收藏識別碼，請重新整理後再試。,无法取得此版块的收藏标识码，请刷新后重试。
+解除收藏失敗，已重新整理收藏識別碼，請再試一次。,Removal failed. The favorite ID was refreshed; please try again.,解除收藏失敗，已重新整理收藏識別碼，請再試一次。,移除收藏失败，已刷新收藏标识码，请重试。
+解除收藏失敗，重新整理後仍無法取得收藏識別碼。,Removal failed and the favorite ID is still unavailable after refresh.,解除收藏失敗，重新整理後仍無法取得收藏識別碼。,移除收藏失败，刷新后仍无法取得收藏标识码。
+解除收藏失敗，且收藏識別碼重新整理失敗，請稍後再試。,Removal failed and the favorite ID could not be refreshed. Please try again later.,解除收藏失敗，且收藏識別碼重新整理失敗，請稍後再試。,移除收藏失败，且收藏标识码刷新失败，请稍后重试。

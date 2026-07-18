@@ -179,6 +179,10 @@ private class FakeForumRepository(
     var nextSearch: SearchPage? = null,
     var nextFailure: YamiboResult.Failure? = null,
 ) : ForumRepository {
+    override val favoriteForums = kotlinx.coroutines.flow.MutableStateFlow<
+        Map<ForumId, io.github.littlesurvival.dto.value.FavoriteId?>
+    >(emptyMap())
+
     override suspend fun fetchSearch(query: String, forumId: ForumId?, formHash: FormHash): YamiboResult<SearchPage> {
         nextFailure?.let { return it }
         return YamiboResult.Success(requireNotNull(nextSearch))
@@ -195,7 +199,11 @@ private class FakeForumRepository(
         orderType: io.github.littlesurvival.dto.page.OrderType?,
     ): YamiboResult<ForumPage> = error("Not used")
 
-    override suspend fun addFavorite(forumId: ForumId, formHash: FormHash): YamiboResult<String> = error("Not used")
+    override suspend fun addFavorite(
+        forumId: ForumId,
+        formHash: FormHash,
+    ): YamiboResult<io.github.littlesurvival.dto.page.AddFavoriteResult> = error("Not used")
+    override suspend fun removeFavorite(forumId: ForumId, formHash: FormHash): YamiboResult<String> = error("Not used")
     override fun getCachedHomePage(): HomePage? = null
     override fun getCachedForumPage(
         fid: ForumId,

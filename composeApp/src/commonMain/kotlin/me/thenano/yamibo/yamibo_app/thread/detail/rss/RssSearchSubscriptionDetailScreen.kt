@@ -63,7 +63,8 @@ fun RssSearchSubscriptionDetailScreen(
     val appSettingsRepo = LocalAppSettingsRepository.current
     val imageReaderModeOverrideRepository = LocalImageReaderModeOverrideRepository.current
     val platformContext = LocalPlatformContext.current
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
+    val appTaskManager = me.thenano.yamibo.yamibo_app.LocalAppTaskManager.current
     val scope = rememberCoroutineScope()
     val stackSize = navigator.stack.size
 
@@ -116,9 +117,16 @@ fun RssSearchSubscriptionDetailScreen(
 
     suspend fun ensureDownloadStorageReady(): Boolean {
         if (downloadRepository.isStorageReady()) return true
-        snackbarHostState.showSnackbar(i18n("尚未設定下載資料夾"))
+        feedbackController.post(i18n("尚未設定下載資料夾"))
         navigator.navigate(IBackupSettingsScreen())
         return false
+    }
+
+    fun launchDownloadTask(action: String, operation: suspend () -> Unit) {
+        appTaskManager.launch(
+            key = me.thenano.yamibo.yamibo_app.task.AppTaskKey("download:rss:$subscriptionId:$action"),
+            operation = operation,
+        )
     }
 
     fun currentSubscription(): RssSearchSubscriptionRepository.SubscriptionSummary? =
@@ -343,7 +351,6 @@ fun RssSearchSubscriptionDetailScreen(
 
     Scaffold(
         containerColor = colors.creamBackground,
-        snackbarHost = { YamiboSnackbarHost(hostState = snackbarHostState) },
         topBar = { CatalogDetailTopBar(title = currentTitle(), onBack = { navigator.pop() }) },
     ) { paddingValues ->
         Box(
@@ -368,7 +375,7 @@ fun RssSearchSubscriptionDetailScreen(
                         scope.launch {
                             loadPage(currentPage, preferCache = false)
                             isRefreshing = false
-                            snackbarHostState.showSnackbar(i18n("RSS 已刷新"))
+                            feedbackController.post(i18n("RSS 已刷新"))
                         }
                     },
                     modifier = Modifier.fillMaxSize(),
@@ -401,13 +408,13 @@ fun RssSearchSubscriptionDetailScreen(
                                 if (selection.item == null) {
                                     favoriteRepository.saveFavorite(target)
                                     favoriteRefreshToken += 1
-                                    snackbarHostState.showSnackbar(i18n("已加入收藏"))
+                                    feedbackController.post(i18n("已加入收藏"))
                                 } else {
                                     pendingFavoriteRemovalSelection = selection
                                     if (appSettingsRepo.skipFavoriteRemovalConfirm.getValue()) {
                                         withContext(Dispatchers.Default) { removeFavoriteWithSync(favoriteRepository, favoriteSyncRepository, target) }
                                         favoriteRefreshToken += 1
-                                        snackbarHostState.showSnackbar(i18n("已移除收藏"))
+                                        feedbackController.post(i18n("已移除收藏"))
                                     } else {
                                         showFavoriteRemovalConfirm = true
                                     }
@@ -467,7 +474,7 @@ fun RssSearchSubscriptionDetailScreen(
                 scope.launch {
                     detailNoteRepository.saveNote(DetailNoteRepository.TargetType.RssSearch, subscriptionId, content = content)
                     reloadNote()
-                    snackbarHostState.showSnackbar(if (content.isBlank()) i18n("已刪除筆記") else i18n("已保存筆記"))
+                    feedbackController.post(if (content.isBlank()) i18n("已刪除筆記") else i18n("已保存筆記"))
                 }
             },
             onDelete = {
@@ -475,7 +482,7 @@ fun RssSearchSubscriptionDetailScreen(
                 scope.launch {
                     detailNoteRepository.deleteNote(DetailNoteRepository.TargetType.RssSearch, subscriptionId)
                     reloadNote()
-                    snackbarHostState.showSnackbar(i18n("已刪除筆記"), duration = SnackbarDuration.Short)
+                    feedbackController.post(i18n("已刪除筆記"), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
                 }
             },
         )
@@ -505,7 +512,7 @@ fun RssSearchSubscriptionDetailScreen(
                         next,
                     )
                     reloadThreadBookMarks()
-                    snackbarHostState.showSnackbar(if (next) i18n("已新增書籤") else i18n("已移除書籤"))
+                    feedbackController.post(if (next) i18n("已新增書籤") else i18n("已移除書籤"))
                 }
             },
             onMarkRead = {
@@ -514,7 +521,7 @@ fun RssSearchSubscriptionDetailScreen(
                     chapterStateRepository.setRead(ChapterStateRepository.TargetType.RssSearchThread, subscriptionId, thread.tid.value.toLong(), thread.title, true)
                     repository.markRead(subscriptionId, thread.tid.value.toLong())
                     reloadThreadChapterStates()
-                    snackbarHostState.showSnackbar(i18n("已標為已讀"))
+                    feedbackController.post(i18n("已標為已讀"))
                 }
             },
             onMarkUnread = {
@@ -523,7 +530,7 @@ fun RssSearchSubscriptionDetailScreen(
                     chapterStateRepository.setRead(ChapterStateRepository.TargetType.RssSearchThread, subscriptionId, thread.tid.value.toLong(), thread.title, false)
                     repository.markUnread(subscriptionId, thread.tid.value.toLong())
                     reloadThreadChapterStates()
-                    snackbarHostState.showSnackbar(i18n("已標為未讀"))
+                    feedbackController.post(i18n("已標為未讀"))
                 }
             },
             onClearHistory = {
@@ -543,42 +550,42 @@ fun RssSearchSubscriptionDetailScreen(
                     }
                     reloadThreadChapterStates()
                     loadPage(currentPage, preferCache = true)
-                    snackbarHostState.showSnackbar(i18n("已清除閱讀紀錄"))
+                    feedbackController.post(i18n("已清除閱讀紀錄"))
                 }
             },
             onDownloadChapter = {
                 actionThread = null
-                scope.launch {
-                    if (!ensureDownloadStorageReady()) return@launch
+                launchDownloadTask("chapter:${thread.tid.value}") {
+                    if (!ensureDownloadStorageReady()) return@launchDownloadTask
                     downloadRepository.enqueueRssMangaChapter(subscriptionId, currentTitle(), currentQuery(), thread, currentPage)
                         .onFailure { error ->
                             Logger.e("RssSearchSubscriptionDetailScreen", "Failed to enqueue RSS manga chapter subscriptionId=$subscriptionId tid=${thread.tid.value}", error)
-                            snackbarHostState.showSnackbar(error.message ?: i18n("加入下載失敗"))
+                            feedbackController.post(error.message ?: i18n("加入下載失敗"))
                         }
                 }
             },
             onRefreshChapter = {
                 actionThread = null
-                scope.launch {
-                    if (!ensureDownloadStorageReady()) return@launch
+                launchDownloadTask("refresh:${thread.tid.value}") {
+                    if (!ensureDownloadStorageReady()) return@launchDownloadTask
                     when (val result = downloadRepository.refreshRssMangaChapter(downloadKey)) {
-                        is YamiboResult.Success -> snackbarHostState.showSnackbar(i18n("已重新整理此章"))
-                        else -> snackbarHostState.showSnackbar(result.message())
+                        is YamiboResult.Success -> feedbackController.post(i18n("已重新整理此章"))
+                        else -> feedbackController.post(result.message())
                     }
                 }
             },
             onRetryChapter = {
                 actionThread = null
-                scope.launch {
-                    if (!ensureDownloadStorageReady()) return@launch
+                launchDownloadTask("retry:${thread.tid.value}") {
+                    if (!ensureDownloadStorageReady()) return@launchDownloadTask
                     downloadRepository.retry(downloadKey)
                 }
             },
             onClearChapterDownload = {
                 actionThread = null
-                scope.launch {
+                launchDownloadTask("clear:${thread.tid.value}") {
                     downloadRepository.clearRssMangaChapter(downloadKey)
-                    snackbarHostState.showSnackbar(i18n("已清除此章下載"))
+                    feedbackController.post(i18n("已清除此章下載"))
                 }
             },
         )
@@ -594,41 +601,41 @@ fun RssSearchSubscriptionDetailScreen(
             actions = buildList {
                 add(CatalogDownloadAction(i18n("下載目前分頁")) {
                     showDownloadSheet = false
-                    scope.launch {
-                        if (!ensureDownloadStorageReady()) return@launch
+                    launchDownloadTask("current-page:$currentPage") {
+                        if (!ensureDownloadStorageReady()) return@launchDownloadTask
                         downloadRepository.enqueueRssMangaCurrentPage(subscriptionId, currentTitle(), currentQuery(), currentThreads, currentPage)
                             .onFailure { error ->
                                 Logger.e("RssSearchSubscriptionDetailScreen", "Failed to enqueue current RSS manga page subscriptionId=$subscriptionId page=$currentPage", error)
-                                snackbarHostState.showSnackbar(error.message ?: i18n("加入下載失敗"))
+                                feedbackController.post(error.message ?: i18n("加入下載失敗"))
                             }
                     }
                 })
                 add(CatalogDownloadAction(i18n("下載全部分頁")) {
                     showDownloadSheet = false
-                    scope.launch {
-                        if (!ensureDownloadStorageReady()) return@launch
+                    launchDownloadTask("all-pages") {
+                        if (!ensureDownloadStorageReady()) return@launchDownloadTask
                         downloadRepository.enqueueRssMangaAllPages(subscriptionId, currentTitle(), currentQuery())
                             .onFailure { error ->
                                 Logger.e("RssSearchSubscriptionDetailScreen", "Failed to enqueue all RSS manga pages subscriptionId=$subscriptionId", error)
-                                snackbarHostState.showSnackbar(error.message ?: i18n("加入下載失敗"))
+                                feedbackController.post(error.message ?: i18n("加入下載失敗"))
                             }
                     }
                 })
                 if (currentPageHasDownloads) {
                     add(CatalogDownloadAction(i18n("清除目前分頁下載")) {
                         showDownloadSheet = false
-                        scope.launch {
+                        launchDownloadTask("clear-page:$currentPage") {
                             currentThreads.forEach { downloadRepository.clearRssMangaChapter(rssMangaKey(it)) }
-                            snackbarHostState.showSnackbar(i18n("已清除目前分頁下載"))
+                            feedbackController.post(i18n("已清除目前分頁下載"))
                         }
                     })
                 }
                 if (rssDownloadEntries.isNotEmpty()) {
                     add(CatalogDownloadAction(i18n("清除整個 RSS 下載")) {
                         showDownloadSheet = false
-                        scope.launch {
+                        launchDownloadTask("clear-all") {
                             downloadRepository.clearRssManga(subscriptionId)
-                            snackbarHostState.showSnackbar(i18n("已清除整個 RSS 下載"))
+                            feedbackController.post(i18n("已清除整個 RSS 下載"))
                         }
                     })
                 }
@@ -658,7 +665,7 @@ fun RssSearchSubscriptionDetailScreen(
                     }
                     showFavoriteDialog = false
                     favoriteRefreshToken += 1
-                    snackbarHostState.showSnackbar(i18n("收藏位置已更新"))
+                    feedbackController.post(i18n("收藏位置已更新"))
                 }
             },
         )
@@ -668,7 +675,7 @@ fun RssSearchSubscriptionDetailScreen(
         showRemovalConfirm = showFavoriteRemovalConfirm,
         showMultiPathDialog = showFavoriteMultiPathDialog,
         pendingSelection = pendingFavoriteRemovalSelection,
-        snackbarHostState = snackbarHostState,
+        feedbackController = feedbackController,
         setShowRemovalConfirm = { showFavoriteRemovalConfirm = it },
         setShowMultiPathDialog = { showFavoriteMultiPathDialog = it },
         clearPendingSelection = { pendingFavoriteRemovalSelection = null },
