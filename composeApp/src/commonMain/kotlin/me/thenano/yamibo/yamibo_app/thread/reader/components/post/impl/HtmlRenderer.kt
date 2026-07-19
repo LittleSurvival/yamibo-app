@@ -26,11 +26,14 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextDecoration
@@ -416,220 +419,111 @@ private fun RubyTextBlock(
     lineHeightSp: Float,
     textColor: Color,
     modifier: Modifier = Modifier,
+    onTextLayout: (TextLayoutResult) -> Unit,
 ) {
-    val segments = remember(text, rubies) {
-        buildRubySegments(text, rubies)
+    val inlineLayout = remember(text, rubies) {
+        buildRubyInlineLayout(text, rubies)
     }
-    val lines = remember(segments) {
-        buildRubyLines(segments)
-    }
-    val horizontalArrangement = when (textAlign) {
-        TextAlign.Center -> Arrangement.Center
-        TextAlign.Right, TextAlign.End -> Arrangement.End
-        else -> Arrangement.Start
-    }
-
-    Column(modifier = modifier) {
-        lines.forEach { line ->
-            if (line.hasRuby) {
-                RubyFlowLine(
-                    segments = line.segments,
-                    horizontalArrangement = horizontalArrangement,
-                    fontFamily = fontFamily,
-                    fontSizeSp = fontSizeSp,
-                    lineHeightSp = lineHeightSp,
-                    textColor = textColor,
-                )
-            } else {
-                line.segments.filterIsInstance<RubySegment.Text>().forEach { segment ->
-                    Text(
-                        text = segment.text,
-                        color = textColor,
-                        fontFamily = fontFamily,
-                        fontSize = fontSizeSp.sp,
-                        lineHeight = lineHeightSp.sp,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RubyFlowLine(
-    segments: List<RubySegment>,
-    horizontalArrangement: Arrangement.Horizontal,
-    fontFamily: FontFamily,
-    fontSizeSp: Float,
-    lineHeightSp: Float,
-    textColor: Color,
-) {
-    FlowRow(
-        horizontalArrangement = horizontalArrangement,
-        verticalArrangement = Arrangement.spacedBy(0.dp),
-    ) {
-        segments.forEach { segment ->
-            when (segment) {
-                is RubySegment.Text -> {
-                    if (segment.text.isNotEmpty()) {
-                        RubyPlainTextSegment(
-                            text = segment.text,
-                            fontFamily = fontFamily,
-                            fontSizeSp = fontSizeSp,
-                            lineHeightSp = lineHeightSp,
-                            textColor = textColor,
-                        )
-                    }
-                }
-
-                is RubySegment.Ruby -> {
-                    RubySegmentView(
-                        baseText = segment.baseText,
-                        rubyText = segment.ruby.rubyText,
-                        fontFamily = fontFamily,
-                        fontSizeSp = fontSizeSp,
-                        lineHeightSp = lineHeightSp,
-                        textColor = textColor,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RubyPlainTextSegment(
-    text: AnnotatedString,
-    fontFamily: FontFamily,
-    fontSizeSp: Float,
-    lineHeightSp: Float,
-    textColor: Color,
-) {
+    val textMeasurer = rememberTextMeasurer()
     val density = LocalDensity.current
-    val baseTop = with(density) { (fontSizeSp * 0.82f).sp.toDp() }
-    val segmentHeight = with(density) { lineHeightSp.sp.toDp() }
-    Box(modifier = Modifier.height(segmentHeight)) {
-        Text(
-            text = text,
+    val rubyFontSizeSp = fontSizeSp * 0.72f
+    val baseStyle = remember(fontFamily, fontSizeSp, textColor) {
+        TextStyle(
             color = textColor,
             fontFamily = fontFamily,
             fontSize = fontSizeSp.sp,
             lineHeight = fontSizeSp.sp,
-            modifier = Modifier.offset(y = baseTop),
         )
     }
-}
-
-@Composable
-private fun RubySegmentView(
-    baseText: AnnotatedString,
-    rubyText: String,
-    fontFamily: FontFamily,
-    fontSizeSp: Float,
-    lineHeightSp: Float,
-    textColor: Color,
-) {
-    val rubyFontSizeSp = fontSizeSp * 0.72f
-    val density = LocalDensity.current
-    val baseTop = with(density) { (fontSizeSp * 0.82f).sp.toDp() }
-    val segmentHeight = with(density) { lineHeightSp.sp.toDp() }
-    Box(
-        modifier = Modifier
-            .height(segmentHeight)
-            .padding(horizontal = 1.dp),
-        contentAlignment = Alignment.TopCenter,
-    ) {
-        Text(
-            text = rubyText,
+    val rubyStyle = remember(fontFamily, rubyFontSizeSp, textColor) {
+        TextStyle(
             color = textColor,
             fontFamily = fontFamily,
             fontSize = rubyFontSizeSp.sp,
             lineHeight = rubyFontSizeSp.sp,
-            maxLines = 1,
-            modifier = Modifier.align(Alignment.TopCenter),
-        )
-        Text(
-            text = baseText,
-            color = textColor,
-            fontFamily = fontFamily,
-            fontSize = fontSizeSp.sp,
-            lineHeight = fontSizeSp.sp,
-            maxLines = 1,
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .offset(y = baseTop),
         )
     }
-}
 
-private sealed class RubySegment {
-    data class Text(val text: AnnotatedString) : RubySegment()
-    data class Ruby(val ruby: HtmlBlock.RubyText, val baseText: AnnotatedString) : RubySegment()
-}
-
-private data class RubyLine(
-    val segments: List<RubySegment>,
-    val hasRuby: Boolean,
-)
-
-private fun buildRubyLines(segments: List<RubySegment>): List<RubyLine> {
-    val lines = mutableListOf<RubyLine>()
-    var current = mutableListOf<RubySegment>()
-
-    fun flush() {
-        lines += RubyLine(current.toList(), current.any { it is RubySegment.Ruby })
-        current = mutableListOf()
-    }
-
-    segments.forEach { segment ->
-        when (segment) {
-            is RubySegment.Ruby -> current += segment
-            is RubySegment.Text -> {
-                var start = 0
-                val source = segment.text.text
-                source.forEachIndexed { index, char ->
-                    if (char == '\n') {
-                        if (start < index) {
-                            current += RubySegment.Text(segment.text.subSequence(start, index))
-                        }
-                        flush()
-                        start = index + 1
-                    }
+    BoxWithConstraints(modifier = modifier) {
+        val maxWidthPx = with(density) { maxWidth.roundToPx() }
+        val horizontalPaddingPx = with(density) { 4.dp.roundToPx() }
+        val lineHeightPx = with(density) { lineHeightSp.sp.roundToPx() }
+        val inlineContent = remember(
+            inlineLayout.contents,
+            textMeasurer,
+            baseStyle,
+            rubyStyle,
+            lineHeightSp,
+            maxWidthPx,
+            horizontalPaddingPx,
+            lineHeightPx,
+        ) {
+            inlineLayout.contents.associate { content ->
+                val baseLayout = textMeasurer.measure(
+                    text = content.baseText,
+                    style = baseStyle,
+                    softWrap = false,
+                    maxLines = 1,
+                )
+                val rubyWidthPx = textMeasurer.measure(
+                    text = content.rubyText,
+                    style = rubyStyle,
+                    softWrap = false,
+                    maxLines = 1,
+                ).size.width
+                val widthPx = (maxOf(baseLayout.size.width, rubyWidthPx) + horizontalPaddingPx)
+                    .coerceAtMost(maxWidthPx)
+                val widthSp = with(density) { widthPx.toSp() }
+                val baseTop = with(density) {
+                    (lineHeightPx - baseLayout.firstBaseline).coerceAtLeast(0f).toDp()
                 }
-                if (start < source.length) {
-                    current += RubySegment.Text(segment.text.subSequence(start, source.length))
+
+                content.id to InlineTextContent(
+                    placeholder = Placeholder(
+                        width = widthSp,
+                        height = lineHeightSp.sp,
+                        placeholderVerticalAlign = PlaceholderVerticalAlign.AboveBaseline,
+                    ),
+                ) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.TopCenter,
+                    ) {
+                        Text(
+                            text = content.rubyText,
+                            style = rubyStyle,
+                            maxLines = 1,
+                            overflow = TextOverflow.Clip,
+                            modifier = Modifier.align(Alignment.TopCenter),
+                        )
+                        Text(
+                            text = content.baseText,
+                            style = baseStyle,
+                            maxLines = 1,
+                            overflow = TextOverflow.Clip,
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .offset(y = baseTop),
+                        )
+                    }
                 }
             }
         }
-    }
-    if (current.isNotEmpty() || lines.isEmpty()) {
-        flush()
-    }
-    return lines
-}
 
-private fun buildRubySegments(
-    text: AnnotatedString,
-    rubies: List<HtmlBlock.RubyText>,
-): List<RubySegment> {
-    val segments = mutableListOf<RubySegment>()
-    var cursor = 0
-    val source = text.text
-
-    rubies.sortedWith(compareBy<HtmlBlock.RubyText> { it.start }.thenBy { it.end }).forEach { ruby ->
-        val start = ruby.start.coerceIn(0, source.length)
-        val end = ruby.end.coerceIn(start, source.length)
-        if (start < cursor || start == end) return@forEach
-        if (cursor < start) {
-            segments += RubySegment.Text(text.subSequence(cursor, start))
-        }
-        segments += RubySegment.Ruby(ruby, text.subSequence(start, end))
-        cursor = end
+        Text(
+            text = inlineLayout.text,
+            style = TextStyle(
+                color = textColor,
+                fontFamily = fontFamily,
+                fontSize = fontSizeSp.sp,
+                lineHeight = lineHeightSp.sp,
+                textAlign = textAlign,
+            ),
+            modifier = Modifier.fillMaxWidth(),
+            inlineContent = inlineContent,
+            onTextLayout = onTextLayout,
+        )
     }
-    if (cursor < source.length) {
-        segments += RubySegment.Text(text.subSequence(cursor, source.length))
-    }
-    return segments
 }
 
 @Composable
@@ -820,6 +714,7 @@ private fun HtmlBlockRenderer(
                     lineHeightSp = lineHeightSp,
                     textColor = colors.htmlTextDark,
                     modifier = textModifier,
+                    onTextLayout = { layoutResult.value = it },
                 )
             } else {
                 Text(
