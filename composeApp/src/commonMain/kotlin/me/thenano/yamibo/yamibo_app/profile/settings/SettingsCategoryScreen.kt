@@ -650,8 +650,8 @@ private fun DownloadStorageSummaryTable(
         modifier = Modifier.padding(horizontal = 4.dp),
     )
     Spacer(Modifier.height(8.dp))
-    StorageSummaryRow(i18n("Thread 頁數"), summary.threadPages.toString())
-    StorageSummaryRow(i18n("Tag Manga 章節數"), summary.tagMangaChapters.toString())
+    StorageSummaryRow(i18n("帖子頁數"), summary.threadPages.toString())
+    StorageSummaryRow(i18n("標籤漫畫章節數"), summary.tagMangaChapters.toString())
     StorageSummaryRow(i18n("圖片張數"), summary.imageCount.toString())
     StorageSummaryRow(i18n("容量"), formatStorageSize(summary.imageBytes))
     Spacer(Modifier.height(8.dp))

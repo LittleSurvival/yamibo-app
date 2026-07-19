@@ -41,15 +41,7 @@ import me.thenano.yamibo.yamibo_app.repository.download.DownloadStatus
 import me.thenano.yamibo.yamibo_app.repository.settings.SignInMode
 
 internal fun shouldShowDownloadBadge(queue: List<DownloadQueueEntry>): Boolean =
-    queue.any { entry ->
-        when (entry.status) {
-            DownloadStatus.Queued,
-            DownloadStatus.Downloading,
-            DownloadStatus.Failed,
-            DownloadStatus.UpdateAvailable -> true
-            else -> false
-        }
-    }
+    queue.any { entry -> entry.status == DownloadStatus.Queued || entry.status == DownloadStatus.Downloading }
 
 @Composable
 fun ProfilePage(

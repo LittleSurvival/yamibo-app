@@ -12,7 +12,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.launch
 import me.thenano.yamibo.yamibo_app.AppVersion
 import me.thenano.yamibo.yamibo_app.LocalAppSettingsRepository
@@ -168,22 +167,13 @@ private fun PreviewUpdatePromptDialog(onDismiss: () -> Unit) {
             - changelog 會直接顯示在 app 內，而不是只提供超連結。
             - 下載完成後沿用 Android 系統安裝流程。
             - 測試長文以觸發捲軸：
-              這是一段為了測試更新日誌彈窗所加入的較長文字。我們需要確保當更新日誌的內容長度超過限制時，視窗會自動顯示自訂捲軸，並且限制使用者必須完全滑動到底部後，才能點擊「立即更新」、「手動更新」或「稍後」等按鈕。這樣的設計能夠有效提醒使用者在升級前詳閱新版說明，避免遺漏重要事項。
+              這是一段為了測試更新日誌彈窗所加入的較長文字。我們需要確保當更新日誌的內容長度超過限制時，視窗會維持固定高度、允許獨立捲動，並清楚顯示目前的捲動位置。使用者仍可隨時選擇立即更新、手動更新或稍後處理。
         """.trimIndent(),
     )
-    var hasScrolledToBottom by remember { mutableStateOf(false) }
 
-    Dialog(
-        onDismissRequest = { if (hasScrolledToBottom) onDismiss() },
-        properties = DialogProperties(
-            dismissOnBackPress = hasScrolledToBottom,
-            dismissOnClickOutside = hasScrolledToBottom
-        )
-    ) {
+    Dialog(onDismissRequest = onDismiss) {
         AppUpdatePromptContent(
             release = release,
-            hasScrolledToBottom = hasScrolledToBottom,
-            onScrolledToBottomChange = { hasScrolledToBottom = it },
             onPrimaryClick = onDismiss,
             onManualClick = onDismiss,
             onLaterClick = onDismiss,

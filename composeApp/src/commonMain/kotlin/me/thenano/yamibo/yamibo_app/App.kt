@@ -441,21 +441,12 @@ private fun LaunchUpdateAvailableDialog(
     onOpenReleasePage: (AppUpdateRelease) -> Unit,
 ) {
     if (release == null) return
-    var hasScrolledToBottom by remember { mutableStateOf(false) }
-    Dialog(
-        onDismissRequest = { if (hasScrolledToBottom) onDismiss() },
-        properties = DialogProperties(
-            dismissOnBackPress = hasScrolledToBottom,
-            dismissOnClickOutside = hasScrolledToBottom
-        )
-    ) {
+    Dialog(onDismissRequest = onDismiss) {
         LaunchUpdateAvailableContent(
             release = release,
             onDismiss = onDismiss,
             onDownload = onDownload,
             onOpenReleasePage = onOpenReleasePage,
-            hasScrolledToBottom = hasScrolledToBottom,
-            onScrolledToBottomChange = { hasScrolledToBottom = it }
         )
     }
 }
@@ -466,14 +457,10 @@ private fun LaunchUpdateAvailableContent(
     onDismiss: () -> Unit,
     onDownload: (AppUpdateRelease) -> Unit,
     onOpenReleasePage: (AppUpdateRelease) -> Unit,
-    hasScrolledToBottom: Boolean,
-    onScrolledToBottomChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     AppUpdatePromptContent(
         release = release,
-        hasScrolledToBottom = hasScrolledToBottom,
-        onScrolledToBottomChange = onScrolledToBottomChange,
         onPrimaryClick = {
             if (release.asset == null) {
                 onOpenReleasePage(release)

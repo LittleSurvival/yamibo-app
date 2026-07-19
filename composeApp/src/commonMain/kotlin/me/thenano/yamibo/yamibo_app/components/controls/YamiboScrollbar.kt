@@ -35,7 +35,11 @@ fun YamiboVerticalScrollbar(
             Box(
                 modifier = modifier
                     .fillMaxHeight()
-                    .width(4.dp)
+                    .width(6.dp)
+                    .background(
+                        color = colors.brownLight.copy(alpha = 0.2f),
+                        shape = RoundedCornerShape(3.dp),
+                    )
             ) {
                 Box(
                     modifier = Modifier
@@ -46,11 +50,11 @@ fun YamiboVerticalScrollbar(
                                 y = (thumbTravelPx * scrollFraction).roundToInt(),
                             )
                         }
-                        .width(4.dp)
+                        .width(6.dp)
                         .height(thumbHeight)
                         .background(
-                            color = colors.brownPrimary.copy(alpha = 0.4f),
-                            shape = RoundedCornerShape(2.dp)
+                            color = colors.brownDeep.copy(alpha = 0.72f),
+                            shape = RoundedCornerShape(3.dp)
                         )
                 )
             }

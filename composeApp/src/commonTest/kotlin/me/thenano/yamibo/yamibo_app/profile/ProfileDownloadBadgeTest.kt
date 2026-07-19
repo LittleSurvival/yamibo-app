@@ -9,12 +9,10 @@ import kotlin.test.assertTrue
 
 class ProfileDownloadBadgeTest {
     @Test
-    fun showsBadgeForActiveAndActionableStatuses() {
+    fun showsBadgeOnlyForQueuedAndDownloadingStatuses() {
         listOf(
             DownloadStatus.Queued,
             DownloadStatus.Downloading,
-            DownloadStatus.Failed,
-            DownloadStatus.UpdateAvailable,
         ).forEach { status ->
             assertTrue(shouldShowDownloadBadge(listOf(entry(status))), "Expected badge for $status")
         }
@@ -25,11 +23,24 @@ class ProfileDownloadBadgeTest {
         listOf(
             DownloadStatus.NotDownloaded,
             DownloadStatus.Downloaded,
+            DownloadStatus.Failed,
             DownloadStatus.Paused,
+            DownloadStatus.UpdateAvailable,
         ).forEach { status ->
             assertFalse(shouldShowDownloadBadge(listOf(entry(status))), "Expected no badge for $status")
         }
         assertFalse(shouldShowDownloadBadge(emptyList()))
+    }
+
+    @Test
+    fun showsBadgeWhenMixedQueueContainsAnActiveStatus() {
+        val queue = listOf(
+            entry(DownloadStatus.Failed),
+            entry(DownloadStatus.UpdateAvailable),
+            entry(DownloadStatus.Queued),
+        )
+
+        assertTrue(shouldShowDownloadBadge(queue))
     }
 
     private fun entry(status: DownloadStatus) = DownloadQueueEntry(
