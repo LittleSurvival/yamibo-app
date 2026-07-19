@@ -20,24 +20,19 @@ import io.github.littlesurvival.dto.value.UserId
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import me.thenano.yamibo.yamibo_app.*
+import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.favorite.*
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
-import me.thenano.yamibo.yamibo_app.repository.DetailNoteRepository
-import me.thenano.yamibo.yamibo_app.repository.ContentCoverRepository
-import me.thenano.yamibo.yamibo_app.repository.contentcover.findThreadCoverCandidate
-import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
+import me.thenano.yamibo.yamibo_app.repository.*
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository.ThreadReadingHistory
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
+import me.thenano.yamibo.yamibo_app.repository.contentcover.findThreadCoverCandidate
 import me.thenano.yamibo.yamibo_app.thread.detail.components.DetailNoteCard
 import me.thenano.yamibo.yamibo_app.thread.detail.components.DetailNoteEditorDialog
 import me.thenano.yamibo.yamibo_app.thread.detail.novel.components.*
 import me.thenano.yamibo.yamibo_app.thread.reader.IThreadReaderScreen
 import me.thenano.yamibo.yamibo_app.util.shareText
 import me.thenano.yamibo.yamibo_app.util.time.epochMillisOrNull
-import me.thenano.yamibo.yamibo_app.repository.BookMarkRepository as BookMarkRepository
-import me.thenano.yamibo.yamibo_app.repository.ChapterStateRepository as ChapterStateRepository
 
 /** Thread detail state */
 internal sealed interface ThreadState {
@@ -47,7 +42,6 @@ internal sealed interface ThreadState {
 }
 
 /** Main Thread Detail Screen */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: UserId? = null) {
     val colors = YamiboTheme.colors
@@ -62,9 +56,9 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
     val contentCoverRepository = LocalContentCoverRepository.current
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
-    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
-    val confirmationController = me.thenano.yamibo.yamibo_app.LocalAppConfirmationController.current
-    val appTaskManager = me.thenano.yamibo.yamibo_app.LocalAppTaskManager.current
+    val feedbackController = LocalAppFeedbackController.current
+    val confirmationController = LocalAppConfirmationController.current
+    val appTaskManager = LocalAppTaskManager.current
     val platformContext = LocalPlatformContext.current
 
     var state by remember { mutableStateOf<ThreadState>(ThreadState.Loading) }
@@ -76,10 +70,10 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
     var favoriteDialogCategorySelection by remember { mutableStateOf<Set<Long>>(emptySet()) }
     var favoriteDialogSelection by remember { mutableStateOf<Set<Long>>(emptySet()) }
     var favoriteDialogCategories by remember {
-        mutableStateOf<List<me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository.FavoriteCategory>>(emptyList())
+        mutableStateOf<List<FavoriteStoreRepository.FavoriteCategory>>(emptyList())
     }
     var favoriteDialogOptions by remember {
-        mutableStateOf<List<me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository.FavoriteCollectionOption>>(emptyList())
+        mutableStateOf<List<FavoriteStoreRepository.FavoriteCollectionOption>>(emptyList())
     }
     var isFavorited by remember { mutableStateOf(false) }
     var favoritePaths by remember { mutableStateOf<List<String>>(emptyList()) }

@@ -311,7 +311,7 @@ fun HtmlRenderer(
     html: String,
     tid: ThreadId? = null,
     linkContext: InAppLinkContext = InAppLinkContext(currentTid = tid),
-    modifier: Modifier = Modifier,
+    @Suppress("ModifierParameter") modifier: Modifier = Modifier,
     onImageSuccess: ((String) -> Unit)? = null,
     onImageError: ((String, String) -> Unit)? = null,
     onImageReload: ((String) -> Unit)? = null,
@@ -352,7 +352,7 @@ fun HtmlBlocksRenderer(
     blocks: List<HtmlBlock>,
     tid: ThreadId? = null,
     linkContext: InAppLinkContext = InAppLinkContext(currentTid = tid),
-    modifier: Modifier = Modifier,
+    @Suppress("ModifierParameter") modifier: Modifier = Modifier,
     onImageSuccess: ((String) -> Unit)? = null,
     onImageError: ((String, String) -> Unit)? = null,
     onImageReload: ((String) -> Unit)? = null,
@@ -406,7 +406,6 @@ fun HtmlBlocksRenderer(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun RubyTextBlock(
     text: AnnotatedString,
@@ -456,7 +455,6 @@ private fun RubyTextBlock(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun RubyFlowLine(
     segments: List<RubySegment>,

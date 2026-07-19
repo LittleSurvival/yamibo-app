@@ -3,9 +3,12 @@ package me.thenano.yamibo.yamibo_app
 import androidx.compose.animation.*
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
@@ -28,10 +31,9 @@ import coil3.compose.setSingletonImageLoaderFactory
 import coil3.memory.MemoryCache
 import coil3.network.ktor3.KtorNetworkFetcherFactory
 import io.github.littlesurvival.core.YamiboResult
-import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import me.thenano.yamibo.yamibo_app.components.font.getFontFamily
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
@@ -52,7 +54,9 @@ import me.thenano.yamibo.yamibo_app.profile.settings.update.AppUpdatePromptConte
 import me.thenano.yamibo.yamibo_app.profile.sign.ISignWebView
 import me.thenano.yamibo.yamibo_app.repository.AuthRepository
 import me.thenano.yamibo.yamibo_app.repository.SignRepository
-import me.thenano.yamibo.yamibo_app.repository.appupdate.*
+import me.thenano.yamibo.yamibo_app.repository.appupdate.AppUpdateCheckResult
+import me.thenano.yamibo.yamibo_app.repository.appupdate.AppUpdateDownloadState
+import me.thenano.yamibo.yamibo_app.repository.appupdate.AppUpdateRelease
 import me.thenano.yamibo.yamibo_app.repository.chineseconversion.ChineseConversionMode
 import me.thenano.yamibo.yamibo_app.repository.settings.AppSettingsRepository
 import me.thenano.yamibo.yamibo_app.repository.settings.ReaderChineseConversionOption

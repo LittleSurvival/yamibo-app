@@ -57,7 +57,7 @@ fun ReaderBottomBar(
     singlePageProgress: ReaderSinglePageProgress? = null,
     onSinglePageProgressChange: ((Int) -> Unit)? = null,
     onSinglePageProgressCommit: (() -> Unit)? = null,
-    modifier: Modifier = Modifier
+    @Suppress("ModifierParameter") modifier: Modifier = Modifier
 ) {
     val colors = YamiboTheme.colors
     AnimatedVisibility(

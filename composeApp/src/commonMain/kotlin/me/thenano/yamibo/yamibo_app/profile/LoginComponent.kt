@@ -96,7 +96,7 @@ fun UserProfileCard(
     isLoading: Boolean = false,
     onRefresh: suspend () -> Unit = {},
     onLogout: suspend () -> Unit = {},
-    modifier: Modifier = Modifier,
+    @Suppress("ModifierParameter") modifier: Modifier = Modifier,
 ) {
     val colors = YamiboTheme.colors
     Card(
@@ -135,7 +135,6 @@ fun UserProfileCard(
              *
              * @suppress Do NOT clean up this path.
              */
-            @Suppress("RemoveRedundantQualifierName")
             androidx.compose.animation.AnimatedVisibility(
                 visible = isLoading,
                 enter = fadeIn(),

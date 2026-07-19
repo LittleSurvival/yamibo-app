@@ -13,7 +13,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import coil3.compose.SubcomposeAsyncImage
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
@@ -33,6 +32,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil3.compose.SubcomposeAsyncImage
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.model.ForumSummary
 import io.github.littlesurvival.dto.page.ForumCategory
@@ -41,17 +41,16 @@ import io.github.littlesurvival.dto.page.SwiperImages
 import kotlinx.coroutines.launch
 import me.thenano.yamibo.yamibo_app.LocalAppSettingsRepository
 import me.thenano.yamibo.yamibo_app.LocalForumRepository
+import me.thenano.yamibo.yamibo_app.components.feedback.YamiboDetailedErrorContent
+import me.thenano.yamibo.yamibo_app.components.navigation.YamiboHomeTopBar
+import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.event.AppEventBus
 import me.thenano.yamibo.yamibo_app.event.events.LoginSuccessEvent
 import me.thenano.yamibo.yamibo_app.forum.IForumScreen
 import me.thenano.yamibo.yamibo_app.forum.search.ISearchScreen
 import me.thenano.yamibo.yamibo_app.i18n.i18n
-import me.thenano.yamibo.yamibo_app.components.feedback.YamiboDetailedErrorContent
-import me.thenano.yamibo.yamibo_app.components.navigation.YamiboHomeTopBar
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.thread.reader.IThreadReaderScreen
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.util.rememberImageRequest
 import me.thenano.yamibo.yamibo_app.util.state
 import org.jetbrains.compose.resources.painterResource
@@ -67,7 +66,6 @@ private sealed interface HomeState {
 }
 
 /** Main Entry */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomePageScreen(
     onNewMessageStatusChange: (Boolean) -> Unit = {},
@@ -189,7 +187,6 @@ private fun HomeContent(homePage: HomePage, onSearch: () -> Unit) {
     }
 }
 
-@OptIn(ExperimentalAnimationApi::class)
 @Composable
 private fun HomeSwiper(images: List<SwiperImages>) {
     val colors = YamiboTheme.colors

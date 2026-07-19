@@ -5,8 +5,6 @@ import android.graphics.Bitmap
 import android.webkit.*
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -15,7 +13,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import me.thenano.yamibo.yamibo_app.LocalAuthRepository
 import me.thenano.yamibo.yamibo_app.Logger
-import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import org.json.JSONArray
 
 @SuppressLint("SetJavaScriptEnabled")
@@ -35,32 +32,22 @@ actual fun PlatformWebViewContent(
     onLoadError: (url: String?, description: String) -> Unit,
     shouldOverrideUrlLoading: (String) -> Boolean,
 ) {
-    val navigator = LocalNavigator.current
     val authRepo = LocalAuthRepository.current
     val cookies = authRepo.cookieStore.load() ?: ""
 
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
 
-    LaunchedEffect(webViewInstance) {
-        onBack { if (webViewInstance?.canGoBack() == true) webViewInstance?.goBack() }
-        onForward { if (webViewInstance?.canGoForward() == true) webViewInstance?.goForward() }
-        onReload { webViewInstance?.reload() }
-    }
-
-    DisposableEffect(webViewInstance) {
-        val handler: () -> Boolean = {
-            if (webViewInstance?.canGoBack() == true) {
-                webViewInstance?.goBack()
-                true
-            } else {
-                false
-            }
-        }
-        navigator.backHandlers.add(handler)
-        onDispose {
-            navigator.backHandlers.remove(handler)
-        }
-    }
+    RegisterPlatformWebViewNavigation(
+        controllerKey = webViewInstance,
+        canGoBack = { webViewInstance?.canGoBack() == true },
+        goBack = { webViewInstance?.goBack() },
+        canGoForward = { webViewInstance?.canGoForward() == true },
+        goForward = { webViewInstance?.goForward() },
+        reload = { webViewInstance?.reload() },
+        onBack = onBack,
+        onForward = onForward,
+        onReload = onReload,
+    )
 
     AndroidView(
         modifier = Modifier.fillMaxSize(),
@@ -97,7 +84,7 @@ actual fun PlatformWebViewContent(
                         error: WebResourceError?
                     ) {
                         val description = error?.description?.toString().orEmpty()
-                        me.thenano.yamibo.yamibo_app.Logger.e("WebView", description)
+                        Logger.e("WebView", description)
                         if (request?.isForMainFrame == true) {
                             onLoadingChanged(false)
                             onLoadError(request.url?.toString(), description)
@@ -111,7 +98,7 @@ actual fun PlatformWebViewContent(
                     ) {
                         super.onReceivedHttpError(view, request, errorResponse)
                         val statusCode = errorResponse?.statusCode ?: return
-                        me.thenano.yamibo.yamibo_app.Logger.e("WebView", "HTTP $statusCode ${request?.url}")
+                        Logger.e("WebView", "HTTP $statusCode ${request?.url}")
                     }
 
                     override fun shouldOverrideUrlLoading(

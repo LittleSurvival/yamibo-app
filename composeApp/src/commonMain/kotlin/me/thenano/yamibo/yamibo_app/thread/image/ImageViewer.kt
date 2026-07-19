@@ -153,7 +153,7 @@ fun ImageViewer(
     val painterState by painter.state.collectAsState()
     val sharedPainterCache = LocalReaderImagePainterCache.current
     var lastSuccessfulPainter by remember(fullUrl) {
-        mutableStateOf(sharedPainterCache?.get(fullUrl) ?: ReaderImagePainterMemoryCache.get(fullUrl))
+        mutableStateOf(sharedPainterCache?.get(fullUrl) ?: ReaderImagePainterMemoryCache[fullUrl])
     }
     val latestOverlayOpen by rememberUpdatedState(isOverlayOpen)
     val latestOnSingleTap by rememberUpdatedState(onSingleTap)

@@ -59,18 +59,6 @@ interface NavigationRestoreLogger {
     fun onRestoreItemFailed(type: String, reason: String)
     fun onRestoreFinished(restoredStackSize: Int)
 }
-
-object NoOpNavigationRestoreLogger : NavigationRestoreLogger {
-    override fun onSnapshotStart(stackSize: Int) = Unit
-    override fun onSnapshotItemSkipped(screenId: String, reason: String) = Unit
-    override fun onSnapshotBuilt(restorableStackSize: Int) = Unit
-    override fun onSnapshotSaved(restorableStackSize: Int, bytes: Int) = Unit
-    override fun onRestoreStart(snapshotSize: Int) = Unit
-    override fun onRestoreItemDecoded(type: String) = Unit
-    override fun onRestoreItemFailed(type: String, reason: String) = Unit
-    override fun onRestoreFinished(restoredStackSize: Int) = Unit
-}
-
 object LoggerNavigationRestoreLogger : NavigationRestoreLogger {
     private const val TAG = "NavigationRestore"
 

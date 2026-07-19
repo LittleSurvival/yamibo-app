@@ -117,42 +117,42 @@ internal suspend fun enqueueFavoriteBatchDownloads(
     mode: FavoriteBatchDownloadMode = FavoriteBatchDownloadMode.All,
 ): FavoriteBatchDownloadResult {
     var queued = 0
-    var skipped = 0
+    val skipped = 0
     var failed = 0
     var unsupported = 0
 
-    for (item in items) {
-        val result = when (item.targetType) {
+    for ((_, targetType, targetId, title, _, _, _, _, authorId) in items) {
+        val result = when (targetType) {
             FavoriteTargetType.ThreadNormal,
             FavoriteTargetType.ThreadNovel -> {
-                val threadId = ThreadId(item.targetId.toInt())
+                val threadId = ThreadId(targetId.toInt())
                 if (mode == FavoriteBatchDownloadMode.ExceptLastPage) {
                     downloadRepository.enqueueThreadExceptLastPage(
                         tid = threadId,
-                        title = item.title,
-                        authorId = item.authorId,
+                        title = title,
+                        authorId = authorId,
                     )
                 } else {
                     downloadRepository.enqueueThread(
                         tid = threadId,
-                        title = item.title,
-                        authorId = item.authorId,
+                        title = title,
+                        authorId = authorId,
                     )
                 }
             }
             FavoriteTargetType.TagManga -> downloadRepository.enqueueTagMangaAllPages(
-                tagId = TagId(item.targetId.toInt()),
-                tagName = item.title,
+                tagId = TagId(targetId.toInt()),
+                tagName = title,
             )
             FavoriteTargetType.RssSearch -> {
-                val subscription = rssRepository.getSubscription(item.targetId)
+                val subscription = rssRepository.getSubscription(targetId)
                 if (subscription == null) {
                     unsupported += 1
                     continue
                 }
                 downloadRepository.enqueueRssMangaAllPages(
-                    subscriptionId = item.targetId,
-                    title = subscription.title.ifBlank { item.title },
+                    subscriptionId = targetId,
+                    title = subscription.title.ifBlank { title },
                     query = subscription.query,
                 )
             }

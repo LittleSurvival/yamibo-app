@@ -148,13 +148,6 @@ class AppTaskManager(
 
     fun state(key: AppTaskKey): AppTaskState? = tasks.value[key]
 
-    fun clearFinished(key: AppTaskKey) {
-        val entry = entries[key] ?: return
-        if (entry.state.value.isActive) return
-        entries.remove(key)
-        _tasks.value = _tasks.value - key
-    }
-
     private fun cancel(key: AppTaskKey, submissionId: Long) {
         val entry = entries[key] ?: return
         if (entry.state.value.submissionId != submissionId) return
@@ -164,7 +157,7 @@ class AppTaskManager(
     private fun transition(entry: Entry, state: AppTaskState) {
         entry.state.value = state
         if (entries[state.key] === entry) {
-            var published = tasks.value + (state.key to state)
+            val published = (tasks.value + (state.key to state)).toMutableMap()
             if (!state.isActive) {
                 terminalOrder.addLast(TerminalRecord(state.key, state.submissionId))
                 while (terminalOrder.size > MAX_RETAINED_TERMINAL_TASKS) {
@@ -184,7 +177,7 @@ class AppTaskManager(
     }
 
     private fun publish(state: AppTaskState) {
-        _tasks.value = _tasks.value + (state.key to state)
+        _tasks.value += (state.key to state)
     }
 
     private data class TerminalRecord(

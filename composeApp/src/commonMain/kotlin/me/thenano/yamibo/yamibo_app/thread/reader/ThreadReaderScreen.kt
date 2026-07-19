@@ -1,7 +1,5 @@
 package me.thenano.yamibo.yamibo_app.thread.reader
 
-import me.thenano.yamibo.yamibo_app.i18n.i18n
-
 import YamiboIcons
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
@@ -12,29 +10,25 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListItemInfo
-import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -50,68 +44,53 @@ import io.github.littlesurvival.dto.page.Post
 import io.github.littlesurvival.dto.page.ThreadInfo
 import io.github.littlesurvival.dto.page.ThreadPage
 import io.github.littlesurvival.dto.value.*
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
-import kotlinx.coroutines.withTimeoutOrNull
 import me.thenano.yamibo.yamibo_app.*
-import me.thenano.yamibo.yamibo_app.favorite.*
-import me.thenano.yamibo.yamibo_app.thread.reader.components.manga.TouchAction
-import me.thenano.yamibo.yamibo_app.thread.reader.components.manga.getTouchAction
-import me.thenano.yamibo.yamibo_app.components.tracking.ReadingTimeTracker
-import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
-import me.thenano.yamibo.yamibo_app.repository.inapplinknavigation.InAppLinkContext
-import me.thenano.yamibo.yamibo_app.repository.ContentCoverRepository
-import me.thenano.yamibo.yamibo_app.repository.contentcover.ThreadCoverResolver
-import me.thenano.yamibo.yamibo_app.repository.BookMarkRepository as BookMarkRepository
-import me.thenano.yamibo.yamibo_app.repository.ChapterStateRepository as ChapterStateRepository
-import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
-import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository.ThreadReadingHistory
-import me.thenano.yamibo.yamibo_app.repository.download.DownloadStatus
-import me.thenano.yamibo.yamibo_app.repository.download.ThreadPageDownloadKey
 import me.thenano.yamibo.yamibo_app.components.systembars.SystemBarsEffect
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
+import me.thenano.yamibo.yamibo_app.components.tracking.ReadingTimeTracker
+import me.thenano.yamibo.yamibo_app.favorite.*
+import me.thenano.yamibo.yamibo_app.i18n.i18n
+import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
+import me.thenano.yamibo.yamibo_app.profile.settings.backup.IBackupSettingsScreen
+import me.thenano.yamibo.yamibo_app.repository.BookMarkRepository
+import me.thenano.yamibo.yamibo_app.repository.ChapterStateRepository
+import me.thenano.yamibo.yamibo_app.repository.ContentCoverRepository
+import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
+import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository.ThreadReadingHistory
+import me.thenano.yamibo.yamibo_app.repository.contentcover.ThreadCoverResolver
+import me.thenano.yamibo.yamibo_app.repository.contentcover.toCoverTargetType
+import me.thenano.yamibo.yamibo_app.repository.download.DownloadStatus
+import me.thenano.yamibo.yamibo_app.repository.download.ThreadPageDownloadKey
+import me.thenano.yamibo.yamibo_app.repository.inapplinknavigation.InAppLinkContext
+import me.thenano.yamibo.yamibo_app.repository.settings.ReaderScrollButtonDisplayMode
+import me.thenano.yamibo.yamibo_app.repository.settings.ReaderScrollButtonJumpTarget
+import me.thenano.yamibo.yamibo_app.repository.settings.ThreadReaderMode
+import me.thenano.yamibo.yamibo_app.repository.settings.TouchZoneLayout
 import me.thenano.yamibo.yamibo_app.thread.detail.novel.components.ThreadErrorContent
 import me.thenano.yamibo.yamibo_app.thread.detail.novel.components.ThreadLoadingSkeleton
-import me.thenano.yamibo.yamibo_app.profile.settings.backup.IBackupSettingsScreen
-import me.thenano.yamibo.yamibo_app.repository.contentcover.toCoverTargetType
-import me.thenano.yamibo.yamibo_app.thread.image.LocalImageActionMessageListener
-import me.thenano.yamibo.yamibo_app.thread.image.LocalImageClickListener
-import me.thenano.yamibo.yamibo_app.thread.image.LocalImageDoubleClickListener
-import me.thenano.yamibo.yamibo_app.thread.image.LocalImageSetCatalogCoverLabel
-import me.thenano.yamibo.yamibo_app.thread.image.LocalImageSetCatalogCoverListener
-import me.thenano.yamibo.yamibo_app.thread.image.LocalImageSetCoverListener
-import me.thenano.yamibo.yamibo_app.thread.image.LocalReaderOverlayVisible
-import me.thenano.yamibo.yamibo_app.thread.image.LocalReaderImagePainterCache
-import me.thenano.yamibo.yamibo_app.thread.image.createReaderImagePainterCache
-import me.thenano.yamibo.yamibo_app.thread.reader.debug.DebugRecomposeProbe
-import me.thenano.yamibo.yamibo_app.thread.reader.debug.debugPerfLog
+import me.thenano.yamibo.yamibo_app.thread.image.*
 import me.thenano.yamibo.yamibo_app.thread.reader.components.CommentBanner
 import me.thenano.yamibo.yamibo_app.thread.reader.components.ReaderCatalogPanel
 import me.thenano.yamibo.yamibo_app.thread.reader.components.ReaderOverlayMenu
+import me.thenano.yamibo.yamibo_app.thread.reader.components.manga.TouchAction
+import me.thenano.yamibo.yamibo_app.thread.reader.components.manga.getTouchAction
 import me.thenano.yamibo.yamibo_app.thread.reader.components.novel.NovelReaderSettingsPanel
-import me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.ReaderPageProgress
-import me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.ReaderPageProgressHint
-import me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.ReaderPageProgressSlideBar
-import me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.ReaderScrollJumpButton
-import me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.ReaderSinglePageProgress
-import me.thenano.yamibo.yamibo_app.thread.reader.components.post.PostFooterSection
+import me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.*
 import me.thenano.yamibo.yamibo_app.thread.reader.components.post.PostFooterRenderOptions
+import me.thenano.yamibo.yamibo_app.thread.reader.components.post.PostFooterSection
 import me.thenano.yamibo.yamibo_app.thread.reader.components.post.PostRenderer
 import me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl.HtmlBlock
 import me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl.HtmlParser
 import me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl.normalizeHtmlBlocks
 import me.thenano.yamibo.yamibo_app.thread.reader.components.tag.ITagListScreen
+import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.*
+import me.thenano.yamibo.yamibo_app.thread.reader.debug.DebugRecomposeProbe
+import me.thenano.yamibo.yamibo_app.thread.reader.debug.debugPerfLog
 import me.thenano.yamibo.yamibo_app.util.buildImageRequest
 import me.thenano.yamibo.yamibo_app.util.normalizeImageUrl
 import me.thenano.yamibo.yamibo_app.util.shareText
@@ -119,36 +98,6 @@ import me.thenano.yamibo.yamibo_app.util.state
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
 import me.thenano.yamibo.yamibo_app.util.time.epochMillisOrNull
 import me.thenano.yamibo.yamibo_app.webview.action.IActionWebView
-import me.thenano.yamibo.yamibo_app.repository.settings.ReaderScrollButtonDisplayMode
-import me.thenano.yamibo.yamibo_app.repository.settings.ReaderScrollButtonJumpTarget
-import me.thenano.yamibo.yamibo_app.repository.settings.ThreadReaderMode
-import me.thenano.yamibo.yamibo_app.repository.settings.TouchZoneLayout
-import me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.ReaderProgressCoordinator
-import me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.ReaderProgressGeometry
-import me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.ReaderScrollSession
-import me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.calculateReaderProgress
-import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.SinglePageTapAction
-import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.ThreadReaderAnchorRange
-import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.ThreadReaderMeasuredPackingResult
-import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.ThreadReaderMeasuredUnit
-import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.ThreadReaderMeasuredUnitKind
-import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.ThreadReaderPageSlice
-import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.ThreadReaderPaginationInput
-import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.ThreadReaderPlannedPage
-import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.ThreadReaderReadingAnchor
-import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.buildSafeBreakMap
-import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.buildThreadReaderPageProgressStates
-import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.captureSinglePageViewportAnchor
-import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.packMeasuredThreadReaderUnitsResult
-import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.physicalDragForSinglePageDelta
-import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.planFixedHeightReaderPages
-import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.resolvePageIndexForPersistedAnchor
-import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.resolveSinglePagePlanTransition
-import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.semanticStableId
-import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.sliceHtmlBlocksForPage
-import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.shouldInlineFooterOnFinalPage
-import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.singlePageDeltaForPhysicalDrag
-import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.singlePageDeltaForTouchAction
 import kotlin.math.abs
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -568,7 +517,6 @@ private fun buildReaderBodySegments(post: Post, contentHtml: String): List<Reade
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ThreadReaderScreen(
     tid: ThreadId,
@@ -699,9 +647,9 @@ internal fun ThreadReaderScreen(
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
     val authRepo = LocalAuthRepository.current
-    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
-    val confirmationController = me.thenano.yamibo.yamibo_app.LocalAppConfirmationController.current
-    val appTaskManager = me.thenano.yamibo.yamibo_app.LocalAppTaskManager.current
+    val feedbackController = LocalAppFeedbackController.current
+    val confirmationController = LocalAppConfirmationController.current
+    val appTaskManager = LocalAppTaskManager.current
 
     val readerUsesBrownSystemBar = showMenu || showSettingsPanel || drawerState.isOpen
     SystemBarsEffect(
@@ -1254,7 +1202,7 @@ internal fun ThreadReaderScreen(
                                     .networkCachePolicy(CachePolicy.DISABLED)
                                     .build()
                             )
-                            val result = if (cachedResult is SuccessResult) cachedResult else imageLoader.execute(request)
+                            val result = cachedResult as? SuccessResult ?: imageLoader.execute(request)
                             if (result is SuccessResult && result.image.width > 0 && result.image.height > 0) {
                                 measuredRatios[imageUrl] =
                                     result.image.height.toFloat() / result.image.width.toFloat()
@@ -1803,8 +1751,7 @@ internal fun ThreadReaderScreen(
 
     fun isPostHeightStable(postId: Long): Boolean {
         val expectedImageUrls = expectedImageUrlsByPost[postId].orEmpty()
-        if (expectedImageUrls.isEmpty()) return true
-        return loadedImageUrlsByPost[postId].orEmpty().containsAll(expectedImageUrls)
+        return expectedImageUrls.isEmpty() || loadedImageUrlsByPost[postId].orEmpty().containsAll(expectedImageUrls)
     }
 
     fun commitPostHeightIfStable(postId: Long) {
@@ -1896,9 +1843,7 @@ internal fun ThreadReaderScreen(
                     .filter { it.page.postId == pageEntry.page.postId }
                     .flatMap { it.page.slices.asSequence() }
                     .filterIsInstance<ThreadReaderPageSlice.Text>()
-                    .filter { it.blockId == blockId }
-                    .map { it.endOffset }
-                    .maxOrNull()
+                    .filter { it.blockId == blockId }.maxOfOrNull { it.endOffset }
             }
             val blockRatio = if (pageAnchor.textOffset != null && blockEndOffset != null && blockEndOffset > 0) {
                 (pageAnchor.textOffset.toFloat() / blockEndOffset.toFloat()).coerceIn(0f, 1f)
@@ -3026,7 +2971,7 @@ internal fun ThreadReaderScreen(
                     }
                     visibilityToken += 1
                     val token = visibilityToken
-                    launch {
+                    this@LaunchedEffect.launch {
                         delay(1800.milliseconds)
                         if (visibilityToken == token) {
                             showScrollJumpButtonAfterSlide = false

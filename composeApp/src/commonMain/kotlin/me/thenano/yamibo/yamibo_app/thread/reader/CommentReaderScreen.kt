@@ -5,7 +5,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material3.*
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -24,12 +27,11 @@ import kotlinx.coroutines.launch
 import me.thenano.yamibo.yamibo_app.LocalAuthRepository
 import me.thenano.yamibo.yamibo_app.LocalNovelThreadCacheRepository
 import me.thenano.yamibo.yamibo_app.LocalThreadRepository
+import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
 import me.thenano.yamibo.yamibo_app.repository.inapplinknavigation.InAppLinkContext
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.thread.detail.novel.components.ThreadErrorContent
 import me.thenano.yamibo.yamibo_app.thread.detail.novel.components.ThreadLoadingSkeleton
 import me.thenano.yamibo.yamibo_app.thread.detail.novel.components.ThreadTopBar
@@ -54,7 +56,6 @@ private sealed interface CommentState {
  *
  * Supports cross-page lazy loading when comments span multiple pages.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun CommentReaderScreen(
     tid: ThreadId,
@@ -212,6 +213,21 @@ internal fun CommentReaderScreen(
         return Pair(continuationComments, isComplete)
     }
 
+    suspend fun reloadComments() {
+        when (val result = threadRepository.fetchFindPost(tid, oPostId)) {
+            is YamiboResult.Success -> {
+                currentFullPage = result.value.pageNav?.currentPage ?: 1
+                totalFullPages = result.value.pageNav?.totalPages ?: 1
+                val (comments, complete) = extractAndCacheComments(result.value)
+                commentPosts = comments
+                isCommentComplete = complete
+                state = CommentState.Success
+            }
+
+            else -> state = CommentState.Error(i18n(result.message()))
+        }
+    }
+
     // Initial load
     LaunchedEffect(tid, oPostId) {
         // Check cache first
@@ -237,23 +253,7 @@ internal fun CommentReaderScreen(
             return@LaunchedEffect
         }
 
-        // No cache — fetch using fetchFindPost
-        when (val result = threadRepository.fetchFindPost(tid, oPostId)) {
-            is YamiboResult.Success -> {
-                val threadPage = result.value
-                currentFullPage = threadPage.pageNav?.currentPage ?: 1
-                totalFullPages = threadPage.pageNav?.totalPages ?: 1
-
-                val (comments, complete) = extractAndCacheComments(threadPage)
-                commentPosts = comments
-                isCommentComplete = complete
-                state = CommentState.Success
-            }
-
-            else -> {
-                state = CommentState.Error(i18n(result.message()))
-            }
-        }
+        reloadComments()
     }
 
     LaunchedEffect(state, commentPosts, targetCommentPid) {
@@ -293,18 +293,7 @@ internal fun CommentReaderScreen(
                     onRetry = {
                         state = CommentState.Loading
                         scope.launch {
-                            when (val result = threadRepository.fetchFindPost(tid, oPostId)) {
-                                is YamiboResult.Success -> {
-                                    currentFullPage = result.value.pageNav?.currentPage ?: 1
-                                    totalFullPages = result.value.pageNav?.totalPages ?: 1
-                                    val (comments, complete) = extractAndCacheComments(result.value)
-                                    commentPosts = comments
-                                    isCommentComplete = complete
-                                    state = CommentState.Success
-                                }
-
-                                else -> state = CommentState.Error(i18n(result.message()))
-                            }
+                            reloadComments()
                         }
                     }
                 )
@@ -467,18 +456,7 @@ internal fun CommentReaderScreen(
                 onRefresh = {
                     scope.launch {
                         state = CommentState.Loading
-                        // Re-fetch using fetchFindPost
-                        when (val result = threadRepository.fetchFindPost(tid, oPostId)) {
-                            is YamiboResult.Success -> {
-                                currentFullPage = result.value.pageNav?.currentPage ?: 1
-                                totalFullPages = result.value.pageNav?.totalPages ?: 1
-                                val (comments, complete) = extractAndCacheComments(result.value)
-                                commentPosts = comments
-                                isCommentComplete = complete
-                                state = CommentState.Success
-                            }
-                            else -> state = CommentState.Error(i18n(result.message()))
-                        }
+                        reloadComments()
                     }
                 },
                 onSettings = {

@@ -4,7 +4,10 @@ package me.thenano.yamibo.yamibo_app.favorite
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -22,19 +25,18 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import me.thenano.yamibo.yamibo_app.*
 import me.thenano.yamibo.yamibo_app.components.controls.YamiboMultiSelectDialog
+import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.favorite.components.*
 import me.thenano.yamibo.yamibo_app.favorite.sync.IFavoriteSyncProgressScreen
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.navigation.*
-import me.thenano.yamibo.yamibo_app.repository.FavoriteSyncRepository.FavoriteSyncState
-import me.thenano.yamibo.yamibo_app.repository.FavoriteShareRepository
-import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository.*
-import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
-import me.thenano.yamibo.yamibo_app.repository.settings.FavoriteSortMode
 import me.thenano.yamibo.yamibo_app.profile.settings.access.IBackgroundAccessSetupScreen
 import me.thenano.yamibo.yamibo_app.profile.settings.backup.IBackupSettingsScreen
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
+import me.thenano.yamibo.yamibo_app.repository.FavoriteShareRepository
+import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository.*
+import me.thenano.yamibo.yamibo_app.repository.FavoriteSyncRepository.FavoriteSyncState
+import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
+import me.thenano.yamibo.yamibo_app.repository.settings.FavoriteSortMode
 import me.thenano.yamibo.yamibo_app.thread.detail.novel.INovelThreadDetailScreen
 import me.thenano.yamibo.yamibo_app.thread.detail.rss.IRssSearchSubscriptionDetailScreen
 import me.thenano.yamibo.yamibo_app.thread.detail.tag.ITagDetailScreen
@@ -138,7 +140,7 @@ fun FavoritePage() {
     val navigator = LocalNavigator.current
     val appTaskManager = LocalAppTaskManager.current
     val scope = rememberCoroutineScope()
-    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
+    val feedbackController = LocalAppFeedbackController.current
     val favoriteGridMode = appSettingsRepository.favoriteGridMode.state()
     val sortMode = appSettingsRepository.favoriteSortMode.state()
     val sortDescending = appSettingsRepository.favoriteSortDescending.state()

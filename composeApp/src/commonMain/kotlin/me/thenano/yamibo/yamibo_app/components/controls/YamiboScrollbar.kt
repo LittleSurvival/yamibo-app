@@ -11,8 +11,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
+import kotlin.math.roundToInt
 
 @Composable
 fun YamiboVerticalScrollbar(
@@ -27,8 +29,8 @@ fun YamiboVerticalScrollbar(
             val maxScroll = with(density) { scrollState.maxValue.toDp() }
             val totalHeight = viewportHeight + maxScroll
             val thumbHeight = (viewportHeight * (viewportHeight / totalHeight)).coerceAtLeast(24.dp)
-            val scrollFraction = scrollState.value.toFloat() / scrollState.maxValue
-            val thumbOffset = (viewportHeight - thumbHeight) * scrollFraction
+            val thumbTravelPx = with(density) { (viewportHeight - thumbHeight).roundToPx() }
+            val maxScrollValue = scrollState.maxValue
 
             Box(
                 modifier = modifier
@@ -37,7 +39,13 @@ fun YamiboVerticalScrollbar(
             ) {
                 Box(
                     modifier = Modifier
-                        .offset(y = thumbOffset)
+                        .offset {
+                            val scrollFraction = scrollState.value.toFloat() / maxScrollValue
+                            IntOffset(
+                                x = 0,
+                                y = (thumbTravelPx * scrollFraction).roundToInt(),
+                            )
+                        }
                         .width(4.dp)
                         .height(thumbHeight)
                         .background(

@@ -14,7 +14,6 @@ import io.github.littlesurvival.dto.page.TagPage
 import me.thenano.yamibo.yamibo_app.forum.components.PageNavigation
 import me.thenano.yamibo.yamibo_app.repository.ChapterStateRepository
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadQueueEntry
-import me.thenano.yamibo.yamibo_app.thread.detail.components.DetailNoteCard
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 
 /** Tag Detail Content (scrollable body) */

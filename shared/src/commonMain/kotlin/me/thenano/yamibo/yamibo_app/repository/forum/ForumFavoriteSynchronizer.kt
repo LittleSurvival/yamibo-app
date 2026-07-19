@@ -84,8 +84,7 @@ class ForumFavoriteSynchronizer(
         forumId: ForumId,
         failure: YamiboResult.Failure,
     ): YamiboResult<String> {
-        val refresh = refreshFavoriteId(forumId)
-        val repairMessage = when (refresh) {
+        val repairMessage = when (val refresh = refreshFavoriteId(forumId)) {
             is YamiboResult.Success -> if (refresh.value != null) {
                 i18n("解除收藏失敗，已重新整理收藏識別碼，請再試一次。")
             } else {

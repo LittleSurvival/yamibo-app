@@ -1,6 +1,5 @@
 package me.thenano.yamibo.yamibo_app.thread.reader.components.thread
 
-import androidx.compose.ui.text.AnnotatedString
 import me.thenano.yamibo.yamibo_app.repository.settings.ThreadReaderMode
 import me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl.HtmlBlock
 import kotlin.math.roundToInt
@@ -114,7 +113,27 @@ private data class CachedBoundaries(
     val sentence: IntArray,
     val line: IntArray,
     val grapheme: IntArray,
-)
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other == null || this::class != other::class) return false
+
+        other as CachedBoundaries
+
+        if (!sentence.contentEquals(other.sentence)) return false
+        if (!line.contentEquals(other.line)) return false
+        if (!grapheme.contentEquals(other.grapheme)) return false
+
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var result = sentence.contentHashCode()
+        result = 31 * result + line.contentHashCode()
+        result = 31 * result + grapheme.contentHashCode()
+        return result
+    }
+}
 
 private data class BoundaryCacheKey(
     val text: String,
@@ -213,7 +232,6 @@ internal data class ThreadReaderReadingAnchor(
 )
 
 internal enum class AnchorAffinity {
-    Start,
     Center,
     End,
 }
@@ -230,7 +248,7 @@ internal data class ThreadReaderAnchorRange(
         val offset = anchor.textOffset ?: return anchor.blockId == null || anchor.blockId == blockId
         val start = startOffset ?: return true
         val end = endOffset ?: return true
-        return offset >= start && offset < end
+        return offset in start..<end
     }
 }
 
@@ -434,8 +452,6 @@ private data class PendingTextSlice(
     val endOffset: Int,
     val estimatedHeightPx: Int,
 ) {
-    val charCount: Int get() = endOffset - startOffset
-
     fun toPageSlice(): ThreadReaderPageSlice.Text =
         ThreadReaderPageSlice.Text(
             blockId = block.anchorId,
@@ -778,7 +794,7 @@ internal fun planFixedHeightReaderPages(
             is HtmlBlock.Image -> {
                 val cachedHeight = input.imageHeightFor(block)?.takeIf { it > 0 }
                 val estimatedHeight = when {
-                    block.isEmoticon -> (cachedHeight ?: input.estimatedLineHeightPx * 2).coerceIn(1, maxPageHeight)
+                    block.isEmoticon -> ((cachedHeight ?: (input.estimatedLineHeightPx * 2))).coerceIn(1, maxPageHeight)
                     cachedHeight != null -> cachedHeight.coerceIn(1, maxPageHeight)
                     else -> {
                         val ratio = input.imageHeightToWidthRatioFor(block)?.takeIf { it > 0f } ?: 1.35f
@@ -1017,7 +1033,6 @@ internal enum class ThreadReaderMeasuredUnitKind {
     NavigationBanner,
     Metadata,
     Poll,
-    RatingSummary,
     RatingRows,
     CommentRows,
     AttachmentRows,
@@ -1225,26 +1240,6 @@ private fun estimateTextHeight(
             estimatedCharsPerLine = input.estimatedCharsPerLine,
             estimatedLineHeightPx = input.estimatedLineHeightPx,
         )
-
-private fun SafeBreakMap.fitMeasuredHeight(
-    start: Int,
-    preferredEnd: Int,
-    availableHeightPx: Int,
-    input: ThreadReaderPaginationInput,
-    block: HtmlBlock.Text,
-): Int {
-    if (input.textHeightFor == null) return preferredEnd
-    var end = preferredEnd.coerceIn(start + 1, textLength)
-    while (end > start + 1) {
-        val height = estimateTextHeight(input, block, start, end)
-        if (height <= availableHeightPx) return end
-        val shorterMax = (start + ((end - start) * 0.82f).toInt()).coerceAtLeast(start + 1)
-        val shorterEnd = bestBreak(start, shorterMax, preferSentence = false)
-        if (shorterEnd >= end) break
-        end = shorterEnd
-    }
-    return end
-}
 
 private fun estimateTextHeight(
     charCount: Int,

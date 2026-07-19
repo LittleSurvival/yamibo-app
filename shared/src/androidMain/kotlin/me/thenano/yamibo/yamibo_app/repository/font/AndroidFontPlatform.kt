@@ -1,5 +1,6 @@
 package me.thenano.yamibo.yamibo_app.repository.font
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -12,7 +13,9 @@ class AndroidFontPlatform(private val context: Context) : FontPlatform {
 
     override suspend fun importFont(sourceUri: String, displayName: String?, id: String): FontImportResult {
         return try {
+            @SuppressLint("UseKtx")
             val uri = Uri.parse(sourceUri)
+
             val sourceName = displayName
                 ?.takeIf { it.isNotBlank() }
                 ?: queryDisplayName(uri)

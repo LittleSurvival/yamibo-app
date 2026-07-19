@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,6 +37,46 @@ expect fun PlatformWebViewContent(
     onLoadError: (url: String?, description: String) -> Unit,
     shouldOverrideUrlLoading: (String) -> Boolean,
 )
+
+@Composable
+internal fun RegisterPlatformWebViewNavigation(
+    controllerKey: Any?,
+    canGoBack: () -> Boolean,
+    goBack: () -> Unit,
+    canGoForward: () -> Boolean,
+    goForward: () -> Unit,
+    reload: () -> Unit,
+    onBack: (() -> Unit) -> Unit,
+    onForward: (() -> Unit) -> Unit,
+    onReload: (() -> Unit) -> Unit,
+) {
+    val navigator = LocalNavigator.current
+
+    LaunchedEffect(controllerKey) {
+        onBack {
+            if (canGoBack()) goBack()
+        }
+        onForward {
+            if (canGoForward()) goForward()
+        }
+        onReload(reload)
+    }
+
+    DisposableEffect(controllerKey, navigator) {
+        val handler: () -> Boolean = {
+            if (canGoBack()) {
+                goBack()
+                true
+            } else {
+                false
+            }
+        }
+        navigator.backHandlers.add(handler)
+        onDispose {
+            navigator.backHandlers.remove(handler)
+        }
+    }
+}
 
 @Composable
 internal fun PlatformWebViewScreen(

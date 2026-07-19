@@ -69,7 +69,6 @@ class IFavoriteSyncProgressScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FavoriteSyncProgressScreen(runId: String) {
     val colors = YamiboTheme.colors

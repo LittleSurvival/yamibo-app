@@ -33,14 +33,13 @@ import me.thenano.yamibo.yamibo_app.components.navigation.YamiboMainTabTopBar
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboScrollableTabRow
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBar
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBarIconAction
+import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.components.user.UserAvatar
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.message.IMessageCenterScreen
 import me.thenano.yamibo.yamibo_app.message.IPrivateMessageScreen
 import me.thenano.yamibo.yamibo_app.navigation.ComposableNavigator
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.thread.detail.novel.INovelThreadDetailScreen
 import me.thenano.yamibo.yamibo_app.thread.reader.IThreadReaderScreen
 import me.thenano.yamibo.yamibo_app.userspace.blog.IBlogReaderScreen
@@ -90,7 +89,6 @@ private enum class ViewAllBlogFilter(
     Hot(i18n("推薦閱讀的日志"), YamiboRoute.UserSpace.Blog.ViewAllType.Hot),
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UserSpaceScreen(
     userId: UserId? = null,

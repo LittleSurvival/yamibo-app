@@ -62,7 +62,6 @@ private data class ForumPageSnapshot(
 )
 
 /** Main Forum Screen Entry */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ForumPageScreen(fid: ForumId, name: String) {
     val colors = YamiboTheme.colors
@@ -196,12 +195,11 @@ fun ForumPageScreen(fid: ForumId, name: String) {
                         )
                         return@ForumTopBar
                     }
-                    val removeFavorite = isFavoriteForum
                     val feedbackGroup = "forum-favorite:${fid.value}"
                     appTaskManager.launch(
                         key = me.thenano.yamibo.yamibo_app.task.AppTaskKey("forum-favorite-toggle:${fid.value}"),
                     ) {
-                        if (removeFavorite) {
+                        if (isFavoriteForum) {
                             feedbackController.post(i18n("正在解除本版收藏..."), groupKey = feedbackGroup)
                             val result = forumRepository.removeFavorite(fid, formHash)
                             feedbackController.post(
@@ -390,7 +388,6 @@ fun ForumPageScreen(fid: ForumId, name: String) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ForumTopBar(
     title: String,

@@ -62,7 +62,6 @@ internal class ISignInfoScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SignInfoScreen(onInfoLoaded: () -> Unit) {
     val colors = YamiboTheme.colors

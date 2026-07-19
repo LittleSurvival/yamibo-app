@@ -22,7 +22,25 @@ import me.thenano.yamibo.yamibo_app.i18n.i18n
 private data class ImageBytesResult(
     val bytes: ByteArray? = null,
     val errorMessage: String? = null,
-)
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other == null || this::class != other::class) return false
+
+        other as ImageBytesResult
+
+        if (!bytes.contentEquals(other.bytes)) return false
+        if (errorMessage != other.errorMessage) return false
+
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var result = bytes?.contentHashCode() ?: 0
+        result = 31 * result + errorMessage.hashCode()
+        return result
+    }
+}
 
 private suspend fun downloadImageBytes(
     context: PlatformContext,

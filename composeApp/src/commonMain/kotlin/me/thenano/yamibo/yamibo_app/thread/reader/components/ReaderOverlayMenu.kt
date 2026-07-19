@@ -36,7 +36,7 @@ internal fun ReaderOverlayMenu(
     singlePageProgress: ReaderSinglePageProgress? = null,
     onSinglePageProgressChange: ((Int) -> Unit)? = null,
     onSinglePageProgressCommit: (() -> Unit)? = null,
-    modifier: Modifier = Modifier
+    @Suppress("ModifierParameter") modifier: Modifier = Modifier
 ) {
     DebugRecomposeProbe("ReaderOverlayMenu", "visible=$visible")
     val floatButtonBottomPadding = if (singlePageProgress != null) 154.dp else 110.dp

@@ -81,8 +81,7 @@ class AppConfirmationController(scope: CoroutineScope) {
 
     suspend fun resolve(id: AppConfirmationId, result: AppConfirmationResult): Boolean {
         val accepted = CompletableDeferred<Boolean>()
-        if (commandChannel.trySend(Command.Resolve(id, result, accepted)).isFailure) return false
-        return accepted.await()
+        return !commandChannel.trySend(Command.Resolve(id, result, accepted)).isFailure && accepted.await()
     }
 
     fun close() {

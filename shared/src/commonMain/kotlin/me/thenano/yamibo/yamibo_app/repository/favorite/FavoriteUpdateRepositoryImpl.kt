@@ -2,7 +2,6 @@
 
 import io.github.littlesurvival.YamiboForum
 import io.github.littlesurvival.core.YamiboResult
-import io.github.littlesurvival.dto.model.ThreadSummary
 import io.github.littlesurvival.dto.page.Post
 import io.github.littlesurvival.dto.page.TagPage
 import io.github.littlesurvival.dto.page.ThreadPage
@@ -15,26 +14,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.i18n.i18n
-import me.thenano.yamibo.yamibo_app.repository.FavoriteUpdateRepository
-import me.thenano.yamibo.yamibo_app.repository.FavoriteUpdateRepository.CategoryFilter
-import me.thenano.yamibo.yamibo_app.repository.FavoriteUpdateRepository.FidFilter
-import me.thenano.yamibo.yamibo_app.repository.FavoriteUpdateRepository.RunPhase
-import me.thenano.yamibo.yamibo_app.repository.FavoriteUpdateRepository.RunSnapshot
-import me.thenano.yamibo.yamibo_app.repository.FavoriteUpdateRepository.RunState
-import me.thenano.yamibo.yamibo_app.repository.FavoriteUpdateRepository.RunStatus
-import me.thenano.yamibo.yamibo_app.repository.FavoriteUpdateRepository.ScopeTarget
-import me.thenano.yamibo.yamibo_app.repository.FavoriteUpdateRepository.TargetMode
-import me.thenano.yamibo.yamibo_app.repository.FavoriteUpdateRepository.UpdateEvent
-import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository
-import me.thenano.yamibo.yamibo_app.repository.RssSearchSubscriptionRepository
-import me.thenano.yamibo.yamibo_app.repository.TagRepository
-import me.thenano.yamibo.yamibo_app.repository.ThreadRepository
+import me.thenano.yamibo.yamibo_app.repository.*
+import me.thenano.yamibo.yamibo_app.repository.FavoriteUpdateRepository.*
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
-import me.thenano.yamibo.yamiboapp.FavoriteUpdateCategoryFilter
-import me.thenano.yamibo.yamiboapp.FavoriteUpdateEvent
-import me.thenano.yamibo.yamiboapp.FavoriteUpdateFidFilter
-import me.thenano.yamibo.yamiboapp.FavoriteUpdateRun
-import me.thenano.yamibo.yamiboapp.FavoriteUpdateTrackedTarget
+import me.thenano.yamibo.yamiboapp.*
 import kotlin.math.max
 import kotlin.random.Random
 import kotlin.time.Duration.Companion.milliseconds
@@ -727,7 +710,7 @@ class FavoriteUpdateRepositoryImpl(
         )
     }
 
-    private suspend fun refreshFidFilters(favorites: List<FavoriteStoreRepository.FavoriteItem>) {
+    private fun refreshFidFilters(favorites: List<FavoriteStoreRepository.FavoriteItem>) {
         val now = currentTimeMillis()
         val counts = favorites.mapNotNull { item ->
             val fid = item.scopeFid() ?: return@mapNotNull null

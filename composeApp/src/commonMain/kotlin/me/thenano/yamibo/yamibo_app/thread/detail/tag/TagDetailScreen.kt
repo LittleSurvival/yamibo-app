@@ -4,10 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -23,7 +20,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.thenano.yamibo.yamibo_app.*
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.favorite.*
 import me.thenano.yamibo.yamibo_app.i18n.i18n
@@ -46,7 +42,6 @@ internal sealed interface TagDetailState {
     data class Error(val message: String) : TagDetailState
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun TagDetailScreen(
     tagId: TagId,
@@ -68,8 +63,8 @@ internal fun TagDetailScreen(
     val platformContext = LocalPlatformContext.current
 
     val scope = rememberCoroutineScope()
-    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
-    val appTaskManager = me.thenano.yamibo.yamibo_app.LocalAppTaskManager.current
+    val feedbackController = LocalAppFeedbackController.current
+    val appTaskManager = LocalAppTaskManager.current
 
     var state by remember { mutableStateOf<TagDetailState>(TagDetailState.Loading) }
     var currentPage by remember { mutableIntStateOf(initialPage ?: 1) }
@@ -546,9 +541,9 @@ internal fun TagDetailScreen(
                               } else {
                                   tagCatalogHistory?.threadId?.value?.toLong()
                               },
-                              historyThreadCompleted = if (isMangaMode) mangaTagHistory?.let {
+                              historyThreadCompleted = isMangaMode && mangaTagHistory?.let {
                                   it.threadImageTotalPages > 0 && it.threadImagePageIndex >= it.threadImageTotalPages - 1
-                              } == true else false,
+                              } == true,
                               historyThreadProgressText = if (isMangaMode) mangaTagHistory?.let {
                                   if (it.threadImageTotalPages <= 0) null else {
                                       val clampedPageIndex = it.threadImagePageIndex.coerceIn(0, it.threadImageTotalPages - 1)

@@ -1,16 +1,11 @@
 package me.thenano.yamibo.yamibo_app.history
 
-import me.thenano.yamibo.yamibo_app.i18n.i18n
-
 import androidx.compose.animation.*
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,24 +19,19 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import me.thenano.yamibo.yamibo_app.IMainScreen
-import me.thenano.yamibo.yamibo_app.LocalAppSettingsRepository
-import me.thenano.yamibo.yamibo_app.LocalFavoriteRepository
-import me.thenano.yamibo.yamibo_app.LocalFavoriteSyncRepository
-import me.thenano.yamibo.yamibo_app.LocalReadHistoryRepository
-import me.thenano.yamibo.yamibo_app.Logger
+import me.thenano.yamibo.yamibo_app.*
 import me.thenano.yamibo.yamibo_app.components.controls.YamiboActionChip
 import me.thenano.yamibo.yamibo_app.components.controls.YamiboMultiSelectDialog
+import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.favorite.*
 import me.thenano.yamibo.yamibo_app.forum.components.PageNavigation
 import me.thenano.yamibo.yamibo_app.history.components.*
+import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
-import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository
 import me.thenano.yamibo.yamibo_app.repository.ContentCoverRepository
+import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository.ThreadReadingHistory
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.thread.reader.IImageReaderScreen
 import me.thenano.yamibo.yamibo_app.thread.reader.IThreadReaderScreen
 import kotlin.math.ceil
@@ -49,7 +39,6 @@ import kotlin.time.Duration.Companion.milliseconds
 
 private const val PAGE_SIZE = 20
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReadHistoryPage(reTapToken: Int = 0) {
     val colors = YamiboTheme.colors
@@ -59,9 +48,9 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
     val favoriteSyncRepository = LocalFavoriteSyncRepository.current
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
-    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
-    val confirmationController = me.thenano.yamibo.yamibo_app.LocalAppConfirmationController.current
-    val appTaskManager = me.thenano.yamibo.yamibo_app.LocalAppTaskManager.current
+    val feedbackController = LocalAppFeedbackController.current
+    val confirmationController = LocalAppConfirmationController.current
+    val appTaskManager = LocalAppTaskManager.current
     val allLabel = i18n("全部")
     val filterPrefix = i18n("篩選")
 

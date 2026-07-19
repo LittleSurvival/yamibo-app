@@ -11,7 +11,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -120,23 +119,6 @@ internal fun FavoriteBatchDownloadModeDialog(
                 ActionChip(i18n("開始下載"), onConfirm)
             }
         },
-    )
-}
-
-@Composable
-private fun FavoriteBatchSummary(scope: FavoriteBatchDownloadScope) {
-    val colors = YamiboTheme.colors
-    Text(
-        text = i18n(
-            "已選 {} 項，包含 {} 個集合；集合展開 {} 項，去重後 {} 項。",
-            scope.directItemCount,
-            scope.selectedCollectionCount,
-            scope.expandedCollectionItemCount,
-            scope.totalItemCount,
-        ),
-        color = colors.textDark.copy(alpha = 0.72f),
-        fontSize = 13.sp,
-        lineHeight = 18.sp,
     )
 }
 

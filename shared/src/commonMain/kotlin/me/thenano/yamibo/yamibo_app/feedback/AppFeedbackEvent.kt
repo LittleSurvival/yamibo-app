@@ -14,7 +14,6 @@ enum class AppFeedbackDuration {
 enum class AppFeedbackKind {
     Info,
     Success,
-    Warning,
     Error,
 }
 

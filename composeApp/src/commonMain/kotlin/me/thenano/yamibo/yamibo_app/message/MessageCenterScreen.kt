@@ -27,7 +27,6 @@ import me.thenano.yamibo.yamibo_app.components.navigation.YamiboMainTabTopBar
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboScrollableTabRow
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBar
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBarIconAction
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.components.user.UserAvatar
 import me.thenano.yamibo.yamibo_app.i18n.i18n
@@ -51,7 +50,6 @@ internal sealed interface MessageCenterContent {
     data class Notices(val page: UserSpaceNoticePage) : MessageCenterContent
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MessageCenterScreen(
     initialTab: MessageCenterTab = MessageCenterTab.PrivateMessages,

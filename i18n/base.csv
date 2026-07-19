@@ -171,6 +171,7 @@ tip：長按可詳細編輯收藏路徑,Tip: Long press to edit the favorite pat
 建立、載入與管理本地備份檔案,"Create, restore, and manage local backup files",建立、載入與管理本地備份檔案,建立、载入与管理本地备份档案
 建立備份,Create backup,建立備份,建立备份
 建立備份失敗,Failed to create backup,建立備份失敗,建立备份失败
+建立備份時發生錯誤,An error occurred while creating the backup,建立備份時發生錯誤,建立备份时发生错误
 建立類別失敗,Failed to create category,建立類別失敗,建立类别失败
 建議處理,Recommended treatment,建議處理,建议处理
 必須處理,must be dealt with,必須處理,必须处理
@@ -247,6 +248,7 @@ tip：長按可詳細編輯收藏路徑,Tip: Long press to edit the favorite pat
 正在取得收藏頁,Getting favorites,正在取得收藏頁,正在取得收藏页
 正在同步到百合會...,Synchronizing to Yamibo...,正在同步到百合會...,正在同步到百合会...
 正在定位連結,Locating link,正在定位連結,正在定位连结
+正在建立備份,Creating backup,正在建立備份,正在建立备份
 正在建立同步任務,Creating synchronization task,正在建立同步任務,正在建立同步任务
 正在從百合會移除收藏...,Removing favorites from Yamibo...,正在從百合會移除收藏...,正在从百合会移除收藏...
 正在檢查收藏更新,Checking for favorites updates,正在檢查收藏更新,正在检查收藏更新

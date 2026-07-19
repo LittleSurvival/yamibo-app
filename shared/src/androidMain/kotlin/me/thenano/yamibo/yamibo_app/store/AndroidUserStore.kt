@@ -2,22 +2,14 @@ package me.thenano.yamibo.yamibo_app.store
 
 import android.annotation.SuppressLint
 import android.content.Context
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 import io.github.littlesurvival.dto.model.TimeInfo
 import io.github.littlesurvival.dto.page.ProfilePage
 import io.github.littlesurvival.dto.value.FormHash
 import io.github.littlesurvival.dto.value.UserId
 import me.thenano.yamibo.yamibo_app.store.auth.UserStore
+
 class AndroidUserStore(context: Context) : UserStore {
-    private val prefs =
-        EncryptedSharedPreferences.create(
-            context,
-            prefName,
-            MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-        )
+    private val prefs = context.encryptedSharedPreferences(prefName)
 
     @SuppressLint("UseKtx")
     override fun save(userInfo: ProfilePage) {

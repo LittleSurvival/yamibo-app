@@ -28,7 +28,6 @@ import me.thenano.yamibo.yamibo_app.util.state
 
 private const val ShowUpdatePromptPreviewButton = false
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun AppUpdateScreen() {
     val colors = YamiboTheme.colors

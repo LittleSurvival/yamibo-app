@@ -411,6 +411,19 @@ fun FavoriteCollectionPickerDialog(
 
     val currentCategory = groupedCategories.firstOrNull { it.categoryId == currentCategoryId }
 
+    fun toggleCategory(category: FavoritePickerCategory) {
+        val categoryCollectionIds = category.collections.map { it.id }.toSet()
+        val hasAnySelection =
+            category.categoryId in selectedCategories ||
+                categoryCollectionIds.any(selectedCollections::contains)
+        if (hasAnySelection) {
+            selectedCategories -= category.categoryId
+            selectedCollections -= categoryCollectionIds
+        } else {
+            selectedCategories += category.categoryId
+        }
+    }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -460,18 +473,7 @@ fun FavoriteCollectionPickerDialog(
                                     selectedCategories = selectedCategories,
                                     selectedCollections = selectedCollections,
                                     triStateColors = checkboxColors,
-                                    onToggleCategory = {
-                                        val categoryCollectionIds = category.collections.map { it.id }.toSet()
-                                        val hasAnySelection =
-                                            category.categoryId in selectedCategories ||
-                                                categoryCollectionIds.any(selectedCollections::contains)
-                                        if (hasAnySelection) {
-                                            selectedCategories = selectedCategories - category.categoryId
-                                            selectedCollections = selectedCollections - categoryCollectionIds
-                                        } else {
-                                            selectedCategories = selectedCategories + category.categoryId
-                                        }
-                                    },
+                                    onToggleCategory = { toggleCategory(category) },
                                     onOpenCategory = { currentCategoryId = category.categoryId },
                                 )
                             }
@@ -482,18 +484,7 @@ fun FavoriteCollectionPickerDialog(
                                     selectedCategories = selectedCategories,
                                     selectedCollections = selectedCollections,
                                     triStateColors = checkboxColors,
-                                    onToggle = {
-                                        val categoryCollectionIds = currentCategory.collections.map { it.id }.toSet()
-                                        val hasAnySelection =
-                                            currentCategory.categoryId in selectedCategories ||
-                                                categoryCollectionIds.any(selectedCollections::contains)
-                                        if (hasAnySelection) {
-                                            selectedCategories = selectedCategories - currentCategory.categoryId
-                                            selectedCollections = selectedCollections - categoryCollectionIds
-                                        } else {
-                                            selectedCategories = selectedCategories + currentCategory.categoryId
-                                        }
-                                    },
+                                    onToggle = { toggleCategory(currentCategory) },
                                 )
                             }
                             items(currentCategory.collections, key = { it.id }) { option ->

@@ -26,7 +26,6 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.SubcomposeAsyncImage
 import me.thenano.yamibo.yamibo_app.components.feedback.resolvedContentCoverUrl
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
-import me.thenano.yamibo.yamibo_app.favorite.FavoriteActionButton
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
@@ -213,31 +212,12 @@ fun ReadHistoryCard(
             Spacer(Modifier.size(4.dp))
 
             if (!isSelectMode) {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(0.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    FavoriteActionButton(
-                        onClick = onFavorite,
-                        onLongClick = onFavoriteLongPress,
-                        modifier = Modifier.size(32.dp),
-                        tint = colors.brownPrimary.copy(alpha = 0.75f),
-                        iconSize = 16,
-                        filled = isFavorited
-                    )
-
-                    IconButton(
-                        onClick = onDelete,
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            imageVector = YamiboIcons.Trashcan,
-                            contentDescription = i18n("刪除"),
-                            modifier = Modifier.size(16.dp),
-                            tint = colors.textDark.copy(alpha = 0.4f)
-                        )
-                    }
-                }
+                HistoryCardActions(
+                    isFavorited = isFavorited,
+                    onFavorite = onFavorite,
+                    onFavoriteLongPress = onFavoriteLongPress,
+                    onDelete = onDelete,
+                )
             }
         }
     }

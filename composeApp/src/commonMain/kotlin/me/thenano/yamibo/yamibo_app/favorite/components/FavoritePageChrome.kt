@@ -37,21 +37,6 @@ import me.thenano.yamibo.yamibo_app.components.navigation.YamiboMainTabIconActio
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboMainTabTopBar
 
 @Composable
-fun HeaderRow(title: String, actions: List<Pair<String, () -> Unit>>) {
-    val colors = YamiboTheme.colors
-    Row(
-        Modifier.fillMaxWidth().statusBarsPadding().padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(title, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = colors.textStrong, modifier = Modifier.weight(1f))
-        actions.forEachIndexed { index, action ->
-            ActionChip(action.first, action.second)
-            if (index != actions.lastIndex) Spacer(Modifier.width(6.dp))
-        }
-    }
-}
-
-@Composable
 fun SelectionHeaderRows(
     title: String,
     actions: List<Pair<String, () -> Unit>>,

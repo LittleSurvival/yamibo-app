@@ -5,21 +5,21 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import io.github.littlesurvival.dto.value.ThreadId
+import io.github.littlesurvival.dto.value.UserId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import io.github.littlesurvival.dto.value.ThreadId
-import io.github.littlesurvival.dto.value.UserId
 import me.thenano.yamibo.yamibo_app.LocalAppSettingsRepository
 import me.thenano.yamibo.yamibo_app.LocalDownloadRepository
 import me.thenano.yamibo.yamibo_app.LocalFavoriteUpdateRepository
@@ -30,15 +30,14 @@ import me.thenano.yamibo.yamibo_app.components.feedback.YamiboErrorContent
 import me.thenano.yamibo.yamibo_app.components.feedback.YamiboLoadingContent
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboMainTabIconAction
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboMainTabTopBar
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.favorite.updates.FavoriteUpdateRunner
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.i18n.localizedLabel
 import me.thenano.yamibo.yamibo_app.navigation.ComposableNavigator
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
-import me.thenano.yamibo.yamibo_app.repository.FavoriteUpdateRepository
 import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository
+import me.thenano.yamibo.yamibo_app.repository.FavoriteUpdateRepository
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadStatus
 import me.thenano.yamibo.yamibo_app.repository.download.ThreadPageDownloadKey
@@ -46,8 +45,9 @@ import me.thenano.yamibo.yamibo_app.thread.detail.novel.INovelThreadDetailScreen
 import me.thenano.yamibo.yamibo_app.thread.detail.rss.IRssSearchSubscriptionDetailScreen
 import me.thenano.yamibo.yamibo_app.thread.detail.tag.ITagDetailScreen
 import me.thenano.yamibo.yamibo_app.thread.reader.IThreadReaderScreen
-import me.thenano.yamibo.yamibo_app.util.state
 import me.thenano.yamibo.yamibo_app.updates.components.*
+import me.thenano.yamibo.yamibo_app.util.state
+import kotlin.time.Duration.Companion.milliseconds
 
 private sealed interface UpdatesScreenState {
     data object Loading : UpdatesScreenState
@@ -105,7 +105,6 @@ internal fun favoriteUpdateAutoRefreshEntries(
         .distinctBy { it.second }
         .toList()
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UpdatesScreen() {
     val colors = YamiboTheme.colors
@@ -210,7 +209,7 @@ fun UpdatesScreen() {
 
     LaunchedEffect(updateContent?.events) {
         updateContent ?: return@LaunchedEffect
-        delay(350)
+        delay(350.milliseconds)
         loadUpdateFilters()
     }
 
@@ -592,14 +591,14 @@ private fun navigateFavoriteUpdateEvent(
         )
         FavoriteStoreRepository.FavoriteTargetType.ThreadNovel -> navigator.navigate(
             INovelThreadDetailScreen(
-                tid = io.github.littlesurvival.dto.value.ThreadId(event.targetId.toInt()),
+                tid = ThreadId(event.targetId.toInt()),
                 title = event.title,
-                authorId = event.authorId?.toInt()?.let { io.github.littlesurvival.dto.value.UserId(it) },
+                authorId = event.authorId?.toInt()?.let { UserId(it) },
             )
         )
         FavoriteStoreRepository.FavoriteTargetType.ThreadNormal -> navigator.navigate(
             IThreadReaderScreen(
-                tid = io.github.littlesurvival.dto.value.ThreadId(event.targetId.toInt()),
+                tid = ThreadId(event.targetId.toInt()),
                 title = event.title,
                 threadType = ReadHistoryRepository.ThreadEntryType.Normal,
             )

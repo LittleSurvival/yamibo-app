@@ -101,7 +101,7 @@ class ComposableNavigator private constructor(
         }
     }
 
-    @Deprecated("There's no longer a need for this.")
+    @Deprecated("There's no longer a need for this.", ReplaceWith("stack.size > 1"))
     fun canGoBack(): Boolean = stack.size > 1
 
     fun snapshot(): NavigatorSnapshot {

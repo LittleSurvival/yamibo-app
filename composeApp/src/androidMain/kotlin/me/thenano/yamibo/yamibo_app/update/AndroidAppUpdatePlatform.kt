@@ -34,11 +34,7 @@ class AndroidAppUpdatePlatform(
     override val supportedAssetTypes: Set<String> = setOf("universal-apk", "apk")
 
     override val isInstallPermissionGranted: Boolean
-        get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.packageManager.canRequestPackageInstalls()
-        } else {
-            true
-        }
+        get() = Build.VERSION.SDK_INT < Build.VERSION_CODES.O || context.packageManager.canRequestPackageInstalls()
 
     override suspend fun downloadAndInstall(
         release: AppUpdateRelease,
@@ -171,8 +167,7 @@ private fun File.sha256(): String {
 }
 
 private fun File.hasApkZipSignature(): Boolean {
-    if (length() < 4L) return false
-    return inputStream().use { input ->
+    return length() >= 4L && inputStream().use { input ->
         val header = ByteArray(4)
         input.read(header) == header.size &&
             header.contentEquals(byteArrayOf(0x50, 0x4B, 0x03, 0x04))

@@ -30,7 +30,7 @@ class AppFeedbackController {
     ): AppFeedbackId {
         val id = AppFeedbackId(++nextId)
         event.groupKey?.let { groupKey ->
-            latestGroupState.value = latestGroupState.value + (groupKey to id)
+            latestGroupState.value += (groupKey to id)
         }
         val channel = if (event.requiresDurableDelivery) {
             durableDeliveryChannel
@@ -65,7 +65,7 @@ class AppFeedbackController {
         val resolved = delivery.resolve(result)
         val groupKey = delivery.event.groupKey
         if (resolved && groupKey != null && latestGroupState.value[groupKey] == delivery.id) {
-            latestGroupState.value = latestGroupState.value - groupKey
+            latestGroupState.value -= groupKey
         }
         return resolved
     }

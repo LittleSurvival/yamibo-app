@@ -91,8 +91,8 @@ internal fun ReaderCatalogPanel(
                     currentIndex++ // page_loading
                 } else {
                     val pagePosts = loadedPostsByPage[page] ?: emptyList()
-                    for (post in pagePosts) {
-                        if (post.pid == currentPid) {
+                    for ((pid) in pagePosts) {
+                        if (pid == currentPid) {
                             targetIndex = currentIndex
                             break
                         }
@@ -316,8 +316,8 @@ private fun ChapterStateRepository.Entry.progressLabel(): String? {
     return i18n("已讀 {}%", progressPercent)
 }
 
-private fun catalogDownloadLabel(entry: DownloadQueueEntry): String = when {
-    entry.status == DownloadStatus.Downloading && entry.stage != null -> when (entry.stage) {
+private fun catalogDownloadLabel(entry: DownloadQueueEntry): String = when (entry.status) {
+    DownloadStatus.Downloading if entry.stage != null -> when (entry.stage) {
         DownloadStage.Preparing -> i18n("準備中")
         DownloadStage.FetchingContent -> i18n("正在取得內容")
         DownloadStage.DownloadingText -> i18n("下載文字")
@@ -326,13 +326,14 @@ private fun catalogDownloadLabel(entry: DownloadQueueEntry): String = when {
         } else {
             i18n("下載圖片")
         }
+
         DownloadStage.Saving -> i18n("儲存中")
         null -> i18n("下載中")
     }
-    entry.status == DownloadStatus.Queued -> i18n("等待中")
-    entry.status == DownloadStatus.Downloaded -> i18n("已下載")
-    entry.status == DownloadStatus.Failed -> i18n("下載失敗")
-    entry.status == DownloadStatus.Paused -> i18n("已暫停")
-    entry.status == DownloadStatus.UpdateAvailable -> i18n("可刷新")
+    DownloadStatus.Queued -> i18n("等待中")
+    DownloadStatus.Downloaded -> i18n("已下載")
+    DownloadStatus.Failed -> i18n("下載失敗")
+    DownloadStatus.Paused -> i18n("已暫停")
+    DownloadStatus.UpdateAvailable -> i18n("可刷新")
     else -> i18n("未下載")
 }

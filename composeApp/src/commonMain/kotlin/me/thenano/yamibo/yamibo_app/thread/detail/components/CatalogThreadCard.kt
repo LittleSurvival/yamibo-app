@@ -227,8 +227,8 @@ fun CatalogThreadCard(
     }
 }
 
-private fun catalogDownloadLabel(entry: DownloadQueueEntry): String = when {
-    entry.status == DownloadStatus.Downloading && entry.stage != null -> when (entry.stage) {
+private fun catalogDownloadLabel(entry: DownloadQueueEntry): String = when (entry.status) {
+    DownloadStatus.Downloading if entry.stage != null -> when (entry.stage) {
         DownloadStage.Preparing -> i18n("準備中")
         DownloadStage.FetchingContent -> i18n("正在取得內容")
         DownloadStage.DownloadingImages -> if (entry.progressTotal > 0) {
@@ -236,14 +236,15 @@ private fun catalogDownloadLabel(entry: DownloadQueueEntry): String = when {
         } else {
             i18n("下載圖片")
         }
+
         DownloadStage.Saving -> i18n("儲存中")
         DownloadStage.DownloadingText -> i18n("正在取得內容")
         null -> i18n("下載中")
     }
-    entry.status == DownloadStatus.Queued -> i18n("等待中")
-    entry.status == DownloadStatus.Downloaded -> i18n("已下載")
-    entry.status == DownloadStatus.Failed -> i18n("下載失敗")
-    entry.status == DownloadStatus.Paused -> i18n("已暫停")
-    entry.status == DownloadStatus.UpdateAvailable -> i18n("可刷新")
+    DownloadStatus.Queued -> i18n("等待中")
+    DownloadStatus.Downloaded -> i18n("已下載")
+    DownloadStatus.Failed -> i18n("下載失敗")
+    DownloadStatus.Paused -> i18n("已暫停")
+    DownloadStatus.UpdateAvailable -> i18n("可刷新")
     else -> i18n("未下載")
 }

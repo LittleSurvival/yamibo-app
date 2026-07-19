@@ -6,8 +6,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -20,7 +18,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.thenano.yamibo.yamibo_app.*
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.favorite.*
 import me.thenano.yamibo.yamibo_app.i18n.i18n
@@ -42,7 +39,6 @@ private sealed interface RssDetailState {
     data class Error(val message: String) : RssDetailState
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RssSearchSubscriptionDetailScreen(
     subscriptionId: Long,
@@ -63,8 +59,8 @@ fun RssSearchSubscriptionDetailScreen(
     val appSettingsRepo = LocalAppSettingsRepository.current
     val imageReaderModeOverrideRepository = LocalImageReaderModeOverrideRepository.current
     val platformContext = LocalPlatformContext.current
-    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
-    val appTaskManager = me.thenano.yamibo.yamibo_app.LocalAppTaskManager.current
+    val feedbackController = LocalAppFeedbackController.current
+    val appTaskManager = LocalAppTaskManager.current
     val scope = rememberCoroutineScope()
     val stackSize = navigator.stack.size
 
@@ -452,9 +448,9 @@ fun RssSearchSubscriptionDetailScreen(
                         } else {
                             rssCatalogHistory?.threadId?.value?.toLong()
                         },
-                        historyThreadCompleted = if (isMangaMode) rssHistory?.let {
+                        historyThreadCompleted = isMangaMode && rssHistory?.let {
                             it.threadImageTotalPages > 0 && it.threadImagePageIndex >= it.threadImageTotalPages - 1
-                        } == true else false,
+                        } == true,
                         historyThreadProgressText = if (isMangaMode) rssHistory?.let {
                             catalogHistoryProgressLabel(it.threadImagePageIndex, it.threadImageTotalPages)
                         } else rssCatalogHistory?.let { i18n("第{}頁", it.threadPage) },
