@@ -30,7 +30,6 @@ import coil3.PlatformContext
 import coil3.compose.setSingletonImageLoaderFactory
 import coil3.memory.MemoryCache
 import coil3.network.ktor3.KtorNetworkFetcherFactory
-import io.github.littlesurvival.core.YamiboResult
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -52,6 +51,7 @@ import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.navigation.NavAction
 import me.thenano.yamibo.yamibo_app.profile.settings.update.AppUpdatePromptContent
 import me.thenano.yamibo.yamibo_app.profile.sign.ISignWebView
+import me.thenano.yamibo.yamibo_app.profile.sign.signActionFeedbackMessage
 import me.thenano.yamibo.yamibo_app.repository.AuthRepository
 import me.thenano.yamibo.yamibo_app.repository.SignRepository
 import me.thenano.yamibo.yamibo_app.repository.appupdate.AppUpdateCheckResult
@@ -629,23 +629,7 @@ private fun navigateToSignWebViewOrProfile(
                         onCfCleared = {
                             appTaskManager.launch(AppTaskKey("sign:auto")) {
                                 feedbackController.post(i18n("開始自動簽到..."))
-                                when (val result = signRepository.runAutoSign(allowRepair)) {
-                                    is YamiboResult.Success -> {
-                                        feedbackController.post(result.value.message)
-                                    }
-                                    is YamiboResult.Failure -> {
-                                        feedbackController.post(i18n(result.message()))
-                                    }
-                                    is YamiboResult.NotLoggedIn -> {
-                                        feedbackController.post(i18n(result.message()))
-                                    }
-                                    is YamiboResult.NoPermission -> {
-                                        feedbackController.post(i18n("目前無法自動簽到，請改用手動模式"))
-                                    }
-                                    is YamiboResult.Maintenance -> {
-                                        feedbackController.post(i18n(result.message()))
-                                    }
-                                }
+                                feedbackController.post(signRepository.runAutoSign(allowRepair).signActionFeedbackMessage())
                             }
                         },
                         onMaintenanceObserved = {

@@ -926,15 +926,6 @@ class FavoriteUpdateRepositoryImpl(
     private fun YamiboResult<*>.toCheckFailure(itemTitle: String): CheckResult.Failed =
         CheckResult.Failed(favoriteUpdateFailureReason(itemTitle))
 
-    private fun YamiboResult<*>.favoriteUpdateFailureReason(itemTitle: String): String =
-        when (this) {
-            is YamiboResult.NotLoggedIn -> i18n("登入狀態已失效，無法檢查 {}", itemTitle)
-            is YamiboResult.NoPermission -> reason
-            is YamiboResult.Maintenance -> i18n("百合會維護中，無法檢查 {}", itemTitle)
-            is YamiboResult.Failure -> reason
-            is YamiboResult.Success -> error("Success result has no failure reason")
-        }
-
     private fun shouldStop(runId: String): Boolean {
         if (runId in interruptRequestedRunIds) return true
         val snapshot = runQueries.getByRunId(runId).executeAsOneOrNull()?.toSnapshot() ?: return false

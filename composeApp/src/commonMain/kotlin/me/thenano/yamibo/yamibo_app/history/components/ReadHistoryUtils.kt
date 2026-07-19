@@ -5,7 +5,7 @@ import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository.ThreadReadingHistory
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
-import me.thenano.yamibo.yamibo_app.util.time.formatDate as sharedFormatDate
+import me.thenano.yamibo.yamibo_app.util.time.formatDate
 import me.thenano.yamibo.yamibo_app.util.time.formatTime as sharedFormatTime
 
 internal fun itemKey(history: ReadHistoryRepository.AnyReadingHistory): String {
@@ -38,8 +38,6 @@ internal fun groupByDate(
     }
     return grouped.toList()
 }
-
-private fun formatDate(timestamp: Long): String = sharedFormatDate(timestamp)
 
 internal fun formatTime(timestamp: Long): String = sharedFormatTime(timestamp)
 

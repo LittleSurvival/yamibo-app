@@ -20,11 +20,8 @@ class BlogRepositoryImpl(
 
     override suspend fun fetchBlogPage(blogId: BlogId, userId: UserId?, page: Int): YamiboResult<BlogPage> {
         yamiboClient.setCookie(cookieStore.load() ?: "")
-        val result = yamiboClient.fetchBlogPage(blogId, userId, page)
-        if (result is YamiboResult.Success) {
-            blogPageCache.set(BlogRepository.BlogPageCacheKey(blogId.value, userId?.value, page).toCacheKey(), result.value)
-        }
-        return result
+        return yamiboClient.fetchBlogPage(blogId, userId, page)
+            .cacheSuccess(blogPageCache, BlogRepository.BlogPageCacheKey(blogId.value, userId?.value, page).toCacheKey())
     }
 
     override suspend fun postBlogComment(

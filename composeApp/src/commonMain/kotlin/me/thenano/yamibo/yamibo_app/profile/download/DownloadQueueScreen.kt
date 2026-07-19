@@ -46,6 +46,7 @@ import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.profile.settings.backup.IBackupSettingsScreen
 import me.thenano.yamibo.yamibo_app.repository.DownloadRepository
 import me.thenano.yamibo.yamibo_app.repository.download.*
+import me.thenano.yamibo.yamibo_app.util.formatDownloadedByteSize
 import me.thenano.yamibo.yamibo_app.task.AppTaskKey
 import me.thenano.yamibo.yamibo_app.task.isActive
 import me.thenano.yamibo.yamibo_app.util.state
@@ -609,7 +610,7 @@ private fun DownloadContentSummaryCard(summary: DownloadedContentSummary) {
             fontSize = 13.sp,
         )
         Text(
-            i18n("圖片約佔 {}", formatBytes(summary.imageBytes)),
+            i18n("圖片約佔 {}", formatDownloadedByteSize(summary.imageBytes)),
             color = colors.brownPrimary,
             fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
@@ -645,7 +646,7 @@ private fun DownloadContentGroupCard(
             Column(Modifier.weight(1f).padding(start = 10.dp)) {
                 Text(group.title, color = colors.textStrong, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    i18n("{} 項 · {} 張圖片 · {}", group.itemCount, group.imageCount, formatBytes(group.imageBytes)),
+                    i18n("{} 項 · {} 張圖片 · {}", group.itemCount, group.imageCount, formatDownloadedByteSize(group.imageBytes)),
                     color = colors.textDark.copy(alpha = 0.68f),
                     fontSize = 12.sp,
                 )
@@ -692,7 +693,7 @@ private fun DownloadContentItemRow(
         Column(Modifier.weight(1f)) {
             Text(item.detail, color = colors.textStrong, fontWeight = FontWeight.Medium, fontSize = 13.sp)
             Text(
-                i18n("{} 張圖片 · {}", item.imageCount, formatBytes(item.imageBytes)),
+                i18n("{} 張圖片 · {}", item.imageCount, formatDownloadedByteSize(item.imageBytes)),
                 color = colors.textDark.copy(alpha = 0.62f),
                 fontSize = 12.sp,
             )
@@ -831,15 +832,3 @@ private suspend fun refreshUpdateAvailableDownloads(
         }
     return refreshed
 }
-
-private fun formatBytes(bytes: Long): String {
-    if (bytes < 1024L) return "$bytes B"
-    val kib = bytes / 1024.0
-    if (kib < 1024.0) return "${oneDecimal(kib)} KB"
-    val mib = kib / 1024.0
-    if (mib < 1024.0) return "${oneDecimal(mib)} MB"
-    return "${oneDecimal(mib / 1024.0)} GB"
-}
-
-private fun oneDecimal(value: Double): String =
-    ((value * 10).toInt() / 10.0).toString()

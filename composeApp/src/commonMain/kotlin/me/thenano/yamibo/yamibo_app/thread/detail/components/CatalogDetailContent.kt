@@ -12,9 +12,10 @@ import androidx.compose.ui.unit.dp
 import io.github.littlesurvival.dto.model.ThreadSummary
 import io.github.littlesurvival.dto.page.TagPage
 import me.thenano.yamibo.yamibo_app.forum.components.PageNavigation
+import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.repository.ChapterStateRepository
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadQueueEntry
-import me.thenano.yamibo.yamibo_app.i18n.i18n
+import me.thenano.yamibo.yamibo_app.thread.components.chapterPageProgressLabel
 
 /** Tag Detail Content (scrollable body) */
 @Composable
@@ -122,7 +123,7 @@ fun CatalogDetailContent(
             val threadProgressText = if (isMangaMode) {
                 when {
                     read -> null
-                    chapterState?.hasProgress == true -> chapterState.progressLabel()
+                    chapterState?.hasProgress == true -> chapterState.chapterPageProgressLabel()
                     historyThreadId == threadId -> historyThreadProgressText
                     else -> null
                 }
@@ -150,13 +151,6 @@ fun CatalogDetailContent(
             }
         }
     }
-}
-
-private fun ChapterStateRepository.Entry.progressLabel(): String? {
-    if (read) return null
-    val currentPage = lastPageIndex?.plus(1) ?: return null
-    val totalPage = totalPages?.takeIf { it > 0 } ?: return null
-    return "$currentPage/$totalPage"
 }
 
 fun catalogHistoryProgressLabel(

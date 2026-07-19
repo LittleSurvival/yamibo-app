@@ -225,7 +225,7 @@ fun FavoriteSyncStatusCard(
                     color = colors.brownDeep,
                     trackColor = colors.brownPrimary.copy(alpha = 0.18f),
                 )
-                SyncMetricRow(i18n("最後一次同步時間"), formatSyncDateTime(lastSyncTimestamp))
+                SyncMetricRow(i18n("最後一次同步時間"), formatDateTime(lastSyncTimestamp))
                 SyncMetricRow(i18n("同步花費時間"), formatSyncDuration(displayedElapsedDuration))
                 progressUi.lines.forEach { line ->
                     SyncMetricRow(line.first, line.second)
@@ -423,10 +423,6 @@ private fun SyncMessageBlock(
             }
         }
     }
-}
-
-private fun formatSyncDateTime(timestamp: Long): String {
-    return formatDateTime(timestamp)
 }
 
 private fun formatSyncDuration(durationMs: Long): String {

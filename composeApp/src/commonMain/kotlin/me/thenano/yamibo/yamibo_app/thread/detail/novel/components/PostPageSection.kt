@@ -32,6 +32,7 @@ import io.github.littlesurvival.dto.page.Post
 import me.thenano.yamibo.yamibo_app.components.text.rememberConvertedText
 import me.thenano.yamibo.yamibo_app.repository.ChapterStateRepository
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
+import me.thenano.yamibo.yamibo_app.thread.components.chapterPercentProgressLabel
 
 /** Expandable page section with post titles */
 @Composable
@@ -122,7 +123,7 @@ internal fun PostPageSection(
                             post = post,
                             bookmarked = postId in bookmarkedPostIds,
                             read = isRead,
-                            progressText = chapterState?.progressLabel(),
+                            progressText = chapterState?.chapterPercentProgressLabel(),
                             onClick = { onPostClick(post) },
                             onLongPress = { onPostLongPress(post) },
                         )
@@ -132,7 +133,6 @@ internal fun PostPageSection(
         }
     }
 }
-
 /** Single post title row (lightweight — just title) */
 @Composable
 private fun PostTitleRow(
@@ -206,9 +206,4 @@ private fun PostTitleRow(
             }
         }
     }
-}
-
-private fun ChapterStateRepository.Entry.progressLabel(): String? {
-    if (read || progressPercent <= 0) return null
-    return i18n("已讀 {}%", progressPercent)
 }

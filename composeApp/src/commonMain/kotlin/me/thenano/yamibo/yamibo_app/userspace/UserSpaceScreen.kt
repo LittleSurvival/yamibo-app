@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.sp
 import io.github.littlesurvival.YamiboForum
 import io.github.littlesurvival.YamiboRoute
 import io.github.littlesurvival.core.YamiboResult
+import io.github.littlesurvival.core.mapSuccess
 import io.github.littlesurvival.dto.model.ThreadSummary
 import io.github.littlesurvival.dto.page.*
 import io.github.littlesurvival.dto.value.UserId
@@ -646,14 +647,6 @@ private fun UserSpaceScreenContent.pageNumber(): Int? = when (this) {
     is UserSpaceScreenContent.Replies -> page.pageNav?.currentPage
     is UserSpaceScreenContent.Blogs -> page.pageNav?.currentPage
     is UserSpaceScreenContent.Friends -> page.pageNav?.currentPage
-}
-
-private fun <T, R> YamiboResult<T>.mapSuccess(transform: (T) -> R): YamiboResult<R> = when (this) {
-    is YamiboResult.Success -> YamiboResult.Success(transform(value))
-    is YamiboResult.Failure -> this
-    is YamiboResult.NotLoggedIn -> this
-    is YamiboResult.NoPermission -> this
-    is YamiboResult.Maintenance -> this
 }
 
 private fun topBarTitle(

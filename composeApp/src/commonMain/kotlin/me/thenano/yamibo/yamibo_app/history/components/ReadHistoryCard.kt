@@ -64,7 +64,7 @@ fun ReadHistoryCard(
         append(timeLabel)
         history.lastUpdatedTime?.takeIf { it > 0L }?.let {
             append(i18n(" / 最後更新 "))
-            append(formatHistoryRelativeTime(it))
+            append(formatRelativeTime(it))
         }
     }
     val scale by animateFloatAsState(
@@ -221,8 +221,4 @@ fun ReadHistoryCard(
             }
         }
     }
-}
-
-private fun formatHistoryRelativeTime(timestamp: Long): String {
-    return formatRelativeTime(timestamp)
 }

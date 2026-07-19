@@ -34,6 +34,7 @@ import me.thenano.yamibo.yamibo_app.profile.settings.ISettingsScreen
 import me.thenano.yamibo.yamibo_app.profile.settings.backup.IBackupSettingsScreen
 import me.thenano.yamibo.yamibo_app.profile.sign.ISignInfoScreen
 import me.thenano.yamibo.yamibo_app.profile.sign.ISignWebView
+import me.thenano.yamibo.yamibo_app.profile.sign.signActionFeedbackMessage
 import me.thenano.yamibo.yamibo_app.profile.support.ISupportAppDevelopmentScreen
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadQueueEntry
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadStatus
@@ -217,28 +218,13 @@ fun ProfilePage(
                                     onCfCleared = {
                                         coroutineScope.launch {
                                             var snackbarMessage: String?
-                                            /** This when maps semi-automatic sign results into the ProfilePage sign button snackbar/title update flow. */
                                             when (val result = signRepository.runAutoSign(allowRepair)) {
                                                 is YamiboResult.Success -> {
                                                     signRefreshKey += 1
                                                     snackbarMessage = result.value.message
                                                 }
 
-                                                is YamiboResult.Failure -> {
-                                                    snackbarMessage = i18n(result.message())
-                                                }
-
-                                                is YamiboResult.NotLoggedIn -> {
-                                                    snackbarMessage = i18n(result.message())
-                                                }
-
-                                                is YamiboResult.NoPermission -> {
-                                                    snackbarMessage = i18n("目前無法自動簽到，請改用手動模式")
-                                                }
-
-                                                is YamiboResult.Maintenance -> {
-                                                    snackbarMessage = i18n(result.message())
-                                                }
+                                                else -> snackbarMessage = result.signActionFeedbackMessage()
                                             }
                                             isSigning = false
                                             refreshSignStatus()

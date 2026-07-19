@@ -45,9 +45,9 @@ class ForumFavoriteSynchronizer(
                 result
             }
             is YamiboResult.Failure -> repairIdAfterRemoveFailure(forumId, result)
-            is YamiboResult.NotLoggedIn -> YamiboResult.NotLoggedIn
-            is YamiboResult.NoPermission -> YamiboResult.NoPermission(result.reason)
-            is YamiboResult.Maintenance -> YamiboResult.Maintenance
+            is YamiboResult.NotLoggedIn,
+            is YamiboResult.NoPermission,
+            is YamiboResult.Maintenance -> result
         }
     }
 
@@ -72,10 +72,10 @@ class ForumFavoriteSynchronizer(
                     }
                     page += 1
                 }
-                is YamiboResult.NotLoggedIn -> return YamiboResult.NotLoggedIn
-                is YamiboResult.NoPermission -> return YamiboResult.NoPermission(result.reason)
-                is YamiboResult.Maintenance -> return YamiboResult.Maintenance
-                is YamiboResult.Failure -> return YamiboResult.Failure(result.reason, result.exception)
+                is YamiboResult.NotLoggedIn,
+                is YamiboResult.NoPermission,
+                is YamiboResult.Maintenance,
+                is YamiboResult.Failure -> return result
             }
         }
     }

@@ -27,6 +27,7 @@ import io.github.littlesurvival.dto.value.ThreadId
 import me.thenano.yamibo.yamibo_app.repository.ChapterStateRepository
 import me.thenano.yamibo.yamibo_app.repository.settings.ReadingMode
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
+import me.thenano.yamibo.yamibo_app.thread.components.chapterPageProgressLabel
 
 /** Item types in the reader list */
 internal sealed class ReaderItem {
@@ -39,7 +40,6 @@ internal sealed class ReaderItem {
         val readingMode: ReadingMode
     ) : ReaderItem()
 }
-
 /** Interstitial page between chapters */
 @Composable
 internal fun InterstitialCard(item: ReaderItem.InterstitialItem) {
@@ -248,7 +248,7 @@ internal fun TagCatalogPanel(
                                         val isCurrentThread = thread.tid == currentThreadId
                                         val chapterState = chapterStates[thread.tid.value.toLong()]
                                         val isRead = chapterState?.read == true
-                                        val progressText = chapterState?.progressLabel()
+                                        val progressText = chapterState?.chapterPageProgressLabel()
                                         Surface(
                                             color = if (isCurrentThread) colors.brownLight.copy(alpha = 0.15f) else colors.creamSurface,
                                             onClick = { onPageOrThreadClick(page, thread) },
@@ -307,11 +307,4 @@ internal fun TagCatalogPanel(
             }
         }
     }
-}
-
-private fun ChapterStateRepository.Entry.progressLabel(): String? {
-    if (read) return null
-    val currentPage = lastPageIndex?.plus(1) ?: return null
-    val totalPage = totalPages?.takeIf { it > 0 } ?: return null
-    return "$currentPage/$totalPage"
 }
