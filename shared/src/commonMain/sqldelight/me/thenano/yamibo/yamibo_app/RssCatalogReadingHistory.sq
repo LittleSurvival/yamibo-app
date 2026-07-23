@@ -23,6 +23,10 @@ SELECT * FROM RssCatalogReadingHistory
 ORDER BY lastVisitTime DESC
 LIMIT ? OFFSET ?;
 
+getAll:
+SELECT * FROM RssCatalogReadingHistory
+ORDER BY lastVisitTime DESC;
+
 countAll:
 SELECT COUNT(*) FROM RssCatalogReadingHistory;
 

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "exportedAtEpochMillis": 0,
+  "sourceAppVersionCode": 4,
+  "readingHistory": {
+    "thread": [],
+    "image": [],
+    "tagManga": [],
+    "tagCatalog": [],
+    "rssSearch": [],
+    "rssCatalog": [],
+    "readingTimeStats": []
+  },
+  "favorites": {
+    "categories": [],
+    "collections": [],
+    "items": [],
+    "itemCategoryRefs": [],
+    "itemCollectionRefs": []
+  },
+  "settings": []
+}

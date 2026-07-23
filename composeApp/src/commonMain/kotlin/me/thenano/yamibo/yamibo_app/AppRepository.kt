@@ -8,6 +8,7 @@ import me.thenano.yamibo.yamibo_app.task.AppTaskManager
 import me.thenano.yamibo.yamibo_app.core.cache.DiskCacheFactory
 import me.thenano.yamibo.yamibo_app.repository.AuthRepository
 import me.thenano.yamibo.yamibo_app.repository.AppUpdateRepository
+import me.thenano.yamibo.yamibo_app.repository.AppSyncRepository
 import me.thenano.yamibo.yamibo_app.repository.BlogRepository
 import me.thenano.yamibo.yamibo_app.repository.BackupRepository
 import me.thenano.yamibo.yamibo_app.repository.ChineseConversionRepository
@@ -59,6 +60,9 @@ val LocalAuthRepository =
 
 val LocalAppUpdateRepository =
     compositionLocalOf<AppUpdateRepository> { error("LocalAppUpdateRepository not provided") }
+
+val LocalAppSyncRepository =
+    compositionLocalOf<AppSyncRepository> { error("LocalAppSyncRepository not provided") }
 
 val LocalForumRepository =
     compositionLocalOf<ForumRepository> { error("LocalForumRepository not provided") }

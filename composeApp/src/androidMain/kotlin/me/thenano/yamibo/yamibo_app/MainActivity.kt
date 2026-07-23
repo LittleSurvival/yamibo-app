@@ -42,6 +42,7 @@ import me.thenano.yamibo.yamibo_app.profile.settings.backup.AndroidBackupSchedul
 import me.thenano.yamibo.yamibo_app.profile.settings.sign.AndroidSignReminderScheduler
 import me.thenano.yamibo.yamibo_app.repository.*
 import me.thenano.yamibo.yamibo_app.repository.appupdate.DefaultAppUpdateRepository
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.backup.BackupRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.chineseconversion.createChineseConversionRepository
 import me.thenano.yamibo.yamibo_app.repository.contentcover.ContentCoverRepositoryImpl
@@ -235,6 +236,13 @@ class MainActivity : ComponentActivity() {
                     appVersionCode = AppVersion.VersionCode.toInt(),
                 )
             }
+            val appSyncRepository = remember {
+                AppSyncRepositoryImpl(
+                    db = favoriteSyncDatabase,
+                    settingsRegistries = listOf(appSettingsRepository, novelReaderSettingsRepository, mangaReaderSettingsRepository),
+                    appVersionCode = AppVersion.VersionCode.toInt(),
+                )
+            }
             val downloadRepository = remember {
                 DownloadRepositoryImpl(
                     threadRepository = threadRepository,
@@ -292,6 +300,7 @@ class MainActivity : ComponentActivity() {
                 LocalNavigator provides navigator,
                 LocalAuthRepository provides authRepository,
                 LocalAppUpdateRepository provides appUpdateRepository,
+                LocalAppSyncRepository provides appSyncRepository,
                 LocalForumRepository provides forumRepository,
                 LocalThreadRepository provides threadRepository,
                 LocalInAppLinkNavigationRepository provides inAppLinkNavigationRepository,

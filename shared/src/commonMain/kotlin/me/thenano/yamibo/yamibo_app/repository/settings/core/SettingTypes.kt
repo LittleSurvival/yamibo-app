@@ -127,4 +127,11 @@ class EnumSetting<T : Enum<T>>(
     override fun saveToStore(newValue: T) {
         store.putString(storageKey, newValue.name)
     }
+
+    fun acceptsName(name: String): Boolean = values.any { it.name == name }
+
+    fun setValueFromName(name: String): Boolean {
+        val value = values.firstOrNull { it.name == name } ?: return false
+        return setValue(value)
+    }
 }

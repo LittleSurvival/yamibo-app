@@ -34,6 +34,7 @@ import me.thenano.yamibo.yamibo_app.repository.favorite.FavoriteUpdateRepository
 import me.thenano.yamibo.yamibo_app.repository.font.DefaultFontRepository
 import me.thenano.yamibo.yamibo_app.repository.font.IOSFontPlatform
 import me.thenano.yamibo.yamibo_app.repository.appupdate.DefaultAppUpdateRepository
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.inapplinknavigation.DefaultInAppLinkNavigationRepository
 import me.thenano.yamibo.yamibo_app.repository.rss.RssSearchSubscriptionRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.settings.AppSettingsRepository
@@ -160,6 +161,13 @@ fun MainViewController() = ComposeUIViewController {
             appVersionCode = AppVersion.VersionCode.toInt(),
         )
     }
+    val appSyncRepository = remember {
+        AppSyncRepositoryImpl(
+            db = favoriteSyncDatabase,
+            settingsRegistries = listOf(appSettingsRepository, novelReaderSettingsRepository, mangaReaderSettingsRepository),
+            appVersionCode = AppVersion.VersionCode.toInt(),
+        )
+    }
     val downloadRepository = remember {
         DownloadRepositoryImpl(
             threadRepository = threadRepository,
@@ -207,6 +215,7 @@ fun MainViewController() = ComposeUIViewController {
         LocalNavigator provides navigator,
         LocalAuthRepository provides authRepository,
         LocalAppUpdateRepository provides appUpdateRepository,
+        LocalAppSyncRepository provides appSyncRepository,
         LocalForumRepository provides forumRepository,
         LocalThreadRepository provides threadRepository,
         LocalInAppLinkNavigationRepository provides inAppLinkNavigationRepository,
