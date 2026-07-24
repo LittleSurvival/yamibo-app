@@ -9,7 +9,6 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
@@ -41,26 +40,24 @@ import me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl.HtmlRende
 import me.thenano.yamibo.yamibo_app.thread.reader.MAX_READER_TEXT_SEGMENT_CHARS
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
 
-@Serializable
-private data class LocalNovelReaderRestorePayload(
-    val novelId: Long,
-)
+private sealed interface SegmentItem {
+    data class ChapterTitle(val chapterId: Long, val chapterIndex: Int, val title: String) : SegmentItem
+    data class Content(val chapterId: Long, val chapterIndex: Int, val html: String) : SegmentItem
+}
+
+/** A group of chapters loaded together. */
+private data class ChapterGroup(val startIndex: Int, val chapters: List<LocalNovelChapterInfo>)
+
+private const val CHAPTERS_PER_GROUP = 10
+
+@Serializable private data class LocalNovelReaderRestorePayload(val novelId: Long)
 
 @RestorableScreenEntry
 class ILocalNovelReaderScreen(val novelId: Long) : RestorableNavigatable {
     override val id = buildId(novelId.toString())
     override val restoreDecoder = Decoder
-
-    override fun toRestoreSnapshot(): RestorableScreenSnapshot = restoreSnapshot(
-        decoder = restoreDecoder,
-        payload = LocalNovelReaderRestorePayload(novelId = novelId),
-    )
-
-    @Composable
-    override fun Content() {
-        LocalNovelReaderScreen(novelId)
-    }
-
+    override fun toRestoreSnapshot(): RestorableScreenSnapshot = restoreSnapshot(decoder = restoreDecoder, payload = LocalNovelReaderRestorePayload(novelId = novelId))
+    @Composable override fun Content() { LocalNovelReaderScreen(novelId) }
     companion object Decoder : TypedRestorableNavigatableDecoder<ILocalNovelReaderScreen>(ILocalNovelReaderScreen::class) {
         override fun decode(payload: String): RestorableNavigatable {
             val data = decodeRestorePayload<LocalNovelReaderRestorePayload>(payload)
@@ -68,6 +65,37 @@ class ILocalNovelReaderScreen(val novelId: Long) : RestorableNavigatable {
         }
     }
 }
+
+// ---- Grouping ----
+
+private fun groupChapters(chapters: List<LocalNovelChapterInfo>): List<ChapterGroup> {
+    if (chapters.isEmpty()) return emptyList()
+    val groups = mutableListOf<ChapterGroup>()
+    var start = 0
+    val volPat = Regex("""第\s*[0-9零一二两三四五六七八九十百千万]+\s*[卷集部篇]""")
+    for (i in chapters.indices) {
+        if (i == 0) continue
+        if (volPat.containsMatchIn(chapters[i].title)) {
+            groups.add(ChapterGroup(start, chapters.subList(start, i)))
+            start = i
+        } else if (i - start >= CHAPTERS_PER_GROUP) {
+            groups.add(ChapterGroup(start, chapters.subList(start, i)))
+            start = i
+        }
+    }
+    groups.add(ChapterGroup(start, chapters.subList(start, chapters.size)))
+    return groups
+}
+
+/** Find the group index containing the given chapterId. */
+private fun findGroupIndex(groups: List<ChapterGroup>, chapterId: Long): Int {
+    for ((gi, g) in groups.withIndex()) {
+        if (g.chapters.any { it.id == chapterId }) return gi
+    }
+    return 0
+}
+
+// ---- Screen ----
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -81,108 +109,188 @@ fun LocalNovelReaderScreen(novelId: Long) {
 
     var novel by remember { mutableStateOf<LocalNovelInfo?>(null) }
     var chapters by remember { mutableStateOf<List<LocalNovelChapterInfo>>(emptyList()) }
-    var currentChapterIndex by remember { mutableIntStateOf(0) }
-    var chapterSegments by remember { mutableStateOf<List<String>>(emptyList()) }
-    var savedSegmentIndex by remember { mutableLongStateOf(0L) }
-    var canSaveProgress by remember { mutableStateOf(false) }
+    var groups by remember { mutableStateOf<List<ChapterGroup>>(emptyList()) }
+    val allSegments = remember { mutableStateListOf<SegmentItem>() }
+    // chapterIndex -> first segment index in allSegments
+    var chapterStarts by remember { mutableStateOf<Map<Int, Int>>(emptyMap()) }
 
-    // UI state — mirrors ThreadReaderScreen's overlay pattern
+    var currentGroupIndex by remember { mutableIntStateOf(0) }
+    var currentChapterId by remember { mutableLongStateOf(0L) }
+    var savedSegmentIndex by remember { mutableLongStateOf(0L) }  // within-group offset
+    var canSaveProgress by remember { mutableStateOf(false) }
+    var isLoading by remember { mutableStateOf(true) }
+
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     var showMenu by remember { mutableStateOf(true) }
     var showSettingsPanel by remember { mutableStateOf(false) }
-
     val listState = rememberLazyListState()
 
-    fun saveProgressNow(chapterId: Long, segmentIndex: Long, scrollOffset: Int = 0) {
+    // ---- Helpers ----
+
+    fun buildChapterItems(n: LocalNovelInfo, ch: LocalNovelChapterInfo): List<SegmentItem> {
+        val items = mutableListOf<SegmentItem>()
+        items.add(SegmentItem.ChapterTitle(chapterId = ch.id, chapterIndex = ch.chapterIndex, title = ch.title))
+        for (h in buildChapterSegments(n, ch, fileOps))
+            items.add(SegmentItem.Content(chapterId = ch.id, chapterIndex = ch.chapterIndex, html = h))
+        return items
+    }
+
+    /** Append all chapters of a group to allSegments. Returns the start index. */
+    fun appendGroup(n: LocalNovelInfo, group: ChapterGroup): Int {
+        val start = allSegments.size
+        val ns = chapterStarts.toMutableMap()
+        for (ch in group.chapters) {
+            ns[ch.chapterIndex] = allSegments.size
+            allSegments.addAll(buildChapterItems(n, ch))
+        }
+        chapterStarts = ns
+        return start
+    }
+
+    /** Prepend all chapters of a group to allSegments, correcting scroll position. */
+    suspend fun prependGroup(n: LocalNovelInfo, group: ChapterGroup) {
+        val oldIndex = listState.firstVisibleItemIndex
+        val oldOffset = listState.firstVisibleItemScrollOffset
+        val items = mutableListOf<SegmentItem>()
+        val ns = chapterStarts.toMutableMap()
+        var offset = 0
+        for (ch in group.chapters) {
+            val chItems = buildChapterItems(n, ch)
+            ns[ch.chapterIndex] = offset; offset += chItems.size; items.addAll(chItems)
+        }
+        for ((ci, idx) in chapterStarts) ns[ci] = (ns[ci] ?: idx) + offset
+        chapterStarts = ns
+        allSegments.addAll(0, items)
+        if (allSegments.isNotEmpty())
+            listState.scrollToItem((oldIndex + offset).coerceAtMost(allSegments.lastIndex), oldOffset)
+    }
+
+    /** Trim old groups if we have more than MAX_LOADED_GROUPS, keeping [keepFirst..keepLast]. */
+    fun saveProgressNow(groupIndex: Int, globalIndex: Long, scrollOffset: Int = 0) {
+        val g = groups.getOrNull(groupIndex) ?: return
+        val chId = g.chapters.firstOrNull()?.id ?: return
+        val chStart = chapterStarts[g.chapters.first().chapterIndex] ?: return
+        val withinGroup = (globalIndex - chStart).coerceAtLeast(0)
         scope.launch {
             withContext(Dispatchers.Default) {
-                repository.saveProgress(
-                    LocalNovelProgressInfo(
-                        novelId = novelId, chapterId = chapterId,
-                        charOffset = (segmentIndex shl 32) or (scrollOffset.toLong() and 0xFFFF_FFFF),
-                    )
-                )
+                repository.saveProgress(LocalNovelProgressInfo(
+                    novelId = novelId, chapterId = chId,
+                    charOffset = (withinGroup shl 32) or (scrollOffset.toLong() and 0xFFFF_FFFF),
+                ))
                 repository.updateLastReadAt(novelId, currentTimeMillis())
             }
         }
     }
 
-    fun loadChapter(index: Int, restoreSegment: Long = 0L, restoreOffset: Int = 0) {
-        scope.launch {
-            canSaveProgress = false
-            val n = novel ?: return@launch
-            val ch = chapters.getOrNull(index) ?: return@launch
-            if (chapters.isNotEmpty() && currentChapterIndex != index) {
-                val currentCh = chapters.getOrNull(currentChapterIndex)
-                if (currentCh != null) {
-                    saveProgressNow(currentCh.id, listState.firstVisibleItemIndex.toLong(), listState.firstVisibleItemScrollOffset)
-                }
-            }
-            val segs = withContext(Dispatchers.Default) { buildChapterSegments(n, ch, fileOps) }
-            chapterSegments = segs
-            currentChapterIndex = index
-            val targetEncoded = (restoreSegment shl 32) or (restoreOffset.toLong() and 0xFFFF_FFFF)
-            savedSegmentIndex = targetEncoded
-            val targetIdx = restoreSegment.toInt().coerceAtMost(segs.lastIndex.coerceAtLeast(0))
-            listState.scrollToItem(targetIdx, restoreOffset)
-            kotlinx.coroutines.delay(120)
-            listState.scrollToItem(targetIdx, restoreOffset)
-            kotlinx.coroutines.delay(300)
-            listState.scrollToItem(targetIdx, restoreOffset)
+    // ---- Initial load ----
+
+    LaunchedEffect(novelId) {
+        isLoading = true; canSaveProgress = false
+        allSegments.clear(); chapterStarts = emptyMap()
+        val data = withContext(Dispatchers.Default) {
+            val n = repository.getNovelById(novelId) ?: return@withContext null
+            val chs = repository.getChaptersByNovelId(novelId)
+            val gs = groupChapters(chs)
+            val progress = repository.getProgress(novelId)
+            val restoreChId = progress?.chapterId ?: chs.firstOrNull()?.id ?: 0L
+            val gi = findGroupIndex(gs, restoreChId)
+            val encoded = progress?.charOffset ?: 0L
+            InitData(n, chs, gs, gi, restoreChId, encoded shr 32, (encoded and 0xFFFF_FFFF).toInt())
+        }
+        if (data != null) {
+            novel = data.novel; chapters = data.chapters; groups = data.groups
+            currentGroupIndex = data.groupIndex; currentChapterId = data.restoreChapterId
+            // Load current group
+            appendGroup(data.novel, data.groups[data.groupIndex])
+            // Load next group
+            val nextGi = data.groupIndex + 1
+            if (nextGi < data.groups.size) appendGroup(data.novel, data.groups[nextGi])
+            isLoading = false
+            // Restore position: within-group offset
+            val g = data.groups[data.groupIndex]
+            val chStart = chapterStarts[g.chapters.first().chapterIndex] ?: 0
+            val target = (chStart + data.restoreWithinGroup.toInt()).coerceAtMost(allSegments.lastIndex.coerceAtLeast(0))
+            listState.scrollToItem(target, data.restoreOff)
+            kotlinx.coroutines.delay(120); listState.scrollToItem(target, data.restoreOff)
+            kotlinx.coroutines.delay(300); listState.scrollToItem(target, data.restoreOff)
+            savedSegmentIndex = (data.restoreWithinGroup shl 32) or (data.restoreOff.toLong() and 0xFFFF_FFFF)
             canSaveProgress = true
         }
     }
 
-    LaunchedEffect(novelId) {
-        val result = withContext(Dispatchers.Default) {
-            val n = repository.getNovelById(novelId) ?: return@withContext null
-            val chs = repository.getChaptersByNovelId(novelId)
-            val progress = repository.getProgress(novelId)
-            val startChapterIndex = if (progress != null && progress.chapterId > 0) {
-                chs.indexOfFirst { it.id == progress.chapterId }.coerceAtLeast(0)
-            } else 0
-            val encoded = progress?.charOffset ?: 0L
-            ChapterInitData(n, chs, startChapterIndex, encoded shr 32, (encoded and 0xFFFF_FFFF).toInt())
-        }
-        if (result != null) {
-            novel = result.novel
-            chapters = result.chapters
-            loadChapter(result.startChapterIndex, result.restoreSeg, result.restoreOff)
+    // ---- Lazy-load adjacent groups ----
+
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            val info = listState.layoutInfo
+            val firstVisible = info.visibleItemsInfo.firstOrNull()?.index ?: 0
+            val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+            Triple(firstVisible, lastVisible, info.totalItemsCount)
+        }.collect { (first, last, total) ->
+            if (!canSaveProgress || allSegments.isEmpty() || novel == null) return@collect
+            val n = novel!!
+            // Near bottom of loaded content: load next group
+            if (total - last < 10) {
+                val nextGi = currentGroupIndex + 1
+                if (nextGi < groups.size) {
+                    val firstCh = groups[nextGi].chapters.firstOrNull()
+                    if (firstCh != null && firstCh.chapterIndex !in chapterStarts) {
+                        appendGroup(n, groups[nextGi])
+                        currentGroupIndex = nextGi
+                    }
+                }
+            }
+            // Near top: load previous group
+            if (first < 2) {
+                val prevGi = currentGroupIndex - 1
+                if (prevGi >= 0) {
+                    val firstCh = groups[prevGi].chapters.firstOrNull()
+                    if (firstCh != null && firstCh.chapterIndex !in chapterStarts) {
+                        scope.launch {
+                            prependGroup(n, groups[prevGi])
+                            currentGroupIndex = prevGi
+                        }
+                    }
+                }
+            }
         }
     }
 
-    // Lightweight position tracking — distinctUntilChanged via the savedSegmentIndex guard
+    // ---- Progress tracking ----
+
     LaunchedEffect(listState) {
         snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
             .collect { (index, offset) ->
-                if (canSaveProgress && chapterSegments.isNotEmpty() && index >= 0) {
-                    val ch = chapters.getOrNull(currentChapterIndex)
-                    if (ch != null) {
-                        val encoded = (index.toLong() shl 32) or (offset.toLong() and 0xFFFF_FFFF)
-                        if (encoded != savedSegmentIndex) {
-                            savedSegmentIndex = encoded
-                            saveProgressNow(ch.id, index.toLong(), offset)
-                        }
+                if (canSaveProgress && index in allSegments.indices) {
+                    val seg = allSegments[index]
+                    val chId = when (seg) { is SegmentItem.ChapterTitle -> seg.chapterId; is SegmentItem.Content -> seg.chapterId }
+                    if (chId != currentChapterId) currentChapterId = chId
+                    val gi = findGroupIndex(groups, chId)
+                    val encoded = (index.toLong() shl 32) or (offset.toLong() and 0xFFFF_FFFF)
+                    if (encoded != savedSegmentIndex) {
+                        savedSegmentIndex = encoded
+                        saveProgressNow(gi, index.toLong(), offset)
                     }
                 }
             }
     }
 
-    // Save progress when leaving the screen (runBlocking ensures it completes)
     DisposableEffect(novelId) {
         onDispose {
-            val ch = chapters.getOrNull(currentChapterIndex)
-            if (ch != null) {
-                val idx = listState.firstVisibleItemIndex.toLong()
-                val off = listState.firstVisibleItemScrollOffset
+            val idx = listState.firstVisibleItemIndex
+            if (idx in allSegments.indices) {
+                val seg = allSegments[idx]
+                val chId = when (seg) { is SegmentItem.ChapterTitle -> seg.chapterId; is SegmentItem.Content -> seg.chapterId }
+                val gi = findGroupIndex(groups, chId)
+                val g = groups.getOrNull(gi) ?: return@onDispose
+                val chStart = chapterStarts[g.chapters.first().chapterIndex] ?: 0
+                val withinGroup = (idx - chStart).coerceAtLeast(0)
                 kotlinx.coroutines.runBlocking {
                     withContext(Dispatchers.Default) {
-                        repository.saveProgress(
-                            LocalNovelProgressInfo(
-                                novelId = novelId, chapterId = ch.id,
-                                charOffset = (idx shl 32) or (off.toLong() and 0xFFFF_FFFF),
-                            )
-                        )
+                        repository.saveProgress(LocalNovelProgressInfo(
+                            novelId = novelId, chapterId = g.chapters.first().id,
+                            charOffset = (withinGroup.toLong() shl 32) or (listState.firstVisibleItemScrollOffset.toLong() and 0xFFFF_FFFF),
+                        ))
                         repository.updateLastReadAt(novelId, currentTimeMillis())
                     }
                 }
@@ -190,24 +298,41 @@ fun LocalNovelReaderScreen(novelId: Long) {
         }
     }
 
-    // When settings panel closes, restore menu visibility
-    LaunchedEffect(showSettingsPanel) {
-        if (!showSettingsPanel) showMenu = true
-        else showMenu = false
+    LaunchedEffect(showSettingsPanel) { if (!showSettingsPanel) showMenu = true else showMenu = false }
+
+    val currentTitle by remember {
+        derivedStateOf {
+            val idx = listState.firstVisibleItemIndex
+            if (idx in allSegments.indices) {
+                when (val seg = allSegments[idx]) {
+                    is SegmentItem.ChapterTitle -> seg.title
+                    is SegmentItem.Content -> chapters.find { it.id == seg.chapterId }?.title ?: ""
+                }
+            } else ""
+        }
     }
+
+    // ---- UI ----
 
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
             ModalDrawerSheet {
                 ChapterDrawerContent(
-                    novelTitle = novel?.title ?: "",
-                    chapters = chapters,
-                    currentIndex = currentChapterIndex,
-                    onChapterClick = { index ->
+                    novelTitle = novel?.title ?: "", chapters = chapters, currentChapterId = currentChapterId,
+                    onChapterClick = { ch ->
                         scope.launch {
-                            drawerState.close()
-                            if (index != currentChapterIndex) loadChapter(index)
+                            val gi = findGroupIndex(groups, ch.id)
+                            val g = groups[gi]
+                            val n = novel ?: return@launch
+                            if (g.chapters.firstOrNull()?.chapterIndex !in chapterStarts) {
+                                allSegments.clear(); chapterStarts = emptyMap()
+                                appendGroup(n, g)
+                                if (gi + 1 < groups.size) appendGroup(n, groups[gi + 1])
+                                currentGroupIndex = gi
+                            }
+                            val chStart = chapterStarts[ch.chapterIndex] ?: 0
+                            listState.scrollToItem(chStart); drawerState.close()
                         }
                     },
                 )
@@ -215,298 +340,84 @@ fun LocalNovelReaderScreen(novelId: Long) {
         },
     ) {
         Box(Modifier.fillMaxSize().background(colors.creamBackground)) {
-            if (novel == null) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = colors.brownPrimary)
-                }
+            if (isLoading) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = colors.brownPrimary) }
             } else {
                 Column(Modifier.fillMaxSize()) {
-                    // Top bar — matches ThreadReaderScreen pattern
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .background(colors.creamSurface)
-                            .statusBarsPadding()
-                            .padding(horizontal = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        TextButton(onClick = { navigator.pop() }) {
-                            Text(i18n("返回"), color = colors.brownPrimary, fontSize = 14.sp)
-                        }
+                    Row(Modifier.fillMaxWidth().background(colors.creamSurface).statusBarsPadding().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = { navigator.pop() }) { Text(i18n("返回"), color = colors.brownPrimary, fontSize = 14.sp) }
                         Spacer(Modifier.weight(1f))
-                        Text(
-                            chapters.getOrNull(currentChapterIndex)?.title ?: "",
-                            color = colors.textDark,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            modifier = Modifier.weight(1f, fill = false),
-                        )
+                        Text(currentTitle, color = colors.textDark, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
                         Spacer(Modifier.weight(1f))
-                        TextButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Text(i18n("目錄"), color = colors.brownPrimary, fontSize = 14.sp)
-                        }
+                        TextButton(onClick = { scope.launch { drawerState.open() } }) { Text(i18n("目錄"), color = colors.brownPrimary, fontSize = 14.sp) }
                     }
-
-                    // Content
-                    if (chapterSegments.isEmpty()) {
-                        Box(Modifier.fillMaxSize().weight(1f), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(color = colors.brownPrimary)
-                        }
-                    } else {
-                        LazyColumn(
-                            Modifier
-                                .fillMaxSize()
-                                .weight(1f)
-                                .padding(horizontal = 16.dp)
-                                .pointerInput(Unit) {
-                                    detectTapGestures { showMenu = !showMenu }
-                                },
-                            state = listState,
-                        ) {
-                                itemsIndexed(chapterSegments) { index, htmlChunk ->
-                                    HtmlRenderer(
-                                        html = htmlChunk,
-                                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                                    )
-                                    if (index < chapterSegments.lastIndex) {
-                                        HorizontalDivider(
-                                            color = colors.textDark.copy(alpha = 0.08f),
-                                            thickness = 0.5.dp,
-                                        )
-                                    }
+                    LazyColumn(Modifier.fillMaxSize().weight(1f).padding(horizontal = 16.dp).pointerInput(Unit) { detectTapGestures { showMenu = !showMenu } }, state = listState) {
+                        itemsIndexed(allSegments, key = { idx, _ -> idx }) { _, item ->
+                            when (item) {
+                                is SegmentItem.ChapterTitle -> {
+                                    Spacer(Modifier.height(16.dp))
+                                    Text(item.title, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = colors.textDark, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
+                                    HorizontalDivider(color = colors.brownPrimary.copy(alpha = 0.4f), thickness = 2.dp)
+                                    Spacer(Modifier.height(8.dp))
                                 }
-                                // Bottom spacer for navigation bar
-                                item { Spacer(Modifier.height(56.dp)) }
+                                is SegmentItem.Content -> HtmlRenderer(html = item.html, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
                             }
-                    }
-
-                    // Bottom navigation bar
-                    AnimatedVisibility(
-                        visible = showMenu && !showSettingsPanel,
-                        enter = fadeIn(),
-                        exit = fadeOut(),
-                    ) {
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .background(colors.creamSurface)
-                                .navigationBarsPadding()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            TextButton(
-                                onClick = {
-                                    if (currentChapterIndex > 0) loadChapter(currentChapterIndex - 1)
-                                },
-                                enabled = currentChapterIndex > 0,
-                            ) { Text(i18n("上一章")) }
-                            Text(
-                                "${currentChapterIndex + 1} / ${chapters.size}",
-                                color = colors.textOnBackground,
-                                modifier = Modifier.align(Alignment.CenterVertically),
-                            )
-                            TextButton(
-                                onClick = {
-                                    if (currentChapterIndex < chapters.lastIndex) loadChapter(currentChapterIndex + 1)
-                                },
-                                enabled = currentChapterIndex < chapters.lastIndex,
-                            ) { Text(i18n("下一章")) }
                         }
+                        item { Spacer(Modifier.height(80.dp)) }
                     }
                 }
             }
-
-            // Settings panel — at Box level (not inside Column)
             if (showSettingsPanel) {
-                // Dismiss overlay
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .clickable(
-                            indication = null,
-                            interactionSource = remember { MutableInteractionSource() },
-                        ) { showSettingsPanel = false; showMenu = true }
-                )
-                NovelReaderSettingsPanel(
-                    visible = showSettingsPanel,
-                    appSettingsRepo = appSettingsRepo,
-                    modifier = Modifier.align(Alignment.BottomCenter),
-                )
+                Box(Modifier.fillMaxSize().clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { showSettingsPanel = false; showMenu = true })
+                NovelReaderSettingsPanel(visible = showSettingsPanel, appSettingsRepo = appSettingsRepo, modifier = Modifier.align(Alignment.BottomCenter))
             }
-
-            // Floating buttons — bottom-end, same position as ThreadReaderScreen
-            AnimatedVisibility(
-                visible = showMenu && !showSettingsPanel,
-                enter = fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(bottom = 56.dp, end = 16.dp),
-            ) {
-                ReaderFloatButtons(
-                    visible = true,
-                    onRefresh = { loadChapter(currentChapterIndex) },
-                    onSettings = {
-                        showSettingsPanel = true
-                        showMenu = false
+            AnimatedVisibility(visible = showMenu && !showSettingsPanel, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 16.dp, end = 16.dp)) {
+                ReaderFloatButtons(visible = true,
+                    onRefresh = {
+                        scope.launch {
+                            isLoading = true; canSaveProgress = false; allSegments.clear(); chapterStarts = emptyMap()
+                            val n = novel ?: return@launch
+                            val gi = findGroupIndex(groups, currentChapterId)
+                            appendGroup(n, groups[gi])
+                            if (gi + 1 < groups.size) appendGroup(n, groups[gi + 1])
+                            currentGroupIndex = gi; isLoading = false; canSaveProgress = true
+                        }
                     },
+                    onSettings = { showSettingsPanel = true; showMenu = false },
                 )
             }
         }
     }
 }
 
-// ---- Chapter drawer content ----
+// ---- Chapter drawer ----
 
-@Composable
-private fun ChapterDrawerContent(
-    novelTitle: String,
-    chapters: List<LocalNovelChapterInfo>,
-    currentIndex: Int,
-    onChapterClick: (Int) -> Unit,
-) {
+@Composable private fun ChapterDrawerContent(novelTitle: String, chapters: List<LocalNovelChapterInfo>, currentChapterId: Long, onChapterClick: (LocalNovelChapterInfo) -> Unit) {
     val colors = YamiboTheme.colors
     Column(Modifier.fillMaxWidth()) {
-        // Drawer header
-        Text(
-            i18n("目錄"),
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Bold,
-            color = colors.textDark,
-            modifier = Modifier.padding(16.dp),
-        )
-        Text(
-            novelTitle,
-            fontSize = 14.sp,
-            color = colors.textOnBackground,
-            modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp),
-        )
+        Text(i18n("目錄"), fontSize = 20.sp, fontWeight = FontWeight.Bold, color = colors.textDark, modifier = Modifier.padding(16.dp))
+        Text(novelTitle, fontSize = 14.sp, color = colors.textOnBackground, modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp))
         HorizontalDivider(color = colors.textDark.copy(alpha = 0.1f))
-
         LazyColumn(Modifier.fillMaxWidth()) {
-            itemsIndexed(chapters) { index, chapter ->
-                Text(
-                    chapter.title,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onChapterClick(index) }
-                        .padding(vertical = 12.dp, horizontal = 16.dp),
-                    color = if (index == currentIndex) colors.brownPrimary else colors.textDark,
-                    fontWeight = if (index == currentIndex) FontWeight.Bold else FontWeight.Normal,
-                    fontSize = 15.sp,
-                )
+            itemsIndexed(chapters) { _, ch ->
+                Text(ch.title, modifier = Modifier.fillMaxWidth().clickable { onChapterClick(ch) }.padding(vertical = 12.dp, horizontal = 16.dp),
+                    color = if (ch.id == currentChapterId) colors.brownPrimary else colors.textDark,
+                    fontWeight = if (ch.id == currentChapterId) FontWeight.Bold else FontWeight.Normal, fontSize = 15.sp)
             }
         }
     }
 }
 
-// ---- Segment builders (unchanged) ----
+// ---- Segment builders ----
 
-private fun buildChapterSegments(
-    novel: LocalNovelInfo,
-    chapter: LocalNovelChapterInfo,
-    fileOps: me.thenano.yamibo.yamibo_app.repository.localnovel.PlatformFileOperations,
-): List<String> {
-    val html = when (novel.fileType) {
-        LocalNovelFileType.TXT -> {
-            val text = TxtFileParser(fileOps).readChapterText(
-                fileUri = novel.fileUri,
-                encoding = novel.encoding,
-                startOffset = chapter.startOffset,
-                endOffset = chapter.endOffset,
-            )
-            textToHtml(text)
-        }
-        LocalNovelFileType.EPUB -> {
-            val rawHtml = EpubFileParser(fileOps).readChapterHtml(chapter.internalPath)
-            // Fix relative image paths to absolute file paths
-            val chapterDir = chapter.internalPath.substringBeforeLast("/", "")
-            fixEpubImagePaths(rawHtml, chapterDir)
-        }
+private fun buildChapterSegments(n: LocalNovelInfo, ch: LocalNovelChapterInfo, fo: me.thenano.yamibo.yamibo_app.repository.localnovel.PlatformFileOperations): List<String> {
+    val html = when (n.fileType) {
+        LocalNovelFileType.TXT -> { val t = TxtFileParser(fo).readChapterText(n.fileUri, n.encoding, ch.startOffset, ch.endOffset); textToHtml(t) }
+        LocalNovelFileType.EPUB -> { val raw = EpubFileParser(fo).readChapterHtml(ch.internalPath); fixEpubImagePaths(raw, ch.internalPath.substringBeforeLast("/", "")) }
     }
     return segmentHtml(html, MAX_READER_TEXT_SEGMENT_CHARS)
 }
-
-private fun textToHtml(text: String): String {
-    val escaped = text
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-
-    val lines = escaped.split("\n")
-    return buildString {
-        for (line in lines) {
-            val trimmed = line.trim()
-            if (trimmed.isEmpty()) {
-                append("<br/>\n")
-            } else {
-                append("<p>")
-                append(trimmed)
-                append("</p>\n")
-            }
-        }
-    }
-}
-
-private fun segmentHtml(html: String, maxChars: Int): List<String> {
-    if (html.length <= maxChars) return listOf(html)
-
-    val chunks = mutableListOf<String>()
-    var remaining = html
-
-    while (remaining.length > maxChars) {
-        val searchStart = (maxChars * 2 / 3).coerceAtLeast(0)
-        val searchEnd = maxChars
-        var breakPoint = -1
-
-        for (i in searchEnd downTo searchStart) {
-            if (i + 4 <= remaining.length) {
-                val window = remaining.substring(i, (i + 4).coerceAtMost(remaining.length))
-                if (window.startsWith("<p>") || window.startsWith("<br") ||
-                    window.startsWith("</p>") || window.startsWith("</d")
-                ) {
-                    breakPoint = i
-                    break
-                }
-            }
-        }
-
-        if (breakPoint == -1) breakPoint = maxChars
-        chunks.add(remaining.substring(0, breakPoint).trim())
-        remaining = remaining.substring(breakPoint).trim()
-    }
-
-    if (remaining.isNotBlank()) chunks.add(remaining)
-    return chunks.ifEmpty { listOf(html) }
-}
-
-/**
- * Replaces relative image paths in EPUB XHTML with absolute file paths,
- * so HtmlRenderer can load images from the extracted EPUB directory.
- */
-private fun fixEpubImagePaths(html: String, chapterDir: String): String {
-    // Match src="..." or src='...' in img tags
-    val srcRegex = Regex("""(src=["'])(.*?)(["'])""", RegexOption.IGNORE_CASE)
-    return srcRegex.replace(html) { match ->
-        val prefix = match.groupValues[1]
-        val path = match.groupValues[2]
-        val suffix = match.groupValues[3]
-        // Only fix relative paths (not http/https/data)
-        if (path.startsWith("http://") || path.startsWith("https://") || path.startsWith("data:") || path.startsWith("/")) {
-            "${prefix}${path}${suffix}"
-        } else {
-            // Resolve relative to chapter directory
-            val resolved = if (chapterDir.isNotEmpty()) "$chapterDir/$path" else path
-            "${prefix}file://$resolved${suffix}"
-        }
-    }
-}
-
-private data class ChapterInitData(
-    val novel: LocalNovelInfo,
-    val chapters: List<LocalNovelChapterInfo>,
-    val startChapterIndex: Int,
-    val restoreSeg: Long,
-    val restoreOff: Int,
-)
+private fun textToHtml(text: String) = buildString { for (l in text.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").split("\n")) { val t=l.trim(); if (t.isEmpty()) append("<br/>\n") else { append("<p>"); append(t); append("</p>\n") } } }
+private fun segmentHtml(html: String, m: Int): List<String> { if (html.length<=m) return listOf(html); val c=mutableListOf<String>(); var r=html; while(r.length>m){ val s=(m*2/3).coerceAtLeast(0); var b=-1; for(i in m downTo s){ if(i+4<=r.length){ val w=r.substring(i,(i+4).coerceAtMost(r.length)); if(w.startsWith("<p>")||w.startsWith("<br")||w.startsWith("</p>")||w.startsWith("</d")){ b=i; break } } }; if(b==-1) b=m; c.add(r.substring(0,b).trim()); r=r.substring(b).trim() }; if(r.isNotBlank()) c.add(r); return c.ifEmpty{listOf(html)} }
+private fun fixEpubImagePaths(h: String, d: String) = Regex("""(src=["'])(.*?)(["'])""", RegexOption.IGNORE_CASE).replace(h){ val p=it.groupValues[2]; if(p.startsWith("http")||p.startsWith("data:")||p.startsWith("/")) "${it.groupValues[1]}${p}${it.groupValues[3]}" else "${it.groupValues[1]}file://${if(d.isNotEmpty())"$d/$p" else p}${it.groupValues[3]}" }
+private data class InitData(val novel: LocalNovelInfo, val chapters: List<LocalNovelChapterInfo>, val groups: List<ChapterGroup>, val groupIndex: Int, val restoreChapterId: Long, val restoreWithinGroup: Long, val restoreOff: Int)
