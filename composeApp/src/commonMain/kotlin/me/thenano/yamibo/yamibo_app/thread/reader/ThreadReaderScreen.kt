@@ -4360,7 +4360,7 @@ internal fun ThreadReaderScreen(
 
                 val appSettingsRepo = LocalAppSettingsRepository.current
 
-                val clipboardManager = LocalClipboardManager.current
+                @Suppress("DEPRECATION") val clipboardManager = LocalClipboardManager.current
 
                 val copyChapter: () -> Unit = {
                     val currentIndex = visibleAnchorEntryIndex() ?: listState.firstVisibleItemIndex
@@ -4380,13 +4380,9 @@ internal fun ThreadReaderScreen(
                             .replace(Regex("\\n\\s*\\n+"), "\n")
                             .trim()
                         clipboardManager.setText(AnnotatedString(plainText))
-                        scope.launch {
-                            snackbarHostState.showSnackbar(i18n("已複製本章內容"))
-                        }
+                        feedbackController.post(i18n("已複製本章內容"))
                     } else {
-                        scope.launch {
-                            snackbarHostState.showSnackbar(i18n("暫無內容可複製"))
-                        }
+                        feedbackController.post(i18n("暫無內容可複製"))
                     }
                 }
 

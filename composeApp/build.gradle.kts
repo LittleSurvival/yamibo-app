@@ -13,7 +13,7 @@ plugins {
 
 val yamiboAppVersionCode = 5
 val yamiboAppVersionName = "0.0.4"
-val yamiboAppApplicationId = "me.thenano.yamibo.yamibo_app"
+val yamiboAppApplicationId = "muleng.yamibo.yamibo_app"
 val localProperties = Properties().apply {
     val file = rootProject.layout.projectDirectory.file("local.properties").asFile
     if (file.isFile) {
