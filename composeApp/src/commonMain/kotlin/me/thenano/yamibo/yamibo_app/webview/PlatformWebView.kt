@@ -6,12 +6,15 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.profile.LoadingOverlay
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.navigation.Navigatable
@@ -34,6 +37,46 @@ expect fun PlatformWebViewContent(
     onLoadError: (url: String?, description: String) -> Unit,
     shouldOverrideUrlLoading: (String) -> Boolean,
 )
+
+@Composable
+internal fun RegisterPlatformWebViewNavigation(
+    controllerKey: Any?,
+    canGoBack: () -> Boolean,
+    goBack: () -> Unit,
+    canGoForward: () -> Boolean,
+    goForward: () -> Unit,
+    reload: () -> Unit,
+    onBack: (() -> Unit) -> Unit,
+    onForward: (() -> Unit) -> Unit,
+    onReload: (() -> Unit) -> Unit,
+) {
+    val navigator = LocalNavigator.current
+
+    LaunchedEffect(controllerKey) {
+        onBack {
+            if (canGoBack()) goBack()
+        }
+        onForward {
+            if (canGoForward()) goForward()
+        }
+        onReload(reload)
+    }
+
+    DisposableEffect(controllerKey, navigator) {
+        val handler: () -> Boolean = {
+            if (canGoBack()) {
+                goBack()
+                true
+            } else {
+                false
+            }
+        }
+        navigator.backHandlers.add(handler)
+        onDispose {
+            navigator.backHandlers.remove(handler)
+        }
+    }
+}
 
 @Composable
 internal fun PlatformWebViewScreen(
@@ -72,7 +115,9 @@ internal fun PlatformWebViewScreen(
                 onOpenBrowserClick = {
                     try {
                         uriHandler.openUri(currentUrl)
-                    } catch (_: Exception) {}
+                    } catch (error: Exception) {
+                        Logger.w("PlatformWebView", "Failed to open browser url=$currentUrl", error)
+                    }
                 },
                 showNavigation = showNavigation,
                 useBackIcon = useBackIcon,

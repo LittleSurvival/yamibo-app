@@ -144,57 +144,52 @@ class FavoriteSyncRepositoryImpl(
         val threadId = item.asThreadIdOrNull()
             ?: return FavoriteSyncActionResult(false, i18n("這種類型的收藏目前不支援同步到百合會。"))
         val existingMapping = mappingQueries.getByThreadId(threadId.value.toLong()).executeAsOneOrNull()
-        if (existingMapping?.remoteFavoriteId != null) {
-            upsertRemoteMapping(
-                threadId = threadId,
-                remoteFavoriteId = FavoriteId(existingMapping.remoteFavoriteId.toInt()),
-                remoteFavoritedOrder = existingMapping.remoteFavoritedOrder ?: existingMapping.remoteFavoriteId,
-                itemId = item.id,
-            )
-            return FavoriteSyncActionResult(true, i18n("此收藏已同步到百合會。"))
-        }
-
         val formHash = when (val formHashResult = ensureFormHash()) {
             is YamiboResult.Success -> formHashResult.value
-            is YamiboResult.NotLoggedIn -> return FavoriteSyncActionResult(false, i18n("目前未登入百合會，無法同步收藏。"))
-            is YamiboResult.NoPermission -> return FavoriteSyncActionResult(false, formHashResult.reason)
-            is YamiboResult.Maintenance -> return FavoriteSyncActionResult(false, i18n("百合會目前維護中，請稍後再試。"))
-            is YamiboResult.Failure -> return FavoriteSyncActionResult(false, truncateLogLine(formHashResult.reason))
+            else -> return FavoriteSyncActionResult(
+                false,
+                formHashResult.favoriteSyncFailureMessage(favoriteSyncActionFailureMessages()),
+            )
+        }
+
+        // Persist the remote-sync intent before the request. If cancellation occurs after the
+        // server accepts it but before the response is processed, removal must still offer the
+        // remote option instead of silently treating the item as local-only.
+        if (existingMapping == null) {
+            upsertRemoteMapping(
+                threadId = threadId,
+                remoteFavoriteId = null,
+                remoteFavoritedOrder = null,
+                itemId = item.id,
+            )
         }
 
         when (val addResult = threadRepository.addFavorite(threadId, formHash)) {
-            is YamiboResult.Success -> Unit
-            is YamiboResult.NotLoggedIn -> return FavoriteSyncActionResult(false, i18n("目前未登入百合會，無法同步收藏。"))
-            is YamiboResult.NoPermission -> return FavoriteSyncActionResult(false, addResult.reason)
-            is YamiboResult.Maintenance -> return FavoriteSyncActionResult(false, i18n("百合會目前維護中，請稍後再試。"))
-            is YamiboResult.Failure -> return FavoriteSyncActionResult(false, truncateLogLine(addResult.reason))
-        }
-
-        return when (val reconcile = fetchRemoteFavoritesSilently()) {
-            is RemoteFetchResult.Success -> {
-                val remoteItem = reconcile.items[threadId]
-                if (remoteItem != null) {
-                    upsertRemoteMapping(
-                        threadId = threadId,
-                        remoteFavoriteId = remoteItem.favoriteId,
-                        remoteFavoritedOrder = remoteItem.favoriteId.value.toLong(),
-                        itemId = item.id,
-                    )
-                    FavoriteSyncActionResult(true, i18n("已同步到百合會。"))
+            is YamiboResult.Success -> {
+                upsertRemoteMapping(
+                    threadId = threadId,
+                    remoteFavoriteId = addResult.value.favId,
+                    remoteFavoritedOrder = addResult.value.favId?.value?.toLong(),
+                    itemId = item.id,
+                )
+                return if (addResult.value.favId != null) {
+                    FavoriteSyncActionResult(true, i18n("已同步至百合會"))
                 } else {
-                    FavoriteSyncActionResult(true, i18n("已同步到百合會，但暫時無法回填收藏順序，下一次同步會補齊。"))
+                    FavoriteSyncActionResult(true, i18n("百合會已收藏，但未取得收藏識別碼"))
                 }
             }
-
-            is RemoteFetchResult.Failure -> FavoriteSyncActionResult(
-                true,
-                i18n("已同步到百合會，但暫時無法回填收藏順序：{}", truncateLogLine(reconcile.reason)),
-            )
+            else -> {
+                if (existingMapping == null) mappingQueries.deleteByItemId(item.id)
+                return FavoriteSyncActionResult(
+                    false,
+                    addResult.favoriteSyncFailureMessage(favoriteSyncActionFailureMessages()),
+                )
+            }
         }
     }
 
     override suspend fun hasRemoteFavorite(itemId: Long): Boolean {
-        return mappingQueries.getByItemId(itemId).executeAsOneOrNull()?.remoteFavoriteId != null
+        return mappingQueries.getByItemId(itemId).executeAsOneOrNull() != null
     }
 
     override suspend fun getRemoteFavoriteOrderMap(itemIds: Set<Long>): Map<Long, Long> {
@@ -260,18 +255,18 @@ class FavoriteSyncRepositoryImpl(
                 is YamiboResult.Success -> {
                     val pageTotal = result.value.pageNav?.totalPages
                     if (totalPages != null && pageTotal != null && totalPages != pageTotal) {
-                        warnings += truncateLogLine(i18n("同步期間網站收藏頁數發生變動，建議再同步一次。"))
+                        warnings += truncateFavoriteMessage(i18n("同步期間網站收藏頁數發生變動，建議再同步一次。"))
                     }
                     totalPages = pageTotal ?: totalPages ?: page
 
                     result.value.items.forEach { remote ->
                         val threadId = remote.toThreadId()
                         if (threadId == null) {
-                            warnings += truncateLogLine(i18n("收藏項目缺少帖子 ID：{}", remote.name))
+                            warnings += truncateFavoriteMessage(i18n("收藏項目缺少帖子 ID：{}", remote.name))
                             return@forEach
                         }
                         if (remoteItems.containsKey(threadId)) {
-                            warnings += truncateLogLine(i18n("網站收藏列表出現重複帖子：{}", formatPostLabel(threadId, remote.name)))
+                            warnings += truncateFavoriteMessage(i18n("網站收藏列表出現重複帖子：{}", formatPostLabel(threadId, remote.name)))
                         }
                         remoteItems[threadId] = RemoteFavoriteItem(
                             threadId = threadId,
@@ -317,7 +312,7 @@ class FavoriteSyncRepositoryImpl(
                 }
 
                 is YamiboResult.Failure -> {
-                    failRun(current.copy(failedCount = current.failedCount + 1), truncateLogLine(result.reason))
+                    failRun(current.copy(failedCount = current.failedCount + 1), truncateFavoriteMessage(result.reason))
                     return
                 }
             }
@@ -462,7 +457,7 @@ class FavoriteSyncRepositoryImpl(
             }
 
             is YamiboResult.Failure -> {
-                failRun(current, truncateLogLine(formHashResult.reason))
+                failRun(current, truncateFavoriteMessage(formHashResult.reason))
                 return
             }
         }
@@ -482,13 +477,13 @@ class FavoriteSyncRepositoryImpl(
             logs = logs,
         )
 
-        for (item in uploadTargets) {
+        for ((_, _, targetId, title) in uploadTargets) {
             if (shouldStop(runId)) {
                 interruptRun(current, i18n("同步已取消。"))
                 return
             }
 
-            val threadId = ThreadId(item.targetId.toInt())
+            val threadId = ThreadId(targetId.toInt())
             when (val addResult = threadRepository.addFavorite(threadId, formHash)) {
                 is YamiboResult.Success -> {
                     current = updateSnapshot(
@@ -504,7 +499,7 @@ class FavoriteSyncRepositoryImpl(
                 }
 
                 is YamiboResult.NoPermission -> {
-                    warnings += uploadFailureMessage(item.title, threadId, addResult.reason)
+                    warnings += uploadFailureMessage(title, threadId, addResult.reason)
                     current = updateSnapshot(
                         current.copy(failedCount = current.failedCount + 1),
                         warnings = warnings,
@@ -518,7 +513,7 @@ class FavoriteSyncRepositoryImpl(
                 }
 
                 is YamiboResult.Failure -> {
-                    warnings += uploadFailureMessage(item.title, threadId, addResult.reason)
+                    warnings += uploadFailureMessage(title, threadId, addResult.reason)
                     current = updateSnapshot(
                         current.copy(failedCount = current.failedCount + 1),
                         warnings = warnings,
@@ -544,7 +539,7 @@ class FavoriteSyncRepositoryImpl(
                 }
 
                 is RemoteFetchResult.Failure -> {
-                    warnings += truncateLogLine(i18n("重新對齊網站收藏資料失敗：{}", reconcile.reason))
+                    warnings += truncateFavoriteMessage(i18n("重新對齊網站收藏資料失敗：{}", reconcile.reason))
                 }
             }
         }
@@ -570,41 +565,31 @@ class FavoriteSyncRepositoryImpl(
             ?: return FavoriteSyncDeleteResult(success = true)
         val mapping = mappingQueries.getByItemId(itemId).executeAsOneOrNull()
 
-        if (removeRemote) {
-            if (mapping?.remoteFavoriteId != null) {
-                val formHash = when (val formHashResult = ensureFormHash()) {
-                    is YamiboResult.Success -> formHashResult.value
-                    is YamiboResult.NotLoggedIn ->
-                        return FavoriteSyncDeleteResult(false, i18n("目前未登入百合會，無法同步刪除網站收藏。"))
-                    is YamiboResult.NoPermission ->
-                        return FavoriteSyncDeleteResult(false, formHashResult.reason)
-                    is YamiboResult.Maintenance ->
-                        return FavoriteSyncDeleteResult(false, i18n("百合會目前維護中，請稍後再試。"))
-                    is YamiboResult.Failure ->
-                        return FavoriteSyncDeleteResult(false, truncateLogLine(formHashResult.reason))
-                }
+        if (removeRemote && mapping != null) {
+            val remoteFavoriteId = mapping.remoteFavoriteId?.let { FavoriteId(it.toInt()) }
+                ?: return FavoriteSyncDeleteResult(
+                    false,
+                    i18n("百合會收藏識別碼不可用。請到收藏頁使用「同步百合會收藏」重新對齊識別碼後再試。"),
+                )
 
-                when (val remoteResult =
-                    favoriteRepository.removeFavorite(FavoriteId(mapping.remoteFavoriteId.toInt()), formHash)) {
-                    is YamiboResult.Success -> Unit
-                    is YamiboResult.NotLoggedIn ->
-                        return FavoriteSyncDeleteResult(false, i18n("目前未登入百合會，無法同步刪除網站收藏。"))
-                    is YamiboResult.NoPermission ->
-                        return FavoriteSyncDeleteResult(false, remoteResult.reason)
-                    is YamiboResult.Maintenance ->
-                        return FavoriteSyncDeleteResult(false, i18n("百合會目前維護中，請稍後再試。"))
-                    is YamiboResult.Failure ->
-                        return FavoriteSyncDeleteResult(false, truncateLogLine(remoteResult.reason))
-                }
-            } else if (mapping != null) {
-                return FavoriteSyncDeleteResult(
-                    success = false,
-                    message = i18n("這筆收藏缺少網站 favorite id，暫時無法同步刪除網站端資料。"),
+            val formHash = when (val formHashResult = ensureFormHash()) {
+                is YamiboResult.Success -> formHashResult.value
+                else -> return FavoriteSyncDeleteResult(
+                    false,
+                    formHashResult.favoriteSyncFailureMessage(favoriteSyncDeleteFailureMessages()),
+                )
+            }
+
+            when (val remoteResult = favoriteRepository.removeFavorite(remoteFavoriteId, formHash)) {
+                is YamiboResult.Success -> Unit
+                else -> return FavoriteSyncDeleteResult(
+                    false,
+                    remoteResult.favoriteSyncFailureMessage(favoriteSyncDeleteFailureMessages()),
                 )
             }
         }
 
-                localFavoriteRepository.deleteFavoriteItems(setOf(item.id))
+        localFavoriteRepository.deleteFavoriteItems(setOf(item.id))
         if (!removeRemote && mapping?.remoteFavoriteId != null) {
             mappingQueries.upsertMapping(
                 threadId = mapping.threadId,
@@ -691,10 +676,10 @@ class FavoriteSyncRepositoryImpl(
                     ?: YamiboResult.Failure(i18n("登入狀態已更新，但仍無法取得 formHash。"))
             }
 
-            is YamiboResult.NotLoggedIn -> YamiboResult.NotLoggedIn
-            is YamiboResult.NoPermission -> YamiboResult.NoPermission(authResult.reason)
-            is YamiboResult.Maintenance -> YamiboResult.Maintenance
-            is YamiboResult.Failure -> YamiboResult.Failure(authResult.reason, authResult.exception)
+            is YamiboResult.NotLoggedIn,
+            is YamiboResult.NoPermission,
+            is YamiboResult.Maintenance,
+            is YamiboResult.Failure -> authResult
         }
     }
 
@@ -738,11 +723,7 @@ class FavoriteSyncRepositoryImpl(
                     }
                     page += 1
                 }
-
-                is YamiboResult.NotLoggedIn -> return RemoteFetchResult.Failure(i18n("目前未登入百合會。"))
-                is YamiboResult.NoPermission -> return RemoteFetchResult.Failure(result.reason)
-                is YamiboResult.Maintenance -> return RemoteFetchResult.Failure(i18n("百合會目前維護中。"))
-                is YamiboResult.Failure -> return RemoteFetchResult.Failure(result.reason)
+                else -> return RemoteFetchResult.Failure(i18n(result.message()))
             }
         }
     }
@@ -765,7 +746,7 @@ class FavoriteSyncRepositoryImpl(
     }
 
     private fun appendLog(logs: MutableList<String>, message: String) {
-        logs += truncateLogLine(message)
+        logs += truncateFavoriteMessage(message)
     }
 
     private fun formatPostLabel(threadId: ThreadId, title: String): String {
@@ -776,7 +757,7 @@ class FavoriteSyncRepositoryImpl(
         remoteItem: RemoteFavoriteItem,
         reason: String,
     ): String {
-        return truncateLogLine(i18n("無法匯入帖子 {}：{}", formatPostLabel(remoteItem.threadId, remoteItem.title), reason))
+        return truncateFavoriteMessage(i18n("無法匯入帖子 {}：{}", formatPostLabel(remoteItem.threadId, remoteItem.title), reason))
     }
 
     private fun uploadFailureMessage(
@@ -784,14 +765,7 @@ class FavoriteSyncRepositoryImpl(
         threadId: ThreadId,
         reason: String,
     ): String {
-        return truncateLogLine(i18n("無法同步到百合會 {}：{}", formatPostLabel(threadId, title), reason))
-    }
-
-    private fun truncateLogLine(message: String, maxChars: Int = 100): String {
-        val normalized = message
-            .replace(Regex("\\s+"), " ")
-            .trim()
-        return if (normalized.length <= maxChars) normalized else normalized.take(maxChars) + "..."
+        return truncateFavoriteMessage(i18n("無法同步到百合會 {}：{}", formatPostLabel(threadId, title), reason))
     }
 
     private fun shouldStop(runId: String): Boolean = runId in interruptRequestedRunIds

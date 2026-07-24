@@ -1,36 +1,32 @@
-﻿package me.thenano.yamibo.yamibo_app.thread.reader
-
-import me.thenano.yamibo.yamibo_app.i18n.i18n
+package me.thenano.yamibo.yamibo_app.thread.reader
 
 import YamiboIcons
 import androidx.compose.animation.*
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.exponentialDecay
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.calculateCentroid
-import androidx.compose.foundation.gestures.calculatePan
-import androidx.compose.foundation.gestures.calculateZoom
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.material3.ButtonDefaults.outlinedButtonColors
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontWeight
@@ -41,57 +37,45 @@ import androidx.compose.ui.zIndex
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import coil3.SingletonImageLoader
+import coil3.compose.LocalPlatformContext
 import io.github.littlesurvival.YamiboForum
 import io.github.littlesurvival.YamiboRoute
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.model.ThreadSummary
+import io.github.littlesurvival.dto.page.TagPage
+import io.github.littlesurvival.dto.page.ThreadPage
 import io.github.littlesurvival.dto.value.*
-import io.github.littlesurvival.dto.page.*
-import kotlinx.coroutines.DelicateCoroutinesApi
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
-import me.thenano.yamibo.yamibo_app.LocalChapterStateRepository
-import me.thenano.yamibo.yamibo_app.LocalContentCoverRepository
-import me.thenano.yamibo.yamibo_app.LocalReadHistoryRepository
-import me.thenano.yamibo.yamibo_app.LocalMangaReaderSettingsRepository
-import me.thenano.yamibo.yamibo_app.LocalImageReaderModeOverrideRepository
-import me.thenano.yamibo.yamibo_app.LocalDownloadRepository
-import me.thenano.yamibo.yamibo_app.LocalRssSearchSubscriptionRepository
-import me.thenano.yamibo.yamibo_app.LocalTagRepository
-import me.thenano.yamibo.yamibo_app.LocalThreadRepository
+import me.thenano.yamibo.yamibo_app.*
+import me.thenano.yamibo.yamibo_app.components.systembars.SystemBarsEffect
+import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.components.tracking.ReadingTimeTracker
+import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
-import me.thenano.yamibo.yamibo_app.repository.ChapterStateRepository as ChapterStateRepository
-import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
+import me.thenano.yamibo.yamibo_app.repository.ChapterStateRepository
 import me.thenano.yamibo.yamibo_app.repository.ContentCoverRepository
+import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadStatus
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadTaskKey
 import me.thenano.yamibo.yamibo_app.repository.download.RssMangaChapterDownloadKey
 import me.thenano.yamibo.yamibo_app.repository.download.TagMangaChapterDownloadKey
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
-import me.thenano.yamibo.yamibo_app.thread.image.ImageContextMenu
-import me.thenano.yamibo.yamibo_app.thread.image.ImageViewer
-import me.thenano.yamibo.yamibo_app.thread.reader.components.manga.*
-import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
-import androidx.compose.ui.input.pointer.util.VelocityTracker
-import androidx.compose.animation.core.exponentialDecay
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import coil3.SingletonImageLoader
-import me.thenano.yamibo.yamibo_app.thread.detail.novel.INovelThreadDetailScreen
-import me.thenano.yamibo.yamibo_app.LocalAuthRepository
-import me.thenano.yamibo.yamibo_app.util.shareText
-import me.thenano.yamibo.yamibo_app.util.state
-import coil3.compose.LocalPlatformContext
 import me.thenano.yamibo.yamibo_app.repository.settings.EffectiveReadingModeSource
 import me.thenano.yamibo.yamibo_app.repository.settings.ReadingMode
 import me.thenano.yamibo.yamibo_app.repository.settings.TouchZoneLayout
 import me.thenano.yamibo.yamibo_app.repository.settings.resolveEffectiveReadingMode
-import me.thenano.yamibo.yamibo_app.components.systembars.SystemBarsEffect
+import me.thenano.yamibo.yamibo_app.task.AppTaskDuplicatePolicy
+import me.thenano.yamibo.yamibo_app.task.AppTaskKey
+import me.thenano.yamibo.yamibo_app.thread.detail.novel.INovelThreadDetailScreen
+import me.thenano.yamibo.yamibo_app.thread.image.ImageContextMenu
+import me.thenano.yamibo.yamibo_app.thread.image.ImageViewer
+import me.thenano.yamibo.yamibo_app.thread.reader.components.manga.*
 import me.thenano.yamibo.yamibo_app.util.buildImageRequest
+import me.thenano.yamibo.yamibo_app.util.shareText
+import me.thenano.yamibo.yamibo_app.util.state
+import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
 import kotlin.math.abs
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -136,7 +120,8 @@ fun ImagesReaderScreen(
     )
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = LocalAppFeedbackController.current
+    val appTaskManager = LocalAppTaskManager.current
     val historyRepo = LocalReadHistoryRepository.current
     val contentCoverRepository = LocalContentCoverRepository.current
     val threadRepository = LocalThreadRepository.current
@@ -326,7 +311,7 @@ fun ImagesReaderScreen(
                     activeTid = currentThreads.first().tid
                 }
             } else {
-                snackbarHostState.showSnackbar(i18n("無法載入閱讀目錄"))
+                feedbackController.post(i18n("無法載入閱讀目錄"))
             }
         }
     }
@@ -413,7 +398,7 @@ fun ImagesReaderScreen(
         }
         val previous = observedDownloadedTagChapter
         if (previous == false && downloaded) {
-            snackbarHostState.showSnackbar(i18n("下載完成"))
+            feedbackController.post(i18n("下載完成"))
         }
         observedDownloadedTagChapter = downloaded
     }
@@ -579,8 +564,11 @@ fun ImagesReaderScreen(
             val tagPageSnap = currentTagPage
             val currentCoverSnap = actualImageList.getOrNull(1) ?: actualImageList.getOrNull(0)
             
-            @OptIn(DelicateCoroutinesApi::class)
-            GlobalScope.launch {
+            appTaskManager.launch(
+                key = AppTaskKey("reader-history:${activeTidSnap.value}"),
+                duplicatePolicy = AppTaskDuplicatePolicy.AllowParallel,
+                instanceId = "${tagPageSnap}:${snapshotPage}:${currentTimeMillis()}",
+            ) {
                 if (tagId != null && tagName != null) {
                     val finalCover = if (actualImageList.isEmpty()) {
                         historyRepo.getTagMangaReaderModeHistoryPosition(tagId)?.coverUrl
@@ -825,7 +813,7 @@ fun ImagesReaderScreen(
                             activeTid = currentThreads.first().tid
                         }
                     } else {
-                        snackbarHostState.showSnackbar(i18n("無法載入下一頁"))
+                        feedbackController.post(i18n("無法載入下一頁"))
                     }
                 }
                 delay(600.milliseconds)
@@ -853,7 +841,7 @@ fun ImagesReaderScreen(
                             activeTid = currentThreads.last().tid
                         }
                     } else {
-                        snackbarHostState.showSnackbar(i18n("無法載入上一頁"))
+                        feedbackController.post(i18n("無法載入上一頁"))
                     }
                 }
                 delay(600.milliseconds)
@@ -1575,10 +1563,10 @@ fun ImagesReaderScreen(
                                             actualImageList = result.value
                                             isDownloadedTagChapter = true
                                             currentPage = currentPage.coerceIn(0, (actualImageList.size - 1).coerceAtLeast(0))
-                                            snackbarHostState.showSnackbar(i18n("已重新整理下載"))
+                                            feedbackController.post(i18n("已重新整理下載"))
                                         }
                                         else -> {
-                                            snackbarHostState.showSnackbar(i18n("重新整理下載失敗：{}", i18n(result.message())))
+                                            feedbackController.post(i18n("重新整理下載失敗：{}", i18n(result.message())))
                                         }
                                     }
                                     isLoadingImages = false
@@ -1730,27 +1718,18 @@ fun ImagesReaderScreen(
                             coverKey,
                             imageUrl,
                         )
-                        if (saved) snackbarHostState.showSnackbar(i18n("已設為封面"))
+                        if (saved) feedbackController.post(i18n("已設為封面"))
                     }
                 }
             } else null,
             onMessage = { message ->
                 scope.launch {
-                    snackbarHostState.currentSnackbarData?.dismiss()
-                    snackbarHostState.showSnackbar(message)
+                    feedbackController.post(message)
                 }
             },
             onDismiss = { showContextMenu = false },
             isBottomSheet = true
         )
 
-        // Snackbar
-        YamiboSnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 72.dp)
-        )
     }
 }

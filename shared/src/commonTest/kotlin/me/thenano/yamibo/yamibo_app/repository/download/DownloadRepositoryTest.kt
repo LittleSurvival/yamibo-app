@@ -25,8 +25,9 @@ import io.github.littlesurvival.dto.value.TagId
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.serialization.encodeToString
+import kotlinx.coroutines.async
 import kotlinx.serialization.json.Json
+import me.thenano.yamibo.yamibo_app.repository.DownloadRepository
 import me.thenano.yamibo.yamibo_app.repository.TagRepository
 import me.thenano.yamibo.yamibo_app.repository.ThreadRepository
 import kotlin.test.Test
@@ -317,6 +318,35 @@ class DownloadRepositoryTest {
     }
 
     @Test
+    fun tagMangaAllPagesStartsWorkBeforeCatalogExpansionFinishes() = runBlocking {
+        val catalogPageTwoGate = CompletableDeferred<Unit>()
+        val downloadGate = CompletableDeferred<Unit>()
+        val key = TagMangaChapterDownloadKey(8, 42, 7)
+        val repository = repository(
+            threadRepository = FakeThreadRepository(
+                pages = mutableMapOf(1 to YamiboResult.Success(page(42, 1, 1, "https://img/42.jpg"))),
+                fetchGate = downloadGate,
+            ),
+            storage = FakeStorage(),
+            tagRepository = FakeTagRepository(
+                pages = mutableMapOf(
+                    1 to YamiboResult.Success(tagPage(1, 2, summary(42, "chapter-1"))),
+                    2 to YamiboResult.Success(tagPage(2, 2, summary(43, "chapter-2"))),
+                ),
+                fetchGates = mapOf(2 to catalogPageTwoGate),
+            ),
+        )
+
+        val enqueue = async { repository.enqueueTagMangaAllPages(TagId(8), "tag") }
+        awaitStatus(repository, key, DownloadStatus.Downloading)
+
+        assertEquals(DownloadStatus.Downloading, repository.queue.value.first { it.key == key }.status)
+        catalogPageTwoGate.complete(Unit)
+        downloadGate.complete(Unit)
+        enqueue.await().getOrThrow()
+    }
+
+    @Test
     fun tagMangaRefreshFailureKeepsExistingImages() = runBlocking {
         val key = TagMangaChapterDownloadKey(8, 42, 7)
         val storage = FakeStorage()
@@ -577,6 +607,12 @@ class DownloadRepositoryTest {
         )
     }
 
+    private fun tagPage(currentPage: Int, totalPages: Int, vararg threads: ThreadSummary) = TagPage(
+        tagName = "tag",
+        threadSummaries = threads.toList(),
+        pageNav = PageNav(currentPage = currentPage, totalPages = totalPages),
+    )
+
     private fun contentGroup(
         id: String,
         type: DownloadedContentGroupType,
@@ -746,9 +782,12 @@ class DownloadRepositoryTest {
 
     private class FakeTagRepository(
         private val pages: MutableMap<Int, YamiboResult<TagPage>> = mutableMapOf(),
+        private val fetchGates: Map<Int, CompletableDeferred<Unit>> = emptyMap(),
     ) : TagRepository {
-        override suspend fun fetchTagPage(tagId: TagId, page: Int): YamiboResult<TagPage> =
-            pages[page] ?: YamiboResult.Failure("missing tag page $page")
+        override suspend fun fetchTagPage(tagId: TagId, page: Int): YamiboResult<TagPage> {
+            fetchGates[page]?.await()
+            return pages[page] ?: YamiboResult.Failure("missing tag page $page")
+        }
 
         override suspend fun fetchExtractTags(tid: ThreadId): YamiboResult<Tags> = error("unused")
         override fun getCachedTagPage(tagId: TagId, page: Int): TagPage? = null

@@ -66,14 +66,10 @@ class AndroidBackgroundAccessRepository(
     }
 
     private fun buildState(): BackgroundAccessRepository.SetupState {
-        val notificationPermissionGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            ContextCompat.checkSelfPermission(
-                appContext,
-                Manifest.permission.POST_NOTIFICATIONS,
-            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-        } else {
-            true
-        }
+        val notificationPermissionGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || ContextCompat.checkSelfPermission(
+            appContext,
+            Manifest.permission.POST_NOTIFICATIONS,
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
         val notificationsEnabled = NotificationManagerCompat.from(appContext).areNotificationsEnabled()
         val powerManager = appContext.getSystemService(Context.POWER_SERVICE) as PowerManager
         val batteryOptimizationIgnored =

@@ -50,12 +50,7 @@ class AndroidSignReminderScheduler(context: Context) : SignReminderScheduler {
     private fun getIntervalMinutes(frequency: SignReminderFrequency): Long? {
         return when (frequency) {
             SignReminderFrequency.OFF -> null
-            SignReminderFrequency.ONCE_A_DAY -> 24 * 60L
-            SignReminderFrequency.TWICE_A_DAY -> 12 * 60L
-            SignReminderFrequency.THRICE_A_DAY -> 8 * 60L
-            SignReminderFrequency.FOUR_TIMES_A_DAY -> 6 * 60L
-            SignReminderFrequency.FIVE_TIMES_A_DAY -> 288L
-            SignReminderFrequency.SIX_TIMES_A_DAY -> 4 * 60L
+            else -> (24L / frequency.timesPerDay.toFloat() * 60L).toLong()
         }
     }
 

@@ -1,25 +1,25 @@
-﻿package me.thenano.yamibo.yamibo_app.updates
+package me.thenano.yamibo.yamibo_app.updates
 
 import YamiboIcons
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import io.github.littlesurvival.dto.value.ThreadId
+import io.github.littlesurvival.dto.value.UserId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import io.github.littlesurvival.dto.value.ThreadId
-import io.github.littlesurvival.dto.value.UserId
 import me.thenano.yamibo.yamibo_app.LocalAppSettingsRepository
 import me.thenano.yamibo.yamibo_app.LocalDownloadRepository
 import me.thenano.yamibo.yamibo_app.LocalFavoriteUpdateRepository
@@ -30,15 +30,14 @@ import me.thenano.yamibo.yamibo_app.components.feedback.YamiboErrorContent
 import me.thenano.yamibo.yamibo_app.components.feedback.YamiboLoadingContent
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboMainTabIconAction
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboMainTabTopBar
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.favorite.updates.FavoriteUpdateRunner
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.i18n.localizedLabel
 import me.thenano.yamibo.yamibo_app.navigation.ComposableNavigator
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
-import me.thenano.yamibo.yamibo_app.repository.FavoriteUpdateRepository
 import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository
+import me.thenano.yamibo.yamibo_app.repository.FavoriteUpdateRepository
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadStatus
 import me.thenano.yamibo.yamibo_app.repository.download.ThreadPageDownloadKey
@@ -46,8 +45,9 @@ import me.thenano.yamibo.yamibo_app.thread.detail.novel.INovelThreadDetailScreen
 import me.thenano.yamibo.yamibo_app.thread.detail.rss.IRssSearchSubscriptionDetailScreen
 import me.thenano.yamibo.yamibo_app.thread.detail.tag.ITagDetailScreen
 import me.thenano.yamibo.yamibo_app.thread.reader.IThreadReaderScreen
-import me.thenano.yamibo.yamibo_app.util.state
 import me.thenano.yamibo.yamibo_app.updates.components.*
+import me.thenano.yamibo.yamibo_app.util.state
+import kotlin.time.Duration.Companion.milliseconds
 
 private sealed interface UpdatesScreenState {
     data object Loading : UpdatesScreenState
@@ -64,7 +64,7 @@ private sealed interface UpdatesScreenState {
     data class Error(val message: String) : UpdatesScreenState
 }
 
-private data class UpdateDownloadTargetKey(
+internal data class UpdateDownloadTargetKey(
     val targetId: Long,
     val authorId: Long?,
 )
@@ -75,7 +75,36 @@ private data class UpdateDownloadHintState(
     val hasDownloaded: Boolean = false,
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
+internal fun favoriteUpdateThreadTargetKeys(
+    events: List<FavoriteUpdateRepository.UpdateEvent>,
+): Set<UpdateDownloadTargetKey> =
+    events
+        .asSequence()
+        .filter {
+            it.targetType != FavoriteStoreRepository.FavoriteTargetType.TagManga &&
+                it.targetType != FavoriteStoreRepository.FavoriteTargetType.RssSearch
+        }
+        .map { UpdateDownloadTargetKey(it.targetId, it.authorId) }
+        .toSet()
+
+internal fun favoriteUpdateAutoRefreshEntries(
+    entries: List<me.thenano.yamibo.yamibo_app.repository.download.DownloadQueueEntry>,
+    targetKeys: Set<UpdateDownloadTargetKey>,
+): List<Pair<me.thenano.yamibo.yamibo_app.repository.download.DownloadQueueEntry, ThreadPageDownloadKey>> =
+    entries
+        .asSequence()
+        .filter { it.status == DownloadStatus.UpdateAvailable }
+        .mapNotNull { entry ->
+            val key = entry.key as? ThreadPageDownloadKey ?: return@mapNotNull null
+            val targetKey = UpdateDownloadTargetKey(
+                targetId = key.tid.toLong(),
+                authorId = key.authorId?.toLong(),
+            )
+            if (targetKey in targetKeys) entry to key else null
+        }
+        .distinctBy { it.second }
+        .toList()
+
 @Composable
 fun UpdatesScreen() {
     val colors = YamiboTheme.colors
@@ -86,10 +115,11 @@ fun UpdatesScreen() {
     val favoriteUpdateRefreshKey = favoriteUpdateRunState.refreshKey()
     val appSettingsRepository = LocalAppSettingsRepository.current
     val favoriteUpdateInterval = appSettingsRepository.favoriteUpdateInterval.state()
+    val favoriteUpdateAutoDownload = appSettingsRepository.favoriteUpdateAutoDownload.state()
     val favoriteUpdateHiddenRunId = appSettingsRepository.favoriteUpdateHiddenRunId.state()
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
 
     var state by remember { mutableStateOf<UpdatesScreenState>(UpdatesScreenState.Loading) }
     var isRefreshing by remember { mutableStateOf(false) }
@@ -102,14 +132,7 @@ fun UpdatesScreen() {
 
     val updateContent = state as? UpdatesScreenState.Success
     val updateDownloadTargetKeys = remember(updateContent?.events) {
-        updateContent?.events
-            ?.filter {
-                it.targetType != FavoriteStoreRepository.FavoriteTargetType.TagManga &&
-                    it.targetType != FavoriteStoreRepository.FavoriteTargetType.RssSearch
-            }
-            ?.map { UpdateDownloadTargetKey(it.targetId, it.authorId) }
-            ?.toSet()
-            .orEmpty()
+        favoriteUpdateThreadTargetKeys(updateContent?.events.orEmpty())
     }
     val updateDownloadHints by remember(downloadRepository, updateDownloadTargetKeys) {
         downloadRepository.queue
@@ -186,23 +209,40 @@ fun UpdatesScreen() {
 
     LaunchedEffect(updateContent?.events) {
         updateContent ?: return@LaunchedEffect
-        delay(350)
+        delay(350.milliseconds)
         loadUpdateFilters()
     }
 
-    LaunchedEffect(updateContent?.events) {
-        updateContent?.events
+    LaunchedEffect(updateContent?.events, favoriteUpdateAutoDownload) {
+        val threadEvents = updateContent?.events
             ?.filter {
                 it.targetType != FavoriteStoreRepository.FavoriteTargetType.TagManga &&
                     it.targetType != FavoriteStoreRepository.FavoriteTargetType.RssSearch
             }
             ?.distinctBy { it.targetId to it.authorId }
-            ?.forEach { event ->
-                downloadRepository.markThreadUpdateAvailable(
-                    tid = ThreadId(event.targetId.toInt()),
-                    authorId = event.authorId?.toInt()?.let(::UserId),
-                )
-            }
+            .orEmpty()
+
+        threadEvents.forEach { event ->
+            downloadRepository.markThreadUpdateAvailable(
+                tid = ThreadId(event.targetId.toInt()),
+                authorId = event.authorId?.toInt()?.let(::UserId),
+            )
+        }
+
+        if (favoriteUpdateAutoDownload) {
+            favoriteUpdateAutoRefreshEntries(
+                entries = downloadRepository.queue.value,
+                targetKeys = favoriteUpdateThreadTargetKeys(threadEvents),
+            )
+                .forEach { (entry, key) ->
+                    downloadRepository.refreshPage(
+                        tid = ThreadId(key.tid),
+                        title = entry.title,
+                        authorId = key.authorId?.let(::UserId),
+                        page = key.page,
+                    )
+                }
+        }
     }
 
     DisposableEffect(isSelectMode, navigator) {
@@ -222,7 +262,6 @@ fun UpdatesScreen() {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = colors.creamBackground,
-        snackbarHost = { YamiboSnackbarHost(hostState = snackbarHostState) },
         topBar = {
             if (isSelectMode) {
                 UpdatesSelectTopBar(
@@ -238,7 +277,7 @@ fun UpdatesScreen() {
                             isSelectMode = false
                             selectedEventIds = emptySet()
                             loadUpdates()
-                            snackbarHostState.showSnackbar(i18n("已刪除全部更新紀錄"))
+                            feedbackController.post(i18n("已刪除全部更新紀錄"))
                         }
                     },
                     onCancel = {
@@ -253,7 +292,7 @@ fun UpdatesScreen() {
                                 isSelectMode = false
                                 selectedEventIds = emptySet()
                                 loadUpdates()
-                                snackbarHostState.showSnackbar(i18n("已刪除 {} 項紀錄", deletedCount))
+                                feedbackController.post(i18n("已刪除 {} 項紀錄", deletedCount))
                             }
                         }
                     },
@@ -338,14 +377,14 @@ fun UpdatesScreen() {
                                         scope.launch {
                                             favoriteUpdateRunner.cancelUpdate(runId)
                                             loadUpdates()
-                                            snackbarHostState.showSnackbar(i18n("已取消收藏更新檢查"), duration = SnackbarDuration.Short)
+                                            feedbackController.post(i18n("已取消收藏更新檢查"), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
                                         }
                                     },
                                     onInterruptFavoriteUpdate = { runId ->
                                         scope.launch {
                                             favoriteUpdateRunner.interruptUpdate(runId)
                                             loadUpdates()
-                                            snackbarHostState.showSnackbar(i18n("已中斷收藏更新檢查"), duration = SnackbarDuration.Short)
+                                            feedbackController.post(i18n("已中斷收藏更新檢查"), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
                                         }
                                     },
                                     onResumeFavoriteUpdate = {
@@ -354,13 +393,13 @@ fun UpdatesScreen() {
                                                 is FavoriteUpdateRunner.LaunchResult.Started -> {
                                                     appSettingsRepository.favoriteUpdateHiddenRunId.setValue("")
                                                     loadUpdates()
-                                                    snackbarHostState.showSnackbar(i18n("繼續檢查收藏更新"), duration = SnackbarDuration.Short)
+                                                    feedbackController.post(i18n("繼續檢查收藏更新"), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
                                                 }
                                                 is FavoriteUpdateRunner.LaunchResult.Rejected -> {
-                                                    snackbarHostState.showSnackbar(i18n(result.reason), duration = SnackbarDuration.Short)
+                                                    feedbackController.post(i18n(result.reason), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
                                                 }
                                                 null -> {
-                                                    snackbarHostState.showSnackbar(i18n("沒有可繼續的收藏更新任務"), duration = SnackbarDuration.Short)
+                                                    feedbackController.post(i18n("沒有可繼續的收藏更新任務"), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
                                                 }
                                             }
                                         }
@@ -370,9 +409,9 @@ fun UpdatesScreen() {
                                         scope.launch {
                                             appSettingsRepository.favoriteUpdateInterval.setValue(interval)
                                             favoriteUpdateRunner.schedulePeriodicUpdate(interval)
-                                            snackbarHostState.showSnackbar(
+                                            feedbackController.post(
                                                 i18n("刷新週期已改為 {}", interval.localizedLabel()),
-                                                duration = SnackbarDuration.Short,
+                                                duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short,
                                             )
                                         }
                                     },
@@ -441,13 +480,13 @@ fun UpdatesScreen() {
                         when (val result = favoriteUpdateRunner.startGlobalRefresh()) {
                             is FavoriteUpdateRunner.LaunchResult.Started -> {
                                 appSettingsRepository.favoriteUpdateHiddenRunId.setValue("")
-                                snackbarHostState.showSnackbar(
+                                feedbackController.post(
                                     i18n("開始全域刷新收藏更新"),
-                                    duration = SnackbarDuration.Short
+                                    duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short
                                 )
                             }
                             is FavoriteUpdateRunner.LaunchResult.Rejected -> {
-                                snackbarHostState.showSnackbar(i18n(result.reason), duration = SnackbarDuration.Short)
+                                feedbackController.post(i18n(result.reason), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
                             }
                         }
                     }
@@ -552,14 +591,14 @@ private fun navigateFavoriteUpdateEvent(
         )
         FavoriteStoreRepository.FavoriteTargetType.ThreadNovel -> navigator.navigate(
             INovelThreadDetailScreen(
-                tid = io.github.littlesurvival.dto.value.ThreadId(event.targetId.toInt()),
+                tid = ThreadId(event.targetId.toInt()),
                 title = event.title,
-                authorId = event.authorId?.toInt()?.let { io.github.littlesurvival.dto.value.UserId(it) },
+                authorId = event.authorId?.toInt()?.let { UserId(it) },
             )
         )
         FavoriteStoreRepository.FavoriteTargetType.ThreadNormal -> navigator.navigate(
             IThreadReaderScreen(
-                tid = io.github.littlesurvival.dto.value.ThreadId(event.targetId.toInt()),
+                tid = ThreadId(event.targetId.toInt()),
                 title = event.title,
                 threadType = ReadHistoryRepository.ThreadEntryType.Normal,
             )

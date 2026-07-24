@@ -37,6 +37,8 @@ import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
  * @param label Converts an option to display text.
  * @param modifier Modifier applied to the option list.
  * @param selectedText Text shown at the right side of each selected row.
+ * @param confirmText Text shown on the confirm chip.
+ * @param optionEnabled Whether an option can be selected.
  * @param toggleSelection Returns the new temporary selection after an option
  * row is tapped. Use this to implement exclusive "All" rows.
  */
@@ -50,14 +52,17 @@ fun <T> YamiboMultiSelectDialog(
     label: @Composable (T) -> String,
     modifier: Modifier = Modifier,
     selectedText: String = i18n("已選擇"),
+    confirmText: String = i18n("確定"),
+    optionEnabled: (T) -> Boolean = { true },
     toggleSelection: (option: T, current: Set<T>) -> Set<T> = { option, current ->
         if (option in current) current - option else current + option
     },
 ) {
     val colors = YamiboTheme.colors
-    var draftSelection by remember(options, selected) { mutableStateOf(selected) }
+    fun enabledSelection(values: Set<T>): Set<T> = values.filterTo(mutableSetOf(), optionEnabled)
+    var draftSelection by remember(options, selected) { mutableStateOf(enabledSelection(selected)) }
     AlertDialog(
-        onDismissRequest = { onConfirm(draftSelection) },
+        onDismissRequest = { onConfirm(enabledSelection(draftSelection)) },
         title = {
             Text(title, color = colors.textStrong, fontWeight = FontWeight.Bold)
         },
@@ -67,14 +72,18 @@ fun <T> YamiboMultiSelectDialog(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 items(options) { option ->
-                    val isSelected = option in draftSelection
+                    val enabled = optionEnabled(option)
+                    val isSelected = enabled && option in draftSelection
                     YamiboSingleSelectRow(
                         label = label(option),
                         selected = isSelected,
                         selectedText = selectedText,
                         onClick = {
-                            draftSelection = toggleSelection(option, draftSelection)
+                            if (enabled) {
+                                draftSelection = enabledSelection(toggleSelection(option, draftSelection))
+                            }
                         },
+                        enabled = enabled,
                     )
                 }
             }
@@ -84,7 +93,7 @@ fun <T> YamiboMultiSelectDialog(
                 if (onCancel != null) {
                     YamiboActionChip(i18n("取消"), onClick = onCancel)
                 }
-                YamiboActionChip(i18n("確定"), onClick = { onConfirm(draftSelection) })
+                YamiboActionChip(confirmText, onClick = { onConfirm(enabledSelection(draftSelection)) })
             }
         },
         dismissButton = {},

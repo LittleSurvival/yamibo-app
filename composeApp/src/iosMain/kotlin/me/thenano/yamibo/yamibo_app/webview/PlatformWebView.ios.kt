@@ -1,25 +1,22 @@
 package me.thenano.yamibo.yamibo_app.webview
 
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.viewinterop.UIKitView
-import kotlinx.cinterop.ExperimentalForeignApi
-import platform.Foundation.NSURL
-import platform.Foundation.NSURLRequest
-import platform.WebKit.WKWebView
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.ui.Modifier
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import me.thenano.yamibo.yamibo_app.LocalAuthRepository
-import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
-import platform.WebKit.WKNavigationDelegateProtocol
-import platform.WebKit.WKNavigation
-import platform.darwin.NSObject
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.viewinterop.UIKitView
+import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.ObjCSignatureOverride
+import me.thenano.yamibo.yamibo_app.LocalAuthRepository
+import platform.Foundation.NSURL
+import platform.Foundation.NSURLRequest
+import platform.WebKit.WKNavigation
+import platform.WebKit.WKNavigationDelegateProtocol
+import platform.WebKit.WKWebView
+import platform.darwin.NSObject
 
 class PlatformNavigationDelegate(
     private val syncAuthCookies: Boolean,
@@ -96,7 +93,6 @@ actual fun PlatformWebViewContent(
     onLoadError: (url: String?, description: String) -> Unit,
     shouldOverrideUrlLoading: (String) -> Boolean,
 ) {
-    val navigator = LocalNavigator.current
     val authRepo = LocalAuthRepository.current
     var webViewInstance by remember { mutableStateOf<WKWebView?>(null) }
 
@@ -114,26 +110,17 @@ actual fun PlatformWebViewContent(
         )
     }
 
-    LaunchedEffect(webViewInstance) {
-        onBack { if (webViewInstance?.canGoBack() == true) webViewInstance?.goBack() }
-        onForward { if (webViewInstance?.canGoForward() == true) webViewInstance?.goForward() }
-        onReload { webViewInstance?.reload() }
-    }
-
-    DisposableEffect(webViewInstance) {
-        val handler: () -> Boolean = {
-            if (webViewInstance?.canGoBack() == true) {
-                webViewInstance?.goBack()
-                true
-            } else {
-                false
-            }
-        }
-        navigator.backHandlers.add(handler)
-        onDispose {
-            navigator.backHandlers.remove(handler)
-        }
-    }
+    RegisterPlatformWebViewNavigation(
+        controllerKey = webViewInstance,
+        canGoBack = { webViewInstance?.canGoBack() == true },
+        goBack = { webViewInstance?.goBack() },
+        canGoForward = { webViewInstance?.canGoForward() == true },
+        goForward = { webViewInstance?.goForward() },
+        reload = { webViewInstance?.reload() },
+        onBack = onBack,
+        onForward = onForward,
+        onReload = onReload,
+    )
     
     UIKitView(
         modifier = Modifier.fillMaxSize(),

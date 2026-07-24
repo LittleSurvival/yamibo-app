@@ -3,9 +3,12 @@ package me.thenano.yamibo.yamibo_app
 import androidx.compose.animation.*
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
@@ -27,12 +30,19 @@ import coil3.PlatformContext
 import coil3.compose.setSingletonImageLoaderFactory
 import coil3.memory.MemoryCache
 import coil3.network.ktor3.KtorNetworkFetcherFactory
-import io.github.littlesurvival.core.YamiboResult
-import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import me.thenano.yamibo.yamibo_app.components.font.getFontFamily
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
+import me.thenano.yamibo.yamibo_app.confirmation.AppConfirmationController
+import me.thenano.yamibo.yamibo_app.confirmation.AppConfirmationDelivery
+import me.thenano.yamibo.yamibo_app.confirmation.AppConfirmationResult
+import me.thenano.yamibo.yamibo_app.feedback.AppFeedbackController
+import me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration
+import me.thenano.yamibo.yamibo_app.feedback.AppFeedbackResult
 import me.thenano.yamibo.yamibo_app.home.HomePageScreen
 import me.thenano.yamibo.yamibo_app.i18n.AppLocaleProvider
 import me.thenano.yamibo.yamibo_app.i18n.i18n
@@ -41,18 +51,24 @@ import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.navigation.NavAction
 import me.thenano.yamibo.yamibo_app.profile.settings.update.AppUpdatePromptContent
 import me.thenano.yamibo.yamibo_app.profile.sign.ISignWebView
+import me.thenano.yamibo.yamibo_app.profile.sign.signActionFeedbackMessage
 import me.thenano.yamibo.yamibo_app.repository.AuthRepository
 import me.thenano.yamibo.yamibo_app.repository.SignRepository
-import me.thenano.yamibo.yamibo_app.repository.appupdate.*
+import me.thenano.yamibo.yamibo_app.repository.appupdate.AppUpdateCheckResult
+import me.thenano.yamibo.yamibo_app.repository.appupdate.AppUpdateDownloadState
+import me.thenano.yamibo.yamibo_app.repository.appupdate.AppUpdateRelease
 import me.thenano.yamibo.yamibo_app.repository.chineseconversion.ChineseConversionMode
 import me.thenano.yamibo.yamibo_app.repository.settings.AppSettingsRepository
 import me.thenano.yamibo.yamibo_app.repository.settings.ReaderChineseConversionOption
 import me.thenano.yamibo.yamibo_app.repository.settings.SignInMode
+import me.thenano.yamibo.yamibo_app.task.AppTaskKey
+import me.thenano.yamibo.yamibo_app.task.AppTaskManager
 import me.thenano.yamibo.yamibo_app.util.state
 import me.thenano.yamibo.yamibo_app.util.time.currentLocalDateKey
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
 
 internal val showSignWebViewTrigger = mutableStateOf(false)
+private const val APP_FEEDBACK_Z_INDEX = Float.MAX_VALUE
 
 @Composable
 fun HomeScreenContent(
@@ -85,12 +101,14 @@ fun App() {
     val signRepository = LocalSignRepository.current
     val appUpdateRepository = LocalAppUpdateRepository.current
     val fontRepository = LocalFontRepository.current
+    val feedbackController = LocalAppFeedbackController.current
+    val confirmationController = LocalAppConfirmationController.current
+    val appTaskManager = LocalAppTaskManager.current
     val appLanguage = appSettingsRepository.language.state()
     val appFontId = appSettingsRepository.appFontId.state()
     val appFontFamily = remember(appFontId) { fontRepository.getFontFamily(appFontId) }
     val signLaunchReminderEnabled = appSettingsRepository.signInLaunchReminderEnabled.state()
     val holder = rememberSaveableStateHolder()
-    val snackbarHostState = remember { SnackbarHostState() }
     navigator.stateHolder = holder
     ChineseConversionModeSync()
 
@@ -100,8 +118,6 @@ fun App() {
     var completedPushTopId by remember { mutableStateOf(stack.lastOrNull()?.id) }
     var showSignReminder by remember { mutableStateOf(false) }
     var launchUpdateRelease by remember { mutableStateOf<AppUpdateRelease?>(null) }
-    val coroutineScope = rememberCoroutineScope()
-
     LaunchedEffect(Unit) {
         val threshold = appSettingsRepository.appUpdateLaunchCheckThreshold.getValue()
         val intervalMillis = threshold.hours?.times(60L * 60L * 1000L) ?: return@LaunchedEffect
@@ -123,7 +139,7 @@ fun App() {
             if (event == Lifecycle.Event.ON_RESUME) {
                 val state = downloadState
                 if (state is AppUpdateDownloadState.PermissionRequired && appUpdateRepository.isInstallPermissionGranted) {
-                    coroutineScope.launch {
+                    appTaskManager.launch(AppTaskKey("app-update:download-install")) {
                         appUpdateRepository.downloadAndInstall(state.release)
                     }
                 }
@@ -213,12 +229,13 @@ fun App() {
                         }
                     }
                 }
-                YamiboSnackbarHost(
-                    hostState = snackbarHostState,
+                AppFeedbackHost(
+                    controller = feedbackController,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .navigationBarsPadding()
                         .padding(bottom = 72.dp)
+                        .zIndex(APP_FEEDBACK_Z_INDEX)
                 )
             }
             LaunchSignReminderDialog(
@@ -238,8 +255,8 @@ fun App() {
                         appSettingsRepository = appSettingsRepository,
                         authRepository = authRepository,
                         signRepository = signRepository,
-                        coroutineScope = coroutineScope,
-                        snackbarHostState = snackbarHostState,
+                        appTaskManager = appTaskManager,
+                        feedbackController = feedbackController,
                     )
                 },
             )
@@ -248,7 +265,7 @@ fun App() {
                 onDismiss = { launchUpdateRelease = null },
                 onDownload = { release ->
                     launchUpdateRelease = null
-                    coroutineScope.launch {
+                    appTaskManager.launch(AppTaskKey("app-update:download-install")) {
                         appUpdateRepository.downloadAndInstall(release)
                     }
                 },
@@ -257,6 +274,7 @@ fun App() {
                     appUpdateRepository.openReleasePage(release)
                 },
             )
+            AppConfirmationHost(controller = confirmationController)
             }
         }
     }
@@ -283,11 +301,118 @@ fun App() {
                 appSettingsRepository = appSettingsRepository,
                 authRepository = authRepository,
                 signRepository = signRepository,
-                coroutineScope = coroutineScope,
-                snackbarHostState = snackbarHostState,
+                appTaskManager = appTaskManager,
+                feedbackController = feedbackController,
             )
         }
     }
+}
+
+@Composable
+private fun AppConfirmationHost(controller: AppConfirmationController) {
+    var currentDelivery by remember { mutableStateOf<AppConfirmationDelivery?>(null) }
+    val resolutionScope = rememberCoroutineScope()
+
+    LaunchedEffect(controller) {
+        controller.deliveries.collect { delivery ->
+            currentDelivery = delivery
+            try {
+                delivery.awaitResult()
+            } finally {
+                if (currentDelivery?.id == delivery.id) currentDelivery = null
+            }
+        }
+    }
+
+    val delivery = currentDelivery ?: return
+    val event = delivery.event
+    fun resolve(result: AppConfirmationResult) {
+        resolutionScope.launch { controller.resolve(delivery.id, result) }
+    }
+
+    AlertDialog(
+        onDismissRequest = { resolve(AppConfirmationResult.Dismissed) },
+        title = {
+            Text(
+                text = event.title,
+                color = YamiboTheme.colors.textStrong,
+                fontWeight = FontWeight.Bold,
+            )
+        },
+        text = {
+            Text(
+                text = event.message,
+                color = YamiboTheme.colors.textDark,
+                modifier = Modifier
+                    .heightIn(max = 280.dp)
+                    .verticalScroll(rememberScrollState()),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { resolve(AppConfirmationResult.Confirmed) }) {
+                Text(event.confirmLabel)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { resolve(AppConfirmationResult.Dismissed) }) {
+                Text(event.dismissLabel)
+            }
+        },
+        containerColor = YamiboTheme.colors.creamSurface,
+        properties = DialogProperties(
+            dismissOnBackPress = event.dismissOnBackPress,
+            dismissOnClickOutside = event.dismissOnClickOutside,
+        ),
+    )
+}
+
+@Composable
+private fun AppFeedbackHost(
+    controller: AppFeedbackController,
+    modifier: Modifier = Modifier,
+) {
+    val hostState = remember { SnackbarHostState() }
+    LaunchedEffect(controller) {
+        controller.deliveries.collect { delivery ->
+            val event = delivery.event
+            if (!controller.isCurrent(delivery)) {
+                controller.resolve(delivery, AppFeedbackResult.Dismissed)
+                return@collect
+            }
+            val result = coroutineScope {
+                val replacementJob = event.groupKey?.let { groupKey ->
+                    launch {
+                        controller.latestGroups
+                            .map { it[groupKey] }
+                            .first { it != delivery.id }
+                        hostState.currentSnackbarData?.dismiss()
+                    }
+                }
+                try {
+                    hostState.showSnackbar(
+                        message = event.message,
+                        actionLabel = event.actionLabel,
+                        withDismissAction = event.withDismissAction,
+                        duration = when (event.duration) {
+                            AppFeedbackDuration.Short -> SnackbarDuration.Short
+                            AppFeedbackDuration.Long -> SnackbarDuration.Long
+                            AppFeedbackDuration.Indefinite -> SnackbarDuration.Indefinite
+                        },
+                    )
+                } finally {
+                    replacementJob?.cancel()
+                }
+            }
+            controller.resolve(
+                delivery,
+                when (result) {
+                    SnackbarResult.ActionPerformed -> AppFeedbackResult.ActionPerformed
+                    SnackbarResult.Dismissed -> AppFeedbackResult.Dismissed
+                },
+            )
+        }
+    }
+    YamiboSnackbarHost(hostState = hostState, modifier = modifier)
 }
 
 private fun Modifier.blockPointerPassthrough(enabled: Boolean): Modifier =
@@ -316,21 +441,12 @@ private fun LaunchUpdateAvailableDialog(
     onOpenReleasePage: (AppUpdateRelease) -> Unit,
 ) {
     if (release == null) return
-    var hasScrolledToBottom by remember { mutableStateOf(false) }
-    Dialog(
-        onDismissRequest = { if (hasScrolledToBottom) onDismiss() },
-        properties = DialogProperties(
-            dismissOnBackPress = hasScrolledToBottom,
-            dismissOnClickOutside = hasScrolledToBottom
-        )
-    ) {
+    Dialog(onDismissRequest = onDismiss) {
         LaunchUpdateAvailableContent(
             release = release,
             onDismiss = onDismiss,
             onDownload = onDownload,
             onOpenReleasePage = onOpenReleasePage,
-            hasScrolledToBottom = hasScrolledToBottom,
-            onScrolledToBottomChange = { hasScrolledToBottom = it }
         )
     }
 }
@@ -341,14 +457,10 @@ private fun LaunchUpdateAvailableContent(
     onDismiss: () -> Unit,
     onDownload: (AppUpdateRelease) -> Unit,
     onOpenReleasePage: (AppUpdateRelease) -> Unit,
-    hasScrolledToBottom: Boolean,
-    onScrolledToBottomChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     AppUpdatePromptContent(
         release = release,
-        hasScrolledToBottom = hasScrolledToBottom,
-        onScrolledToBottomChange = onScrolledToBottomChange,
         onPrimaryClick = {
             if (release.asset == null) {
                 onOpenReleasePage(release)
@@ -470,8 +582,8 @@ private fun navigateToSignWebViewOrProfile(
     appSettingsRepository: AppSettingsRepository,
     authRepository: AuthRepository,
     signRepository: SignRepository,
-    coroutineScope: CoroutineScope,
-    snackbarHostState: SnackbarHostState,
+    appTaskManager: AppTaskManager,
+    feedbackController: AppFeedbackController,
 ) {
     if (authRepository.currentUser() == null) return
     val isDirect = appSettingsRepository.signInDirectWebView.getValue()
@@ -484,19 +596,15 @@ private fun navigateToSignWebViewOrProfile(
                     ISignWebView(
                         semiAutomatic = false,
                         onResultObserved = {
-                            coroutineScope.launch {
+                            appTaskManager.launch(AppTaskKey("sign:manual-complete")) {
                                 authRepository.syncCookieFromWebView()
                                 signRepository.markTodaySigned()
                                 signRepository.fetchPageInfo()
-                                snackbarHostState.currentSnackbarData?.dismiss()
-                                snackbarHostState.showSnackbar(i18n("簽到成功"))
+                                feedbackController.post(i18n("簽到成功"))
                             }
                         },
                         onLoadFailed = { reason ->
-                            coroutineScope.launch {
-                                snackbarHostState.currentSnackbarData?.dismiss()
-                                snackbarHostState.showSnackbar(i18n("簽到頁載入失敗：{}", reason))
-                            }
+                            feedbackController.post(i18n("簽到頁載入失敗：{}", reason))
                         }
                     )
                 )
@@ -506,44 +614,16 @@ private fun navigateToSignWebViewOrProfile(
                     ISignWebView(
                         semiAutomatic = true,
                         onCfCleared = {
-                            coroutineScope.launch {
-                                snackbarHostState.currentSnackbarData?.dismiss()
-                                snackbarHostState.showSnackbar(i18n("開始自動簽到..."))
-                                when (val result = signRepository.runAutoSign(allowRepair)) {
-                                    is YamiboResult.Success -> {
-                                        snackbarHostState.currentSnackbarData?.dismiss()
-                                        snackbarHostState.showSnackbar(result.value.message)
-                                    }
-                                    is YamiboResult.Failure -> {
-                                        snackbarHostState.currentSnackbarData?.dismiss()
-                                        snackbarHostState.showSnackbar(i18n(result.message()))
-                                    }
-                                    is YamiboResult.NotLoggedIn -> {
-                                        snackbarHostState.currentSnackbarData?.dismiss()
-                                        snackbarHostState.showSnackbar(i18n(result.message()))
-                                    }
-                                    is YamiboResult.NoPermission -> {
-                                        snackbarHostState.currentSnackbarData?.dismiss()
-                                        snackbarHostState.showSnackbar(i18n("目前無法自動簽到，請改用手動模式"))
-                                    }
-                                    is YamiboResult.Maintenance -> {
-                                        snackbarHostState.currentSnackbarData?.dismiss()
-                                        snackbarHostState.showSnackbar(i18n(result.message()))
-                                    }
-                                }
+                            appTaskManager.launch(AppTaskKey("sign:auto")) {
+                                feedbackController.post(i18n("開始自動簽到..."))
+                                feedbackController.post(signRepository.runAutoSign(allowRepair).signActionFeedbackMessage())
                             }
                         },
                         onMaintenanceObserved = {
-                            coroutineScope.launch {
-                                snackbarHostState.currentSnackbarData?.dismiss()
-                                snackbarHostState.showSnackbar(i18n("百合會維護中...現在不是簽到的好時機呢"))
-                            }
+                            feedbackController.post(i18n("百合會維護中...現在不是簽到的好時機呢"))
                         },
                         onLoadFailed = { reason ->
-                            coroutineScope.launch {
-                                snackbarHostState.currentSnackbarData?.dismiss()
-                                snackbarHostState.showSnackbar(i18n("簽到頁載入失敗：{}", reason))
-                            }
+                            feedbackController.post(i18n("簽到頁載入失敗：{}", reason))
                         }
                     )
                 )

@@ -4,10 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -23,7 +20,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.thenano.yamibo.yamibo_app.*
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.favorite.*
 import me.thenano.yamibo.yamibo_app.i18n.i18n
@@ -46,7 +42,6 @@ internal sealed interface TagDetailState {
     data class Error(val message: String) : TagDetailState
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun TagDetailScreen(
     tagId: TagId,
@@ -68,7 +63,8 @@ internal fun TagDetailScreen(
     val platformContext = LocalPlatformContext.current
 
     val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = LocalAppFeedbackController.current
+    val appTaskManager = LocalAppTaskManager.current
 
     var state by remember { mutableStateOf<TagDetailState>(TagDetailState.Loading) }
     var currentPage by remember { mutableIntStateOf(initialPage ?: 1) }
@@ -112,9 +108,16 @@ internal fun TagDetailScreen(
 
     suspend fun ensureDownloadStorageReady(): Boolean {
         if (downloadRepository.isStorageReady()) return true
-        snackbarHostState.showSnackbar(i18n("尚未設定下載資料夾"))
+        feedbackController.post(i18n("尚未設定下載資料夾"))
         navigator.navigate(IBackupSettingsScreen())
         return false
+    }
+
+    fun launchDownloadTask(action: String, operation: suspend () -> Unit) {
+        appTaskManager.launch(
+            key = me.thenano.yamibo.yamibo_app.task.AppTaskKey("download:tag:${tagId.value}:$action"),
+            operation = operation,
+        )
     }
 
     val tagMangaDownloadEntries = remember(downloadQueue, tagId) {
@@ -248,7 +251,7 @@ internal fun TagDetailScreen(
                 } else {
                     withContext(Dispatchers.Default) { removeFavoriteWithSync(favoriteRepository, favoriteSyncRepository, target) }
                     favoriteRefreshToken += 1
-                    snackbarHostState.showSnackbar(i18n("已移除收藏"))
+                    feedbackController.post(i18n("已移除收藏"))
                     pendingFavoriteRemovalSelection = null
                 }
             } else {
@@ -259,7 +262,7 @@ internal fun TagDetailScreen(
 
         favoriteRepository.saveFavorite(target)
         favoriteRefreshToken += 1
-        snackbarHostState.showSnackbar(i18n("已加入收藏"))
+        feedbackController.post(i18n("已加入收藏"))
     }
 
     LaunchedEffect(tagId, currentTagName, favoriteRefreshToken, canonicalCover?.resolvedUrl) {
@@ -417,9 +420,6 @@ internal fun TagDetailScreen(
 
     Scaffold(
         containerColor = colors.creamBackground,
-        snackbarHost = {
-            YamiboSnackbarHost(hostState = snackbarHostState)
-        },
         topBar = {
             CatalogDetailTopBar(
                 title = currentTagName,
@@ -467,9 +467,9 @@ internal fun TagDetailScreen(
                                     }
 
                                     else -> {
-                                        snackbarHostState.showSnackbar(
+                                        feedbackController.post(
                                             message = i18n("重新整理標籤頁失敗：{}", i18n(result.message())),
-                                            duration = SnackbarDuration.Short,
+                                            duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short,
                                         )
                                     }
                                 }
@@ -541,9 +541,9 @@ internal fun TagDetailScreen(
                               } else {
                                   tagCatalogHistory?.threadId?.value?.toLong()
                               },
-                              historyThreadCompleted = if (isMangaMode) mangaTagHistory?.let {
+                              historyThreadCompleted = isMangaMode && mangaTagHistory?.let {
                                   it.threadImageTotalPages > 0 && it.threadImagePageIndex >= it.threadImageTotalPages - 1
-                              } == true else false,
+                              } == true,
                               historyThreadProgressText = if (isMangaMode) mangaTagHistory?.let {
                                   if (it.threadImageTotalPages <= 0) null else {
                                       val clampedPageIndex = it.threadImagePageIndex.coerceIn(0, it.threadImageTotalPages - 1)
@@ -569,41 +569,45 @@ internal fun TagDetailScreen(
             actions = buildList {
                 add(CatalogDownloadAction(i18n("下載目前分頁")) {
                     showDownloadSheet = false
-                    scope.launch {
-                        if (!ensureDownloadStorageReady()) return@launch
+                    launchDownloadTask("current-page:$currentPage") {
+                        if (!ensureDownloadStorageReady()) return@launchDownloadTask
                         downloadRepository.enqueueTagMangaCurrentPage(
                             tagId = tagId,
                             tagName = currentTagName,
                             threads = currentThreads,
                             tagPage = currentPage,
-                        ).onFailure {
-                            snackbarHostState.showSnackbar(it.message ?: i18n("加入下載失敗"))
+                        ).onFailure { error ->
+                            Logger.e("TagDetailScreen", "Failed to enqueue current tag manga page tagId=${tagId.value} page=$currentPage", error)
+                            feedbackController.post(error.message ?: i18n("加入下載失敗"))
                         }
                     }
                 })
                 add(CatalogDownloadAction(i18n("下載全部分頁")) {
                     showDownloadSheet = false
-                    scope.launch {
-                        if (!ensureDownloadStorageReady()) return@launch
+                    launchDownloadTask("all-pages") {
+                        if (!ensureDownloadStorageReady()) return@launchDownloadTask
                         downloadRepository.enqueueTagMangaAllPages(tagId, currentTagName)
-                            .onFailure { snackbarHostState.showSnackbar(it.message ?: i18n("加入下載失敗")) }
+                            .onFailure { error ->
+                                Logger.e("TagDetailScreen", "Failed to enqueue all tag manga pages tagId=${tagId.value}", error)
+                                feedbackController.post(error.message ?: i18n("加入下載失敗"))
+                            }
                     }
                 })
                 if (currentPageHasDownloads) {
                     add(CatalogDownloadAction(i18n("清除目前分頁下載")) {
                         showDownloadSheet = false
-                        scope.launch {
+                        launchDownloadTask("clear-page:$currentPage") {
                             currentThreads.forEach { downloadRepository.clearTagMangaChapter(tagMangaKey(it)) }
-                            snackbarHostState.showSnackbar(i18n("已清除目前分頁下載"))
+                            feedbackController.post(i18n("已清除目前分頁下載"))
                         }
                     })
                 }
                 if (tagMangaDownloadEntries.isNotEmpty()) {
                     add(CatalogDownloadAction(i18n("清除整個標籤下載")) {
                         showDownloadSheet = false
-                        scope.launch {
+                        launchDownloadTask("clear-all") {
                             downloadRepository.clearTagManga(tagId)
-                            snackbarHostState.showSnackbar(i18n("已清除整個標籤下載"))
+                            feedbackController.post(i18n("已清除整個標籤下載"))
                         }
                     })
                 }
@@ -638,7 +642,7 @@ internal fun TagDetailScreen(
                         )
                         showFavoriteDialog = false
                         favoriteRefreshToken += 1
-                        snackbarHostState.showSnackbar(i18n("已加入收藏"))
+                        feedbackController.post(i18n("已加入收藏"))
                     } else if (selectedCategories.isEmpty() && selectedCollections.isEmpty()) {
                         showFavoriteDialog = false
                         pendingFavoriteRemovalSelection = favoriteRepository.getFavoriteLocationSelection(target)
@@ -648,7 +652,7 @@ internal fun TagDetailScreen(
                             } else {
                                 withContext(Dispatchers.Default) { removeFavoriteWithSync(favoriteRepository, favoriteSyncRepository, target) }
                                 favoriteRefreshToken += 1
-                                snackbarHostState.showSnackbar(i18n("已從所有位置移除收藏"))
+                                feedbackController.post(i18n("已從所有位置移除收藏"))
                                 pendingFavoriteRemovalSelection = null
                             }
                         } else {
@@ -658,7 +662,7 @@ internal fun TagDetailScreen(
                         favoriteRepository.setItemLocations(existing.id, selectedCategories, selectedCollections)
                         showFavoriteDialog = false
                         favoriteRefreshToken += 1
-                        snackbarHostState.showSnackbar(i18n("收藏位置已更新"))
+                        feedbackController.post(i18n("收藏位置已更新"))
                     }
                 }
             }
@@ -669,7 +673,7 @@ internal fun TagDetailScreen(
         showRemovalConfirm = showFavoriteRemovalConfirm,
         showMultiPathDialog = showFavoriteMultiPathDialog,
         pendingSelection = pendingFavoriteRemovalSelection,
-        snackbarHostState = snackbarHostState,
+        feedbackController = feedbackController,
         setShowRemovalConfirm = { showFavoriteRemovalConfirm = it },
         setShowMultiPathDialog = { showFavoriteMultiPathDialog = it },
         clearPendingSelection = { pendingFavoriteRemovalSelection = null },
@@ -691,9 +695,9 @@ internal fun TagDetailScreen(
                         content = content,
                     )
                     reloadNote()
-                    snackbarHostState.showSnackbar(
+                    feedbackController.post(
                         if (content.isBlank()) i18n("已刪除筆記") else i18n("已保存筆記"),
-                        duration = SnackbarDuration.Short,
+                        duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short,
                     )
                 }
             },
@@ -705,7 +709,7 @@ internal fun TagDetailScreen(
                         targetId = tagId.value.toLong(),
                     )
                     reloadNote()
-                    snackbarHostState.showSnackbar(i18n("已刪除筆記"), duration = SnackbarDuration.Short)
+                    feedbackController.post(i18n("已刪除筆記"), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
                 }
             },
         )
@@ -735,9 +739,9 @@ internal fun TagDetailScreen(
                         bookmarked = next,
                     )
                     reloadThreadBookMarks()
-                    snackbarHostState.showSnackbar(
+                    feedbackController.post(
                         if (next) i18n("已新增書籤") else i18n("已移除書籤"),
-                        duration = SnackbarDuration.Short,
+                        duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short,
                     )
                 }
             },
@@ -752,7 +756,7 @@ internal fun TagDetailScreen(
                         read = true,
                     )
                     reloadThreadChapterStates()
-                    snackbarHostState.showSnackbar(i18n("已標為已讀"), duration = SnackbarDuration.Short)
+                    feedbackController.post(i18n("已標為已讀"), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
                 }
             },
             onMarkUnread = {
@@ -766,7 +770,7 @@ internal fun TagDetailScreen(
                         read = false,
                     )
                     reloadThreadChapterStates()
-                    snackbarHostState.showSnackbar(i18n("已標為未讀"), duration = SnackbarDuration.Short)
+                    feedbackController.post(i18n("已標為未讀"), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
                 }
             },
             onClearHistory = {
@@ -787,40 +791,46 @@ internal fun TagDetailScreen(
                         tagCatalogHistory = null
                     }
                     reloadThreadChapterStates()
-                    snackbarHostState.showSnackbar(i18n("已清除閱讀紀錄"), duration = SnackbarDuration.Short)
+                    feedbackController.post(i18n("已清除閱讀紀錄"), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
                 }
             },
             onDownloadChapter = {
                 actionThread = null
-                scope.launch {
-                    if (!ensureDownloadStorageReady()) return@launch
+                launchDownloadTask("chapter:${thread.tid.value}") {
+                    if (!ensureDownloadStorageReady()) return@launchDownloadTask
                     downloadRepository.enqueueTagMangaChapter(tagId, currentTagName, thread, currentPage)
-                        .onFailure { snackbarHostState.showSnackbar(it.message ?: i18n("加入下載失敗")) }
+                        .onFailure { error ->
+                            Logger.e("TagDetailScreen", "Failed to enqueue tag manga chapter tagId=${tagId.value} tid=${thread.tid.value}", error)
+                            feedbackController.post(error.message ?: i18n("加入下載失敗"))
+                        }
                 }
             },
             onRefreshChapter = {
                 actionThread = null
-                scope.launch {
-                    if (!ensureDownloadStorageReady()) return@launch
+                launchDownloadTask("refresh:${thread.tid.value}") {
+                    if (!ensureDownloadStorageReady()) return@launchDownloadTask
                     when (val result = downloadRepository.refreshTagMangaChapter(downloadKey)) {
-                        is YamiboResult.Success -> snackbarHostState.showSnackbar(i18n("已重新整理下載"))
-                        else -> snackbarHostState.showSnackbar(i18n("重新整理下載失敗：{}", i18n(result.message())))
+                        is YamiboResult.Success -> feedbackController.post(i18n("已重新整理下載"))
+                        else -> feedbackController.post(i18n("重新整理下載失敗：{}", i18n(result.message())))
                     }
                 }
             },
             onRetryChapter = {
                 actionThread = null
-                scope.launch {
-                    if (!ensureDownloadStorageReady()) return@launch
+                launchDownloadTask("retry:${thread.tid.value}") {
+                    if (!ensureDownloadStorageReady()) return@launchDownloadTask
                     downloadRepository.retry(downloadKey)
-                        .onFailure { snackbarHostState.showSnackbar(it.message ?: i18n("重試失敗")) }
+                        .onFailure { error ->
+                            Logger.e("TagDetailScreen", "Failed to retry tag manga chapter key=${downloadKey.stableId}", error)
+                            feedbackController.post(error.message ?: i18n("重試失敗"))
+                        }
                 }
             },
             onClearChapterDownload = {
                 actionThread = null
-                scope.launch {
+                launchDownloadTask("clear:${thread.tid.value}") {
                     downloadRepository.clearTagMangaChapter(downloadKey)
-                    snackbarHostState.showSnackbar(i18n("已清除此章下載"), duration = SnackbarDuration.Short)
+                    feedbackController.post(i18n("已清除此章下載"), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
                 }
             },
         )

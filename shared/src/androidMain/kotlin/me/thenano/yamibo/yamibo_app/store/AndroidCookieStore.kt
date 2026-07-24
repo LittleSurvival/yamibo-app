@@ -2,18 +2,12 @@ package me.thenano.yamibo.yamibo_app.store
 
 import android.annotation.SuppressLint
 import android.content.Context
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 import me.thenano.yamibo.yamibo_app.store.auth.CookieStore
 
 class AndroidCookieStore(
-    context: Context
+    context: Context,
 ) : CookieStore {
-    private val prefs = EncryptedSharedPreferences.create(
-        context, prefName, MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-    )
+    private val prefs = context.encryptedSharedPreferences(prefName)
 
     @SuppressLint("UseKtx")
     override fun save(value: String) {

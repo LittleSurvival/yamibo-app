@@ -4,7 +4,7 @@ import android.content.Context
 import androidx.core.content.ContextCompat
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadBackgroundController
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadQueueEntry
-import me.thenano.yamibo.yamibo_app.repository.download.DownloadRepository
+import me.thenano.yamibo.yamibo_app.repository.DownloadRepository
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadStatus
 
 class AndroidDownloadBackgroundController(

@@ -1,7 +1,5 @@
 package me.thenano.yamibo.yamibo_app.profile
 
-import me.thenano.yamibo.yamibo_app.i18n.i18n
-
 
 import YamiboIcons
 import androidx.compose.foundation.background
@@ -22,13 +20,11 @@ import io.github.littlesurvival.core.YamiboResult
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import me.thenano.yamibo.yamibo_app.AppVersion
-import me.thenano.yamibo.yamibo_app.LocalAppSettingsRepository
-import me.thenano.yamibo.yamibo_app.LocalAuthRepository
-import me.thenano.yamibo.yamibo_app.LocalDownloadRepository
-import me.thenano.yamibo.yamibo_app.LocalSignRepository
+import me.thenano.yamibo.yamibo_app.*
+import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme.colors
 import me.thenano.yamibo.yamibo_app.event.AppEventBus
 import me.thenano.yamibo.yamibo_app.event.events.LoginSuccessEvent
+import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.message.IMessageCenterScreen
 import me.thenano.yamibo.yamibo_app.message.MessageCenterTab
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
@@ -38,11 +34,14 @@ import me.thenano.yamibo.yamibo_app.profile.settings.ISettingsScreen
 import me.thenano.yamibo.yamibo_app.profile.settings.backup.IBackupSettingsScreen
 import me.thenano.yamibo.yamibo_app.profile.sign.ISignInfoScreen
 import me.thenano.yamibo.yamibo_app.profile.sign.ISignWebView
+import me.thenano.yamibo.yamibo_app.profile.sign.signActionFeedbackMessage
 import me.thenano.yamibo.yamibo_app.profile.support.ISupportAppDevelopmentScreen
-import me.thenano.yamibo.yamibo_app.repository.settings.SignInMode
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme.colors
+import me.thenano.yamibo.yamibo_app.repository.download.DownloadQueueEntry
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadStatus
+import me.thenano.yamibo.yamibo_app.repository.settings.SignInMode
+
+internal fun shouldShowDownloadBadge(queue: List<DownloadQueueEntry>): Boolean =
+    queue.any { entry -> entry.status == DownloadStatus.Queued || entry.status == DownloadStatus.Downloading }
 
 @Composable
 fun ProfilePage(
@@ -56,15 +55,10 @@ fun ProfilePage(
     val navigator = LocalNavigator.current
     val coroutineScope = rememberCoroutineScope()
     val colors = colors
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = LocalAppFeedbackController.current
     val hasDownloadBadge by remember(downloadRepository) {
         downloadRepository.queue
-            .map { queue ->
-                queue.any {
-                    it.status == DownloadStatus.Failed ||
-                        it.status == DownloadStatus.UpdateAvailable
-                }
-            }
+            .map(::shouldShowDownloadBadge)
             .distinctUntilChanged()
     }.collectAsState(false)
 
@@ -216,35 +210,19 @@ fun ProfilePage(
                                     onCfCleared = {
                                         coroutineScope.launch {
                                             var snackbarMessage: String?
-                                            /** This when maps semi-automatic sign results into the ProfilePage sign button snackbar/title update flow. */
                                             when (val result = signRepository.runAutoSign(allowRepair)) {
                                                 is YamiboResult.Success -> {
                                                     signRefreshKey += 1
                                                     snackbarMessage = result.value.message
                                                 }
 
-                                                is YamiboResult.Failure -> {
-                                                    snackbarMessage = i18n(result.message())
-                                                }
-
-                                                is YamiboResult.NotLoggedIn -> {
-                                                    snackbarMessage = i18n(result.message())
-                                                }
-
-                                                is YamiboResult.NoPermission -> {
-                                                    snackbarMessage = i18n("目前無法自動簽到，請改用手動模式")
-                                                }
-
-                                                is YamiboResult.Maintenance -> {
-                                                    snackbarMessage = i18n(result.message())
-                                                }
+                                                else -> snackbarMessage = result.signActionFeedbackMessage()
                                             }
                                             isSigning = false
                                             refreshSignStatus()
                                             snackbarMessage.let { message ->
                                                 coroutineScope.launch {
-                                                    snackbarHostState.currentSnackbarData?.dismiss()
-                                                    snackbarHostState.showSnackbar(message)
+                                                    feedbackController.post(message)
                                                 }
                                             }
                                         }
@@ -253,16 +231,14 @@ fun ProfilePage(
                                         coroutineScope.launch {
                                             isSigning = false
                                             refreshSignStatus()
-                                            snackbarHostState.currentSnackbarData?.dismiss()
-                                            snackbarHostState.showSnackbar(i18n("百合會維護中...現在不是簽到的好時機呢"))
+                                            feedbackController.post(i18n("百合會維護中...現在不是簽到的好時機呢"))
                                         }
                                     },
                                     onLoadFailed = { reason ->
                                         coroutineScope.launch {
                                             isSigning = false
                                             refreshSignStatus()
-                                            snackbarHostState.currentSnackbarData?.dismiss()
-                                            snackbarHostState.showSnackbar(i18n("簽到頁載入失敗：{}", reason))
+                                            feedbackController.post(i18n("簽到頁載入失敗：{}", reason))
                                         }
                                     },
                                 )
@@ -349,12 +325,6 @@ fun ProfilePage(
             Spacer(Modifier.height(24.dp))
         }
 
-        YamiboSnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 12.dp)
-        )
     }
 }
 

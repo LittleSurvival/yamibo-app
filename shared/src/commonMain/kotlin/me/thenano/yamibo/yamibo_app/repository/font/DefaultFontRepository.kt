@@ -4,6 +4,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.repository.FontRepository
 import me.thenano.yamibo.yamibo_app.repository.settings.AppSettingsRepository
 import me.thenano.yamibo.yamibo_app.repository.settings.NovelReaderSettingsRepository
@@ -71,9 +72,11 @@ class DefaultFontRepository(
         if (raw.isBlank()) return emptyList()
         return try {
             json.decodeFromString<LoadedFontList>(raw).fonts
-        } catch (_: SerializationException) {
+        } catch (error: SerializationException) {
+            Logger.d("DefaultFontRepository", "Failed to decode loaded font metadata", error)
             emptyList()
-        } catch (_: IllegalArgumentException) {
+        } catch (error: IllegalArgumentException) {
+            Logger.d("DefaultFontRepository", "Invalid loaded font metadata", error)
             emptyList()
         }
     }

@@ -23,11 +23,15 @@ import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 @Composable
 fun RateRenderer(
     rateBlock: RateBlock,
+    rateRange: IntRange? = null,
     onShowAllRatings: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val colors = YamiboTheme.colors
     if (rateBlock.rates.isEmpty()) return
+    val visibleRates = rateRange
+        ?.let { range -> rateBlock.rates.filterIndexed { index, _ -> index in range } }
+        ?: rateBlock.rates
 
     Card(
         modifier = modifier.fillMaxWidth().padding(vertical = 8.dp),
@@ -61,7 +65,7 @@ fun RateRenderer(
 
             // Rates List
             Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                rateBlock.rates.forEach { rate ->
+                visibleRates.forEach { rate ->
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                         verticalAlignment = Alignment.Top
@@ -90,7 +94,7 @@ fun RateRenderer(
                         )
                     }
                 }
-                if (rateBlock.rateParticipatePeople > 10 && onShowAllRatings != null) {
+                if (rateRange == null && rateBlock.rateParticipatePeople > 10 && onShowAllRatings != null) {
                     TextButton(
                         onClick = onShowAllRatings,
                         contentPadding = PaddingValues(0.dp),

@@ -1,55 +1,41 @@
 package me.thenano.yamibo.yamibo_app.profile.settings
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
-import me.thenano.yamibo.yamibo_app.LocalAppSettingsRepository
-import me.thenano.yamibo.yamibo_app.LocalDownloadRepository
-import me.thenano.yamibo.yamibo_app.LocalSignReminderScheduler
-import me.thenano.yamibo.yamibo_app.LocalDiskCacheFactory
-import me.thenano.yamibo.yamibo_app.LocalFavoriteSyncRunner
-import me.thenano.yamibo.yamibo_app.LocalFavoriteUpdateRunner
+import me.thenano.yamibo.yamibo_app.*
+import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBar
+import me.thenano.yamibo.yamibo_app.components.storage.YamiboStorageUsageOverview
+import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.core.cache.CacheStorageBreakdown
 import me.thenano.yamibo.yamibo_app.core.cache.CacheStorageUsage
-import me.thenano.yamibo.yamibo_app.components.storage.YamiboStorageUsageOverview
 import me.thenano.yamibo.yamibo_app.favorite.IFavoriteCategoryManageScreen
 import me.thenano.yamibo.yamibo_app.favorite.sync.FavoriteSyncStatusCard
 import me.thenano.yamibo.yamibo_app.favorite.sync.IFavoriteSyncProgressScreen
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.i18n.localizedLabel
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
+import me.thenano.yamibo.yamibo_app.profile.download.IDownloadQueueScreen
 import me.thenano.yamibo.yamibo_app.profile.settings.access.IBackgroundAccessSetupScreen
 import me.thenano.yamibo.yamibo_app.profile.settings.bound.*
-import me.thenano.yamibo.yamibo_app.profile.download.IDownloadQueueScreen
 import me.thenano.yamibo.yamibo_app.profile.settings.components.SettingsChipRow
 import me.thenano.yamibo.yamibo_app.profile.settings.components.ThemeSelectorContent
-import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBar
 import me.thenano.yamibo.yamibo_app.repository.FavoriteSyncRepository.FavoriteSyncState
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadedContentSummary
 import me.thenano.yamibo.yamibo_app.repository.settings.*
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.util.formatStorageSize
 import me.thenano.yamibo.yamibo_app.util.state
-import kotlin.math.roundToInt
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SettingsCategoryScreen(category: String) {
     val colors = YamiboTheme.colors
@@ -66,7 +52,7 @@ internal fun SettingsCategoryScreen(category: String) {
         else -> i18n("設定")
     }
 
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = LocalAppFeedbackController.current
 
     Scaffold(
         topBar = {
@@ -76,7 +62,6 @@ internal fun SettingsCategoryScreen(category: String) {
                 onBack = { navigator.pop() },
             )
         },
-        snackbarHost = { YamiboSnackbarHost(snackbarHostState) },
         containerColor = colors.creamBackground,
     ) { paddingValues ->
         Column(
@@ -87,12 +72,12 @@ internal fun SettingsCategoryScreen(category: String) {
                 .padding(20.dp),
         ) {
             when (category) {
-                "appearance" -> AppearanceContent(snackbarHostState)
+                "appearance" -> AppearanceContent(feedbackController)
                 "language" -> LanguageContent()
                 "novel_reader" -> NovelReaderContent()
                 "manga_reader" -> MangaReaderContent()
-                "favorite" -> FavoriteSettingsContent(snackbarHostState)
-                "storage" -> StorageContent(snackbarHostState)
+                "favorite" -> FavoriteSettingsContent(feedbackController)
+                "storage" -> StorageContent(feedbackController)
                 "sign" -> SignSettingsContent()
             }
         }
@@ -112,7 +97,7 @@ private fun SectionLabel(text: String) {
 }
 
 @Composable
-private fun AppearanceContent(snackbarHostState: SnackbarHostState) {
+private fun AppearanceContent(feedbackController: me.thenano.yamibo.yamibo_app.feedback.AppFeedbackController) {
     val appSettingsRepo = LocalAppSettingsRepository.current
     val themeMode = appSettingsRepo.themeMode.state()
     val themeScheme = appSettingsRepo.themeScheme.state()
@@ -136,7 +121,7 @@ private fun AppearanceContent(snackbarHostState: SnackbarHostState) {
 
     Spacer(Modifier.height(24.dp))
     SectionLabel(i18n("字體"))
-    FontManagementSetting(snackbarHostState)
+    FontManagementSetting(feedbackController)
     Spacer(Modifier.height(18.dp))
     AppFontSelectorSetting()
     Spacer(Modifier.height(18.dp))
@@ -222,7 +207,7 @@ private fun MangaReaderContent() {
 }
 
 @Composable
-private fun FavoriteSettingsContent(snackbarHostState: SnackbarHostState) {
+private fun FavoriteSettingsContent(feedbackController: me.thenano.yamibo.yamibo_app.feedback.AppFeedbackController) {
     val colors = YamiboTheme.colors
     val navigator = LocalNavigator.current
     val appSettingsRepository = LocalAppSettingsRepository.current
@@ -237,6 +222,8 @@ private fun FavoriteSettingsContent(snackbarHostState: SnackbarHostState) {
     val sortMode = appSettingsRepository.favoriteSortMode.state()
     val sortDescending = appSettingsRepository.favoriteSortDescending.state()
     val updateInterval = appSettingsRepository.favoriteUpdateInterval.state()
+    val favoriteUpdateAutoDownload = appSettingsRepository.favoriteUpdateAutoDownload.state()
+    val downloadedContentRefreshAutoUpdate = appSettingsRepository.downloadedContentRefreshAutoUpdate.state()
     val syncState by favoriteSyncRunner.state.collectAsState()
     val coroutineScope = rememberCoroutineScope()
 
@@ -358,11 +345,27 @@ private fun FavoriteSettingsContent(snackbarHostState: SnackbarHostState) {
             coroutineScope.launch {
                 favoriteUpdateRunner.schedulePeriodicUpdate(interval)
                 if (interval == FavoriteUpdateInterval.SMART) {
-                    snackbarHostState.showSnackbar(i18n("智能更新策略尚未接入，暫停週期背景檢查。"))
+                    feedbackController.post(i18n("智能更新策略尚未接入，暫停週期背景檢查。"))
                 }
             }
         },
         modifier = Modifier.padding(horizontal = 4.dp),
+    )
+
+    Spacer(Modifier.height(18.dp))
+    SettingsToggleRow(
+        title = i18n("更新檢查後自動刷新離線頁"),
+        subtitle = i18n("開啟後，只會自動刷新已確認可更新的離線頁面。"),
+        checked = favoriteUpdateAutoDownload,
+        onCheckedChange = { appSettingsRepository.favoriteUpdateAutoDownload.setValue(it) },
+    )
+
+    Spacer(Modifier.height(10.dp))
+    SettingsToggleRow(
+        title = i18n("重新整理後自動更新離線內容"),
+        subtitle = i18n("開啟後，重新整理已下載內容時會沿用目前目標刷新離線資料。"),
+        checked = downloadedContentRefreshAutoUpdate,
+        onCheckedChange = { appSettingsRepository.downloadedContentRefreshAutoUpdate.setValue(it) },
     )
 
     Spacer(Modifier.height(18.dp))
@@ -430,7 +433,7 @@ private fun FavoriteSettingsContent(snackbarHostState: SnackbarHostState) {
                             navigator.navigate(IFavoriteSyncProgressScreen(result.runId))
                         }
                         is me.thenano.yamibo.yamibo_app.favorite.sync.FavoriteSyncRunner.LaunchResult.Rejected -> {
-                            snackbarHostState.showSnackbar(result.reason)
+                            feedbackController.post(result.reason)
                             if (result.requiresBackgroundAccessSetup) {
                                 navigator.navigate(IBackgroundAccessSetupScreen())
                             }
@@ -540,7 +543,7 @@ private fun RowScope.SettingsRowDescription(
 }
 
 @Composable
-private fun StorageContent(snackbarHostState: SnackbarHostState) {
+private fun StorageContent(feedbackController: me.thenano.yamibo.yamibo_app.feedback.AppFeedbackController) {
     val colors = YamiboTheme.colors
     val navigator = LocalNavigator.current
     val appSettingsRepo = LocalAppSettingsRepository.current
@@ -556,6 +559,7 @@ private fun StorageContent(snackbarHostState: SnackbarHostState) {
     suspend fun refreshCacheUsage() {
         cacheBreakdown = diskCacheFactory.getCacheStorageBreakdown()
         downloadSummary = runCatching { downloadRepository.getDownloadedContentSummary() }
+            .onFailure { Logger.w(TAG, "Failed to load downloaded content summary for storage settings", it) }
             .getOrDefault(DownloadedContentSummary())
         cacheSizeText = formatStorageSize(cacheBreakdown.usages.sumOf { it.bytes })
     }
@@ -616,17 +620,21 @@ private fun StorageContent(snackbarHostState: SnackbarHostState) {
 
     SettingsActionRow(
         title = i18n("立即清除所有緩存"),
-        subtitle = i18n("清除圖片、頁面與其他暫存資料，釋放目前已使用的儲存空間。\n目前緩存大小：{}", cacheSizeText),
+        subtitle = i18n("清除圖片、頁面與其他暫存資料，釋放目前已使用的儲存空間。") +
+            "\n" +
+            i18n("目前緩存大小：{}", cacheSizeText),
         onClick = {
             coroutineScope.launch {
                 diskCacheFactory.clearAllCache()
                 cacheSizeText = "0 kB"
                 cacheBreakdown = cacheBreakdown.copy(usages = emptyList())
-                snackbarHostState.showSnackbar(i18n("已清除所有緩存"))
+                feedbackController.post(i18n("已清除所有緩存"))
             }
         },
     )
 }
+
+private const val TAG = "SettingsCategoryScreen"
 
 @Composable
 private fun DownloadStorageSummaryTable(
@@ -642,8 +650,8 @@ private fun DownloadStorageSummaryTable(
         modifier = Modifier.padding(horizontal = 4.dp),
     )
     Spacer(Modifier.height(8.dp))
-    StorageSummaryRow(i18n("Thread 頁數"), summary.threadPages.toString())
-    StorageSummaryRow(i18n("Tag Manga 章節數"), summary.tagMangaChapters.toString())
+    StorageSummaryRow(i18n("帖子頁數"), summary.threadPages.toString())
+    StorageSummaryRow(i18n("標籤漫畫章節數"), summary.tagMangaChapters.toString())
     StorageSummaryRow(i18n("圖片張數"), summary.imageCount.toString())
     StorageSummaryRow(i18n("容量"), formatStorageSize(summary.imageBytes))
     Spacer(Modifier.height(8.dp))

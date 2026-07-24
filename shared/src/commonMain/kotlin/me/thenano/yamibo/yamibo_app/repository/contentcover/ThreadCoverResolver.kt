@@ -56,6 +56,4 @@ private fun findThreadCoverCandidate(page: ThreadPage, ownerId: UserId, ownerNam
             if (ownerId.value > 0) post.author.uid == ownerId
             else ownerName.isNotBlank() && post.author.name == ownerName
         }
-        .flatMap { it.images.asSequence() }
-        .mapNotNull { normalizeCoverUrl(it.url) }
-        .firstOrNull()
+        .flatMap { it.images.asSequence() }.firstNotNullOfOrNull { normalizeCoverUrl(it.url) }

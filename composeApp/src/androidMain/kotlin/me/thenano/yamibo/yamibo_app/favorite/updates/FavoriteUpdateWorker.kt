@@ -12,6 +12,7 @@ import androidx.work.WorkerParameters
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.repository.FavoriteUpdateRepository
 
 class FavoriteUpdateWorker(
@@ -50,10 +51,11 @@ class FavoriteUpdateWorker(
                     }
                 }
                 Result.success()
-            } catch (_: CancellationException) {
+            } catch (error: CancellationException) {
                 repository.markRunInterrupted(runId, i18n("更新檢查已中斷"))
-                Result.failure()
+                throw error
             } catch (throwable: Throwable) {
+                Logger.e("FavoriteUpdateWorker", "Favorite update failed runId=$runId", throwable)
                 repository.markRunInterrupted(runId, throwable.message ?: i18n("更新檢查被系統中斷"))
                 @Suppress("MissingPermission")
                 notifications.showFailed(i18n("收藏更新中斷"), throwable.message ?: i18n("更新檢查被系統中斷"))
@@ -94,4 +96,3 @@ class FavoriteUpdateWorker(
         private const val FOREGROUND_UPDATE_INTERVAL_MS = 2_000L
     }
 }
-

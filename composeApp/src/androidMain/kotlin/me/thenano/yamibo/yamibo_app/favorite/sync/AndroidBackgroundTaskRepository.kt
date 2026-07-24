@@ -9,6 +9,7 @@ import android.os.Build
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.StateFlow
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.repository.BackgroundTaskRepository
 
 class AndroidBackgroundTaskRepository(
@@ -34,7 +35,8 @@ class AndroidBackgroundTaskRepository(
             val intent = FavoriteSyncForegroundService.createStartIntent(appContext, runId)
             ContextCompat.startForegroundService(appContext, intent)
             BackgroundTaskRepository.StartResult.Started
-        } catch (_: Throwable) {
+        } catch (error: Throwable) {
+            Logger.e("AndroidBackgroundTaskRepository", "Failed to start favorite sync runId=$runId", error)
             BackgroundTaskRepository.StartResult.Rejected(i18n("目前無法啟動背景同步，請在 App 前景時重試。"))
         }
     }

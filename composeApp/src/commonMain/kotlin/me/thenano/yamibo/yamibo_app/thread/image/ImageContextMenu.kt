@@ -49,7 +49,7 @@ fun ImageContextMenu(
     catalogCoverLabel: String? = null,
     onMessage: ((String) -> Unit)? = null,
     onDismiss: () -> Unit,
-    modifier: Modifier = Modifier,
+    @Suppress("ModifierParameter") modifier: Modifier = Modifier,
     isBottomSheet: Boolean = false
 ) {
     if (isBottomSheet) {

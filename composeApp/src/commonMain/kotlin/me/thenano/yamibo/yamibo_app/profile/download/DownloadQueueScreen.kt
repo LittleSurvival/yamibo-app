@@ -1,48 +1,18 @@
 package me.thenano.yamibo.yamibo_app.profile.download
 
 import YamiboIcons
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.*
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Tab
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -52,42 +22,34 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.littlesurvival.core.YamiboResult
-import io.github.littlesurvival.dto.value.ThreadId
 import io.github.littlesurvival.dto.value.TagId
+import io.github.littlesurvival.dto.value.ThreadId
 import io.github.littlesurvival.dto.value.UserId
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import me.thenano.yamibo.yamibo_app.LocalAppSettingsRepository
+import me.thenano.yamibo.yamibo_app.LocalAppTaskManager
 import me.thenano.yamibo.yamibo_app.LocalDownloadRepository
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.components.controls.YamiboActionChip
 import me.thenano.yamibo.yamibo_app.components.controls.YamiboMultiSelectDialog
 import me.thenano.yamibo.yamibo_app.components.controls.YamiboSingleSelectDialog
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboScrollableTabRow
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBar
 import me.thenano.yamibo.yamibo_app.components.storage.YamiboStorageUsageOverview
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.core.cache.CacheStorageUsage
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.profile.settings.backup.IBackupSettingsScreen
-import me.thenano.yamibo.yamibo_app.repository.download.DOWNLOADED_CONTENT_FILTER_ALL
-import me.thenano.yamibo.yamibo_app.repository.download.DownloadQueueEntry
-import me.thenano.yamibo.yamibo_app.repository.download.DownloadQueueSummary
-import me.thenano.yamibo.yamibo_app.repository.download.DownloadStage
-import me.thenano.yamibo.yamibo_app.repository.download.DownloadStatus
-import me.thenano.yamibo.yamibo_app.repository.download.DownloadTaskKey
-import me.thenano.yamibo.yamibo_app.repository.download.DownloadedContentFilterOption
-import me.thenano.yamibo.yamibo_app.repository.download.DownloadedContentGroup
-import me.thenano.yamibo.yamibo_app.repository.download.DownloadedContentGroupType
-import me.thenano.yamibo.yamibo_app.repository.download.DownloadedContentItem
-import me.thenano.yamibo.yamibo_app.repository.download.DownloadedContentSortMode
-import me.thenano.yamibo.yamibo_app.repository.download.DownloadedContentSummary
-import me.thenano.yamibo.yamibo_app.repository.download.RssMangaChapterDownloadKey
-import me.thenano.yamibo.yamibo_app.repository.download.TagMangaChapterDownloadKey
-import me.thenano.yamibo.yamibo_app.repository.download.ThreadPageDownloadKey
-import me.thenano.yamibo.yamibo_app.repository.download.buildDownloadedContentFilterOptions
-import me.thenano.yamibo.yamibo_app.repository.download.filterAndSortDownloadedContentGroups
+import me.thenano.yamibo.yamibo_app.repository.DownloadRepository
+import me.thenano.yamibo.yamibo_app.repository.download.*
+import me.thenano.yamibo.yamibo_app.util.formatDownloadedByteSize
+import me.thenano.yamibo.yamibo_app.task.AppTaskKey
+import me.thenano.yamibo.yamibo_app.task.isActive
+import me.thenano.yamibo.yamibo_app.util.state
 
 private enum class DownloadManagerTab(val title: String) {
     Queue(i18n("下載佇列")),
@@ -108,8 +70,11 @@ fun DownloadQueueScreen() {
     val colors = YamiboTheme.colors
     val navigator = LocalNavigator.current
     val repository = LocalDownloadRepository.current
+    val appSettingsRepository = LocalAppSettingsRepository.current
+    val downloadedContentRefreshAutoUpdate = appSettingsRepository.downloadedContentRefreshAutoUpdate.state()
     val entries by repository.queue.collectAsState()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
+    val appTaskManager = LocalAppTaskManager.current
     val scope = rememberCoroutineScope()
     var summary by remember { mutableStateOf(DownloadQueueSummary()) }
     var folderReady by remember { mutableStateOf(true) }
@@ -130,6 +95,7 @@ fun DownloadQueueScreen() {
                 )
             }
         }.getOrElse { error ->
+            Logger.e("DownloadQueueScreen", "Failed to load downloaded content management", error)
             DownloadContentManagementState.Error(error.message ?: i18n("載入下載內容失敗"))
         }
     }
@@ -147,7 +113,6 @@ fun DownloadQueueScreen() {
                 onBack = navigator::pop,
             )
         },
-        snackbarHost = { YamiboSnackbarHost(snackbarHostState) },
         containerColor = colors.creamBackground,
     ) { padding ->
         Column(
@@ -163,12 +128,23 @@ fun DownloadQueueScreen() {
                     summary = summary,
                     folderReady = folderReady,
                     onOpenSettings = { navigator.navigate(IBackupSettingsScreen()) },
-                    onPauseAll = repository::pauseAll,
-                    onResumeAll = repository::resumeAll,
+                    onPauseAll = {
+                        appTaskManager.launch(AppTaskKey("download-control:pause-all")) {
+                            repository.pauseAll()
+                        }
+                    },
+                    onResumeAll = {
+                        appTaskManager.launch(AppTaskKey("download-control:resume-all")) {
+                            repository.resumeAll()
+                        }
+                    },
                     onRetry = { entry ->
-                        scope.launch {
+                        appTaskManager.launch(AppTaskKey("download-control:retry:${entry.key.stableId}")) {
                             repository.retry(entry.key)
-                                .onFailure { snackbarHostState.showSnackbar(it.message ?: i18n("重試失敗")) }
+                                .onFailure { error ->
+                                    Logger.e("DownloadQueueScreen", "Failed to retry download key=${entry.key.stableId}", error)
+                                    feedbackController.post(error.message ?: i18n("重試失敗"))
+                                }
                         }
                     },
                 )
@@ -186,29 +162,54 @@ fun DownloadQueueScreen() {
                         }
                     },
                     onSelectFilterKeys = { keys -> selectedContentFilterKeys = keys.toList() },
-                    onRetryLoad = { contentReloadToken++ },
-                    onClearGroup = { group ->
+                    onRetryLoad = {
                         scope.launch {
+                            contentReloadToken++
+                            if (downloadedContentRefreshAutoUpdate) {
+                                val refreshed = refreshUpdateAvailableDownloads(entries, repository)
+                                if (refreshed > 0) {
+                                    reloadContentManagement()
+                                    feedbackController.post(i18n("已自動刷新 {} 項可更新內容", refreshed))
+                                }
+                            }
+                        }
+                    },
+                    onClearGroup = { group ->
+                        val handle = appTaskManager.launch(AppTaskKey("download-control:clear-group:${group.id}")) {
                             clearGroup(group, repository)
                                 .onSuccess {
                                     reloadContentManagement()
-                                    snackbarHostState.showSnackbar(i18n("已清除下載內容"))
+                                    feedbackController.post(i18n("已清除下載內容"))
                                 }
-                                .onFailure { snackbarHostState.showSnackbar(it.message ?: i18n("清除失敗")) }
+                                .onFailure { error ->
+                                    Logger.e("DownloadQueueScreen", "Failed to clear download group id=${group.id}", error)
+                                    feedbackController.post(error.message ?: i18n("清除失敗"))
+                                }
+                        }
+                        scope.launch {
+                            handle.state.first { !it.isActive }
+                            reloadContentManagement()
                         }
                     },
                     onClearItem = { item ->
-                        scope.launch {
+                        val handle = appTaskManager.launch(AppTaskKey("download-control:clear-item:${item.key.stableId}")) {
                             clearItem(item.key, repository)
                                 .onSuccess {
                                     reloadContentManagement()
-                                    snackbarHostState.showSnackbar(i18n("已清除下載內容"))
+                                    feedbackController.post(i18n("已清除下載內容"))
                                 }
-                                .onFailure { snackbarHostState.showSnackbar(it.message ?: i18n("清除失敗")) }
+                                .onFailure { error ->
+                                    Logger.e("DownloadQueueScreen", "Failed to clear download item key=${item.key.stableId}", error)
+                                    feedbackController.post(error.message ?: i18n("清除失敗"))
+                                }
+                        }
+                        scope.launch {
+                            handle.state.first { !it.isActive }
+                            reloadContentManagement()
                         }
                     },
                     onRefreshItem = { item ->
-                        scope.launch {
+                        val handle = appTaskManager.launch(AppTaskKey("download-control:refresh:${item.key.stableId}")) {
                             val result = when (val key = item.key) {
                                 is ThreadPageDownloadKey -> repository.refreshPage(
                                     ThreadId(key.tid),
@@ -222,10 +223,14 @@ fun DownloadQueueScreen() {
                             when (result) {
                                 is YamiboResult.Success -> {
                                     reloadContentManagement()
-                                    snackbarHostState.showSnackbar(i18n("已重新載入下載內容"))
+                                    feedbackController.post(i18n("已重新載入下載內容"))
                                 }
-                                else -> snackbarHostState.showSnackbar(i18n("重新載入失敗：{}", i18n(result.message())))
+                                else -> feedbackController.post(i18n("重新載入失敗：{}", i18n(result.message())))
                             }
+                        }
+                        scope.launch {
+                            handle.state.first { !it.isActive }
+                            reloadContentManagement()
                         }
                     },
                 )
@@ -605,7 +610,7 @@ private fun DownloadContentSummaryCard(summary: DownloadedContentSummary) {
             fontSize = 13.sp,
         )
         Text(
-            i18n("圖片約佔 {}", formatBytes(summary.imageBytes)),
+            i18n("圖片約佔 {}", formatDownloadedByteSize(summary.imageBytes)),
             color = colors.brownPrimary,
             fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
@@ -641,7 +646,7 @@ private fun DownloadContentGroupCard(
             Column(Modifier.weight(1f).padding(start = 10.dp)) {
                 Text(group.title, color = colors.textStrong, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    i18n("{} 項 · {} 張圖片 · {}", group.itemCount, group.imageCount, formatBytes(group.imageBytes)),
+                    i18n("{} 項 · {} 張圖片 · {}", group.itemCount, group.imageCount, formatDownloadedByteSize(group.imageBytes)),
                     color = colors.textDark.copy(alpha = 0.68f),
                     fontSize = 12.sp,
                 )
@@ -688,7 +693,7 @@ private fun DownloadContentItemRow(
         Column(Modifier.weight(1f)) {
             Text(item.detail, color = colors.textStrong, fontWeight = FontWeight.Medium, fontSize = 13.sp)
             Text(
-                i18n("{} 張圖片 · {}", item.imageCount, formatBytes(item.imageBytes)),
+                i18n("{} 張圖片 · {}", item.imageCount, formatDownloadedByteSize(item.imageBytes)),
                 color = colors.textDark.copy(alpha = 0.62f),
                 fontSize = 12.sp,
             )
@@ -785,7 +790,7 @@ private fun entryDetailLabel(entry: DownloadQueueEntry): String = when (val key 
 
 private suspend fun clearItem(
     key: DownloadTaskKey,
-    repository: me.thenano.yamibo.yamibo_app.repository.download.DownloadRepository,
+    repository: DownloadRepository,
 ): Result<Unit> = when (key) {
     is ThreadPageDownloadKey -> repository.clearPage(key)
     is TagMangaChapterDownloadKey -> repository.clearTagMangaChapter(key)
@@ -794,7 +799,7 @@ private suspend fun clearItem(
 
 private suspend fun clearGroup(
     group: DownloadedContentGroup,
-    repository: me.thenano.yamibo.yamibo_app.repository.download.DownloadRepository,
+    repository: DownloadRepository,
 ): Result<Unit> {
     val firstKey = group.items.firstOrNull()?.key ?: return Result.success(Unit)
     return when (firstKey) {
@@ -804,14 +809,26 @@ private suspend fun clearGroup(
     }
 }
 
-private fun formatBytes(bytes: Long): String {
-    if (bytes < 1024L) return "$bytes B"
-    val kib = bytes / 1024.0
-    if (kib < 1024.0) return "${oneDecimal(kib)} KB"
-    val mib = kib / 1024.0
-    if (mib < 1024.0) return "${oneDecimal(mib)} MB"
-    return "${oneDecimal(mib / 1024.0)} GB"
+private suspend fun refreshUpdateAvailableDownloads(
+    entries: List<DownloadQueueEntry>,
+    repository: DownloadRepository,
+): Int {
+    var refreshed = 0
+    entries
+        .filter { it.status == DownloadStatus.UpdateAvailable }
+        .distinctBy { it.key.stableId }
+        .forEach { entry ->
+            val result = when (val key = entry.key) {
+                is ThreadPageDownloadKey -> repository.refreshPage(
+                    ThreadId(key.tid),
+                    entry.title,
+                    key.authorId?.let(::UserId),
+                    key.page,
+                )
+                is TagMangaChapterDownloadKey -> repository.refreshTagMangaChapter(key)
+                is RssMangaChapterDownloadKey -> repository.refreshRssMangaChapter(key)
+            }
+            if (result is YamiboResult.Success) refreshed += 1
+        }
+    return refreshed
 }
-
-private fun oneDecimal(value: Double): String =
-    ((value * 10).toInt() / 10.0).toString()

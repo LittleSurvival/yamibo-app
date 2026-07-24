@@ -11,8 +11,8 @@ plugins {
     id("local.i18n-auto-merge")
 }
 
-val yamiboAppVersionCode = 4
-val yamiboAppVersionName = "0.0.3"
+val yamiboAppVersionCode = 5
+val yamiboAppVersionName = "0.0.4"
 val yamiboAppApplicationId = "me.thenano.yamibo.yamibo_app"
 val localProperties = Properties().apply {
     val file = rootProject.layout.projectDirectory.file("local.properties").asFile
@@ -31,10 +31,16 @@ val releaseRunSigningValues = listOf(
     localProperty("yamibo.releaseRun.keyPassword"),
 )
 val hasReleaseRunSigning = releaseRunSigningValues.all { it != null }
+val useReleaseSignatureForDebugRun = localProperty("yamibo.debug.useReleaseSignature") == "true"
+val yamiboAppReleaseRunApplicationId =
+    if (hasReleaseRunSigning) yamiboAppApplicationId else "$yamiboAppApplicationId.run"
 require(releaseRunSigningValues.all { it == null } || hasReleaseRunSigning) {
     "releaseRun signing requires all local.properties keys: " +
         "yamibo.releaseRun.storeFile, yamibo.releaseRun.storePassword, " +
         "yamibo.releaseRun.keyAlias, yamibo.releaseRun.keyPassword"
+}
+require(!useReleaseSignatureForDebugRun || hasReleaseRunSigning) {
+    "yamibo.debug.useReleaseSignature=true requires releaseRun signing keys in local.properties"
 }
 
 kotlin {
@@ -179,11 +185,23 @@ android {
         }
     }
     buildTypes {
+        getByName("debug") {
+            if (useReleaseSignatureForDebugRun) {
+                signingConfig = signingConfigs.getByName("releaseRunLocal")
+            } else {
+                applicationIdSuffix = ".debug"
+                versionNameSuffix = "-debug"
+            }
+        }
         getByName("release") { isMinifyEnabled = false }
         create("releaseRun") {
             initWith(getByName("release"))
             matchingFallbacks += listOf("release")
             signingConfig = signingConfigs.getByName(if (hasReleaseRunSigning) "releaseRunLocal" else "debug")
+            if (!hasReleaseRunSigning) {
+                applicationIdSuffix = ".run"
+                versionNameSuffix = "-run"
+            }
             isDebuggable = false
             isMinifyEnabled = false
         }
@@ -222,7 +240,7 @@ tasks.register<Exec>("runReleaseOnDevice") {
             "shell",
             "monkey",
             "-p",
-            yamiboAppApplicationId,
+            yamiboAppReleaseRunApplicationId,
             "-c",
             "android.intent.category.LAUNCHER",
             "1",

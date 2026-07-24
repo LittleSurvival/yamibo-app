@@ -14,14 +14,6 @@ interface BackupRepository {
         val modifiedAt: Long?,
     )
 
-    data class BackupSummary(
-        val favorites: Int,
-        val settings: Int,
-        val notes: Int,
-        val bookmarks: Int,
-        val readingHistory: Int,
-    )
-
     data class RestoreSummary(
         val favorites: Int,
         val settings: Int,

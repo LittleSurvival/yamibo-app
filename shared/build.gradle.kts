@@ -51,6 +51,9 @@ kotlin {
 android {
     namespace = "me.thenano.yamibo.yamibo_app.shared"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11

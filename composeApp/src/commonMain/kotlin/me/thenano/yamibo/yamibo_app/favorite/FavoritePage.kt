@@ -1,10 +1,13 @@
-﻿package me.thenano.yamibo.yamibo_app.favorite
+package me.thenano.yamibo.yamibo_app.favorite
 
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -15,24 +18,25 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.littlesurvival.dto.value.TagId
 import io.github.littlesurvival.dto.value.ThreadId
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import me.thenano.yamibo.yamibo_app.*
 import me.thenano.yamibo.yamibo_app.components.controls.YamiboMultiSelectDialog
+import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.favorite.components.*
 import me.thenano.yamibo.yamibo_app.favorite.sync.IFavoriteSyncProgressScreen
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.navigation.*
-import me.thenano.yamibo.yamibo_app.repository.FavoriteSyncRepository.FavoriteSyncState
+import me.thenano.yamibo.yamibo_app.profile.settings.access.IBackgroundAccessSetupScreen
+import me.thenano.yamibo.yamibo_app.profile.settings.backup.IBackupSettingsScreen
 import me.thenano.yamibo.yamibo_app.repository.FavoriteShareRepository
 import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository.*
+import me.thenano.yamibo.yamibo_app.repository.FavoriteSyncRepository.FavoriteSyncState
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
 import me.thenano.yamibo.yamibo_app.repository.settings.FavoriteSortMode
-import me.thenano.yamibo.yamibo_app.profile.settings.access.IBackgroundAccessSetupScreen
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.thread.detail.novel.INovelThreadDetailScreen
 import me.thenano.yamibo.yamibo_app.thread.detail.rss.IRssSearchSubscriptionDetailScreen
 import me.thenano.yamibo.yamibo_app.thread.detail.tag.ITagDetailScreen
@@ -130,10 +134,13 @@ fun FavoritePage() {
     val favoriteShareRepository = LocalFavoriteShareRepository.current
     val favoriteSyncRepository = LocalFavoriteSyncRepository.current
     val favoriteSyncRunner = LocalFavoriteSyncRunner.current
+    val downloadRepository = LocalDownloadRepository.current
+    val rssRepository = LocalRssSearchSubscriptionRepository.current
     val readHistoryRepository = LocalReadHistoryRepository.current
     val navigator = LocalNavigator.current
+    val appTaskManager = LocalAppTaskManager.current
     val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = LocalAppFeedbackController.current
     val favoriteGridMode = appSettingsRepository.favoriteGridMode.state()
     val sortMode = appSettingsRepository.favoriteSortMode.state()
     val sortDescending = appSettingsRepository.favoriteSortDescending.state()
@@ -182,11 +189,15 @@ fun FavoritePage() {
     var showImportPreviewDialog by remember { mutableStateOf(false) }
     var showImportTargetDialog by remember { mutableStateOf(false) }
     var importTargetSelection by remember { mutableStateOf<Set<FavoriteCategory>>(emptySet()) }
+    var showBatchTypeDialog by remember { mutableStateOf(false) }
+    var showBatchModeDialog by remember { mutableStateOf(false) }
+    var selectedBatchTypes by remember { mutableStateOf(setOf<FavoriteBatchDownloadType>()) }
+    var selectedBatchMode by remember { mutableStateOf(FavoriteBatchDownloadMode.All) }
+    val batchDownloadSubmissionGate = remember { FavoriteBatchDownloadSubmissionGate() }
 
     fun showSnackbarMessage(message: String) {
         scope.launch {
-            snackbarHostState.currentSnackbarData?.dismiss()
-            snackbarHostState.showSnackbar(message)
+            feedbackController.post(message)
         }
     }
 
@@ -197,6 +208,15 @@ fun FavoritePage() {
             result.reusedItemCount,
             result.skippedDuplicateCount + result.unsupportedCount + result.invalidCount,
         )
+    }
+
+    fun batchDownloadResultMessage(result: FavoriteBatchDownloadResult): String {
+        val skipped = result.skipped + result.unsupported
+        return when {
+            result.requested == 0 -> i18n("沒有可下載的收藏")
+            result.failed == 0 && skipped == 0 -> i18n("已加入下載佇列 {} 項", result.queued)
+            else -> i18n("已加入 {} 項，失敗 {} 項，跳過 {} 項", result.queued, result.failed, skipped)
+        }
     }
 
     val favoriteShareFileActions = rememberFavoriteShareFileActions(
@@ -476,6 +496,11 @@ fun FavoritePage() {
         else -> FavoritePageMode.Normal
     }
     val searchEnabled = searchActive && trimmedSearchQuery.isNotBlank()
+    val batchDownloadScope = remember(ready?.content, selectedItemIds, selectedCollectionIds) {
+        ready?.content?.let { content ->
+            buildFavoriteBatchDownloadScope(content, selectedItemIds, selectedCollectionIds)
+        }
+    }
     val knownForumKeys = favoriteForumCounts.mapNotNullTo(mutableSetOf()) { it.forumKey }
     val normalizedFavoriteForumFilterKeys = selectedFavoriteForumFilterKeys
         .filterTo(mutableSetOf()) { key -> knownForumKeys.isEmpty() || key in knownForumKeys }
@@ -635,6 +660,20 @@ fun FavoritePage() {
                     selectedItemIds = emptySet()
                     selectedCollectionIds = emptySet()
                 },
+                onOpenBatchDownload = {
+                    val scopeInfo = batchDownloadScope ?: return@FavoritePageContent
+                    if (batchDownloadSubmissionGate.isSubmitting) {
+                        showSnackbarMessage(i18n("上一批收藏正在加入下載佇列"))
+                    } else if (scopeInfo.items.isEmpty()) {
+                        showSnackbarMessage(i18n("沒有可下載的收藏"))
+                    } else {
+                        selectedBatchTypes = scopeInfo.countByType()
+                            .filterValues { it > 0 }
+                            .keys
+                        selectedBatchMode = FavoriteBatchDownloadMode.All
+                        showBatchTypeDialog = true
+                    }
+                },
                 onOpenMoveDialog = {
                     scope.launch {
                         val (categories, options) = withContext(Dispatchers.Default) {
@@ -692,9 +731,66 @@ fun FavoritePage() {
             )
         }
 
-        YamiboSnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp)
+    }
+
+    if (showBatchTypeDialog && batchDownloadScope != null) {
+        FavoriteBatchDownloadTypeDialog(
+            scope = batchDownloadScope,
+            selectedTypes = selectedBatchTypes,
+            onDismiss = { showBatchTypeDialog = false },
+            onNext = { confirmedTypes ->
+                if (confirmedTypes.isEmpty()) {
+                    showSnackbarMessage(i18n("請至少選擇一種收藏類型"))
+                } else {
+                    selectedBatchTypes = confirmedTypes
+                    showBatchTypeDialog = false
+                    showBatchModeDialog = true
+                }
+            },
+        )
+    }
+
+    if (showBatchModeDialog && batchDownloadScope != null) {
+        FavoriteBatchDownloadModeDialog(
+            scope = batchDownloadScope,
+            selectedTypes = selectedBatchTypes,
+            selectedMode = selectedBatchMode,
+            onSelectMode = { selectedBatchMode = it },
+            onBack = {
+                showBatchModeDialog = false
+                showBatchTypeDialog = true
+            },
+            onDismiss = { showBatchModeDialog = false },
+            onConfirm = {
+                if (!batchDownloadSubmissionGate.tryStart()) return@FavoriteBatchDownloadModeDialog
+                showBatchModeDialog = false
+                val items = batchDownloadScope.itemsForTypes(selectedBatchTypes)
+                val batchMode = selectedBatchMode.coerceFor(batchDownloadScope, selectedBatchTypes)
+                selectedItemIds = emptySet()
+                selectedCollectionIds = emptySet()
+                showSnackbarMessage(i18n("正在加入下載佇列 {} 項", items.size))
+                appTaskManager.launch(
+                    key = me.thenano.yamibo.yamibo_app.task.AppTaskKey("download:favorite-batch"),
+                ) {
+                    try {
+                        if (!downloadRepository.isStorageReady()) {
+                            showSnackbarMessage(i18n("請先設定備份資料夾"))
+                            navigator.navigate(IBackupSettingsScreen())
+                            return@launch
+                        }
+                        val result = withContext(Dispatchers.Default) {
+                            enqueueFavoriteBatchDownloads(downloadRepository, rssRepository, items, batchMode)
+                        }
+                        showSnackbarMessage(batchDownloadResultMessage(result))
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Throwable) {
+                        showSnackbarMessage(i18n("加入下載佇列失敗：{}", error.message ?: i18n("未知錯誤")))
+                    } finally {
+                        batchDownloadSubmissionGate.finish()
+                    }
+                }
+            },
         )
     }
 

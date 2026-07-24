@@ -29,10 +29,12 @@ import io.github.littlesurvival.dto.value.ForumId
 import io.github.littlesurvival.dto.value.TagId
 import io.github.littlesurvival.dto.value.ThreadId
 import io.github.littlesurvival.dto.value.UserId
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import me.thenano.yamibo.yamibo_app.confirmation.AppConfirmationController
+import me.thenano.yamibo.yamibo_app.confirmation.AppConfirmationEvent
+import me.thenano.yamibo.yamibo_app.confirmation.AppConfirmationResult
+import me.thenano.yamibo.yamibo_app.feedback.AppFeedbackEvent
 import me.thenano.yamibo.yamibo_app.favorite.components.collectionColor
 import me.thenano.yamibo.yamibo_app.repository.FavoriteSyncRepository
 import me.thenano.yamibo.yamibo_app.repository.FavoriteSyncRepository.FavoriteSyncActionResult
@@ -40,6 +42,9 @@ import me.thenano.yamibo.yamibo_app.repository.FavoriteSyncRepository.FavoriteSy
 import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
+import me.thenano.yamibo.yamibo_app.task.AppTaskKey
+import me.thenano.yamibo.yamibo_app.task.AppTaskManager
+import me.thenano.yamibo.yamibo_app.task.AppTaskResult
 
 sealed interface FavoriteTargetPayload {
     data class Thread(
@@ -82,6 +87,12 @@ data class FavoriteLocationSelection(
 
 internal fun FavoriteTargetPayload.supportsRemoteWebsiteSync(): Boolean = this is FavoriteTargetPayload.Thread
 
+internal fun FavoriteTargetPayload.taskIdentity(): String = when (this) {
+    is FavoriteTargetPayload.Thread -> "thread:${tid.value}"
+    is FavoriteTargetPayload.TagManga -> "tag:${tagId.value}"
+    is FavoriteTargetPayload.RssSearch -> "rss:$subscriptionId"
+}
+
 internal suspend fun addFavoriteAndMaybeSync(
     favoriteRepository: FavoriteStoreRepository,
     favoriteSyncRepository: FavoriteSyncRepository,
@@ -123,19 +134,17 @@ internal suspend fun completeFavoriteAddWithFeedback(
     favoriteSyncRepository: FavoriteSyncRepository,
     target: FavoriteTargetPayload,
     syncToRemote: Boolean,
-    snackbarHostState: SnackbarHostState,
-    onRefreshRequested: () -> Unit,
+    feedbackController: me.thenano.yamibo.yamibo_app.feedback.AppFeedbackController,
 ) {
+    val feedbackGroup = "favorite-add:${target.taskIdentity()}"
+    if (syncToRemote) {
+        feedbackController.post(i18n("正在同步到百合會..."), groupKey = feedbackGroup)
+    }
     val syncResult = withContext(Dispatchers.Default) {
         addFavoriteAndMaybeSync(favoriteRepository, favoriteSyncRepository, target, syncToRemote)
     }
-    onRefreshRequested()
-    val message = when {
-        syncResult == null -> i18n("已加入收藏")
-        syncResult.success -> i18n("已加入收藏，{}", (syncResult.message?.let { i18n(it) }?.takeIf { it.isNotBlank() } ?: i18n("已同步到百合會。")))
-        else -> i18n("已加入收藏，但同步失敗：{}", (syncResult.message?.let { i18n(it) }?.takeIf { it.isNotBlank() } ?: i18n("請稍後再試")))
-    }
-    snackbarHostState.showSnackbar(message)
+    val message = favoriteSyncFeedbackMessage(syncResult, i18n("已加入收藏"))
+    feedbackController.post(message, groupKey = feedbackGroup)
 }
 
 internal suspend fun completeSavedFavoriteSyncWithFeedback(
@@ -143,32 +152,17 @@ internal suspend fun completeSavedFavoriteSyncWithFeedback(
     favoriteSyncRepository: FavoriteSyncRepository,
     target: FavoriteTargetPayload,
     syncToRemote: Boolean,
-    scope: CoroutineScope,
-    snackbarHostState: SnackbarHostState,
-    onRefreshRequested: () -> Unit,
+    feedbackController: me.thenano.yamibo.yamibo_app.feedback.AppFeedbackController,
 ) {
-    val syncingSnackbarJob = if (syncToRemote) {
-        scope.launch {
-            snackbarHostState.showSnackbar(
-                message = i18n("正在同步到百合會..."),
-                duration = SnackbarDuration.Indefinite,
-            )
-        }
-    } else {
-        null
+    val feedbackGroup = "favorite-sync:${target.taskIdentity()}"
+    if (syncToRemote) {
+        feedbackController.post(i18n("正在同步到百合會..."), groupKey = feedbackGroup)
     }
     val syncResult = withContext(Dispatchers.Default) {
         syncExistingFavoriteIfRequested(favoriteRepository, favoriteSyncRepository, target, syncToRemote)
     }
-    syncingSnackbarJob?.cancel()
-    snackbarHostState.currentSnackbarData?.dismiss()
-    onRefreshRequested()
-    val message = when {
-        syncResult == null -> i18n("已加入本地收藏")
-        syncResult.success -> i18n("已加入本地收藏，{}", (syncResult.message?.let { i18n(it) }?.takeIf { it.isNotBlank() } ?: i18n("已同步到百合會。")))
-        else -> i18n("已加入本地收藏，但同步到百合會失敗：{}", (syncResult.message?.let { i18n(it) }?.takeIf { it.isNotBlank() } ?: i18n("請稍後再試")))
-    }
-    snackbarHostState.showSnackbar(message)
+    val message = favoriteSyncFeedbackMessage(syncResult, i18n("已加入本地收藏"))
+    feedbackController.post(message, groupKey = feedbackGroup)
 }
 
 internal suspend fun completeFavoriteRemovalWithFeedback(
@@ -176,35 +170,113 @@ internal suspend fun completeFavoriteRemovalWithFeedback(
     favoriteSyncRepository: FavoriteSyncRepository,
     target: FavoriteTargetPayload,
     removeRemote: Boolean,
-    scope: CoroutineScope,
-    snackbarHostState: SnackbarHostState,
+    feedbackController: me.thenano.yamibo.yamibo_app.feedback.AppFeedbackController,
+    confirmationController: AppConfirmationController,
+    appTaskManager: AppTaskManager,
     successMessage: String,
     failureMessage: String,
-    onRefreshRequested: () -> Unit,
 ) {
-    val syncingSnackbarJob = if (removeRemote) {
-        scope.launch {
-            snackbarHostState.showSnackbar(
-                message = i18n("正在從百合會移除收藏..."),
-                duration = SnackbarDuration.Indefinite,
+    val feedbackGroup = "favorite-remove:${target.taskIdentity()}"
+    if (removeRemote) {
+        feedbackController.post(i18n("正在從百合會移除收藏..."), groupKey = feedbackGroup)
+    }
+    val itemId = withContext(Dispatchers.Default) {
+        favoriteRepository.findFavoriteItem(target)?.id
+    }
+    if (itemId == null) {
+        feedbackController.post(
+            if (removeRemote) i18n("找不到本地收藏，未送出百合會解除收藏請求") else successMessage,
+            groupKey = feedbackGroup,
+        )
+        return
+    }
+    completeFavoriteRemovalByItemIdWithFeedback(
+        itemId = itemId,
+        removeRemote = removeRemote,
+        favoriteSyncRepository = favoriteSyncRepository,
+        feedbackController = feedbackController,
+        confirmationController = confirmationController,
+        appTaskManager = appTaskManager,
+        remoteSuccessMessage = i18n("已從百合會取消收藏"),
+        confirmationTitle = i18n("無法從百合會解除收藏"),
+        localOnlyConfirmLabel = i18n("僅解除本地收藏"),
+        keepLocalDismissLabel = i18n("保留本地收藏"),
+        localOnlySuccessMessage = i18n("已解除本地收藏，百合會收藏仍可能存在"),
+        successMessage = successMessage,
+        failureMessage = failureMessage,
+        feedbackGroup = feedbackGroup,
+    )
+}
+
+internal suspend fun completeFavoriteRemovalByItemIdWithFeedback(
+    itemId: Long,
+    removeRemote: Boolean,
+    favoriteSyncRepository: FavoriteSyncRepository,
+    feedbackController: me.thenano.yamibo.yamibo_app.feedback.AppFeedbackController,
+    confirmationController: AppConfirmationController,
+    appTaskManager: AppTaskManager,
+    remoteSuccessMessage: String,
+    confirmationTitle: String,
+    localOnlyConfirmLabel: String,
+    keepLocalDismissLabel: String,
+    localOnlySuccessMessage: String,
+    successMessage: String,
+    failureMessage: String,
+    feedbackGroup: String? = null,
+) {
+    val result = withContext(Dispatchers.Default) {
+        favoriteSyncRepository.removeLocalFavoriteItem(itemId, removeRemote = removeRemote)
+    }
+    if (result.success) {
+        feedbackController.post(if (removeRemote) remoteSuccessMessage else successMessage, groupKey = feedbackGroup)
+        return
+    }
+
+    val reason = result.message?.takeIf { it.isNotBlank() } ?: failureMessage
+    if (!removeRemote) {
+        feedbackController.post(reason, groupKey = feedbackGroup)
+        return
+    }
+
+    val decision = confirmationController.request(
+        AppConfirmationEvent(
+            title = confirmationTitle,
+            message = reason,
+            confirmLabel = localOnlyConfirmLabel,
+            dismissLabel = keepLocalDismissLabel,
+        )
+    )
+    if (decision != AppConfirmationResult.Confirmed) return
+
+    appTaskManager.submit(AppTaskKey("favorite:remove-local:$itemId")) {
+        val localResult = withContext(Dispatchers.Default) {
+            favoriteSyncRepository.removeLocalFavoriteItem(itemId, removeRemote = false)
+        }
+        if (localResult.success) {
+            AppTaskResult.Success(
+                feedback = AppFeedbackEvent(localOnlySuccessMessage),
+            )
+        } else {
+            val localFailure = localResult.message
+                ?.takeIf { it.isNotBlank() }
+                ?: failureMessage
+            AppTaskResult.Failure(
+                message = localFailure,
+                feedback = AppFeedbackEvent(localFailure),
             )
         }
-    } else {
-        null
     }
-    val result = withContext(Dispatchers.Default) {
-        removeFavoriteWithSync(
-            favoriteRepository = favoriteRepository,
-            favoriteSyncRepository = favoriteSyncRepository,
-            target = target,
-            removeRemote = removeRemote,
-        )
-    }
-    syncingSnackbarJob?.cancel()
-    snackbarHostState.currentSnackbarData?.dismiss()
-    onRefreshRequested()
-    snackbarHostState.showSnackbar(
-        if (result.success) successMessage else result.message?.let { i18n(it) }?.takeIf { it.isNotBlank() } ?: failureMessage,
+}
+
+private fun favoriteSyncFeedbackMessage(
+    result: FavoriteSyncRepository.FavoriteSyncActionResult?,
+    localOnlyMessage: String,
+): String = when {
+    result == null -> localOnlyMessage
+    result.success -> result.message?.let { i18n(it) }?.takeIf { it.isNotBlank() } ?: i18n("已同步至百合會")
+    else -> i18n(
+        "同步至百合會失敗：{}",
+        result.message?.let { i18n(it) }?.takeIf { it.isNotBlank() } ?: i18n("請稍後再試"),
     )
 }
 
@@ -339,6 +411,19 @@ fun FavoriteCollectionPickerDialog(
 
     val currentCategory = groupedCategories.firstOrNull { it.categoryId == currentCategoryId }
 
+    fun toggleCategory(category: FavoritePickerCategory) {
+        val categoryCollectionIds = category.collections.map { it.id }.toSet()
+        val hasAnySelection =
+            category.categoryId in selectedCategories ||
+                categoryCollectionIds.any(selectedCollections::contains)
+        if (hasAnySelection) {
+            selectedCategories -= category.categoryId
+            selectedCollections -= categoryCollectionIds
+        } else {
+            selectedCategories += category.categoryId
+        }
+    }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -388,18 +473,7 @@ fun FavoriteCollectionPickerDialog(
                                     selectedCategories = selectedCategories,
                                     selectedCollections = selectedCollections,
                                     triStateColors = checkboxColors,
-                                    onToggleCategory = {
-                                        val categoryCollectionIds = category.collections.map { it.id }.toSet()
-                                        val hasAnySelection =
-                                            category.categoryId in selectedCategories ||
-                                                categoryCollectionIds.any(selectedCollections::contains)
-                                        if (hasAnySelection) {
-                                            selectedCategories = selectedCategories - category.categoryId
-                                            selectedCollections = selectedCollections - categoryCollectionIds
-                                        } else {
-                                            selectedCategories = selectedCategories + category.categoryId
-                                        }
-                                    },
+                                    onToggleCategory = { toggleCategory(category) },
                                     onOpenCategory = { currentCategoryId = category.categoryId },
                                 )
                             }
@@ -410,18 +484,7 @@ fun FavoriteCollectionPickerDialog(
                                     selectedCategories = selectedCategories,
                                     selectedCollections = selectedCollections,
                                     triStateColors = checkboxColors,
-                                    onToggle = {
-                                        val categoryCollectionIds = currentCategory.collections.map { it.id }.toSet()
-                                        val hasAnySelection =
-                                            currentCategory.categoryId in selectedCategories ||
-                                                categoryCollectionIds.any(selectedCollections::contains)
-                                        if (hasAnySelection) {
-                                            selectedCategories = selectedCategories - currentCategory.categoryId
-                                            selectedCollections = selectedCollections - categoryCollectionIds
-                                        } else {
-                                            selectedCategories = selectedCategories + currentCategory.categoryId
-                                        }
-                                    },
+                                    onToggle = { toggleCategory(currentCategory) },
                                 )
                             }
                             items(currentCategory.collections, key = { it.id }) { option ->

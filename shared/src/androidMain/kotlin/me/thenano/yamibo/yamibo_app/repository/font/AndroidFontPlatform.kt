@@ -1,9 +1,11 @@
 package me.thenano.yamibo.yamibo_app.repository.font
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import java.io.File
+import me.thenano.yamibo.yamibo_app.Logger
 
 class AndroidFontPlatform(private val context: Context) : FontPlatform {
     override val supportsFontLoading: Boolean = true
@@ -11,7 +13,9 @@ class AndroidFontPlatform(private val context: Context) : FontPlatform {
 
     override suspend fun importFont(sourceUri: String, displayName: String?, id: String): FontImportResult {
         return try {
+            @SuppressLint("UseKtx")
             val uri = Uri.parse(sourceUri)
+
             val sourceName = displayName
                 ?.takeIf { it.isNotBlank() }
                 ?: queryDisplayName(uri)
@@ -35,19 +39,24 @@ class AndroidFontPlatform(private val context: Context) : FontPlatform {
                 platformPath = target.absolutePath,
             )
         } catch (error: Throwable) {
+            Logger.e("AndroidFontPlatform", "Failed to import font id=$id", error)
             FontImportResult.Failure(error.message ?: "Unable to import selected font file.")
         }
     }
 
     override fun deleteFont(font: LoadedFont): Boolean =
-        runCatching { File(font.platformPath).delete() }.getOrDefault(false)
+        runCatching { File(font.platformPath).delete() }
+            .onFailure { Logger.w("AndroidFontPlatform", "Failed to delete font id=${font.id}", it) }
+            .getOrDefault(false)
 
     private fun queryDisplayName(uri: Uri): String? = runCatching {
         context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
             val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
             if (nameIndex >= 0 && cursor.moveToFirst()) cursor.getString(nameIndex) else null
         }
-    }.getOrNull()
+    }
+        .onFailure { Logger.d("AndroidFontPlatform", "Failed to query font display name", it) }
+        .getOrNull()
 
     private fun String.sanitizeFileName(): String =
         replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "font" }

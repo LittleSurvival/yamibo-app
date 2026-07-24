@@ -7,13 +7,13 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.IBinder
-import android.util.Log
 import androidx.annotation.RequiresPermission
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.repository.FavoriteSyncRepository
 import me.thenano.yamibo.yamibo_app.repository.SystemNotificationRepository
 import kotlin.math.absoluteValue
@@ -66,7 +66,7 @@ class FavoriteSyncForegroundService : Service() {
         try {
             startForeground(notificationId, notificationRepository.buildProgressNotification(initialModel))
         } catch (throwable: Throwable) {
-            Log.e(TAG, "Failed to enter foreground for favorite sync runId=$runId", throwable)
+            Logger.e(TAG, "Failed to enter foreground for favorite sync runId=$runId", throwable)
             scope.launch {
                 favoriteSyncRepository.markRunInterrupted(runId, i18n("系統目前不允許啟動背景同步，請在 App 前景時重試。"))
             }
@@ -158,4 +158,3 @@ class FavoriteSyncForegroundService : Service() {
         fun notificationIdFor(runId: String): Int = 10_000 + runId.hashCode().absoluteValue
     }
 }
-

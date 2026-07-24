@@ -1,4 +1,4 @@
-﻿package me.thenano.yamibo.yamibo_app.favorite
+package me.thenano.yamibo.yamibo_app.favorite
 
 
 import androidx.compose.foundation.BorderStroke
@@ -25,26 +25,24 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.thenano.yamibo.yamibo_app.LocalFavoriteRepository
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBar
+import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.favorite.components.*
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository.FavoriteCategory
 import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository.FavoriteCategoryDeletePreview
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository as FavoriteRepositoryContract
 
 private val ManageRowHeight = 82.dp
 private val ManageRowSpacing = 12.dp
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun FavoriteCategoryManageScreen() {
     val colors = YamiboTheme.colors
     val favoriteRepository = LocalFavoriteRepository.current
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
     val listState = rememberLazyListState()
     val density = LocalDensity.current
     val rowStridePx = with(density) { (ManageRowHeight + ManageRowSpacing).toPx() }
@@ -77,7 +75,7 @@ internal fun FavoriteCategoryManageScreen() {
                 favoriteRepository.getCategoryDeletePreview(categoryId)
             } ?: return@launch
             if (preview.isDefaultCategory) {
-                snackbarHostState.showSnackbar(i18n("{}類別不可刪除", FavoriteRepositoryContract.DEFAULT_CATEGORY_NAME))
+                feedbackController.post(i18n("{}類別不可刪除", FavoriteRepositoryContract.DEFAULT_CATEGORY_NAME))
                 return@launch
             }
             moveItemsToDefaultOnDelete = true
@@ -116,9 +114,6 @@ internal fun FavoriteCategoryManageScreen() {
 
     Scaffold(
         containerColor = colors.creamBackground,
-        snackbarHost = {
-            YamiboSnackbarHost(snackbarHostState)
-        },
         topBar = {
             YamiboTopBar(
                 title = i18n("管理類別"),

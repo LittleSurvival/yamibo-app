@@ -1,12 +1,10 @@
 ﻿package me.thenano.yamibo.yamibo_app.updates.components
 
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
 import me.thenano.yamibo.yamibo_app.components.controls.YamiboMultiSelectDialog
 import me.thenano.yamibo.yamibo_app.i18n.i18n
-import me.thenano.yamibo.yamibo_app.repository.FavoriteUpdateRepository
 import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository
+import me.thenano.yamibo.yamibo_app.repository.FavoriteUpdateRepository
 
 internal const val UPDATE_RESULT_FILTER_ALL = "all"
 
@@ -98,12 +96,16 @@ internal fun filterUpdateEvents(
 ): List<FavoriteUpdateRepository.UpdateEvent> {
     if (!isUpdateResultFilterRestricted(selectedKeys, options)) return events
     return events.filter { event ->
-        val key = if (event.targetType == FavoriteStoreRepository.FavoriteTargetType.TagManga) {
-            "tag"
-        } else if (event.targetType == FavoriteStoreRepository.FavoriteTargetType.RssSearch) {
-            "rss"
-        } else {
-            event.fid?.let { "fid:$it" }
+        val key = when (event.targetType) {
+            FavoriteStoreRepository.FavoriteTargetType.TagManga -> {
+                "tag"
+            }
+            FavoriteStoreRepository.FavoriteTargetType.RssSearch -> {
+                "rss"
+            }
+            else -> {
+                event.fid?.let { "fid:$it" }
+            }
         }
         key != null && key in selectedKeys
     }
@@ -113,8 +115,7 @@ internal fun isUpdateResultFilterRestricted(
     selectedKeys: Set<String>,
     options: List<UpdateResultFilterOption>,
 ): Boolean {
-    if (options.size <= 1) return false
-    return UPDATE_RESULT_FILTER_ALL !in selectedKeys
+    return options.size > 1 && UPDATE_RESULT_FILTER_ALL !in selectedKeys
 }
 
 internal fun updateResultFilterLabel(

@@ -1,7 +1,7 @@
 package me.thenano.yamibo.yamibo_app.updates.components
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -17,7 +17,6 @@ import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.i18n.localizedLabel
 import me.thenano.yamibo.yamibo_app.repository.FavoriteUpdateRepository
 import me.thenano.yamibo.yamibo_app.repository.settings.FavoriteUpdateInterval
-import me.thenano.yamibo.yamibo_app.util.state
 
 @Composable
 internal fun FavoriteUpdateHeader(

@@ -101,7 +101,7 @@ class DownloadForegroundService : Service() {
     }
 
     private fun notificationManager(): NotificationManager =
-        getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        getSystemService(NOTIFICATION_SERVICE) as NotificationManager
 
     companion object {
         private const val CHANNEL_ID = "yamibo_downloads"

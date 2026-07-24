@@ -36,74 +36,50 @@ class UserSpaceRepositoryImpl(
 
     override suspend fun fetchProfile(userId: UserId?): YamiboResult<ProfilePage> {
         yamiboClient.setCookie(cookieStore.load() ?: "")
-        val result = yamiboClient.fetchProfileInfo(userId)
-        if (result is YamiboResult.Success) {
-            profileCache.set(profileKey(userId), result.value)
-        }
-        return result
+        return yamiboClient.fetchProfileInfo(userId)
+            .cacheSuccess(profileCache, profileKey(userId))
     }
 
     override suspend fun fetchThreads(userId: UserId?, page: Int): YamiboResult<UserSpaceThreadPage> {
         yamiboClient.setCookie(cookieStore.load() ?: "")
-        val result = yamiboClient.fetchUserSpaceThreads(userId, page)
-        if (result is YamiboResult.Success) {
-            threadCache.set(UserSpaceRepository.UserPageCacheKey(userId?.value, page).toCacheKey(), result.value)
-        }
-        return result
+        return yamiboClient.fetchUserSpaceThreads(userId, page)
+            .cacheSuccess(threadCache, UserSpaceRepository.UserPageCacheKey(userId?.value, page).toCacheKey())
     }
 
     override suspend fun fetchReplies(userId: UserId?, page: Int): YamiboResult<UserSpaceThreadReplyPage> {
         yamiboClient.setCookie(cookieStore.load() ?: "")
-        val result = yamiboClient.fetchUserSpaceThreadReplies(userId, page)
-        if (result is YamiboResult.Success) {
-            replyCache.set(UserSpaceRepository.UserPageCacheKey(userId?.value, page).toCacheKey(), result.value)
-        }
-        return result
+        return yamiboClient.fetchUserSpaceThreadReplies(userId, page)
+            .cacheSuccess(replyCache, UserSpaceRepository.UserPageCacheKey(userId?.value, page).toCacheKey())
     }
 
     override suspend fun fetchMyBlogs(userId: UserId?, page: Int): YamiboResult<UserSpaceBlogPage> {
         yamiboClient.setCookie(cookieStore.load() ?: "")
-        val result = yamiboClient.fetchUserSpaceMyBlogs(userId, page)
-        if (result is YamiboResult.Success) {
-            blogCache.set(UserSpaceRepository.TypedPageCacheKey("my", userId?.value, page).toCacheKey(), result.value)
-        }
-        return result
+        return yamiboClient.fetchUserSpaceMyBlogs(userId, page)
+            .cacheSuccess(blogCache, UserSpaceRepository.TypedPageCacheKey("my", userId?.value, page).toCacheKey())
     }
 
     override suspend fun fetchFriendBlogs(page: Int): YamiboResult<UserSpaceBlogPage> {
         yamiboClient.setCookie(cookieStore.load() ?: "")
-        val result = yamiboClient.fetchUserSpaceFriendBlogs(page)
-        if (result is YamiboResult.Success) {
-            blogCache.set(UserSpaceRepository.TypedPageCacheKey("friend", null, page).toCacheKey(), result.value)
-        }
-        return result
+        return yamiboClient.fetchUserSpaceFriendBlogs(page)
+            .cacheSuccess(blogCache, UserSpaceRepository.TypedPageCacheKey("friend", null, page).toCacheKey())
     }
 
     override suspend fun fetchViewAllBlogs(type: YamiboRoute.UserSpace.Blog.ViewAllType, page: Int): YamiboResult<UserSpaceBlogPage> {
         yamiboClient.setCookie(cookieStore.load() ?: "")
-        val result = yamiboClient.fetchUserSpaceViewAllBlogs(type, page)
-        if (result is YamiboResult.Success) {
-            blogCache.set(UserSpaceRepository.TypedPageCacheKey("all_${type.name}", null, page).toCacheKey(), result.value)
-        }
-        return result
+        return yamiboClient.fetchUserSpaceViewAllBlogs(type, page)
+            .cacheSuccess(blogCache, UserSpaceRepository.TypedPageCacheKey("all_${type.name}", null, page).toCacheKey())
     }
 
     override suspend fun fetchFriends(type: YamiboRoute.UserSpace.FriendPageType, page: Int): YamiboResult<UserSpaceFriendPage> {
         yamiboClient.setCookie(cookieStore.load() ?: "")
-        val result = yamiboClient.fetchUserSpaceFriends(type, page)
-        if (result is YamiboResult.Success) {
-            friendCache.set(UserSpaceRepository.TypedPageCacheKey(type.name, null, page).toCacheKey(), result.value)
-        }
-        return result
+        return yamiboClient.fetchUserSpaceFriends(type, page)
+            .cacheSuccess(friendCache, UserSpaceRepository.TypedPageCacheKey(type.name, null, page).toCacheKey())
     }
 
     override suspend fun fetchPrivateMessages(page: Int): YamiboResult<UserSpacePrivateMessagePage> {
         yamiboClient.setCookie(cookieStore.load() ?: "")
-        val result = yamiboClient.fetchUserSpacePrivateMessages(page)
-        if (result is YamiboResult.Success) {
-            messageCache.set(page.toString(), result.value)
-        }
-        return result
+        return yamiboClient.fetchUserSpacePrivateMessages(page)
+            .cacheSuccess(messageCache, page.toString())
     }
 
     override suspend fun fetchAddFriendPopoutScreen(userId: UserId): YamiboResult<AddFriendPopoutScreen> {
@@ -145,11 +121,8 @@ class UserSpaceRepositoryImpl(
 
     override suspend fun fetchNotices(page: Int): YamiboResult<UserSpaceNoticePage> {
         yamiboClient.setCookie(cookieStore.load() ?: "")
-        val result = yamiboClient.fetchUserSpaceNotices(page)
-        if (result is YamiboResult.Success) {
-            noticeCache.set(page.toString(), result.value)
-        }
-        return result
+        return yamiboClient.fetchUserSpaceNotices(page)
+            .cacheSuccess(noticeCache, page.toString())
     }
 
     override fun getCachedProfile(userId: UserId?): ProfilePage? = profileCache.get(profileKey(userId))

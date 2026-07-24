@@ -395,7 +395,6 @@ private fun ChangelogContent(text: String) {
         }
 }
 
-@OptIn(ExperimentalResourceApi::class)
 private suspend fun loadCurrentChangelog(): String {
     val currentPath = "files/changelogs/${AppVersion.VersionCode}.changelog"
     val fallbackPath = "files/changelogs/1.changelog"

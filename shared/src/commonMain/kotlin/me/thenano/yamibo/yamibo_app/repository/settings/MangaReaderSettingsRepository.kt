@@ -32,10 +32,5 @@ class MangaReaderSettingsRepository(store: SettingsStore) : SettingsRegistry(sto
         name = "touch_zone",
         default = TouchZoneLayout.L_SHAPE
     )
-
-    companion object {
-        val readingModeOptions = ReadingMode.entries.map { it to it.label }
-        val touchZoneOptions = TouchZoneLayout.entries.map { it to it.label }
-    }
 }
 

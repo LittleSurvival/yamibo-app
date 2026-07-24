@@ -3,14 +3,20 @@
 package me.thenano.yamibo.yamibo_app
 
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.window.ComposeUIViewController
 import io.github.littlesurvival.YamiboClient
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import me.thenano.yamibo.yamibo_app.db.DatabaseFactory
 import me.thenano.yamibo.yamibo_app.favorite.sync.FavoriteSyncRunner
 import me.thenano.yamibo.yamibo_app.favorite.sync.IOSBackgroundTaskRepository
 import me.thenano.yamibo.yamibo_app.favorite.updates.FavoriteUpdateRunner
 import me.thenano.yamibo.yamibo_app.favorite.updates.IOSFavoriteUpdateScheduler
+import me.thenano.yamibo.yamibo_app.feedback.AppFeedbackController
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.navigation.rememberRestorableNavigator
 import me.thenano.yamibo.yamibo_app.profile.settings.access.IOSBackgroundAccessRepository
@@ -37,17 +43,36 @@ import me.thenano.yamibo.yamibo_app.repository.settings.SettingsImageReaderModeO
 import me.thenano.yamibo.yamibo_app.repository.userspace.BlogRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.userspace.UserSpaceRepositoryImpl
 import me.thenano.yamibo.yamibo_app.store.IOSCookieStore
+import me.thenano.yamibo.yamibo_app.store.IOSForumFavoriteStore
 import me.thenano.yamibo.yamibo_app.store.IOSUserStore
 import me.thenano.yamibo.yamibo_app.store.settings.IOSSettingsStore
 import me.thenano.yamibo.yamibo_app.update.IOSAppUpdatePlatform
+import me.thenano.yamibo.yamibo_app.task.AppTaskManager
+import me.thenano.yamibo.yamibo_app.confirmation.AppConfirmationController
 
 fun MainViewController() = ComposeUIViewController {
     /** Navigator Logic */
     val navigator = rememberRestorableNavigator()
+    val appCoroutineScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main) }
+    val appFeedbackController = remember { AppFeedbackController() }
+    val appConfirmationController = remember(appCoroutineScope) {
+        AppConfirmationController(appCoroutineScope)
+    }
+    val appTaskManager = remember(appCoroutineScope, appFeedbackController) {
+        AppTaskManager(appCoroutineScope, appFeedbackController)
+    }
+    DisposableEffect(appCoroutineScope, appFeedbackController, appConfirmationController) {
+        onDispose {
+            appConfirmationController.close()
+            appFeedbackController.close()
+            appCoroutineScope.cancel()
+        }
+    }
 
     /** Store Logic */
     val cookieStore = remember { IOSCookieStore() }
     val userStore = remember { IOSUserStore() }
+    val forumFavoriteStore = remember { IOSForumFavoriteStore() }
     val settingsStore = remember { IOSSettingsStore() }
     val appSettingsRepository = remember { AppSettingsRepository(settingsStore) }
     val novelReaderSettingsRepository = remember { NovelReaderSettingsRepository(settingsStore) }
@@ -64,7 +89,7 @@ fun MainViewController() = ComposeUIViewController {
 
     /** Repository Logic */
     val yamiboClient = remember { YamiboClient() }
-    val authRepository = remember { IOSAuthRepository(cookieStore, userStore, yamiboClient) }
+    val authRepository = remember { IOSAuthRepository(cookieStore, userStore, yamiboClient, forumFavoriteStore) }
     
     val dbFactory = remember { DatabaseFactory() }
     val diskCacheFactory = remember { 
@@ -77,7 +102,9 @@ fun MainViewController() = ComposeUIViewController {
         me.thenano.yamibo.yamibo_app.core.cache.DiskCacheFactory(dbFactory, cacheDirPath = cacheDir) 
     }
 
-    val forumRepository = remember { IOSForumRepository(cookieStore, yamiboClient, diskCacheFactory) }
+    val forumRepository = remember {
+        IOSForumRepository(cookieStore, yamiboClient, diskCacheFactory, forumFavoriteStore)
+    }
     val threadRepository = remember { IOSThreadRepository(cookieStore, yamiboClient, diskCacheFactory) }
     val userSpaceRepository = remember { UserSpaceRepositoryImpl(cookieStore, yamiboClient, diskCacheFactory) }
     val blogRepository = remember { BlogRepositoryImpl(cookieStore, yamiboClient, diskCacheFactory) }
@@ -173,6 +200,10 @@ fun MainViewController() = ComposeUIViewController {
 
     /** Provide Repositories */
     CompositionLocalProvider(
+        LocalAppCoroutineScope provides appCoroutineScope,
+        LocalAppFeedbackController provides appFeedbackController,
+        LocalAppConfirmationController provides appConfirmationController,
+        LocalAppTaskManager provides appTaskManager,
         LocalNavigator provides navigator,
         LocalAuthRepository provides authRepository,
         LocalAppUpdateRepository provides appUpdateRepository,

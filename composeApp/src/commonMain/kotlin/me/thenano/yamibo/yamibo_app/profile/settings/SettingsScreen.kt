@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
@@ -22,7 +21,6 @@ import me.thenano.yamibo.yamibo_app.profile.settings.components.SettingsItem
 import me.thenano.yamibo.yamibo_app.profile.settings.update.IAppUpdateScreen
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SettingsScreen() {
     val colors = YamiboTheme.colors

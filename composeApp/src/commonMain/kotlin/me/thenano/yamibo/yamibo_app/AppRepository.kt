@@ -1,6 +1,10 @@
 ﻿package me.thenano.yamibo.yamibo_app
 
 import androidx.compose.runtime.compositionLocalOf
+import kotlinx.coroutines.CoroutineScope
+import me.thenano.yamibo.yamibo_app.confirmation.AppConfirmationController
+import me.thenano.yamibo.yamibo_app.feedback.AppFeedbackController
+import me.thenano.yamibo.yamibo_app.task.AppTaskManager
 import me.thenano.yamibo.yamibo_app.core.cache.DiskCacheFactory
 import me.thenano.yamibo.yamibo_app.repository.AuthRepository
 import me.thenano.yamibo.yamibo_app.repository.AppUpdateRepository
@@ -9,7 +13,7 @@ import me.thenano.yamibo.yamibo_app.repository.BackupRepository
 import me.thenano.yamibo.yamibo_app.repository.ChineseConversionRepository
 import me.thenano.yamibo.yamibo_app.repository.ContentCoverRepository
 import me.thenano.yamibo.yamibo_app.repository.DetailNoteRepository
-import me.thenano.yamibo.yamibo_app.repository.download.DownloadRepository
+import me.thenano.yamibo.yamibo_app.repository.DownloadRepository
 import me.thenano.yamibo.yamibo_app.repository.FavoriteRepository
 import me.thenano.yamibo.yamibo_app.repository.FavoriteShareRepository
 import me.thenano.yamibo.yamibo_app.repository.FavoriteSyncRepository
@@ -37,6 +41,18 @@ import me.thenano.yamibo.yamibo_app.favorite.sync.FavoriteSyncRunner
 import me.thenano.yamibo.yamibo_app.favorite.updates.FavoriteUpdateRunner
 import me.thenano.yamibo.yamibo_app.profile.settings.backup.BackupScheduler
 import me.thenano.yamibo.yamibo_app.profile.settings.sign.SignReminderScheduler
+
+val LocalAppCoroutineScope =
+    compositionLocalOf<CoroutineScope> { error("LocalAppCoroutineScope not provided") }
+
+val LocalAppFeedbackController =
+    compositionLocalOf<AppFeedbackController> { error("LocalAppFeedbackController not provided") }
+
+val LocalAppConfirmationController =
+    compositionLocalOf<AppConfirmationController> { error("LocalAppConfirmationController not provided") }
+
+val LocalAppTaskManager =
+    compositionLocalOf<AppTaskManager> { error("LocalAppTaskManager not provided") }
 
 val LocalAuthRepository =
     compositionLocalOf<AuthRepository> { error("LocalAuthRepository not provided") }

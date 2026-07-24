@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import java.io.File
 
@@ -34,6 +35,7 @@ actual fun rememberFavoriteShareFileActions(
         }.onSuccess {
             onExported(export.first)
         }.onFailure { error ->
+            Logger.e("FavoriteShareFileActions", "Failed to export favorite share file name=${export.first}", error)
             onExportFailed(error.message ?: "匯出收藏夾失敗")
         }
     }
@@ -46,7 +48,10 @@ actual fun rememberFavoriteShareFileActions(
                 input.readBytes().toString(Charsets.UTF_8)
             } ?: error("無法讀取檔案")
         }.onSuccess(onImportPicked)
-            .onFailure { error -> onImportFailed(error.message ?: "讀取收藏分享檔案失敗") }
+            .onFailure { error ->
+                Logger.e("FavoriteShareFileActions", "Failed to import favorite share file", error)
+                onImportFailed(error.message ?: "讀取收藏分享檔案失敗")
+            }
     }
     return FavoriteShareFileActions(
         exportJson = { fileName, jsonText ->
@@ -80,6 +85,7 @@ actual fun rememberFavoriteShareFileActions(
                 }
                 context.startActivity(chooser)
             }.onFailure { error ->
+                Logger.e("FavoriteShareFileActions", "Failed to share favorite file name=$fileName", error)
                 val message = when (error) {
                     is ActivityNotFoundException -> i18n("找不到可分享檔案的 App")
                     else -> error.message ?: i18n("匯出收藏夾失敗")

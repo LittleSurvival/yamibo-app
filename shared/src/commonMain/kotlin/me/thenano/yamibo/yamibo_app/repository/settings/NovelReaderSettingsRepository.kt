@@ -20,6 +20,13 @@ enum class ReaderScrollButtonJumpTarget(val label: String) {
     POST_EDGE("post_edge"),
 }
 
+enum class ThreadReaderMode(val label: String) {
+    SCROLL_CONTINUOUS("scroll_continuous"),
+    SINGLE_LTR("single_ltr"),
+    SINGLE_RTL("single_rtl"),
+    SINGLE_TTB("single_ttb"),
+}
+
 class NovelReaderSettingsRepository(store: SettingsStore) : SettingsRegistry(store, prefix = "novelreadersettings") {
 
     val fontSize by intSetting(
@@ -67,6 +74,12 @@ class NovelReaderSettingsRepository(store: SettingsStore) : SettingsRegistry(sto
         default = ReaderChineseConversionOption.DEFAULT,
     )
 
+    val threadReaderMode by enumSetting(
+        name = "thread_reader_mode",
+        description = "novel_reader_thread_reader_mode",
+        default = ThreadReaderMode.SCROLL_CONTINUOUS,
+    )
+
     val scrollButtonDisplayMode by enumSetting(
         name = "scroll_button_display_mode",
         description = "novel_reader_scroll_button_display_mode",
@@ -93,8 +106,4 @@ class NovelReaderSettingsRepository(store: SettingsStore) : SettingsRegistry(sto
         description = "novel_reader_show_page_progress_hint",
         default = true,
     )
-
-    companion object {
-        val chineseConversionOptions = ReaderChineseConversionOption.entries.map { it to it.label }
-    }
 }

@@ -55,6 +55,25 @@ import me.thenano.yamibo.yamibo_app.util.state
 import me.thenano.yamibo.yamibo_app.userspace.IUserSpaceScreen
 import me.thenano.yamibo.yamibo_app.webview.action.IActionWebView
 
+enum class PostFooterSection {
+    Metadata,
+    Navigation,
+    Poll,
+    Rates,
+    Comments,
+    Attachments,
+    Actions;
+
+    companion object {
+        val All: Set<PostFooterSection> = entries.toSet()
+    }
+}
+
+data class PostFooterRenderOptions(
+    val rateRange: IntRange? = null,
+    val commentRange: IntRange? = null,
+)
+
 @Composable
 fun PostRenderer(
     post: Post,
@@ -74,13 +93,17 @@ fun PostRenderer(
     onImageReload: ((String) -> Unit)? = null,
     imageErrorMessageFor: ((String) -> String?)? = null,
     imageRetryKeyFor: ((String) -> Int)? = null,
+    imageHasLoadedFor: ((String) -> Boolean)? = null,
     imageCachedHeightFor: ((String) -> Int?)? = null,
     imagePlaceholderAspectRatioFor: ((String) -> Float?)? = null,
+    maxImageHeight: Dp? = null,
     onImageHeightChanged: ((String, Int) -> Unit)? = null,
     onImageAspectRatioChanged: ((String, Float) -> Unit)? = null,
     bodyBlocks: List<HtmlBlock>? = null,
     showHeader: Boolean = true,
     showFooter: Boolean = true,
+    footerSections: Set<PostFooterSection> = PostFooterSection.All,
+    footerRenderOptions: PostFooterRenderOptions = PostFooterRenderOptions(),
     verticalPadding: Dp = 8.dp,
     totalViews: Int? = null,
     totalReplies: Int? = null,
@@ -148,8 +171,10 @@ fun PostRenderer(
                     onImageReload = onImageReload,
                     imageErrorMessageFor = imageErrorMessageFor,
                     imageRetryKeyFor = imageRetryKeyFor,
+                    imageHasLoadedFor = imageHasLoadedFor,
                     imageCachedHeightFor = imageCachedHeightFor,
                     imagePlaceholderAspectRatioFor = imagePlaceholderAspectRatioFor,
+                    maxImageHeight = maxImageHeight,
                     onImageHeightChanged = onImageHeightChanged,
                     onImageAspectRatioChanged = onImageAspectRatioChanged,
                 )
@@ -281,8 +306,10 @@ fun PostRenderer(
                     onImageReload = onImageReload,
                     imageErrorMessageFor = imageErrorMessageFor,
                     imageRetryKeyFor = imageRetryKeyFor,
+                    imageHasLoadedFor = imageHasLoadedFor,
                     imageCachedHeightFor = imageCachedHeightFor,
                     imagePlaceholderAspectRatioFor = imagePlaceholderAspectRatioFor,
+                    maxImageHeight = maxImageHeight,
                     onImageHeightChanged = onImageHeightChanged,
                     onImageAspectRatioChanged = onImageAspectRatioChanged,
                 )
@@ -295,8 +322,10 @@ fun PostRenderer(
                     onImageReload = onImageReload,
                     imageErrorMessageFor = imageErrorMessageFor,
                     imageRetryKeyFor = imageRetryKeyFor,
+                    imageHasLoadedFor = imageHasLoadedFor,
                     imageCachedHeightFor = imageCachedHeightFor,
                     imagePlaceholderAspectRatioFor = imagePlaceholderAspectRatioFor,
+                    maxImageHeight = maxImageHeight,
                     onImageHeightChanged = onImageHeightChanged,
                     onImageAspectRatioChanged = onImageAspectRatioChanged,
                 )
@@ -305,7 +334,7 @@ fun PostRenderer(
             if (showFooter) {
                 // Edited Text
                 val lastEditedTime = post.lastEditedTime
-                if (lastEditedTime != null) {
+                if (PostFooterSection.Metadata in footerSections && lastEditedTime != null) {
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = lastEditedTime.specialText ?: i18n("最後編輯於 {}", lastEditedTime.text),
@@ -317,30 +346,34 @@ fun PostRenderer(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // Poll
-                post.poll?.let { poll ->
+                if (PostFooterSection.Poll in footerSections) post.poll?.let { poll ->
                     PollRenderer(poll, onVote = onVote, onLoadVoters = onLoadVoters)
                 }
 
                 // Rates
-                if (post.rateBlock.rates.isNotEmpty()) {
+                if (PostFooterSection.Rates in footerSections && post.rateBlock.rates.isNotEmpty()) {
                     RateRenderer(
                         rateBlock = post.rateBlock,
+                        rateRange = footerRenderOptions.rateRange,
                         onShowAllRatings = onLoadRateResults?.let { { showRateResultsDialog = true } },
                     )
                 }
 
                 // Comments
-                if (post.comments.isNotEmpty()) {
-                    CommentRenderer(post.comments)
+                if (PostFooterSection.Comments in footerSections && post.comments.isNotEmpty()) {
+                    val visibleComments = footerRenderOptions.commentRange
+                        ?.let { range -> post.comments.filterIndexed { index, _ -> index in range } }
+                        ?: post.comments
+                    CommentRenderer(visibleComments)
                 }
 
                 // Attachments
-                if (post.attachments.isNotEmpty()) {
+                if (PostFooterSection.Attachments in footerSections && post.attachments.isNotEmpty()) {
                     AttachmentRenderer(post.attachments)
                 }
 
                 // Action Buttons Row (Bottom)
-                if (onRate != null || onComment != null || onReply != null) {
+                if (PostFooterSection.Actions in footerSections && (onRate != null || onComment != null || onReply != null)) {
                     HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), thickness = 0.5.dp, color = YamiboTheme.colors.brownPrimary.copy(alpha = 0.15f))
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
