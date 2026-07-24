@@ -73,8 +73,7 @@ fun MangaReaderSettingsPanel(
                     .padding(horizontal = 20.dp, vertical = 16.dp)
                     .verticalScroll(rememberScrollState())
             ) {
-    val lockedByTag = readingModeSource == EffectiveReadingModeSource.CatalogLongStrip
-
+                val lockedByTag = readingModeSource == EffectiveReadingModeSource.CatalogLongStrip
                 // Reading mode
                 SectionTitle(i18n("閱讀模式"))
                 if (lockedByTag) {

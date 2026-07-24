@@ -4,6 +4,10 @@ import io.github.littlesurvival.dto.value.ForumId
 import io.github.littlesurvival.dto.value.TagId
 import io.github.littlesurvival.dto.value.ThreadId
 import io.github.littlesurvival.dto.value.UserId
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository
 import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository.Companion.DEFAULT_CATEGORY_NAME
@@ -26,6 +30,8 @@ import me.thenano.yamibo.yamiboapp.LocalFavoriteItem
 class FavoriteStoreRepositoryImpl(
     private val db: Database
 ) : FavoriteStoreRepository {
+    private val favoriteItemRevisionState = MutableStateFlow(0L)
+    override val favoriteItemRevision: StateFlow<Long> = favoriteItemRevisionState.asStateFlow()
     private val categoryQueries = db.localFavoriteCategoryQueries
     private val collectionQueries = db.localFavoriteCollectionQueries
     private val itemQueries = db.localFavoriteItemQueries
@@ -327,6 +333,7 @@ class FavoriteStoreRepositoryImpl(
             categoryIds = categoryIds,
             collectionIds = collectionIds
         )
+        notifyFavoriteItemsChanged()
     }
 
     override suspend fun addNovelThreadFavorite(
@@ -352,6 +359,7 @@ class FavoriteStoreRepositoryImpl(
             categoryIds = categoryIds,
             collectionIds = collectionIds
         )
+        notifyFavoriteItemsChanged()
     }
 
     override suspend fun addTagMangaFavorite(
@@ -406,6 +414,7 @@ class FavoriteStoreRepositoryImpl(
 
         mergeCategories(itemId, normalizedCategories)
         mergeCollections(itemId, normalizedCollections)
+        notifyFavoriteItemsChanged()
     }
 
     override suspend fun addRssSearchFavorite(
@@ -425,6 +434,7 @@ class FavoriteStoreRepositoryImpl(
             categoryIds = categoryIds,
             collectionIds = collectionIds,
         )
+        notifyFavoriteItemsChanged()
     }
 
     override suspend fun isThreadFavorited(
@@ -471,36 +481,12 @@ class FavoriteStoreRepositoryImpl(
     ) {
         val normalizedCategories = categoryIds.distinct().toSet()
         val normalizedCollections = collectionIds.distinct().toSet()
-        val existingCategories = getCategoryIdsForItem(itemId)
-        val existingCollections = getCollectionIdsForItem(itemId)
+        val now = currentTimeMillis()
 
         db.transaction {
-            existingCategories
-                .filterNot(normalizedCategories::contains)
-                .forEach { categoryId ->
-                    itemCategoryCrossRefQueries.deleteByItemIdAndCategoryId(itemId, categoryId)
-                }
-
-            normalizedCategories
-                .filterNot(existingCategories::contains)
-                .forEach { categoryId ->
-                    itemCategoryCrossRefQueries.insertCrossRef(itemId, categoryId, currentTimeMillis())
-                }
-
-            existingCollections
-                .filterNot(normalizedCollections::contains)
-                .forEach { collectionId ->
-                    crossRefQueries.deleteByItemIdAndCollectionId(itemId, collectionId)
-                }
-
-            normalizedCollections
-                .filterNot(existingCollections::contains)
-                .forEach { collectionId ->
-                    crossRefQueries.insertCrossRef(itemId, collectionId, currentTimeMillis())
-                }
+            replaceItemLocations(itemId, normalizedCategories, normalizedCollections, now)
         }
 
-        itemQueries.markFavoriteStatusUpdated(currentTimeMillis(), itemId)
         cleanupOrphanItems(listOf(itemId))
     }
 
@@ -516,34 +502,7 @@ class FavoriteStoreRepositoryImpl(
 
         db.transaction {
             itemIds.forEach { itemId ->
-                val existingCategories = itemCategoryCrossRefQueries.getCategoryIdsByItemId(itemId).executeAsList().toSet()
-                val existingCollections = crossRefQueries.getCollectionIdsByItemId(itemId).executeAsList().toSet()
-
-                existingCategories
-                    .filterNot(normalizedCategories::contains)
-                    .forEach { categoryId ->
-                        itemCategoryCrossRefQueries.deleteByItemIdAndCategoryId(itemId, categoryId)
-                    }
-
-                normalizedCategories
-                    .filterNot(existingCategories::contains)
-                    .forEach { categoryId ->
-                        itemCategoryCrossRefQueries.insertCrossRef(itemId, categoryId, now)
-                    }
-
-                existingCollections
-                    .filterNot(normalizedCollections::contains)
-                    .forEach { collectionId ->
-                        crossRefQueries.deleteByItemIdAndCollectionId(itemId, collectionId)
-                    }
-
-                normalizedCollections
-                    .filterNot(existingCollections::contains)
-                    .forEach { collectionId ->
-                        crossRefQueries.insertCrossRef(itemId, collectionId, now)
-                    }
-
-                itemQueries.markFavoriteStatusUpdated(now, itemId)
+                replaceItemLocations(itemId, normalizedCategories, normalizedCollections, now)
             }
         }
         cleanupOrphanItems(itemIds.toList())
@@ -561,22 +520,7 @@ class FavoriteStoreRepositoryImpl(
 
         db.transaction {
             itemIds.forEach { itemId ->
-                val existingCategories = itemCategoryCrossRefQueries.getCategoryIdsByItemId(itemId).executeAsList().toMutableSet()
-                val existingCollections = crossRefQueries.getCollectionIdsByItemId(itemId).executeAsList().toMutableSet()
-
-                normalizedCategories.forEach { categoryId ->
-                    if (existingCategories.add(categoryId)) {
-                        itemCategoryCrossRefQueries.insertCrossRef(itemId, categoryId, now)
-                    }
-                }
-
-                normalizedCollections.forEach { collectionId ->
-                    if (existingCollections.add(collectionId)) {
-                        crossRefQueries.insertCrossRef(itemId, collectionId, now)
-                    }
-                }
-
-                itemQueries.markFavoriteStatusUpdated(now, itemId)
+                appendItemLocations(itemId, normalizedCategories, normalizedCollections, now)
             }
         }
     }
@@ -625,6 +569,11 @@ class FavoriteStoreRepositoryImpl(
                 deleteFavoriteItemById(itemId)
             }
         }
+        notifyFavoriteItemsChanged()
+    }
+
+    private fun notifyFavoriteItemsChanged() {
+        favoriteItemRevisionState.update { it + 1L }
     }
 
     private suspend fun addThreadFavorite(
@@ -773,6 +722,66 @@ class FavoriteStoreRepositoryImpl(
                 crossRefQueries.insertCrossRef(itemId, collectionId, now)
             }
         }
+    }
+
+    private fun replaceItemLocations(
+        itemId: Long,
+        targetCategoryIds: Set<Long>,
+        targetCollectionIds: Set<Long>,
+        updatedAt: Long,
+    ) {
+        val existingCategories = itemCategoryCrossRefQueries.getCategoryIdsByItemId(itemId).executeAsList().toSet()
+        val existingCollections = crossRefQueries.getCollectionIdsByItemId(itemId).executeAsList().toSet()
+
+        existingCategories
+            .filterNot(targetCategoryIds::contains)
+            .forEach { categoryId ->
+                itemCategoryCrossRefQueries.deleteByItemIdAndCategoryId(itemId, categoryId)
+            }
+
+        targetCategoryIds
+            .filterNot(existingCategories::contains)
+            .forEach { categoryId ->
+                itemCategoryCrossRefQueries.insertCrossRef(itemId, categoryId, updatedAt)
+            }
+
+        existingCollections
+            .filterNot(targetCollectionIds::contains)
+            .forEach { collectionId ->
+                crossRefQueries.deleteByItemIdAndCollectionId(itemId, collectionId)
+            }
+
+        targetCollectionIds
+            .filterNot(existingCollections::contains)
+            .forEach { collectionId ->
+                crossRefQueries.insertCrossRef(itemId, collectionId, updatedAt)
+            }
+
+        itemQueries.markFavoriteStatusUpdated(updatedAt, itemId)
+    }
+
+    private fun appendItemLocations(
+        itemId: Long,
+        targetCategoryIds: Set<Long>,
+        targetCollectionIds: Set<Long>,
+        updatedAt: Long,
+    ) {
+        val existingCategories = itemCategoryCrossRefQueries.getCategoryIdsByItemId(itemId).executeAsList().toMutableSet()
+        val existingCollections = crossRefQueries.getCollectionIdsByItemId(itemId).executeAsList().toMutableSet()
+
+        targetCategoryIds.forEach { categoryId ->
+            if (existingCategories.add(categoryId)) {
+                itemCategoryCrossRefQueries.insertCrossRef(itemId, categoryId, updatedAt)
+            }
+        }
+
+        targetCollectionIds.forEach { collectionId ->
+            if (existingCollections.add(collectionId)) {
+                crossRefQueries.insertCrossRef(itemId, collectionId, updatedAt)
+            }
+        }
+
+        itemQueries.markFavoriteStatusUpdated(updatedAt, itemId)
     }
 
     private fun cleanupOrphanItems(itemIds: List<Long>) {

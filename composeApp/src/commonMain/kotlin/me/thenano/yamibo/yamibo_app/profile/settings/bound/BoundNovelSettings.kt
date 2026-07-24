@@ -31,6 +31,7 @@ import me.thenano.yamibo.yamibo_app.profile.settings.components.SettingsSlider
 import me.thenano.yamibo.yamibo_app.repository.settings.ReaderChineseConversionOption
 import me.thenano.yamibo.yamibo_app.repository.settings.ReaderScrollButtonDisplayMode
 import me.thenano.yamibo.yamibo_app.repository.settings.ReaderScrollButtonJumpTarget
+import me.thenano.yamibo.yamibo_app.repository.settings.ThreadReaderMode
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl.HtmlRenderer
 import me.thenano.yamibo.yamibo_app.util.state
@@ -159,6 +160,19 @@ fun NovelChineseConversionSetting() {
         options = ReaderChineseConversionOption.entries.map { it to it.localizedLabel() },
         selectedValue = chineseConversion,
         onSelect = { novelSettingsRepo.chineseConversion.setValue(it) },
+        modifier = Modifier.padding(horizontal = 4.dp),
+    )
+}
+
+@Composable
+fun ThreadReaderModeSetting() {
+    val novelSettingsRepo = LocalNovelReaderSettingsRepository.current
+    val readerMode = novelSettingsRepo.threadReaderMode.state()
+
+    SettingsChipRow(
+        options = ThreadReaderMode.entries.map { it to it.localizedLabel() },
+        selectedValue = readerMode,
+        onSelect = { novelSettingsRepo.threadReaderMode.setValue(it) },
         modifier = Modifier.padding(horizontal = 4.dp),
     )
 }

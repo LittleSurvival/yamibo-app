@@ -2,6 +2,7 @@ package me.thenano.yamibo.yamibo_app.message
 
 import androidx.compose.runtime.Composable
 import kotlinx.serialization.Serializable
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.navigation.RestorableNavigatable
 import me.thenano.yamibo.yamibo_app.navigation.RestorableScreenEntry
 import me.thenano.yamibo.yamibo_app.navigation.RestorableScreenSnapshot
@@ -45,7 +46,8 @@ class IMessageCenterScreen(
             val data = decodeRestorePayload<MessageCenterRestorePayload>(payload)
             val initialTab = try {
                 MessageCenterTab.valueOf(data.initialTabName)
-            } catch (_: Exception) {
+            } catch (error: Exception) {
+                Logger.d("IMessageCenterScreen", "Failed to restore message center tab name=${data.initialTabName}", error)
                 MessageCenterTab.PrivateMessages
             }
             return IMessageCenterScreen(

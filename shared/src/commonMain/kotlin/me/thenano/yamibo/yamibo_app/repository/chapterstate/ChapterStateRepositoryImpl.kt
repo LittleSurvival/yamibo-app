@@ -81,7 +81,6 @@ class ChapterStateRepositoryImpl(
             totalPages = totalPages?.toLong(),
             updatedAt = currentTimeMillis(),
         )
-        Unit
     }
 
     override suspend fun setRead(
@@ -105,7 +104,6 @@ class ChapterStateRepositoryImpl(
             totalPages = nextTotalPages?.toLong(),
             updatedAt = currentTimeMillis(),
         )
-        Unit
     }
 
     override suspend fun applyProgressUpdates(
@@ -152,7 +150,6 @@ class ChapterStateRepositoryImpl(
         targetId: Long,
     ): Unit = withContext(Dispatchers.IO) {
         queries.deleteByTarget(targetType.name, parentId, targetId)
-        Unit
     }
 
     override suspend fun clearParent(
@@ -160,7 +157,6 @@ class ChapterStateRepositoryImpl(
         parentId: Long,
     ): Unit = withContext(Dispatchers.IO) {
         queries.deleteByParent(targetType.name, parentId)
-        Unit
     }
 
     private fun LocalChapterState.toEntry(): ChapterStateRepository.Entry {

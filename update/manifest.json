@@ -1,8 +1,8 @@
 {
   "channel": "stable",
-  "versionName": "0.0.3",
-  "versionCode": 4,
+  "versionName": "0.0.4",
+  "versionCode": 5,
   "isReady": false,
-  "releaseNotes": "新增 RSS 搜尋訂閱、離線下載與收藏分享，並改善閱讀器、更新流程及整體穩定性。",
+  "releaseNotes": "新增小說閱讀器單頁模式與收藏批量下載，完善博客管理操作，並修復下載狀態、Ruby 排版及跨頁任務提示問題。",
   "assets": []
 }

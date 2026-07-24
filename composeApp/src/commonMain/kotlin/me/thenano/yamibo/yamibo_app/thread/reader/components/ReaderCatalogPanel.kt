@@ -27,8 +27,9 @@ import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.repository.ChapterStateRepository
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadQueueEntry
-import me.thenano.yamibo.yamibo_app.repository.download.DownloadStage
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadStatus
+import me.thenano.yamibo.yamibo_app.thread.components.catalogDownloadLabel
+import me.thenano.yamibo.yamibo_app.thread.components.chapterPercentProgressLabel
 
 /** Catalog drawer panel showing pages and post-entries */
 @Composable
@@ -91,8 +92,8 @@ internal fun ReaderCatalogPanel(
                     currentIndex++ // page_loading
                 } else {
                     val pagePosts = loadedPostsByPage[page] ?: emptyList()
-                    for (post in pagePosts) {
-                        if (post.pid == currentPid) {
+                    for ((pid) in pagePosts) {
+                        if (pid == currentPid) {
                             targetIndex = currentIndex
                             break
                         }
@@ -230,7 +231,7 @@ internal fun ReaderCatalogPanel(
                             val isBookmarked = post.pid.value.toLong() in bookmarkedPostIds
                             val chapterState = chapterStates[post.pid.value.toLong()]
                             val isRead = post.pid.value.toLong() in readPostIds || chapterState?.read == true
-                            val progressText = chapterState?.progressLabel()
+                            val progressText = chapterState?.chapterPercentProgressLabel()
                             val displayTitle = rememberConvertedText(post.title.ifEmpty { "..." })
                             Surface(
                                 color = if (isCurrentPost) colors.brownLight.copy(alpha = 0.15f) else colors.creamSurface,
@@ -308,31 +309,4 @@ internal fun ReaderCatalogPanel(
             }
         }
     }
-}
-
-private fun ChapterStateRepository.Entry.progressLabel(): String? {
-    if (read) return null
-    if (progressPercent <= 0) return null
-    return i18n("已讀 {}%", progressPercent)
-}
-
-private fun catalogDownloadLabel(entry: DownloadQueueEntry): String = when {
-    entry.status == DownloadStatus.Downloading && entry.stage != null -> when (entry.stage) {
-        DownloadStage.Preparing -> i18n("準備中")
-        DownloadStage.FetchingContent -> i18n("正在取得內容")
-        DownloadStage.DownloadingText -> i18n("下載文字")
-        DownloadStage.DownloadingImages -> if (entry.progressTotal > 0) {
-            i18n("下載圖片 {}/{}", entry.progressCurrent, entry.progressTotal)
-        } else {
-            i18n("下載圖片")
-        }
-        DownloadStage.Saving -> i18n("儲存中")
-        null -> i18n("下載中")
-    }
-    entry.status == DownloadStatus.Queued -> i18n("等待中")
-    entry.status == DownloadStatus.Downloaded -> i18n("已下載")
-    entry.status == DownloadStatus.Failed -> i18n("下載失敗")
-    entry.status == DownloadStatus.Paused -> i18n("已暫停")
-    entry.status == DownloadStatus.UpdateAvailable -> i18n("可刷新")
-    else -> i18n("未下載")
 }

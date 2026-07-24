@@ -1,34 +1,11 @@
 ﻿package me.thenano.yamibo.yamibo_app.navigation
 
-import me.thenano.yamibo.yamibo_app.i18n.i18n
-
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ElevatedCard
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -40,15 +17,16 @@ import io.github.littlesurvival.dto.value.ThreadId
 import io.github.littlesurvival.dto.value.UserId
 import kotlinx.serialization.Serializable
 import me.thenano.yamibo.yamibo_app.LocalInAppLinkNavigationRepository
+import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.forum.IForumScreen
+import me.thenano.yamibo.yamibo_app.i18n.i18n
+import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
 import me.thenano.yamibo.yamibo_app.repository.inapplinknavigation.InAppLinkContext
 import me.thenano.yamibo.yamibo_app.repository.inapplinknavigation.InAppLinkResolveResult
 import me.thenano.yamibo.yamibo_app.repository.inapplinknavigation.InAppLinkTarget
-import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.thread.detail.novel.INovelThreadDetailScreen
-import me.thenano.yamibo.yamibo_app.thread.detail.tag.ITagDetailScreen
 import me.thenano.yamibo.yamibo_app.thread.detail.novel.components.ThreadTopBar
+import me.thenano.yamibo.yamibo_app.thread.detail.tag.ITagDetailScreen
 import me.thenano.yamibo.yamibo_app.thread.reader.ICommentReaderScreen
 import me.thenano.yamibo.yamibo_app.thread.reader.IThreadReaderScreen
 import me.thenano.yamibo.yamibo_app.userspace.IUserSpaceScreen
@@ -114,7 +92,6 @@ private sealed interface InAppLinkResolvingState {
     ) : InAppLinkResolvingState
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun InAppLinkResolvingScreen(url: String, context: InAppLinkContext) {
     val colors = YamiboTheme.colors
@@ -297,8 +274,7 @@ fun looksLikeSupportedYamiboInAppLink(rawUrl: String): Boolean {
         lower.startsWith("http://yamibo.com/") ||
         lower.startsWith("https://yamibo.com/") ||
         !lower.startsWith("http")
-    if (!yamibo) return false
-    return path.contains("mod=forumdisplay") ||
+    return yamibo && (path.contains("mod=forumdisplay") ||
         path.startsWith("forum-") ||
         path.contains("mod=viewthread") ||
         path.startsWith("thread-") ||
@@ -307,6 +283,5 @@ fun looksLikeSupportedYamiboInAppLink(rawUrl: String): Boolean {
         path.startsWith("space-uid-") ||
         path.contains("do=blog") ||
         path.startsWith("blog-") ||
-        (path.contains("misc.php") && path.contains("mod=tag"))
+        (path.contains("misc.php") && path.contains("mod=tag")))
 }
-

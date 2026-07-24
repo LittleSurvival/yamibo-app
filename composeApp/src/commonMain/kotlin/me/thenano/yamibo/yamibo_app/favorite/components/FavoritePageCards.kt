@@ -1,28 +1,10 @@
 ﻿package me.thenano.yamibo.yamibo_app.favorite.components
 
-import me.thenano.yamibo.yamibo_app.i18n.i18n
-
-
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
+import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
@@ -40,14 +22,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import me.thenano.yamibo.yamibo_app.components.feedback.resolvedContentCoverUrl
+import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.favorite.FavoriteGridEntry
+import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository.FavoriteCollectionWithItems
 import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository.FavoriteItem
 import me.thenano.yamibo.yamibo_app.repository.settings.FavoriteGridMode
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
-import me.thenano.yamibo.yamibo_app.components.feedback.resolvedContentCoverUrl
 import me.thenano.yamibo.yamibo_app.util.rememberImageRequest
-import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
 import me.thenano.yamibo.yamibo_app.util.time.formatRelativeTime
 
 @Composable
@@ -149,13 +131,7 @@ internal fun ItemCardUi(item: FavoriteItem, selected: Boolean, selecting: Boolea
     ) {
         Column(Modifier.padding(6.dp)) {
             Box(Modifier.fillMaxWidth().aspectRatio(0.72f).clip(RoundedCornerShape(12.dp)).background(colors.brownPrimary.copy(alpha = 0.12f))) {
-                val coverUrl = resolvedContentCoverUrl(item.targetType, item.targetId, item.coverUrl)
-                if (coverUrl != null) {
-                    AsyncImage(model = rememberImageRequest(coverUrl), contentDescription = item.title, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                } else {
-                    CoverTextFallback(title = item.title, color = colors.brownDeep.copy(alpha = 0.75f))
-                }
-                @Suppress("RemoveRedundantQualifierName")
+                FavoriteItemCover(item)
                 androidx.compose.animation.AnimatedVisibility(
                     visible = selected,
                     modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
@@ -232,12 +208,7 @@ internal fun ItemRowCardUi(item: FavoriteItem, showCover: Boolean, selected: Boo
         Row(Modifier.padding(10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             if (showCover) {
                 Box(Modifier.width(92.dp).aspectRatio(0.72f).clip(RoundedCornerShape(14.dp)).background(colors.brownPrimary.copy(alpha = 0.12f))) {
-                    val coverUrl = resolvedContentCoverUrl(item.targetType, item.targetId, item.coverUrl)
-                    if (coverUrl != null) {
-                        AsyncImage(model = rememberImageRequest(coverUrl), contentDescription = item.title, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                    } else {
-                        CoverTextFallback(title = item.title, color = colors.brownDeep.copy(alpha = 0.75f))
-                    }
+                    FavoriteItemCover(item)
                 }
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -292,6 +263,22 @@ internal fun ItemRowCardUi(item: FavoriteItem, showCover: Boolean, selected: Boo
             }
             AnimatedVisibility(visible = selected, enter = fadeIn() + scaleIn(), exit = fadeOut() + scaleOut()) { SelectedDot() }
         }
+    }
+}
+
+@Composable
+private fun FavoriteItemCover(item: FavoriteItem) {
+    val colors = YamiboTheme.colors
+    val coverUrl = resolvedContentCoverUrl(item.targetType, item.targetId, item.coverUrl)
+    if (coverUrl != null) {
+        AsyncImage(
+            model = rememberImageRequest(coverUrl),
+            contentDescription = item.title,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop,
+        )
+    } else {
+        CoverTextFallback(title = item.title, color = colors.brownDeep.copy(alpha = 0.75f))
     }
 }
 

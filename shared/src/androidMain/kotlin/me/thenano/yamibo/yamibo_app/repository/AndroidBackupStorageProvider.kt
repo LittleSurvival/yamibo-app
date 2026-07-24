@@ -1,9 +1,10 @@
 package me.thenano.yamibo.yamibo_app.repository
 
-import android.content.ContentResolver
+import android.annotation.SuppressLint
 import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.repository.backup.BackupStorageProvider
 import me.thenano.yamibo.yamibo_app.repository.settings.AppSettingsRepository
 
@@ -14,26 +15,33 @@ class AndroidBackupStorageProvider(
     private val appContext = context.applicationContext
     private val resolver = appContext.contentResolver
 
+    private inline fun <T> backupResult(operation: String, block: () -> T): Result<T> =
+        runCatching(block)
+            .onFailure { Logger.e(TAG, "$operation failed", it) }
+
     override suspend fun getSelectedFolderLabel(): String? {
         val uri = selectedTreeUri() ?: return null
         return queryDisplayName(rootDocumentUri(uri)) ?: "YamiboApp"
     }
 
-    override suspend fun setSelectedFolder(uri: String): Result<Unit> = runCatching {
+    @SuppressLint("UseKtx")
+    override suspend fun setSelectedFolder(uri: String): Result<Unit> = backupResult("setSelectedFolder") {
         val parsed = Uri.parse(uri)
         runCatching {
             resolver.takePersistableUriPermission(
                 parsed,
                 IntentFlags.READ_WRITE,
             )
+        }.onFailure {
+            Logger.d(TAG, "Failed to take persistable URI permission", it)
         }
         appSettingsRepository.backupFolderUri.setValue(uri)
-    }.map { Unit }
+    }.map { }
 
     override suspend fun writeBackupFile(
         fileName: String,
         bytes: ByteArray,
-    ): Result<BackupRepository.BackupFileInfo> = runCatching {
+    ): Result<BackupRepository.BackupFileInfo> = backupResult("writeBackupFile fileName=$fileName") {
         val treeUri = selectedTreeUri() ?: error("尚未選擇備份資料夾")
         val fileUri = DocumentsContract.createDocument(
             resolver,
@@ -52,7 +60,8 @@ class AndroidBackupStorageProvider(
         )
     }
 
-    override suspend fun readBackupFile(sourceUri: String): Result<ByteArray> = runCatching {
+    @SuppressLint("UseKtx")
+    override suspend fun readBackupFile(sourceUri: String): Result<ByteArray> = backupResult("readBackupFile") {
         resolver.openInputStream(Uri.parse(sourceUri))?.use { it.readBytes() }
             ?: error("無法讀取備份檔案")
     }
@@ -95,9 +104,10 @@ class AndroidBackupStorageProvider(
     override suspend fun getBackupStorageBytes(): Long =
         listBackupFiles().sumOf { it.bytes }
 
-    override suspend fun deleteBackupFile(fileInfo: BackupRepository.BackupFileInfo): Result<Unit> = runCatching {
+    @SuppressLint("UseKtx")
+    override suspend fun deleteBackupFile(fileInfo: BackupRepository.BackupFileInfo): Result<Unit> = backupResult("deleteBackupFile name=${fileInfo.name}") {
         DocumentsContract.deleteDocument(resolver, Uri.parse(fileInfo.uri))
-    }.map { Unit }
+    }.map { }
 
     private fun selectedTreeUri(): Uri? =
         appSettingsRepository.backupFolderUri.getValue().takeIf { it.isNotBlank() }?.let(Uri::parse)
@@ -125,6 +135,7 @@ class AndroidBackupStorageProvider(
     }
 
     private companion object {
+        const val TAG = "AndroidBackupStorageProvider"
         const val BACKUP_EXTENSION = ".yamibobak"
         const val AUTO_BACKUP_SUFFIX = "-autobackup.yamibobak"
         const val BACKUP_MIME_TYPE = "application/octet-stream"

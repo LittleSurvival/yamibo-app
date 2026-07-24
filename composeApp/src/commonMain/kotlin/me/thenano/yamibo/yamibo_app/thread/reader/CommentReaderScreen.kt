@@ -5,7 +5,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material3.*
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -24,12 +27,11 @@ import kotlinx.coroutines.launch
 import me.thenano.yamibo.yamibo_app.LocalAuthRepository
 import me.thenano.yamibo.yamibo_app.LocalNovelThreadCacheRepository
 import me.thenano.yamibo.yamibo_app.LocalThreadRepository
+import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
 import me.thenano.yamibo.yamibo_app.repository.inapplinknavigation.InAppLinkContext
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.thread.detail.novel.components.ThreadErrorContent
 import me.thenano.yamibo.yamibo_app.thread.detail.novel.components.ThreadLoadingSkeleton
 import me.thenano.yamibo.yamibo_app.thread.detail.novel.components.ThreadTopBar
@@ -54,7 +56,6 @@ private sealed interface CommentState {
  *
  * Supports cross-page lazy loading when comments span multiple pages.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun CommentReaderScreen(
     tid: ThreadId,
@@ -69,7 +70,7 @@ internal fun CommentReaderScreen(
     val authRepo = LocalAuthRepository.current
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
     val platformContext = LocalPlatformContext.current
     val listState = rememberLazyListState()
     val htmlLinkContext = remember(tid, postTitle, authorId) {
@@ -102,7 +103,7 @@ internal fun CommentReaderScreen(
                 title = i18n("發表回復"),
                 initialUrl = replyPageUrl,
                 successCondition = { url -> url.contains("mod=viewthread") && url.contains("tid=") },
-                    onSuccess = { scope.launch { snackbarHostState.showSnackbar(i18n("回復已發表，請刷新頁面查看")) } },
+            onSuccess = { feedbackController.post(i18n("回復已發表，請刷新頁面查看")) },
             )
         )
     }
@@ -212,6 +213,21 @@ internal fun CommentReaderScreen(
         return Pair(continuationComments, isComplete)
     }
 
+    suspend fun reloadComments() {
+        when (val result = threadRepository.fetchFindPost(tid, oPostId)) {
+            is YamiboResult.Success -> {
+                currentFullPage = result.value.pageNav?.currentPage ?: 1
+                totalFullPages = result.value.pageNav?.totalPages ?: 1
+                val (comments, complete) = extractAndCacheComments(result.value)
+                commentPosts = comments
+                isCommentComplete = complete
+                state = CommentState.Success
+            }
+
+            else -> state = CommentState.Error(i18n(result.message()))
+        }
+    }
+
     // Initial load
     LaunchedEffect(tid, oPostId) {
         // Check cache first
@@ -237,23 +253,7 @@ internal fun CommentReaderScreen(
             return@LaunchedEffect
         }
 
-        // No cache — fetch using fetchFindPost
-        when (val result = threadRepository.fetchFindPost(tid, oPostId)) {
-            is YamiboResult.Success -> {
-                val threadPage = result.value
-                currentFullPage = threadPage.pageNav?.currentPage ?: 1
-                totalFullPages = threadPage.pageNav?.totalPages ?: 1
-
-                val (comments, complete) = extractAndCacheComments(threadPage)
-                commentPosts = comments
-                isCommentComplete = complete
-                state = CommentState.Success
-            }
-
-            else -> {
-                state = CommentState.Error(i18n(result.message()))
-            }
-        }
+        reloadComments()
     }
 
     LaunchedEffect(state, commentPosts, targetCommentPid) {
@@ -264,7 +264,7 @@ internal fun CommentReaderScreen(
             listState.animateScrollToItem(index)
             targetCommentHandled = true
         } else if (isCommentComplete) {
-            snackbarHostState.showSnackbar(i18n("無法精準定位該評論"))
+            feedbackController.post(i18n("無法精準定位該評論"))
             targetCommentHandled = true
         }
     }
@@ -272,9 +272,6 @@ internal fun CommentReaderScreen(
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = colors.creamBackground,
-        snackbarHost = {
-            YamiboSnackbarHost(hostState = snackbarHostState)
-        },
         topBar = {
             ThreadTopBar(
                 title = postTitle,
@@ -296,18 +293,7 @@ internal fun CommentReaderScreen(
                     onRetry = {
                         state = CommentState.Loading
                         scope.launch {
-                            when (val result = threadRepository.fetchFindPost(tid, oPostId)) {
-                                is YamiboResult.Success -> {
-                                    currentFullPage = result.value.pageNav?.currentPage ?: 1
-                                    totalFullPages = result.value.pageNav?.totalPages ?: 1
-                                    val (comments, complete) = extractAndCacheComments(result.value)
-                                    commentPosts = comments
-                                    isCommentComplete = complete
-                                    state = CommentState.Success
-                                }
-
-                                else -> state = CommentState.Error(i18n(result.message()))
-                            }
+                            reloadComments()
                         }
                     }
                 )
@@ -345,26 +331,26 @@ internal fun CommentReaderScreen(
                                     onRate = { score, reason, noticeAuthor ->
                                         val formHash = getFormHash()
                                         if (formHash == null) {
-                                            scope.launch { snackbarHostState.showSnackbar(i18n("獲取登入資訊失敗，請重新登入")) }
+                feedbackController.post(i18n("獲取登入資訊失敗，請重新登入"))
                                             return@PostRenderer
                                         }
                                         scope.launch {
                                             when (val res = threadRepository.ratePost(tid, post.pid, score, reason, formHash, noticeAuthor)) {
-                                                is YamiboResult.Success -> snackbarHostState.showSnackbar(i18n("評分成功，刷新後更新評分/點評狀態"))
-                                                else -> snackbarHostState.showSnackbar(i18n("評分失敗: {}", i18n(res.message())))
+                                                is YamiboResult.Success -> feedbackController.post(i18n("評分成功，刷新後更新評分/點評狀態"))
+                                                else -> feedbackController.post(i18n("評分失敗: {}", i18n(res.message())))
                                             }
                                         }
                                     },
                                     onComment = { message ->
                                         val formHash = getFormHash()
                                         if (formHash == null) {
-                                            scope.launch { snackbarHostState.showSnackbar(i18n("獲取登入資訊失敗，請重新登入")) }
+                feedbackController.post(i18n("獲取登入資訊失敗，請重新登入"))
                                             return@PostRenderer
                                         }
                                         scope.launch {
                                             when (val res = threadRepository.commentPost(tid, post.pid, message, formHash)) {
-                                                is YamiboResult.Success -> snackbarHostState.showSnackbar(i18n("點評成功，刷新後更新評分/點評狀態"))
-                                                else -> snackbarHostState.showSnackbar(i18n("點評失敗: {}", i18n(res.message())))
+                                                is YamiboResult.Success -> feedbackController.post(i18n("點評成功，刷新後更新評分/點評狀態"))
+                                                else -> feedbackController.post(i18n("點評失敗: {}", i18n(res.message())))
                                             }
                                         }
                                     },
@@ -416,7 +402,7 @@ internal fun CommentReaderScreen(
                                                             threadRepository.fetchThread(tid, null, nextPage)) {
                                                             is YamiboResult.Success -> result.value
                                                             else -> {
-                                                                snackbarHostState.showSnackbar(i18n("載入失敗: {}", i18n(result.message())))
+                                                                feedbackController.post(i18n("載入失敗: {}", i18n(result.message())))
                                                                 isLoadingMore = false
                                                                 return@launch
                                                             }
@@ -470,23 +456,12 @@ internal fun CommentReaderScreen(
                 onRefresh = {
                     scope.launch {
                         state = CommentState.Loading
-                        // Re-fetch using fetchFindPost
-                        when (val result = threadRepository.fetchFindPost(tid, oPostId)) {
-                            is YamiboResult.Success -> {
-                                currentFullPage = result.value.pageNav?.currentPage ?: 1
-                                totalFullPages = result.value.pageNav?.totalPages ?: 1
-                                val (comments, complete) = extractAndCacheComments(result.value)
-                                commentPosts = comments
-                                isCommentComplete = complete
-                                state = CommentState.Success
-                            }
-                            else -> state = CommentState.Error(i18n(result.message()))
-                        }
+                        reloadComments()
                     }
                 },
                 onSettings = {
                     scope.launch {
-                        snackbarHostState.showSnackbar(i18n("設定功能開發中"))
+                        feedbackController.post(i18n("設定功能開發中"))
                     }
                 },
                 modifier = Modifier
@@ -506,14 +481,14 @@ internal fun CommentReaderScreen(
                             initialUrl = replyUrl,
                             successCondition = { url -> url.contains("mod=viewthread") && url.contains("tid=") },
                             onSuccess = {
-                                scope.launch { snackbarHostState.showSnackbar(i18n("回復已發表，請刷新頁面查看")) }
+                        feedbackController.post(i18n("回復已發表，請刷新頁面查看"))
                             },
                         )
                     )
                 },
                 onFavorite = {
                     scope.launch {
-                        snackbarHostState.showSnackbar(i18n("收藏功能開發中"))
+                        feedbackController.post(i18n("收藏功能開發中"))
                     }
                 },
                 onShare = {

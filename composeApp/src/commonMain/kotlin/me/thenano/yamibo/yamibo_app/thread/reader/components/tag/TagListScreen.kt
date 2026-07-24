@@ -2,7 +2,6 @@ package me.thenano.yamibo.yamibo_app.thread.reader.components.tag
 
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 
-
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -33,7 +32,6 @@ internal sealed interface TagListState {
     data class Error(val message: String) : TagListState
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 internal fun TagListScreen(
     tid: ThreadId,

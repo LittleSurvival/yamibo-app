@@ -1,4 +1,4 @@
-﻿package me.thenano.yamibo.yamibo_app.profile.settings.backup
+package me.thenano.yamibo.yamibo_app.profile.settings.backup
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -21,20 +21,19 @@ import kotlinx.coroutines.launch
 import me.thenano.yamibo.yamibo_app.LocalAppSettingsRepository
 import me.thenano.yamibo.yamibo_app.LocalBackupRepository
 import me.thenano.yamibo.yamibo_app.LocalBackupScheduler
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBar
+import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.i18n.localizedLabel
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.profile.settings.components.SettingsChipRow
 import me.thenano.yamibo.yamibo_app.repository.BackupRepository
 import me.thenano.yamibo.yamibo_app.repository.settings.BackupInterval
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.util.formatStorageSize
 import me.thenano.yamibo.yamibo_app.util.state
 import kotlin.math.roundToInt
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun BackupSettingsScreen() {
     val colors = YamiboTheme.colors
@@ -42,7 +41,7 @@ internal fun BackupSettingsScreen() {
     val repository = LocalBackupRepository.current
     val scheduler = LocalBackupScheduler.current
     val appSettingsRepository = LocalAppSettingsRepository.current
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
     val coroutineScope = rememberCoroutineScope()
     val backupInterval = appSettingsRepository.backupInterval.state()
     val maxAutoFiles = appSettingsRepository.backupMaxAutoFiles.state()
@@ -66,9 +65,12 @@ internal fun BackupSettingsScreen() {
                 repository.setSelectedFolder(uri)
                     .onSuccess {
                         refresh()
-                        snackbarHostState.showSnackbar(i18n("已選擇備份資料夾"))
+                        feedbackController.post(i18n("已選擇備份資料夾"))
                     }
-                    .onFailure { snackbarHostState.showSnackbar(it.message ?: i18n("無法選擇備份資料夾")) }
+                    .onFailure { error ->
+                        Logger.e("BackupSettingsScreen", "Failed to select backup folder", error)
+                        feedbackController.post(error.message ?: i18n("無法選擇備份資料夾"))
+                    }
             }
         },
         onBackupPicked = { uri -> pendingRestoreUri = uri },
@@ -84,7 +86,6 @@ internal fun BackupSettingsScreen() {
                 onBack = { navigator.pop() },
             )
         },
-        snackbarHost = { YamiboSnackbarHost(snackbarHostState) },
         containerColor = colors.creamBackground,
     ) { paddingValues ->
         Column(
@@ -134,11 +135,14 @@ internal fun BackupSettingsScreen() {
                     repository.restoreBackup(uri, mode)
                         .onSuccess {
                             refresh()
-                            snackbarHostState.showSnackbar(
+                            feedbackController.post(
                                 i18n("還原完成：收藏 {}，設定 {}，閱讀紀錄 {}", it.favorites, it.settings, it.readingHistory)
                             )
                         }
-                        .onFailure { snackbarHostState.showSnackbar(it.message ?: i18n("還原備份失敗")) }
+                        .onFailure { error ->
+                            Logger.e("BackupSettingsScreen", "Failed to restore backup", error)
+                            feedbackController.post(error.message ?: i18n("還原備份失敗"))
+                        }
                     working = false
                 }
             },
@@ -155,9 +159,12 @@ internal fun BackupSettingsScreen() {
                     repository.createBackup(automatic = false, customName = name.takeIf { it.isNotBlank() })
                         .onSuccess {
                             refresh()
-                            snackbarHostState.showSnackbar(i18n("已建立備份：{}", it.name))
+                            feedbackController.post(i18n("已建立備份：{}", it.name))
                         }
-                        .onFailure { snackbarHostState.showSnackbar(it.message ?: i18n("建立備份失敗")) }
+                        .onFailure { error ->
+                            Logger.e("BackupSettingsScreen", "Failed to create backup", error)
+                            feedbackController.post(error.message ?: i18n("建立備份失敗"))
+                        }
                     working = false
                 }
             },

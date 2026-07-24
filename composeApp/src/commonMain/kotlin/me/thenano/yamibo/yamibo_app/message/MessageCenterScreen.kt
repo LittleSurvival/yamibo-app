@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.littlesurvival.YamiboRoute
 import io.github.littlesurvival.core.YamiboResult
+import io.github.littlesurvival.core.mapSuccess
 import io.github.littlesurvival.dto.page.ProfilePage
 import io.github.littlesurvival.dto.page.UserSpaceNoticePage
 import io.github.littlesurvival.dto.page.UserSpacePrivateMessagePage
@@ -27,7 +28,6 @@ import me.thenano.yamibo.yamibo_app.components.navigation.YamiboMainTabTopBar
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboScrollableTabRow
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBar
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBarIconAction
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.components.user.UserAvatar
 import me.thenano.yamibo.yamibo_app.i18n.i18n
@@ -51,7 +51,6 @@ internal sealed interface MessageCenterContent {
     data class Notices(val page: UserSpaceNoticePage) : MessageCenterContent
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MessageCenterScreen(
     initialTab: MessageCenterTab = MessageCenterTab.PrivateMessages,
@@ -63,7 +62,7 @@ fun MessageCenterScreen(
     val authRepository = LocalAuthRepository.current
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
     val currentUser = authRepository.currentUser()
 
     var selectedTab by remember { mutableStateOf(initialTab) }
@@ -106,7 +105,6 @@ fun MessageCenterScreen(
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = colors.creamBackground,
-        snackbarHost = { YamiboSnackbarHost(hostState = snackbarHostState) },
         topBar = {
             if (mainTabTopBar) {
                 MessageCenterMainTopBar(
@@ -177,7 +175,7 @@ fun MessageCenterScreen(
                             onOpenPrivateMessage = { user -> navigator.navigate(IPrivateMessageScreen(user.uid, user.name)) },
                             onMessageAction = {
                                 scope.launch {
-                                    snackbarHostState.showSnackbar(i18n("TODO: 消息互動尚未接入"), duration = SnackbarDuration.Short)
+                                    feedbackController.post(i18n("TODO: 消息互動尚未接入"), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
                                 }
                             },
                         )
@@ -283,14 +281,6 @@ private fun MessageCenterContent.pageNumber(): Int? = when (this) {
 
 private fun UserSpacePrivateMessagePage.hasUnreadMessages(): Boolean =
     (unreadCount ?: 0) > 0 || messages.any { (it.unreadCount ?: 0) > 0 }
-
-private fun <T, R> YamiboResult<T>.mapSuccess(transform: (T) -> R): YamiboResult<R> = when (this) {
-    is YamiboResult.Success -> YamiboResult.Success(transform(value))
-    is YamiboResult.Failure -> this
-    is YamiboResult.NotLoggedIn -> this
-    is YamiboResult.NoPermission -> this
-    is YamiboResult.Maintenance -> this
-}
 
 private fun sendPrivateMessageWebView(): IActionWebView =
     IActionWebView(

@@ -2,15 +2,20 @@ package me.thenano.yamibo.yamibo_app.repository
 
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.page.FilterType
+import io.github.littlesurvival.dto.page.AddFavoriteResult
 import io.github.littlesurvival.dto.page.ForumPage
 import io.github.littlesurvival.dto.page.HomePage
 import io.github.littlesurvival.dto.page.OrderType
 import io.github.littlesurvival.dto.page.SearchPage
 import io.github.littlesurvival.dto.value.FormHash
+import io.github.littlesurvival.dto.value.FavoriteId
 import io.github.littlesurvival.dto.value.ForumId
 import io.github.littlesurvival.dto.value.SearchId
+import kotlinx.coroutines.flow.StateFlow
 
 interface ForumRepository {
+    val favoriteForums: StateFlow<Map<ForumId, FavoriteId?>>
+
     data class ForumCacheKey(
         val fid: Int,
         val page: Int,
@@ -50,7 +55,8 @@ interface ForumRepository {
         page: Int = 1
     ): YamiboResult<SearchPage>
 
-    suspend fun addFavorite(forumId: ForumId, formHash: FormHash): YamiboResult<String>
+    suspend fun addFavorite(forumId: ForumId, formHash: FormHash): YamiboResult<AddFavoriteResult>
+    suspend fun removeFavorite(forumId: ForumId, formHash: FormHash): YamiboResult<String>
 
     fun getCachedHomePage(): HomePage?
     fun getCachedForumPage(

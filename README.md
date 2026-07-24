@@ -161,7 +161,12 @@ Gitee / Gitea mirror 的 ready manifest 必須指向各自 mirror release 的 AP
 
 見 `LICENSE`。
 
-
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=LittleSurvival/yamibo-app&type=Date)](https://star-history.com/#LittleSurvival/yamibo-app&Date)
+<a href="https://www.star-history.com/?repos=LittleSurvival%2Fyamibo-app&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=LittleSurvival/yamibo-app&type=date&theme=dark&legend=top-left&sealed_token=yMVKSYcJeVKDjcpFomqoaWC1Yk3hqLTR8HTht7y-Rjled52mrB6RX7MS9eWxPp_WAeVCR1PIF1LXTwjuyVVPDUasD0InNXK9nUH5FE3Q31T95F-JKbbVsw" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=LittleSurvival/yamibo-app&type=date&legend=top-left&sealed_token=yMVKSYcJeVKDjcpFomqoaWC1Yk3hqLTR8HTht7y-Rjled52mrB6RX7MS9eWxPp_WAeVCR1PIF1LXTwjuyVVPDUasD0InNXK9nUH5FE3Q31T95F-JKbbVsw" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=LittleSurvival/yamibo-app&type=date&legend=top-left&sealed_token=yMVKSYcJeVKDjcpFomqoaWC1Yk3hqLTR8HTht7y-Rjled52mrB6RX7MS9eWxPp_WAeVCR1PIF1LXTwjuyVVPDUasD0InNXK9nUH5FE3Q31T95F-JKbbVsw" />
+ </picture>
+</a>

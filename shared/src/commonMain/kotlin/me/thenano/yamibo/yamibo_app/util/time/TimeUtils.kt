@@ -23,23 +23,7 @@ fun isLeapYear(year: Int): Boolean {
 }
 
 fun formatDate(timestamp: Long): String {
-    val totalDays = timestamp / (24 * 60 * 60 * 1000L)
-    var year = 1970
-    var remainingDays = totalDays + (8 * 60 * 60 * 1000L / (24 * 60 * 60 * 1000L))
-    while (true) {
-        val daysInYear = if (isLeapYear(year)) 366L else 365L
-        if (remainingDays < daysInYear) break
-        remainingDays -= daysInYear
-        year++
-    }
-    val monthDays = intArrayOf(31, if (isLeapYear(year)) 29 else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
-    var month = 1
-    for (days in monthDays) {
-        if (remainingDays < days) break
-        remainingDays -= days
-        month++
-    }
-    val day = remainingDays.toInt() + 1
+    val (year, month, day) = datePartsAtUtcPlus8(timestamp)
     return "$year/$month/$day"
 }
 
@@ -52,6 +36,15 @@ fun formatTime(timestamp: Long): String {
 }
 
 fun formatDateTime(timestamp: Long): String {
+    val (year, month, day) = datePartsAtUtcPlus8(timestamp)
+    val adjustedMs = timestamp + 8 * 60 * 60 * 1000L
+    val totalMinutes = (adjustedMs / (60 * 1000L)) % (24 * 60)
+    val hours = (totalMinutes / 60).toInt()
+    val minutes = (totalMinutes % 60).toInt()
+    return "$year/${month.toString().padStart(2, '0')}/${day.toString().padStart(2, '0')} ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}"
+}
+
+private fun datePartsAtUtcPlus8(timestamp: Long): Triple<Int, Int, Int> {
     val totalDays = timestamp / (24 * 60 * 60 * 1000L)
     var year = 1970
     var remainingDays = totalDays + (8 * 60 * 60 * 1000L / (24 * 60 * 60 * 1000L))
@@ -68,12 +61,7 @@ fun formatDateTime(timestamp: Long): String {
         remainingDays -= days
         month++
     }
-    val day = remainingDays.toInt() + 1
-    val adjustedMs = timestamp + 8 * 60 * 60 * 1000L
-    val totalMinutes = (adjustedMs / (60 * 1000L)) % (24 * 60)
-    val hours = (totalMinutes / 60).toInt()
-    val minutes = (totalMinutes % 60).toInt()
-    return "$year/${month.toString().padStart(2, '0')}/${day.toString().padStart(2, '0')} ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}"
+    return Triple(year, month, remainingDays.toInt() + 1)
 }
 
 fun currentLocalDateKey(): String {

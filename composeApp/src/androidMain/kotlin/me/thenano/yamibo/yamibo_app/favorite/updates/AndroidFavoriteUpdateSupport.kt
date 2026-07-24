@@ -14,6 +14,7 @@ import me.thenano.yamibo.yamibo_app.repository.FavoriteUpdateRepository
 import me.thenano.yamibo.yamibo_app.repository.favorite.FavoriteUpdateRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.rss.RssSearchSubscriptionRepositoryImpl
 import me.thenano.yamibo.yamibo_app.store.AndroidCookieStore
+import me.thenano.yamibo.yamibo_app.store.AndroidForumFavoriteStore
 import me.thenano.yamibo.yamibo_app.store.AndroidUserStore
 
 internal object AndroidFavoriteUpdateSupport {
@@ -22,14 +23,20 @@ internal object AndroidFavoriteUpdateSupport {
         val dbFactory = DatabaseFactory(appContext)
         val cookieStore = AndroidCookieStore(appContext)
         val userStore = AndroidUserStore(appContext)
+        val forumFavoriteStore = AndroidForumFavoriteStore(appContext)
         val yamiboClient = YamiboClient(timeoutMillis = 60_000L)
         val diskCacheFactory = DiskCacheFactory(
             dbFactory = dbFactory,
             cacheDirPath = appContext.cacheDir.absolutePath,
         )
         val db = Database(dbFactory.createDriver())
-        val authRepository = AndroidAuthRepository(cookieStore, userStore, yamiboClient)
-        val forumRepository = AndroidForumRepository(cookieStore, yamiboClient, diskCacheFactory)
+        val authRepository = AndroidAuthRepository(cookieStore, userStore, yamiboClient, forumFavoriteStore)
+        val forumRepository = AndroidForumRepository(
+            cookieStore,
+            yamiboClient,
+            diskCacheFactory,
+            forumFavoriteStore,
+        )
         return FavoriteUpdateRepositoryImpl(
             db = db,
             localFavoriteRepository = AndroidLocalFavoriteRepository(dbFactory),

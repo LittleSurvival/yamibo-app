@@ -16,7 +16,6 @@ import androidx.compose.ui.unit.sp
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 
 /** Wrapping option chips used by settings pages. */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun <T> SettingsChipRow(
     options: List<Pair<T, String>>,

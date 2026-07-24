@@ -11,6 +11,7 @@ import me.thenano.yamibo.yamibo_app.thread.reader.debug.DebugRecomposeProbe
 import me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.ReaderBottomBar
 import me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.ReaderFloatButtons
 import me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.ReaderOverlayTopBar
+import me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.ReaderSinglePageProgress
 
 /**
  *  TopBar (CataLog)
@@ -32,9 +33,13 @@ internal fun ReaderOverlayMenu(
     onReply: () -> Unit,
     onRefresh: () -> Unit,
     onSettings: () -> Unit,
-    modifier: Modifier = Modifier
+    singlePageProgress: ReaderSinglePageProgress? = null,
+    onSinglePageProgressChange: ((Int) -> Unit)? = null,
+    onSinglePageProgressCommit: (() -> Unit)? = null,
+    @Suppress("ModifierParameter") modifier: Modifier = Modifier
 ) {
     DebugRecomposeProbe("ReaderOverlayMenu", "visible=$visible")
+    val floatButtonBottomPadding = if (singlePageProgress != null) 154.dp else 110.dp
     Box(modifier = modifier.fillMaxSize()) {
         // Animated top bar
         ReaderOverlayTopBar(
@@ -52,7 +57,7 @@ internal fun ReaderOverlayMenu(
             onSettings = onSettings,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(bottom = 110.dp, end = 16.dp)
+                .padding(bottom = floatButtonBottomPadding, end = 16.dp)
         )
 
         // Bottom action bar (Comment, Favorite, Share)
@@ -62,8 +67,11 @@ internal fun ReaderOverlayMenu(
             onReply = onReply,
             onFavorite = onFavorite,
             onFavoriteLongPress = onFavoriteLongPress,
-            onShare = onShare,
-            modifier = Modifier.align(Alignment.BottomCenter)
-        )
+        onShare = onShare,
+        singlePageProgress = singlePageProgress,
+        onSinglePageProgressChange = onSinglePageProgressChange,
+        onSinglePageProgressCommit = onSinglePageProgressCommit,
+        modifier = Modifier.align(Alignment.BottomCenter)
+    )
     }
 }

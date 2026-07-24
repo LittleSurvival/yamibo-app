@@ -23,7 +23,7 @@ internal fun CommentBanner(
     text: String,
     icon: String = "💬",
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    @Suppress("ModifierParameter") modifier: Modifier = Modifier
 ) {
     val colors = YamiboTheme.colors
 

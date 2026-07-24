@@ -6,6 +6,8 @@ import android.os.Build
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
+import me.thenano.yamibo.yamibo_app.Logger
+import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.repository.settings.AppSettingsRepository
 import me.thenano.yamibo.yamibo_app.store.settings.AndroidSettingsStore
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
@@ -16,12 +18,12 @@ class BackupWorker(
 ) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val notifications = AndroidBackupNotificationRepository(applicationContext)
-        setForeground(createForegroundInfo(notifications, "正在建立備份"))
+        setForeground(createForegroundInfo(notifications, i18n("正在建立備份")))
         return try {
             val repository = AndroidBackupSupport.createRepository(applicationContext)
             val settings = AppSettingsRepository(AndroidSettingsStore(applicationContext))
             if (settings.backupFolderUri.getValue().isBlank()) {
-                notifications.showFailed("尚未選擇備份資料夾")
+                notifications.showFailed(i18n("尚未選擇備份資料夾"))
                 return Result.failure()
             }
             val file = repository.createBackup(automatic = true).getOrThrow()
@@ -30,7 +32,8 @@ class BackupWorker(
             notifications.showCompleted("${file.name}，${file.bytes} bytes")
             Result.success()
         } catch (throwable: Throwable) {
-            notifications.showFailed(throwable.message ?: "建立備份時發生錯誤")
+            Logger.e("BackupWorker", "Automatic backup failed", throwable)
+            notifications.showFailed(throwable.message ?: i18n("建立備份時發生錯誤"))
             Result.retry()
         }
     }

@@ -8,6 +8,7 @@ import androidx.core.content.FileProvider
 import androidx.core.net.toUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.repository.appupdate.AppUpdateDownloadState
 import me.thenano.yamibo.yamibo_app.repository.appupdate.AppUpdatePlatform
 import me.thenano.yamibo.yamibo_app.repository.appupdate.AppUpdateRelease
@@ -33,11 +34,7 @@ class AndroidAppUpdatePlatform(
     override val supportedAssetTypes: Set<String> = setOf("universal-apk", "apk")
 
     override val isInstallPermissionGranted: Boolean
-        get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.packageManager.canRequestPackageInstalls()
-        } else {
-            true
-        }
+        get() = Build.VERSION.SDK_INT < Build.VERSION_CODES.O || context.packageManager.canRequestPackageInstalls()
 
     override suspend fun downloadAndInstall(
         release: AppUpdateRelease,
@@ -51,7 +48,9 @@ class AndroidAppUpdatePlatform(
         val sha = asset.sha256
         val fileIsValid = apkFile.exists() && apkFile.hasApkZipSignature() && runCatching {
             sha.isNullOrBlank() || apkFile.sha256().equals(sha, ignoreCase = true)
-        }.getOrDefault(false)
+        }
+            .onFailure { Logger.d(TAG, "Cached APK validation failed; downloading a fresh asset", it) }
+            .getOrDefault(false)
 
         if (fileIsValid) {
             return@withContext requestInstall(apkFile, release)
@@ -98,7 +97,13 @@ class AndroidAppUpdatePlatform(
                 }
             }
             requestInstall(apkFile, release)
-        }.getOrElse { error ->
+        }
+            .onFailure { error ->
+                if (error !is CancellationException) {
+                    Logger.e(TAG, "APK download or install request failed version=${release.versionName}", error)
+                }
+            }
+            .getOrElse { error ->
             apkFile.delete()
             if (error is CancellationException) {
                 AppUpdateDownloadState.Failed(release, "Download canceled")
@@ -144,6 +149,8 @@ class AndroidAppUpdatePlatform(
     }
 }
 
+private const val TAG = "AndroidAppUpdate"
+
 private class CancellationException : Exception()
 
 private fun File.sha256(): String {
@@ -160,8 +167,7 @@ private fun File.sha256(): String {
 }
 
 private fun File.hasApkZipSignature(): Boolean {
-    if (length() < 4L) return false
-    return inputStream().use { input ->
+    return length() >= 4L && inputStream().use { input ->
         val header = ByteArray(4)
         input.read(header) == header.size &&
             header.contentEquals(byteArrayOf(0x50, 0x4B, 0x03, 0x04))

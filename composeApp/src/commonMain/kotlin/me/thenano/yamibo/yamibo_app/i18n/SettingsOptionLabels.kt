@@ -55,6 +55,13 @@ fun ReadingMode.localizedLabel(): String = when (this) {
     ReadingMode.SCROLL_GAP -> i18n("捲動(留空)")
 }
 
+fun ThreadReaderMode.localizedLabel(): String = when (this) {
+        ThreadReaderMode.SCROLL_CONTINUOUS -> i18n("捲動(連續)")
+    ThreadReaderMode.SINGLE_LTR -> i18n("單頁(左至右)")
+    ThreadReaderMode.SINGLE_RTL -> i18n("單頁(右至左)")
+    ThreadReaderMode.SINGLE_TTB -> i18n("單頁(上至下)")
+}
+
 fun TouchZoneLayout.localizedLabel(): String = when (this) {
     TouchZoneLayout.L_SHAPE -> i18n("L式")
     TouchZoneLayout.KINDLE -> i18n("Kindle式")

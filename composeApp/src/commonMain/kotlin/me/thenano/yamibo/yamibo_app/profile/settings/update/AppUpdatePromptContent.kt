@@ -23,8 +23,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
@@ -44,8 +42,6 @@ import yamibo_app.composeapp.generated.resources.logo_about
 @Composable
 internal fun AppUpdatePromptContent(
     release: AppUpdateRelease,
-    hasScrolledToBottom: Boolean,
-    onScrolledToBottomChange: (Boolean) -> Unit,
     onPrimaryClick: () -> Unit,
     onManualClick: () -> Unit,
     onLaterClick: () -> Unit,
@@ -86,16 +82,6 @@ internal fun AppUpdatePromptContent(
                 contentScale = ContentScale.Fit,
             )
             val scrollState = rememberScrollState()
-            LaunchedEffect(scrollState) {
-                snapshotFlow {
-                    val value = scrollState.value
-                    val max = scrollState.maxValue
-                    val viewport = scrollState.viewportSize
-                    viewport > 0 && (max == 0 || value >= max)
-                }.collect { reached ->
-                    if (reached) onScrolledToBottomChange(true)
-                }
-            }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -126,7 +112,6 @@ internal fun AppUpdatePromptContent(
             }
             Button(
                 onClick = onPrimaryClick,
-                enabled = hasScrolledToBottom,
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = colors.brownDeep,
@@ -142,7 +127,6 @@ internal fun AppUpdatePromptContent(
             ) {
                 OutlinedButton(
                     onClick = onManualClick,
-                    enabled = hasScrolledToBottom,
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.outlinedButtonColors(
                         containerColor = colors.creamBackground,
@@ -155,7 +139,6 @@ internal fun AppUpdatePromptContent(
                 }
                 OutlinedButton(
                     onClick = onLaterClick,
-                    enabled = hasScrolledToBottom,
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.outlinedButtonColors(
                         containerColor = colors.creamBackground,

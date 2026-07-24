@@ -31,7 +31,9 @@ import me.thenano.yamibo.yamibo_app.profile.settings.bound.NovelScrollButtonDisp
 import me.thenano.yamibo.yamibo_app.profile.settings.bound.NovelScrollButtonJumpTargetSetting
 import me.thenano.yamibo.yamibo_app.profile.settings.bound.NovelScrollButtonThresholdSetting
 import me.thenano.yamibo.yamibo_app.profile.settings.bound.NovelSystemBarsBackgroundSetting
+import me.thenano.yamibo.yamibo_app.profile.settings.bound.MangaTouchZoneSetting
 import me.thenano.yamibo.yamibo_app.profile.settings.bound.ReaderFontSelectorSetting
+import me.thenano.yamibo.yamibo_app.profile.settings.bound.ThreadReaderModeSetting
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.util.state
 
@@ -90,18 +92,18 @@ fun NovelReaderSettingsPanel(
 
                     Spacer(Modifier.height(24.dp))
 
-                    // Copy Chapter Action
-                    SectionTitle(i18n("操作"), color = colors.textDark)
-                    CopyChapterButton(
-                        onClick = { onCopyChapter?.invoke() },
-                        enabled = onCopyChapter != null,
-                        colors = colors,
-                    )
+                    SectionTitle(i18n("簡繁轉換"), color = colors.textDark)
+                    NovelChineseConversionSetting()
 
                     Spacer(Modifier.height(24.dp))
 
-                    SectionTitle(i18n("簡繁轉換"), color = colors.textDark)
-                    NovelChineseConversionSetting()
+                    SectionTitle("${i18n("閱讀模式")} (beta測試)", color = colors.textDark)
+                    ThreadReaderModeSetting()
+
+                    Spacer(Modifier.height(24.dp))
+
+                    SectionTitle(i18n("觸控分區"), color = colors.textDark)
+                    MangaTouchZoneSetting()
 
                     Spacer(Modifier.height(24.dp))
 
@@ -129,11 +131,32 @@ fun NovelReaderSettingsPanel(
                         onSchemeChange = { appSettingsRepo.themeScheme.setValue(it) }
                     )
 
+                    Spacer(Modifier.height(24.dp))
+
+                    // Copy Chapter Action
+                    SectionTitle(i18n("操作"), color = colors.textDark)
+                    CopyChapterButton(
+                        onClick = { onCopyChapter?.invoke() },
+                        enabled = onCopyChapter != null,
+                        colors = colors,
+                    )
+
                     Spacer(Modifier.height(16.dp))
                 }
             }
         }
     }
+}
+
+@Composable
+private fun SectionTitle(text: String, color: Color) {
+    Text(
+        text = text,
+        color = color,
+        fontSize = 16.sp,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier.padding(bottom = 12.dp)
+    )
 }
 
 @Composable
@@ -154,29 +177,16 @@ private fun CopyChapterButton(
             .padding(vertical = 12.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = i18n("複製本章"),
-                fontSize = 16.sp,
-                color = if (enabled) colors.textDark else colors.textDark.copy(alpha = 0.38f),
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = i18n("將當前章節的內容複製到剪貼簿。"),
-                fontSize = 13.sp,
-                color = if (enabled) colors.textDark.copy(alpha = 0.6f) else colors.textDark.copy(alpha = 0.24f),
-            )
-        }
+        Text(
+            text = i18n("複製本章"),
+            color = if (enabled) colors.textDark else colors.textDark.copy(alpha = 0.38f),
+            fontSize = 15.sp,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = i18n("將當前章節的內容複製到剪貼簿。"),
+            color = colors.textDark.copy(alpha = 0.58f),
+            fontSize = 13.sp,
+        )
     }
-}
-
-@Composable
-private fun SectionTitle(text: String, color: Color) {
-    Text(
-        text = text,
-        color = color,
-        fontSize = 16.sp,
-        fontWeight = FontWeight.Bold,
-        modifier = Modifier.padding(bottom = 12.dp)
-    )
 }

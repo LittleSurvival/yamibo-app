@@ -20,8 +20,16 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import me.thenano.yamibo.yamibo_app.components.controls.YamiboMultiSelectDialog
 import me.thenano.yamibo.yamibo_app.components.controls.YamiboSingleSelectDialog
+import me.thenano.yamibo.yamibo_app.favorite.FavoriteBatchDownloadMode
+import me.thenano.yamibo.yamibo_app.favorite.FavoriteBatchDownloadScope
+import me.thenano.yamibo.yamibo_app.favorite.FavoriteBatchDownloadType
 import me.thenano.yamibo.yamibo_app.favorite.FavoriteCollectionDraft
+import me.thenano.yamibo.yamibo_app.favorite.batchDownloadType
+import me.thenano.yamibo.yamibo_app.favorite.countByType
+import me.thenano.yamibo.yamibo_app.favorite.coerceFor
+import me.thenano.yamibo.yamibo_app.favorite.supportsExceptLastPageDownload
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.i18n.localizedLabel
 import me.thenano.yamibo.yamibo_app.repository.settings.FavoriteGridMode
@@ -53,6 +61,77 @@ internal fun FavoriteGridModeDialog(selected: FavoriteGridMode, onDismiss: () ->
         label = { it.localizedLabel() },
         dismissOnSelect = true,
     )
+}
+
+@Composable
+internal fun FavoriteBatchDownloadTypeDialog(
+    scope: FavoriteBatchDownloadScope,
+    selectedTypes: Set<FavoriteBatchDownloadType>,
+    onDismiss: () -> Unit,
+    onNext: (Set<FavoriteBatchDownloadType>) -> Unit,
+) {
+    val counts = scope.countByType()
+    YamiboMultiSelectDialog(
+        title = i18n("批量下載收藏"),
+        options = FavoriteBatchDownloadType.entries,
+        selected = selectedTypes,
+        onConfirm = { confirmed ->
+            val nextSelection = confirmed.filterTo(mutableSetOf()) { (counts[it] ?: 0) > 0 }
+            onNext(nextSelection)
+        },
+        onCancel = onDismiss,
+        label = { type -> i18n("{} ({})", type.localizedBatchLabel(), counts[type] ?: 0) },
+        confirmText = i18n("下一步"),
+        optionEnabled = { type -> (counts[type] ?: 0) > 0 },
+    )
+}
+
+@Composable
+internal fun FavoriteBatchDownloadModeDialog(
+    scope: FavoriteBatchDownloadScope,
+    selectedTypes: Set<FavoriteBatchDownloadType>,
+    selectedMode: FavoriteBatchDownloadMode,
+    onSelectMode: (FavoriteBatchDownloadMode) -> Unit,
+    onBack: () -> Unit,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val selectedItemCount = scope.items.count { it.batchDownloadType() in selectedTypes }
+    val modeOptions = if (scope.supportsExceptLastPageDownload(selectedTypes)) {
+        FavoriteBatchDownloadMode.entries
+    } else {
+        listOf(FavoriteBatchDownloadMode.All)
+    }
+    val selectedAvailableMode = selectedMode.coerceFor(scope, selectedTypes)
+    YamiboSingleSelectDialog(
+        title = i18n("下載方式"),
+        options = modeOptions,
+        selected = selectedAvailableMode,
+        onDismiss = onDismiss,
+        onSelect = onSelectMode,
+        label = { mode ->
+            "${mode.localizedBatchModeLabel()} · ${i18n("本次將處理 {} 項收藏。", selectedItemCount)}"
+        },
+        footer = {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                ActionChip(i18n("上一步"), onBack)
+                ActionChip(i18n("取消"), onDismiss)
+                ActionChip(i18n("開始下載"), onConfirm)
+            }
+        },
+    )
+}
+
+internal fun FavoriteBatchDownloadType.localizedBatchLabel(): String = when (this) {
+    FavoriteBatchDownloadType.NovelThread -> i18n("小說帖子")
+    FavoriteBatchDownloadType.NormalThread -> i18n("一般帖子")
+    FavoriteBatchDownloadType.TagManga -> i18n("標籤漫畫")
+    FavoriteBatchDownloadType.RssSearch -> i18n("RSS收藏")
+}
+
+private fun FavoriteBatchDownloadMode.localizedBatchModeLabel(): String = when (this) {
+    FavoriteBatchDownloadMode.All -> i18n("全部下載")
+    FavoriteBatchDownloadMode.ExceptLastPage -> i18n("下載除最後一頁以外的全部頁")
 }
 
 @Composable

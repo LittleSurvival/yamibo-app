@@ -7,8 +7,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 
 enum class EffectiveReadingModeSource {
@@ -125,7 +125,9 @@ class SettingsImageReaderModeOverrideRepository(
         if (raw.isBlank()) return StoredOverrides()
         return runCatching {
             json.decodeFromString<StoredOverrides>(raw).normalized()
-        }.getOrDefault(StoredOverrides())
+        }
+            .onFailure { Logger.d(TAG, "Failed to decode image reader mode overrides; using defaults", it) }
+            .getOrDefault(StoredOverrides())
     }
 
     private fun String.toReadingModeOrNull(): ReadingMode? =
@@ -143,6 +145,7 @@ class SettingsImageReaderModeOverrideRepository(
         )
 
     private companion object {
+        @Suppress("ConstPropertyName")
         const val storageKey = "imagereadermodeoverrides.v1"
 
         fun tagKey(tagId: TagId): String = tagId.value.toString()
@@ -153,6 +156,8 @@ class SettingsImageReaderModeOverrideRepository(
             "${tid.value}:${authorId?.value ?: "all"}"
     }
 }
+
+private const val TAG = "ImageReaderModeOverride"
 
 @Serializable
 private data class StoredOverrides(

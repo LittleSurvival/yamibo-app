@@ -116,7 +116,10 @@ actual suspend fun copyImageToClipboard(context: PlatformContext, url: String, c
     val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     val clip = ClipData.newUri(context.contentResolver, "Image", uri)
+
+    @Suppress("UsePropertyAccessSyntax")
     clipboard.setPrimaryClip(clip)
+
     return ImageActionResult(successMessage = i18n("已複製圖片"))
 }
 
@@ -137,7 +140,7 @@ actual suspend fun shareImageToApp(context: PlatformContext, url: String, cookie
     return try {
         context.startActivity(chooser)
         ImageActionResult()
-    } catch (e: ActivityNotFoundException) {
+    } catch (_: ActivityNotFoundException) {
         ImageActionResult(errorMessage = i18n("分享圖片失敗：找不到可分享圖片的 App"))
     } catch (e: Exception) {
         Log.e(ImageActionLogTag, "Sharing image failed", e)
@@ -169,9 +172,7 @@ actual suspend fun saveImageToGallery(context: PlatformContext, url: String, coo
                 val uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
                 if (uri != null) {
                     val outputStream = context.contentResolver.openOutputStream(uri)
-                    if (outputStream == null) {
-                        return@withContext detailedSaveFailure(i18n("系統相簿無法開啟輸出串流"))
-                    }
+                        ?: return@withContext detailedSaveFailure(i18n("系統相簿無法開啟輸出串流"))
                     outputStream.use {
                         val diskCacheKey = result.diskCacheKey
                         var handled = false
@@ -211,6 +212,5 @@ actual suspend fun saveImageToGallery(context: PlatformContext, url: String, coo
             Log.e(ImageActionLogTag, "Saving image failed", e)
             return@withContext ImageActionResult(errorMessage = i18n("儲存圖片失敗：{}", e.message ?: i18n("系統相簿寫入失敗")))
         }
-        detailedSaveFailure(i18n("未知錯誤"))
     }
 }

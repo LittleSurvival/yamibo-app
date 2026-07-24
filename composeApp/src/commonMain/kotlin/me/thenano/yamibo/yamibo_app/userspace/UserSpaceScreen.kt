@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.sp
 import io.github.littlesurvival.YamiboForum
 import io.github.littlesurvival.YamiboRoute
 import io.github.littlesurvival.core.YamiboResult
+import io.github.littlesurvival.core.mapSuccess
 import io.github.littlesurvival.dto.model.ThreadSummary
 import io.github.littlesurvival.dto.page.*
 import io.github.littlesurvival.dto.value.UserId
@@ -33,14 +34,13 @@ import me.thenano.yamibo.yamibo_app.components.navigation.YamiboMainTabTopBar
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboScrollableTabRow
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBar
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBarIconAction
+import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.components.user.UserAvatar
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.message.IMessageCenterScreen
 import me.thenano.yamibo.yamibo_app.message.IPrivateMessageScreen
 import me.thenano.yamibo.yamibo_app.navigation.ComposableNavigator
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
-import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.thread.detail.novel.INovelThreadDetailScreen
 import me.thenano.yamibo.yamibo_app.thread.reader.IThreadReaderScreen
 import me.thenano.yamibo.yamibo_app.userspace.blog.IBlogReaderScreen
@@ -90,7 +90,6 @@ private enum class ViewAllBlogFilter(
     Hot(i18n("推薦閱讀的日志"), YamiboRoute.UserSpace.Blog.ViewAllType.Hot),
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UserSpaceScreen(
     userId: UserId? = null,
@@ -104,7 +103,8 @@ fun UserSpaceScreen(
     val authRepository = LocalAuthRepository.current
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
+    val appTaskManager = me.thenano.yamibo.yamibo_app.LocalAppTaskManager.current
     val currentUser = authRepository.currentUser()
     val isSelf = userId == null || currentUser?.uid?.value == userId.value
     val tabs = remember(isSelf, group) { tabsFor(group, isSelf) }
@@ -161,7 +161,6 @@ fun UserSpaceScreen(
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = colors.creamBackground,
-        snackbarHost = { YamiboSnackbarHost(hostState = snackbarHostState) },
         topBar = {
             if (mainTabTopBar) {
                 UserSpaceMainTopBar(
@@ -285,12 +284,12 @@ fun UserSpaceScreen(
                                 },
                                 onReplyQuoteClick = {
                                     scope.launch {
-                                        snackbarHostState.showSnackbar(i18n("TODO: 回覆定位跳轉尚未接入"), duration = SnackbarDuration.Short)
+                                        feedbackController.post(i18n("TODO: 回覆定位跳轉尚未接入"), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
                                     }
                                 },
                                 onMessageAction = {
                                     scope.launch {
-                                        snackbarHostState.showSnackbar(i18n("TODO: 消息互動尚未接入"), duration = SnackbarDuration.Short)
+                                        feedbackController.post(i18n("TODO: 消息互動尚未接入"), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
                                     }
                                 },
                                 onOpenWebView = { title, url ->
@@ -328,25 +327,27 @@ fun UserSpaceScreen(
             onSubmit = { note, option ->
                 val formHash = authRepository.currentUser()?.formHash ?: targetProfile.formHash
                 if (formHash == null) {
-                    scope.launch { snackbarHostState.showSnackbar(i18n("登入狀態已失效，請重新登入")) }
+                feedbackController.post(i18n("登入狀態已失效，請重新登入"))
                     return@AddFriendDialog
                 }
                 isAddFriendSubmitting = true
-                scope.launch {
+                appTaskManager.launch(
+                    key = me.thenano.yamibo.yamibo_app.task.AppTaskKey("user-add-friend:${targetProfile.uid.value}"),
+                ) {
                     when (val result = repository.addFriend(targetProfile.uid, formHash, note, option.id)) {
                         is YamiboResult.Success -> {
                             repository.clearFriendPages()
                             addFriendProfile = null
                             addFriendPopout = null
                             addFriendError = null
-                            snackbarHostState.showSnackbar(
+                            feedbackController.post(
                                 result.value.takeIf { it.isNotBlank() } ?: i18n("好友請求已送出"),
-                                duration = SnackbarDuration.Short,
+                                duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short,
                             )
                         }
-                        else -> snackbarHostState.showSnackbar(
+                        else -> feedbackController.post(
                             i18n("加為好友失敗：{}", i18n(result.message())),
-                            duration = SnackbarDuration.Short,
+                            duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short,
                         )
                     }
                     isAddFriendSubmitting = false
@@ -646,14 +647,6 @@ private fun UserSpaceScreenContent.pageNumber(): Int? = when (this) {
     is UserSpaceScreenContent.Replies -> page.pageNav?.currentPage
     is UserSpaceScreenContent.Blogs -> page.pageNav?.currentPage
     is UserSpaceScreenContent.Friends -> page.pageNav?.currentPage
-}
-
-private fun <T, R> YamiboResult<T>.mapSuccess(transform: (T) -> R): YamiboResult<R> = when (this) {
-    is YamiboResult.Success -> YamiboResult.Success(transform(value))
-    is YamiboResult.Failure -> this
-    is YamiboResult.NotLoggedIn -> this
-    is YamiboResult.NoPermission -> this
-    is YamiboResult.Maintenance -> this
 }
 
 private fun topBarTitle(

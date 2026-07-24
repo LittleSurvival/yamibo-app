@@ -6,30 +6,32 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 
-internal const val THREAD_READER_PERF_DEBUG = false
+internal expect fun isThreadReaderPerfDebugEnabled(): Boolean
+
+internal expect fun emitThreadReaderPerfLogLine(line: String)
 
 @Composable
 internal fun DebugRecomposeProbe(tag: String, key: String) {
-    if (!THREAD_READER_PERF_DEBUG) return
+    if (!isThreadReaderPerfDebugEnabled()) return
 
     val count = remember(tag, key) { mutableIntStateOf(0) }
     DisposableEffect(tag, key) {
-        println("TR_PROF|enter|$tag|$key")
+        emitThreadReaderPerfLogLine("TR_PROF|enter|$tag|$key")
         onDispose {
-            println("TR_PROF|dispose|$tag|$key|count=${count.intValue}")
+            emitThreadReaderPerfLogLine("TR_PROF|dispose|$tag|$key|count=${count.intValue}")
         }
     }
     SideEffect {
         count.intValue += 1
         val current = count.intValue
         if (current <= 3 || current % 10 == 0) {
-            println("TR_PROF|recompose|$tag|$key|count=$current")
+            emitThreadReaderPerfLogLine("TR_PROF|recompose|$tag|$key|count=$current")
         }
     }
 }
 
 internal fun debugPerfLog(message: String) {
-    if (THREAD_READER_PERF_DEBUG) {
-        println("TR_PROF|event|$message")
+    if (isThreadReaderPerfDebugEnabled()) {
+        emitThreadReaderPerfLogLine("TR_PROF|event|$message")
     }
 }

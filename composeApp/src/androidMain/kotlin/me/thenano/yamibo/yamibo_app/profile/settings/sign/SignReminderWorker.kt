@@ -14,6 +14,7 @@ import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import io.github.littlesurvival.YamiboClient
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.MainActivity
 import me.thenano.yamibo.yamibo_app.R
 import me.thenano.yamibo.yamibo_app.db.DatabaseFactory
@@ -104,7 +105,7 @@ class SignReminderWorker(
             val notificationManager = NotificationManagerCompat.from(applicationContext)
             notificationManager.notify(NOTIFICATION_ID, notification)
         } catch (e: SecurityException) {
-            // Permission might have been revoked just before notify
+            Logger.e("SignReminderWorker", "Permission might have been revoked just before notify", e)
         }
 
         return Result.success()

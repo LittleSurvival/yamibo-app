@@ -468,11 +468,11 @@ class IOSReadHistoryRepository(dbFactory: DatabaseFactory) : ReadHistoryReposito
     }
 
     override suspend fun getCombinedHistoryFilterCounts(): List<ReadHistoryRepository.HistoryFilterCount> {
-        val forumCounts = queries.getForumCounts().executeAsList().mapNotNull { row ->
+        val forumCounts = queries.getForumCounts().executeAsList().map { row ->
             val forumId = row.forumId
             ReadHistoryRepository.HistoryFilterCount(
                 filter = ReadHistoryRepository.HistoryFilter.Forum(ForumId(forumId.toInt())),
-                label = row.forumName?.takeIf { it.isNotBlank() } ?: "Forum ${forumId}",
+                label = row.forumName?.takeIf { it.isNotBlank() } ?: "Forum $forumId",
                 count = row.count,
             )
         }
