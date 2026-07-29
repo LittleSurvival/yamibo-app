@@ -22,7 +22,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -46,6 +45,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import androidx.compose.runtime.rememberCoroutineScope
+import me.thenano.yamibo.yamibo_app.LocalAppSyncService
+import me.thenano.yamibo.yamibo_app.LocalAppSyncBackgroundScheduler
 import me.thenano.yamibo.yamibo_app.components.controls.YamiboActionChip
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBar
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
@@ -54,23 +56,27 @@ import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 
 @Composable
 internal fun AppSyncSettingsScreen(
-    controller: CloudSyncUiController = StubCloudSyncUiController,
+    controller: CloudSyncUiController? = null,
 ) {
     val navigator = LocalNavigator.current
-    val state by controller.state.collectAsState()
+    val service = LocalAppSyncService.current
+    val scheduler = LocalAppSyncBackgroundScheduler.current
+    val scope = rememberCoroutineScope()
+    val activeController = controller ?: remember(service, scope, scheduler) {
+        service?.let { AppSyncCloudUiController(it, scope, scheduler) } ?: StubCloudSyncUiController
+    }
+    val state by activeController.state.collectAsState()
 
     AppSyncSettingsContent(
         state = state,
         onBack = { navigator.pop() },
-        onRefresh = controller::refresh,
-        onUpload = controller::upload,
-        onLoad = controller::load,
-        onDismissApplyChoice = controller::dismissApplyChoice,
-        onMerge = controller::merge,
-        onOverwrite = controller::overwrite,
-        onDeleteCloud = controller::deleteCloudData,
-        onAutomaticEnabledChange = controller::setAutomaticEnabled,
-        onSyncNow = controller::syncNow,
+        onRefresh = activeController::refresh,
+        onDeleteCloud = activeController::deleteCloudData,
+        onAutomaticEnabledChange = activeController::setAutomaticEnabled,
+        onSyncNow = activeController::syncNow,
+        onRequestForce = activeController::requestForceOverride,
+        onConfirmForce = activeController::confirmForceOverride,
+        onClearForcePreview = activeController::clearForcePreview,
     )
 }
 
@@ -79,14 +85,12 @@ internal fun AppSyncSettingsContent(
     state: CloudSyncUiState,
     onBack: () -> Unit,
     onRefresh: () -> Unit,
-    onUpload: () -> Unit,
-    onLoad: () -> Unit,
-    onDismissApplyChoice: () -> Unit,
-    onMerge: () -> Unit,
-    onOverwrite: () -> Unit,
     onDeleteCloud: () -> Unit,
     onAutomaticEnabledChange: (Boolean) -> Unit,
     onSyncNow: () -> Unit,
+    onRequestForce: (CloudSyncForceDirection) -> Unit,
+    onConfirmForce: (CloudSyncForcePreview) -> Unit,
+    onClearForcePreview: () -> Unit,
 ) {
     val colors = YamiboTheme.colors
     var detailsExpanded by remember { mutableStateOf(true) }
@@ -125,41 +129,28 @@ internal fun AppSyncSettingsContent(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(
-                    text = i18n("同步範圍"),
+                    text = i18n("同步資料"),
                     color = colors.textStrong,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    text = i18n("每次同步都包含全部設定、收藏與閱讀紀錄。"),
+                    text = i18n("設定、收藏與閱讀紀錄會以操作紀錄自動合併；不會以空白或舊快照覆蓋雲端。"),
                     color = colors.textDark.copy(alpha = 0.68f),
                     fontSize = 13.sp,
-                )
-                Spacer(Modifier.height(4.dp))
-                CloudActionButton(
-                    text = operationText(state.operation, CloudSyncOperation.Uploading)
-                        ?: i18n("上傳目前資料"),
-                    icon = YamiboIcons.Backup,
-                    primary = true,
-                    enabled = state.actionsAvailable && !state.isBusy,
-                    testTag = "app_sync_upload",
-                    onClick = onUpload,
-                )
-                CloudActionButton(
-                    text = operationText(state.operation, CloudSyncOperation.Loading)
-                        ?: i18n("載入雲端備份"),
-                    icon = YamiboIcons.Download,
-                    primary = false,
-                    enabled = state.actionsAvailable && state.cloudDataExists && !state.isBusy,
-                    testTag = "app_sync_load",
-                    onClick = onLoad,
                 )
             }
             HorizontalDivider(color = colors.brownLight.copy(alpha = 0.2f))
             SyncDetailsSection(
                 expanded = detailsExpanded,
                 details = state.details,
+                changes = state.changes,
                 onExpandedChange = { detailsExpanded = it },
+            )
+            HorizontalDivider(color = colors.brownLight.copy(alpha = 0.2f))
+            ManualOverrideSection(
+                state = state,
+                onRequestForce = onRequestForce,
             )
             HorizontalDivider(color = colors.brownLight.copy(alpha = 0.2f))
             TextButton(
@@ -173,20 +164,13 @@ internal fun AppSyncSettingsContent(
                 val enabled = state.actionsAvailable && state.cloudDataExists && !state.isBusy
                 Text(
                     text = i18n("清除雲端資料"),
-                    color = MaterialTheme.colorScheme.error.copy(alpha = if (enabled) 1f else 0.4f),
+                    color = colors.redAccent.copy(alpha = if (enabled) 1f else 0.6f),
                     fontWeight = FontWeight.SemiBold,
                 )
             }
         }
     }
 
-    if (state.pendingApplyChoice && !state.isBusy) {
-        ApplyModeDialog(
-            onDismiss = onDismissApplyChoice,
-            onMerge = onMerge,
-            onOverwrite = onOverwrite,
-        )
-    }
     if (showDeleteConfirmation) {
         DeleteCloudDataDialog(
             onDismiss = { showDeleteConfirmation = false },
@@ -195,6 +179,64 @@ internal fun AppSyncSettingsContent(
                 onDeleteCloud()
             },
         )
+    }
+    state.forcePreview?.let { preview ->
+        ForceOverrideDialog(
+            preview = preview,
+            onDismiss = onClearForcePreview,
+            onConfirm = { onConfirmForce(preview) },
+        )
+    }
+}
+
+@Composable
+private fun ManualOverrideSection(
+    state: CloudSyncUiState,
+    onRequestForce: (CloudSyncForceDirection) -> Unit,
+) {
+    val colors = YamiboTheme.colors
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 18.dp)
+            .testTag("app_sync_manual_override"),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = i18n("進階資料操作"),
+            color = colors.textStrong,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = i18n("僅在一般同步無法解決資料差異時使用。確認前會重新比較本機與雲端。"),
+            color = colors.textDark.copy(alpha = 0.68f),
+            fontSize = 13.sp,
+        )
+        CloudActionButton(
+            text = if (state.forcePreviewLoading) i18n("正在比較資料...") else i18n("強制上傳本機資料"),
+            icon = YamiboIcons.Sync,
+            primary = false,
+            enabled = state.actionsAvailable && !state.isBusy && !state.forcePreviewLoading,
+            testTag = "app_sync_force_push",
+            onClick = { onRequestForce(CloudSyncForceDirection.Push) },
+        )
+        CloudActionButton(
+            text = if (state.forcePreviewLoading) i18n("正在比較資料...") else i18n("強制載入雲端資料"),
+            icon = YamiboIcons.Download,
+            primary = false,
+            enabled = state.actionsAvailable && !state.isBusy && !state.forcePreviewLoading,
+            testTag = "app_sync_force_pull",
+            onClick = { onRequestForce(CloudSyncForceDirection.Pull) },
+        )
+        state.forceError?.let {
+            Text(
+                text = i18n(it),
+                color = colors.redAccent,
+                fontSize = 12.sp,
+                modifier = Modifier.testTag("app_sync_force_error"),
+            )
+        }
     }
 }
 
@@ -273,7 +315,7 @@ private fun CloudSyncInlineNotice(notice: CloudSyncNotice) {
     val colors = YamiboTheme.colors
     val color = when (notice.severity) {
         CloudSyncNoticeSeverity.Info -> colors.brownPrimary
-        CloudSyncNoticeSeverity.Success -> Color(0xFF3E7A4C)
+        CloudSyncNoticeSeverity.Success -> colors.brownPrimary
         CloudSyncNoticeSeverity.Warning -> colors.orangeAccent
         CloudSyncNoticeSeverity.Error -> colors.redAccent
     }
@@ -348,6 +390,7 @@ private fun AutomaticSyncSection(
 private fun SyncDetailsSection(
     expanded: Boolean,
     details: List<CloudSyncDetail>,
+    changes: List<CloudSyncChangeDetail>,
     onExpandedChange: (Boolean) -> Unit,
 ) {
     val colors = YamiboTheme.colors
@@ -392,7 +435,7 @@ private fun SyncDetailsSection(
                     .testTag("app_sync_details_content"),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                details.take(5).forEach { detail ->
+                details.forEach { detail ->
                     Row(modifier = Modifier.fillMaxWidth()) {
                         Text(
                             text = i18n(detail.label),
@@ -406,6 +449,25 @@ private fun SyncDetailsSection(
                             fontSize = 12.sp,
                             modifier = Modifier.weight(0.68f),
                         )
+                    }
+                }
+                if (changes.isNotEmpty()) {
+                    HorizontalDivider(color = colors.brownLight.copy(alpha = 0.2f))
+                    changes.forEach { change ->
+                        Row(modifier = Modifier.fillMaxWidth()) {
+                            Text(
+                                text = i18n(change.direction),
+                                color = colors.textDark.copy(alpha = 0.58f),
+                                fontSize = 12.sp,
+                                modifier = Modifier.weight(0.32f),
+                            )
+                            Text(
+                                text = i18n("{}：{}", change.module, change.summary),
+                                color = colors.textStrong,
+                                fontSize = 12.sp,
+                                modifier = Modifier.weight(0.68f),
+                            )
+                        }
                     }
                 }
             }
@@ -467,65 +529,6 @@ private fun CloudActionButton(
 }
 
 @Composable
-private fun ApplyModeDialog(
-    onDismiss: () -> Unit,
-    onMerge: () -> Unit,
-    onOverwrite: () -> Unit,
-) {
-    val colors = YamiboTheme.colors
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = colors.creamSurface,
-        titleContentColor = colors.textStrong,
-        textContentColor = colors.textDark,
-        title = { Text(i18n("選擇套用方式"), fontWeight = FontWeight.Bold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                ApplyModeOption(
-                    title = i18n("合併"),
-                    subtitle = i18n("保留較新的本機或雲端紀錄，不讓舊紀錄覆蓋新紀錄。"),
-                    onClick = onMerge,
-                )
-                ApplyModeOption(
-                    title = i18n("覆蓋"),
-                    subtitle = i18n("以雲端備份替換全部同步資料，下一步會再次確認。"),
-                    onClick = onOverwrite,
-                )
-            }
-        },
-        confirmButton = {},
-        dismissButton = {
-            YamiboActionChip(text = i18n("取消"), onClick = onDismiss)
-        },
-    )
-}
-
-@Composable
-private fun ApplyModeOption(
-    title: String,
-    subtitle: String,
-    onClick: () -> Unit,
-) {
-    val colors = YamiboTheme.colors
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(colors.brownLight.copy(alpha = 0.18f))
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick,
-            )
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Text(title, color = colors.textStrong, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-        Text(subtitle, color = colors.textDark.copy(alpha = 0.66f), fontSize = 12.sp)
-    }
-}
-
-@Composable
 private fun DeleteCloudDataDialog(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
@@ -574,8 +577,8 @@ private fun DeleteCloudDataDialog(
                         else -> i18n("確認清除")
                     },
                     selected = secondStep,
+                    enabled = enabled,
                     onClick = {
-                        if (!enabled) return@YamiboActionChip
                         if (secondStep) onConfirm() else secondStep = true
                     },
                 )
@@ -588,9 +591,90 @@ private fun DeleteCloudDataDialog(
 }
 
 @Composable
+private fun ForceOverrideDialog(
+    preview: CloudSyncForcePreview,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val colors = YamiboTheme.colors
+    var remainingSeconds by remember(preview.token) { mutableStateOf(10) }
+    LaunchedEffect(preview.token) {
+        remainingSeconds = 10
+        while (remainingSeconds > 0) {
+            delay(1_000)
+            remainingSeconds -= 1
+        }
+    }
+    val isPush = preview.direction == CloudSyncForceDirection.Push
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = colors.creamSurface,
+        titleContentColor = colors.textStrong,
+        textContentColor = colors.textDark,
+        title = {
+            Text(
+                text = if (isPush) i18n("確認強制上傳") else i18n("確認強制載入"),
+                fontWeight = FontWeight.Bold,
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = if (isPush) {
+                        i18n("本機資料將成為權威；雲端獨有資料會被明確刪除。")
+                    } else {
+                        i18n("雲端資料將成為權威；未上傳的本機差異會被捨棄。")
+                    },
+                    color = colors.redAccent,
+                    fontSize = 13.sp,
+                )
+                if (preview.differences.isEmpty()) {
+                    Text(i18n("本機與雲端目前沒有差異。"), fontSize = 13.sp)
+                } else {
+                    preview.differences.forEach { difference ->
+                        Row(modifier = Modifier.fillMaxWidth()) {
+                            Text(
+                                text = i18n(difference.module),
+                                color = colors.textStrong,
+                                fontSize = 12.sp,
+                                modifier = Modifier.weight(0.38f),
+                            )
+                            Text(
+                                text = i18n(difference.summary),
+                                color = colors.textDark,
+                                fontSize = 12.sp,
+                                modifier = Modifier.weight(0.62f),
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            YamiboActionChip(
+                text = if (remainingSeconds > 0) {
+                    i18n("{} 秒後可確認", remainingSeconds)
+                } else {
+                    if (isPush) i18n("確認強制上傳") else i18n("確認強制載入")
+                },
+                selected = true,
+                enabled = forceConfirmationEnabled(remainingSeconds),
+                onClick = onConfirm,
+            )
+        },
+        dismissButton = {
+            YamiboActionChip(text = i18n("取消"), onClick = onDismiss)
+        },
+    )
+}
+
+internal fun forceConfirmationEnabled(remainingSeconds: Int): Boolean =
+    remainingSeconds <= 0
+
+@Composable
 private fun statusColor(status: CloudSyncStatus): Color = when (status) {
     CloudSyncStatus.Checking -> YamiboTheme.colors.brownPrimary
-    CloudSyncStatus.Available -> Color(0xFF3E7A4C)
+    CloudSyncStatus.Available -> YamiboTheme.colors.brownPrimary
     CloudSyncStatus.Missing -> YamiboTheme.colors.brownPrimary
     CloudSyncStatus.Unavailable -> YamiboTheme.colors.redAccent
 }

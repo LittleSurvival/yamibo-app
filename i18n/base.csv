@@ -826,3 +826,16 @@ RSS收藏,RSS favorites,RSS收藏,RSS收藏
 本機變更,Local changes,本機變更,本地更改
 尚未檢查,Not checked yet,尚未檢查,尚未检查
 最近結果,Recent result,最近結果,最近结果
+同步資料,Sync data,同步資料,同步数据
+設定、收藏與閱讀紀錄會以操作紀錄自動合併；不會以空白或舊快照覆蓋雲端。,"Settings, favorites, and reading history are merged as operations; empty or stale snapshots never replace cloud data.",設定、收藏與閱讀紀錄會以操作紀錄自動合併；不會以空白或舊快照覆蓋雲端。,设置、收藏与阅读记录会以操作记录自动合并；不会以空白或旧快照覆盖云端。
+{}：{},{}: {},{}：{},{}：{}
+進階資料操作,Advanced data operations,進階資料操作,高级数据操作
+僅在一般同步無法解決資料差異時使用。確認前會重新比較本機與雲端。,Use only when ordinary sync cannot resolve a data difference. Local and cloud data are compared again before confirmation.,僅在一般同步無法解決資料差異時使用。確認前會重新比較本機與雲端。,仅在常规同步无法解决数据差异时使用。确认前会重新比较本地与云端。
+正在比較資料...,Comparing data...,正在比較資料...,正在比较数据...
+強制上傳本機資料,Force push local data,強制上傳本機資料,强制上传本地数据
+強制載入雲端資料,Force pull cloud data,強制載入雲端資料,强制载入云端数据
+本機與雲端目前沒有差異。,There is currently no difference between local and cloud data.,本機與雲端目前沒有差異。,本地与云端目前没有差异。
+確認強制上傳,Confirm force push,確認強制上傳,确认强制上传
+確認強制載入,Confirm force pull,確認強制載入,确认强制载入
+本機資料將成為權威；雲端獨有資料會被明確刪除。,Local data will become authoritative; cloud-only data will be explicitly deleted.,本機資料將成為權威；雲端獨有資料會被明確刪除。,本地数据将成为权威；云端独有数据会被明确删除。
+雲端資料將成為權威；未上傳的本機差異會被捨棄。,Cloud data will become authoritative; unuploaded local differences will be discarded.,雲端資料將成為權威；未上傳的本機差異會被捨棄。,云端数据将成为权威；未上传的本地差异会被舍弃。
