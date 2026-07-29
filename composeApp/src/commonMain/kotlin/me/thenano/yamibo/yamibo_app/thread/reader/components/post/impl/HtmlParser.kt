@@ -314,10 +314,14 @@ object HtmlParser {
                             }
                         }
                         "rt" -> {
-                            // Handled by the parent <ruby>; ignore standalone rt to avoid duplicate text.
+                            /**
+                             * Handled by the parent <ruby>; ignore standalone rt to avoid duplicate text.
+                             */
                         }
                         "rp" -> {
-                            // Browser fallback parentheses are not shown in native ruby rendering.
+                            /**
+                             * Browser fallback parentheses are not shown in native ruby rendering.
+                             */
                         }
                         "a" -> {
                             val href = node.attr("href")
@@ -364,7 +368,7 @@ object HtmlParser {
                         else -> { node.childNodes().forEach { parseNode(it, parentAlign) } }
                     }
                 }
-                else -> { /* Other node types, ignore */ }
+                else -> { /** Other node types, ignore */ }
             }
         }
 
