@@ -1,0 +1,29 @@
+ALTER TABLE LocalFavoriteCategory ADD COLUMN syncId TEXT;
+ALTER TABLE LocalFavoriteCollection ADD COLUMN syncId TEXT;
+
+CREATE UNIQUE INDEX LocalFavoriteCategorySyncIdIndex
+ON LocalFavoriteCategory(syncId)
+WHERE syncId IS NOT NULL;
+
+CREATE UNIQUE INDEX LocalFavoriteCollectionSyncIdIndex
+ON LocalFavoriteCollection(syncId)
+WHERE syncId IS NOT NULL;
+
+CREATE TABLE AppSyncResolvedEntity (
+    entityKey TEXT NOT NULL PRIMARY KEY,
+    domainId TEXT NOT NULL,
+    entityId TEXT NOT NULL,
+    entityGeneration INTEGER NOT NULL,
+    encodedState TEXT NOT NULL,
+    updatedAtEpochMillis INTEGER NOT NULL
+);
+CREATE INDEX AppSyncResolvedEntityDomainIndex
+ON AppSyncResolvedEntity(domainId);
+
+CREATE TABLE AppSyncSettingValue (
+    settingKey TEXT NOT NULL PRIMARY KEY,
+    type TEXT NOT NULL,
+    value TEXT,
+    winnerOperationId TEXT NOT NULL,
+    updatedAtEpochMillis INTEGER NOT NULL
+);

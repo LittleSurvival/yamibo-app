@@ -15,13 +15,15 @@ import me.thenano.yamibo.yamiboapp.RssCatalogReadingHistory
 import me.thenano.yamibo.yamiboapp.RssSearchReadingHistory
 import me.thenano.yamibo.yamiboapp.TagCatalogReadingHistory
 
-class AndroidReadHistoryRepository(dbFactory: DatabaseFactory) : ReadHistoryRepository {
+class AndroidReadHistoryRepository(
+    private val db: Database,
+) : ReadHistoryRepository {
+    constructor(dbFactory: DatabaseFactory) : this(Database(dbFactory.createDriver()))
     private companion object {
         const val COMBINED_HISTORY_BATCH_SIZE = 500L
         const val MAX_HISTORY_ITEMS = 2000L
     }
 
-    private val db = Database(dbFactory.createDriver())
     private val queries = db.readingHistoryQueries
     private val readingTimeQueries = db.readingTimeStatQueries
 

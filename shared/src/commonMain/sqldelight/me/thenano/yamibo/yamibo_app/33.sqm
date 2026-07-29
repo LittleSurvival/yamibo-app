@@ -1,0 +1,6 @@
+CREATE TABLE AppSyncKnownSettingKey (
+    settingKey TEXT NOT NULL PRIMARY KEY
+);
+
+INSERT OR IGNORE INTO AppSyncKnownSettingKey(settingKey)
+SELECT settingKey FROM AppSyncSettingValue;

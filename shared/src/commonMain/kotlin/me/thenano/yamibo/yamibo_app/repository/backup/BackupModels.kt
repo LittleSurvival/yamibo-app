@@ -29,6 +29,7 @@ internal data class BackupFavorites(
 @Serializable
 internal data class BackupFavoriteCategory(
     val localId: Long,
+    val syncId: String? = null,
     val name: String,
     val sortOrder: Long,
     val createdAt: Long,
@@ -38,6 +39,7 @@ internal data class BackupFavoriteCategory(
 @Serializable
 internal data class BackupFavoriteCollection(
     val localId: Long,
+    val syncId: String? = null,
     val categoryLocalId: Long,
     val name: String,
     val colorKey: String,

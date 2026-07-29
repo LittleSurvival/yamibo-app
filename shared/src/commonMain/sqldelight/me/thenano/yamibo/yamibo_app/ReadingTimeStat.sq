@@ -24,5 +24,9 @@ getAll:
 SELECT * FROM ReadingTimeStat
 ORDER BY dateKey ASC;
 
+deleteByDateKey:
+DELETE FROM ReadingTimeStat
+WHERE dateKey = ?;
+
 deleteAll:
 DELETE FROM ReadingTimeStat;

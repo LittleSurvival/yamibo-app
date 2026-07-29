@@ -8,6 +8,7 @@ import me.thenano.yamibo.yamibo_app.repository.settings.core.*
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 import me.thenano.yamibo.yamibo_app.util.time.currentLocalDateKeyAt
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncIdentityGenerator
 
 class BackupRepositoryImpl(
     private val db: Database,
@@ -84,6 +85,8 @@ class BackupRepositoryImpl(
     override suspend fun setSelectedFolder(uri: String): Result<Unit> =
         storageProvider.setSelectedFolder(uri)
 
+    internal fun createAppSyncSnapshot(): YamiboBackupFile = createSnapshot(currentTimeMillis())
+
     private fun createSnapshot(now: Long): YamiboBackupFile {
         val categories = categoryQueries.getAll().executeAsList()
         val collections = collectionQueries.getAll().executeAsList()
@@ -98,10 +101,26 @@ class BackupRepositoryImpl(
             createdAt = now,
             favorites = BackupFavorites(
                 categories = categories.map {
-                    BackupFavoriteCategory(it.id, it.name, it.sortOrder, it.createdAt, it.updatedAt)
+                    BackupFavoriteCategory(
+                        localId = it.id,
+                        syncId = it.syncId,
+                        name = it.name,
+                        sortOrder = it.sortOrder,
+                        createdAt = it.createdAt,
+                        updatedAt = it.updatedAt,
+                    )
                 },
                 collections = collections.map {
-                    BackupFavoriteCollection(it.id, it.categoryId, it.name, it.colorKey, it.sortOrder, it.createdAt, it.updatedAt)
+                    BackupFavoriteCollection(
+                        localId = it.id,
+                        syncId = it.syncId,
+                        categoryLocalId = it.categoryId,
+                        name = it.name,
+                        colorKey = it.colorKey,
+                        sortOrder = it.sortOrder,
+                        createdAt = it.createdAt,
+                        updatedAt = it.updatedAt,
+                    )
                 },
                 items = items.map {
                     BackupFavoriteItem(
@@ -223,7 +242,18 @@ class BackupRepositoryImpl(
                 } else null
                 val targetId = existing?.id ?: run {
                     categoryQueries.insertCategory(category.name, category.sortOrder, category.createdAt, category.updatedAt)
-                    categoryQueries.getFirstByName(category.name).executeAsOne().id
+                    categoryQueries.getFirstByName(category.name).executeAsOne().id.also { id ->
+                        categoryQueries.setSyncId(
+                            category.syncId ?: SyncIdentityGenerator.stableEntityId().value,
+                            id,
+                        )
+                    }
+                }
+                if (existing != null) {
+                    categoryQueries.setSyncId(
+                        category.syncId ?: SyncIdentityGenerator.stableEntityId().value,
+                        existing.id,
+                    )
                 }
                 categoryIdMap[category.localId] = targetId
             }
@@ -243,7 +273,18 @@ class BackupRepositoryImpl(
                         createdAt = collection.createdAt,
                         updatedAt = collection.updatedAt,
                     )
-                    collectionQueries.getLatestByCategoryId(mappedCategoryId).executeAsOne().id
+                    collectionQueries.getLatestByCategoryId(mappedCategoryId).executeAsOne().id.also {
+                        collectionQueries.setSyncId(
+                            collection.syncId ?: SyncIdentityGenerator.stableEntityId().value,
+                            it,
+                        )
+                    }
+                }
+                if (existing != null) {
+                    collectionQueries.setSyncId(
+                        collection.syncId ?: SyncIdentityGenerator.stableEntityId().value,
+                        targetId,
+                    )
                 }
                 collectionIdMap[collection.localId] = targetId
             }
