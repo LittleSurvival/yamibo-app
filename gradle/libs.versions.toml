@@ -15,7 +15,7 @@ ktor = "3.4.2"
 ktorClientCore = "3.4.2"
 coil3 = "3.4.0"
 securityCrypto = "1.1.0"
-yamiboApi = "1.1.20"
+yamiboApi = "1.1.21"
 androidx-work = "2.11.0"
 sqldelight = "2.2.1"
 okio = "3.17.0"
@@ -33,6 +33,7 @@ kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serializa
 ksoup = { module = "com.fleeksoft.ksoup:ksoup", version.ref = "ksoup" }
 ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negotiation", version.ref = "ktorClientCore" }
 ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktorClientCore" }
+ktor-client-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktorClientCore" }
 ktor-client-darwin = { module = "io.ktor:ktor-client-darwin", version.ref = "ktorClientCore" }
 ktor-client-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "ktorClientCore" }
 ktor-serialization-kotlinx-json = { module = "io.ktor:ktor-serialization-kotlinx-json", version.ref = "ktorClientCore" }
