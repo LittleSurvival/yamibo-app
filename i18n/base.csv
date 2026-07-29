@@ -791,3 +791,38 @@ RSS收藏,RSS favorites,RSS收藏,RSS收藏
 解除收藏失敗，已重新整理收藏識別碼，請再試一次。,Removal failed. The favorite ID was refreshed; please try again.,解除收藏失敗，已重新整理收藏識別碼，請再試一次。,移除收藏失败，已刷新收藏标识码，请重试。
 解除收藏失敗，重新整理後仍無法取得收藏識別碼。,Removal failed and the favorite ID is still unavailable after refresh.,解除收藏失敗，重新整理後仍無法取得收藏識別碼。,移除收藏失败，刷新后仍无法取得收藏标识码。
 解除收藏失敗，且收藏識別碼重新整理失敗，請稍後再試。,Removal failed and the favorite ID could not be refreshed. Please try again later.,解除收藏失敗，且收藏識別碼重新整理失敗，請稍後再試。,移除收藏失败，且收藏标识码刷新失败，请稍后重试。
+上傳目前資料,Upload current data,上傳目前資料,上传当前数据
+以雲端備份替換全部同步資料，下一步會再次確認。,Replace all synchronized data with the cloud backup. You will be asked to confirm again.,以雲端備份替換全部同步資料，下一步會再次確認。,使用云端备份替换全部同步数据。下一步会再次确认。
+保留較新的本機或雲端紀錄，不讓舊紀錄覆蓋新紀錄。,Keep the newer local or cloud record so older records cannot overwrite newer ones.,保留較新的本機或雲端紀錄，不讓舊紀錄覆蓋新紀錄。,保留较新的本地或云端记录，避免旧记录覆盖新记录。
+再次確認清除雲端資料,Confirm cloud data deletion again,再次確認清除雲端資料,再次确认清除云端数据
+合併,Merge,合併,合并
+同步範圍,Sync scope,同步範圍,同步范围
+同步設定、收藏與閱讀紀錄,"Sync settings, favorites, and reading history",同步設定、收藏與閱讀紀錄,同步设置、收藏与阅读记录
+同步詳情,Sync details,同步詳情,同步详情
+展開同步詳情,Expand sync details,展開同步詳情,展开同步详情
+收合同步詳情,Collapse sync details,收合同步詳情,收合同步详情
+每次同步都包含全部設定、收藏與閱讀紀錄。,"Every sync includes all settings, favorites, and reading history.",每次同步都包含全部設定、收藏與閱讀紀錄。,每次同步都包含全部设置、收藏与阅读记录。
+清除雲端資料,Delete cloud data,清除雲端資料,清除云端数据
+確定要清除雲端同步資料嗎？,Are you sure you want to delete the cloud sync data?,確定要清除雲端同步資料嗎？,确定要清除云端同步数据吗？
+確認清除,Confirm deletion,確認清除,确认清除
+立即同步,Sync now,立即同步,立即同步
+自動同步,Automatic sync,自動同步,自动同步
+覆蓋,Overwrite,覆蓋,覆盖
+載入雲端備份,Load cloud backup,載入雲端備份,载入云端备份
+這是最後確認。清除後無法從雲端復原。,This is the final confirmation. Deleted data cannot be recovered from the cloud.,這是最後確認。清除後無法從雲端復原。,这是最后确认。清除后无法从云端恢复。
+選擇套用方式,Choose how to apply,選擇套用方式,选择应用方式
+重新檢查雲端備份,Check cloud backup again,重新檢查雲端備份,重新检查云端备份
+雲端備份狀態,Cloud backup status,雲端備份狀態,云端备份状态
+雲端同步,Cloud sync,雲端同步,云端同步
+{} 秒後可確認,Confirm in {} seconds,{} 秒後可確認,{} 秒后可确认
+同步核心尚未連接,Sync core is not connected,同步核心尚未連接,同步核心尚未连接
+介面已就緒，雲端同步功能將由新架構提供,"The interface is ready; cloud sync will be provided by the new architecture",介面已就緒，雲端同步功能將由新架構提供,界面已就绪，云端同步功能将由新架构提供
+背景同步尚未提供,Background sync is not available yet,背景同步尚未提供,后台同步尚未提供
+雲端備份,Cloud backup,雲端備份,云端备份
+尚未連接,Not connected,尚未連接,尚未连接
+最後驗證,Last verified,最後驗證,最后验证
+尚無紀錄,No records yet,尚無紀錄,暂无记录
+尚未提供,Not available yet,尚未提供,尚未提供
+本機變更,Local changes,本機變更,本地更改
+尚未檢查,Not checked yet,尚未檢查,尚未检查
+最近結果,Recent result,最近結果,最近结果

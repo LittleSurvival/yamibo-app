@@ -32,6 +32,7 @@ import me.thenano.yamibo.yamibo_app.profile.about.IAboutScreen
 import me.thenano.yamibo.yamibo_app.profile.download.IDownloadQueueScreen
 import me.thenano.yamibo.yamibo_app.profile.settings.ISettingsScreen
 import me.thenano.yamibo.yamibo_app.profile.settings.backup.IBackupSettingsScreen
+import me.thenano.yamibo.yamibo_app.profile.settings.cloud.IAppSyncSettingsScreen
 import me.thenano.yamibo.yamibo_app.profile.sign.ISignInfoScreen
 import me.thenano.yamibo.yamibo_app.profile.sign.ISignWebView
 import me.thenano.yamibo.yamibo_app.profile.sign.signActionFeedbackMessage
@@ -283,6 +284,12 @@ fun ProfilePage(
                 title = i18n("閱讀統計"),
                 icon = YamiboIcons.Statistics,
                 onClick = { navigator.navigate(IProfileStatisticsScreen()) }
+            )
+
+            EntryCard(
+                title = i18n("雲端同步"),
+                icon = YamiboIcons.CloudSync,
+                onClick = { navigator.navigate(IAppSyncSettingsScreen()) }
             )
 
             EntryCard(

@@ -50,6 +50,20 @@ class AppFeedbackArchitectureTest {
         )
     }
 
+    @Test
+    fun cloudSyncUiUsesPageLocalOperationNotices() {
+        val cloudSyncRoot = projectRoot().resolve(
+            "composeApp/src/commonMain/kotlin/me/thenano/yamibo/yamibo_app/profile/settings/cloud",
+        )
+        val source = cloudSyncRoot.walkTopDown()
+            .filter { it.isFile && it.extension == "kt" }
+            .joinToString("\n") { it.readText() }
+
+        assertTrue("CloudSyncInlineNotice" in source)
+        assertTrue("LocalAppFeedbackController" !in source)
+        assertTrue("showSnackbar(" !in source)
+    }
+
     private fun projectRoot(): File {
         val userDir = requireNotNull(System.getProperty("user.dir"))
         return generateSequence(File(userDir).absoluteFile) { it.parentFile }
