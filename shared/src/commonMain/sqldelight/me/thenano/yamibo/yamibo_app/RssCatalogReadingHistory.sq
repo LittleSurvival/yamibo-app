@@ -12,6 +12,10 @@ INSERT OR REPLACE INTO RssCatalogReadingHistory(
 getBySubscriptionId:
 SELECT * FROM RssCatalogReadingHistory WHERE subscriptionId = ?;
 
+getAll:
+SELECT * FROM RssCatalogReadingHistory
+ORDER BY lastVisitTime DESC;
+
 deleteBySubscriptionId:
 DELETE FROM RssCatalogReadingHistory WHERE subscriptionId = ?;
 

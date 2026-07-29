@@ -15,6 +15,7 @@ internal data class YamiboBackupFile(
     val notes: List<BackupDetailNote> = emptyList(),
     val bookmarks: List<BackupBookMark> = emptyList(),
     val readingState: BackupReadingState = BackupReadingState(),
+    val favoriteUpdates: BackupFavoriteUpdates = BackupFavoriteUpdates(),
 )
 
 @Serializable
@@ -120,6 +121,10 @@ internal data class BackupReadingState(
     val threadHistory: List<BackupThreadReadingHistory> = emptyList(),
     val imageHistory: List<BackupImageReadingHistory> = emptyList(),
     val tagMangaHistory: List<BackupTagMangaReadingHistory> = emptyList(),
+    val tagCatalogHistory: List<BackupTagCatalogReadingHistory> = emptyList(),
+    val rssSearchHistory: List<BackupRssSearchReadingHistory> = emptyList(),
+    val rssCatalogHistory: List<BackupRssCatalogReadingHistory> = emptyList(),
+    val chapterState: List<BackupChapterState> = emptyList(),
     val readingTimeStats: List<BackupReadingTimeStat> = emptyList(),
 )
 
@@ -180,4 +185,120 @@ internal data class BackupReadingTimeStat(
     val dateKey: String,
     val durationMillis: Long,
     val updatedAt: Long,
+)
+
+@Serializable
+internal data class BackupTagCatalogReadingHistory(
+    val tagId: Long,
+    val tagName: String,
+    val tagPage: Long,
+    val threadId: Long,
+    val threadTitle: String,
+    val threadPage: Long,
+    val postId: Long,
+    val postTitle: String,
+    val authorId: Long?,
+    val anchorPostId: Long,
+    val anchorPostRatio: Double?,
+    val anchorBlockId: String?,
+    val anchorBlockType: String?,
+    val anchorBlockRatio: Double?,
+    val viewportHeight: Long?,
+    val firstVisibleItemIndex: Long?,
+    val firstVisibleItemOffset: Long?,
+    val lastVisitTime: Long,
+    val coverUrl: String?,
+)
+
+@Serializable
+internal data class BackupRssSearchReadingHistory(
+    val subscriptionId: Long,
+    val subscriptionTitle: String,
+    val subscriptionQuery: String,
+    val subscriptionPage: Long,
+    val threadId: Long,
+    val threadTitle: String,
+    val threadImagePageIndex: Long,
+    val threadImageTotalPages: Long,
+    val firstVisibleItemIndex: Long?,
+    val firstVisibleItemOffset: Long?,
+    val lastVisitTime: Long,
+    val coverUrl: String?,
+)
+
+@Serializable
+internal data class BackupRssCatalogReadingHistory(
+    val subscriptionId: Long,
+    val subscriptionTitle: String,
+    val subscriptionQuery: String,
+    val subscriptionPage: Long,
+    val threadId: Long,
+    val threadTitle: String,
+    val threadPage: Long,
+    val postId: Long,
+    val postTitle: String,
+    val authorId: Long?,
+    val anchorPostId: Long,
+    val anchorPostRatio: Double?,
+    val anchorBlockId: String?,
+    val anchorBlockType: String?,
+    val anchorBlockRatio: Double?,
+    val viewportHeight: Long?,
+    val firstVisibleItemIndex: Long?,
+    val firstVisibleItemOffset: Long?,
+    val lastVisitTime: Long,
+    val coverUrl: String?,
+)
+
+@Serializable
+internal data class BackupChapterState(
+    val targetType: String,
+    val parentId: Long,
+    val targetId: Long,
+    val title: String,
+    val read: Boolean,
+    val progressPercent: Long,
+    val lastPageIndex: Long?,
+    val totalPages: Long?,
+    val updatedAt: Long,
+)
+
+@Serializable
+internal data class BackupFavoriteUpdates(
+    val events: List<BackupFavoriteUpdateEvent> = emptyList(),
+    val fidFilters: List<BackupFavoriteUpdateFidFilter> = emptyList(),
+    val categoryFilters: List<BackupFavoriteUpdateCategoryFilter> = emptyList(),
+)
+
+@Serializable
+internal data class BackupFavoriteUpdateEvent(
+    val syncId: String,
+    val sourceFingerprint: String,
+    val targetType: String,
+    val targetId: Long,
+    val authorId: Long?,
+    val fid: Long?,
+    val forumName: String?,
+    val title: String,
+    val latestPostTitle: String?,
+    val mode: String,
+    val summary: String,
+    val detailIds: List<Long>,
+    val coverUrl: String?,
+    val detectedAt: Long,
+    val readAt: Long?,
+    val dismissedAt: Long?,
+    val ambiguous: Boolean,
+)
+
+@Serializable
+internal data class BackupFavoriteUpdateFidFilter(
+    val fid: Long,
+    val enabled: Boolean,
+)
+
+@Serializable
+internal data class BackupFavoriteUpdateCategoryFilter(
+    val categorySyncId: String,
+    val enabled: Boolean,
 )

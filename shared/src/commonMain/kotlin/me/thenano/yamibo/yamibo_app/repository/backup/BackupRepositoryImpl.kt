@@ -16,6 +16,7 @@ class BackupRepositoryImpl(
     private val settingsRegistries: List<SettingsRegistry>,
     private val storageProvider: BackupStorageProvider,
     private val appVersionCode: Int,
+    private val restoreFailureInjector: ((String) -> Unit)? = null,
     private val json: Json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
@@ -32,7 +33,14 @@ class BackupRepositoryImpl(
     private val readingQueries = db.readingHistoryQueries
     private val imageHistoryQueries = db.imageReadingHistoryQueries
     private val tagHistoryQueries = db.mangaTagReadingHistoryQueries
+    private val tagCatalogHistoryQueries = db.tagCatalogReadingHistoryQueries
+    private val rssSearchHistoryQueries = db.rssSearchReadingHistoryQueries
+    private val rssCatalogHistoryQueries = db.rssCatalogReadingHistoryQueries
+    private val chapterStateQueries = db.localChapterStateQueries
     private val readingTimeQueries = db.readingTimeStatQueries
+    private val updateEventQueries = db.favoriteUpdateEventQueries
+    private val updateFidFilterQueries = db.favoriteUpdateFidFilterQueries
+    private val updateCategoryFilterQueries = db.favoriteUpdateCategoryFilterQueries
 
     suspend fun createBackup(automatic: Boolean): Result<BackupRepository.BackupFileInfo> =
         createBackup(automatic = automatic, customName = null)
@@ -42,7 +50,7 @@ class BackupRepositoryImpl(
         customName: String?,
     ): Result<BackupRepository.BackupFileInfo> = runCatching {
         val now = currentTimeMillis()
-        val backup = createSnapshot(now)
+        val backup = createSnapshot(now, PortableSnapshotScope.LocalBackup)
         val bytes = json.encodeToString(YamiboBackupFile.serializer(), backup).encodeToByteArray()
         val written = storageProvider.writeBackupFile(
             fileName = backupFileName(nowMillis = now, automatic = automatic, customName = customName),
@@ -60,7 +68,8 @@ class BackupRepositoryImpl(
             throw IllegalArgumentException("備份檔案格式無法解析", e)
         }
         val migrated = migrate(backup)
-        restoreSnapshot(migrated, mode)
+        val plan = buildRestorePlan(migrated)
+        restoreSnapshot(plan, mode)
     }
 
     override suspend fun listBackupFiles(): List<BackupRepository.BackupFileInfo> =
@@ -85,9 +94,13 @@ class BackupRepositoryImpl(
     override suspend fun setSelectedFolder(uri: String): Result<Unit> =
         storageProvider.setSelectedFolder(uri)
 
-    internal fun createAppSyncSnapshot(): YamiboBackupFile = createSnapshot(currentTimeMillis())
+    internal fun createAppSyncSnapshot(): YamiboBackupFile =
+        createSnapshot(currentTimeMillis(), PortableSnapshotScope.AppSync)
 
-    private fun createSnapshot(now: Long): YamiboBackupFile {
+    internal fun createSnapshot(
+        now: Long,
+        scope: PortableSnapshotScope,
+    ): YamiboBackupFile {
         val categories = categoryQueries.getAll().executeAsList()
         val collections = collectionQueries.getAll().executeAsList()
         val items = itemQueries.getAll().executeAsList()
@@ -161,7 +174,7 @@ class BackupRepositoryImpl(
                 )
             },
             readingState = BackupReadingState(
-                threadHistory = readingQueries.getAll().executeAsList().map {
+                threadHistory = readingQueries.getAllForBackup().executeAsList().map {
                     BackupThreadReadingHistory(
                         threadId = it.threadId,
                         threadType = it.threadType,
@@ -213,32 +226,318 @@ class BackupRepositoryImpl(
                         coverUrl = it.coverUrl,
                     )
                 },
+                tagCatalogHistory = if (scope == PortableSnapshotScope.LocalBackup) {
+                    tagCatalogHistoryQueries.getAll().executeAsList().map {
+                    BackupTagCatalogReadingHistory(
+                        tagId = it.tagId,
+                        tagName = it.tagName,
+                        tagPage = it.tagPage,
+                        threadId = it.threadId,
+                        threadTitle = it.threadTitle,
+                        threadPage = it.threadPage,
+                        postId = it.postId,
+                        postTitle = it.postTitle,
+                        authorId = it.authorId,
+                        anchorPostId = it.anchorPostId,
+                        anchorPostRatio = it.anchorPostRatio,
+                        anchorBlockId = it.anchorBlockId,
+                        anchorBlockType = it.anchorBlockType,
+                        anchorBlockRatio = it.anchorBlockRatio,
+                        viewportHeight = it.viewportHeight,
+                        firstVisibleItemIndex = it.firstVisibleItemIndex,
+                        firstVisibleItemOffset = it.firstVisibleItemOffset,
+                        lastVisitTime = it.lastVisitTime,
+                        coverUrl = it.coverUrl,
+                    )
+                    }
+                } else {
+                    emptyList()
+                },
+                rssSearchHistory = if (scope == PortableSnapshotScope.LocalBackup) {
+                    rssSearchHistoryQueries.getAll().executeAsList().map {
+                    BackupRssSearchReadingHistory(
+                        subscriptionId = it.subscriptionId,
+                        subscriptionTitle = it.subscriptionTitle,
+                        subscriptionQuery = it.subscriptionQuery,
+                        subscriptionPage = it.subscriptionPage,
+                        threadId = it.threadId,
+                        threadTitle = it.threadTitle,
+                        threadImagePageIndex = it.threadImagePageIndex,
+                        threadImageTotalPages = it.threadImageTotalPages,
+                        firstVisibleItemIndex = it.firstVisibleItemIndex,
+                        firstVisibleItemOffset = it.firstVisibleItemOffset,
+                        lastVisitTime = it.lastVisitTime,
+                        coverUrl = it.coverUrl,
+                    )
+                    }
+                } else {
+                    emptyList()
+                },
+                rssCatalogHistory = if (scope == PortableSnapshotScope.LocalBackup) {
+                    rssCatalogHistoryQueries.getAll().executeAsList().map {
+                    BackupRssCatalogReadingHistory(
+                        subscriptionId = it.subscriptionId,
+                        subscriptionTitle = it.subscriptionTitle,
+                        subscriptionQuery = it.subscriptionQuery,
+                        subscriptionPage = it.subscriptionPage,
+                        threadId = it.threadId,
+                        threadTitle = it.threadTitle,
+                        threadPage = it.threadPage,
+                        postId = it.postId,
+                        postTitle = it.postTitle,
+                        authorId = it.authorId,
+                        anchorPostId = it.anchorPostId,
+                        anchorPostRatio = it.anchorPostRatio,
+                        anchorBlockId = it.anchorBlockId,
+                        anchorBlockType = it.anchorBlockType,
+                        anchorBlockRatio = it.anchorBlockRatio,
+                        viewportHeight = it.viewportHeight,
+                        firstVisibleItemIndex = it.firstVisibleItemIndex,
+                        firstVisibleItemOffset = it.firstVisibleItemOffset,
+                        lastVisitTime = it.lastVisitTime,
+                        coverUrl = it.coverUrl,
+                    )
+                    }
+                } else {
+                    emptyList()
+                },
+                chapterState = if (scope == PortableSnapshotScope.LocalBackup) {
+                    chapterStateQueries.getAll().executeAsList().map {
+                    BackupChapterState(
+                        targetType = it.targetType,
+                        parentId = it.parentId,
+                        targetId = it.targetId,
+                        title = it.title,
+                        read = it.read != 0L,
+                        progressPercent = it.progressPercent,
+                        lastPageIndex = it.lastPageIndex,
+                        totalPages = it.totalPages,
+                        updatedAt = it.updatedAt,
+                    )
+                    }
+                } else {
+                    emptyList()
+                },
                 readingTimeStats = readingTimeQueries.getAll().executeAsList().map {
                     BackupReadingTimeStat(it.dateKey, it.durationMillis, it.updatedAt)
                 },
             ),
+            favoriteUpdates = if (scope == PortableSnapshotScope.LocalBackup) {
+                createFavoriteUpdateSnapshot()
+            } else {
+                BackupFavoriteUpdates()
+            },
         )
     }
 
-    private fun restoreSnapshot(
-        backup: YamiboBackupFile,
-        mode: BackupRepository.RestoreMode,
-    ): BackupRepository.RestoreSummary {
-        if (mode == BackupRepository.RestoreMode.Overwrite) {
-            clearRestorableData()
+    private fun createFavoriteUpdateSnapshot(): BackupFavoriteUpdates {
+        val categorySyncIds = categoryQueries.getAll().executeAsList()
+            .associate { it.id to it.syncId }
+        return BackupFavoriteUpdates(
+            events = updateEventQueries.getAll().executeAsList().map { event ->
+                val detailIds = event.detailIds.csvLongs()
+                val identity = favoriteUpdateEventIdentity(
+                    targetType = event.targetType,
+                    targetId = event.targetId,
+                    authorId = event.authorId,
+                    mode = event.mode,
+                    detailIds = detailIds,
+                    ambiguous = event.ambiguous != 0L,
+                    detectedAt = event.detectedAt,
+                    summary = event.summary,
+                    title = event.title,
+                )
+                BackupFavoriteUpdateEvent(
+                    syncId = identity.syncId,
+                    sourceFingerprint = identity.sourceFingerprint,
+                    targetType = event.targetType,
+                    targetId = event.targetId,
+                    authorId = event.authorId,
+                    fid = event.fid,
+                    forumName = event.forumName,
+                    title = event.title,
+                    latestPostTitle = event.latestPostTitle,
+                    mode = event.mode,
+                    summary = event.summary,
+                    detailIds = detailIds.distinct().sorted(),
+                    coverUrl = event.coverUrl,
+                    detectedAt = event.detectedAt,
+                    readAt = event.readAt,
+                    dismissedAt = event.dismissedAt,
+                    ambiguous = event.ambiguous != 0L,
+                )
+            },
+            fidFilters = updateFidFilterQueries.getAll().executeAsList().map {
+                BackupFavoriteUpdateFidFilter(it.fid, it.enabled != 0L)
+            },
+            categoryFilters = updateCategoryFilterQueries.getAll().executeAsList().mapNotNull {
+                val syncId = categorySyncIds[it.categoryId] ?: return@mapNotNull null
+                BackupFavoriteUpdateCategoryFilter(syncId, it.enabled != 0L)
+            },
+        )
+    }
+
+    private data class RestorePlan(
+        val backup: YamiboBackupFile,
+        val skippedCategoryFilters: Int,
+    )
+
+    private fun buildRestorePlan(backup: YamiboBackupFile): RestorePlan {
+        fun requireBounded(name: String, size: Int) {
+            require(size <= MAX_RECORDS_PER_DOMAIN) {
+                "$name 筆數超過安全限制 $MAX_RECORDS_PER_DOMAIN"
+            }
         }
 
-        restoreSettings(backup.settings)
+        require(backup.schemaVersion in 1..CURRENT_BACKUP_SCHEMA_VERSION) {
+            "不支援的備份版本：${backup.schemaVersion}"
+        }
+        val favorites = backup.favorites
+        val reading = backup.readingState
+        val updates = backup.favoriteUpdates
+        listOf(
+            "收藏分類" to favorites.categories.size,
+            "收藏集合" to favorites.collections.size,
+            "收藏項目" to favorites.items.size,
+            "設定" to backup.settings.size,
+            "筆記" to backup.notes.size,
+            "書籤" to backup.bookmarks.size,
+            "主題閱讀紀錄" to reading.threadHistory.size,
+            "圖片閱讀紀錄" to reading.imageHistory.size,
+            "標籤漫畫紀錄" to reading.tagMangaHistory.size,
+            "標籤目錄紀錄" to reading.tagCatalogHistory.size,
+            "RSS 搜尋紀錄" to reading.rssSearchHistory.size,
+            "RSS 目錄紀錄" to reading.rssCatalogHistory.size,
+            "章節進度" to reading.chapterState.size,
+            "閱讀時間" to reading.readingTimeStats.size,
+            "更新紀錄" to updates.events.size,
+            "更新篩選" to updates.fidFilters.size + updates.categoryFilters.size,
+        ).forEach { (name, size) -> requireBounded(name, size) }
+
+        requireUnique("收藏分類 localId", favorites.categories.map { it.localId })
+        requireUnique("收藏集合 localId", favorites.collections.map { it.localId })
+        requireUnique("收藏項目 localId", favorites.items.map { it.localId })
+        requireUnique(
+            "收藏項目 identity",
+            favorites.items.map { "${it.targetType}:${it.targetId}:${it.authorId}" },
+        )
+        requireUnique(
+            "主題閱讀 identity",
+            reading.threadHistory.map { "${it.threadId}:${it.threadType}:${it.authorId}:${it.historyOrigin}" },
+        )
+        requireUnique("圖片閱讀 identity", reading.imageHistory.map { it.postId })
+        requireUnique("標籤漫畫 identity", reading.tagMangaHistory.map { it.tagId })
+        requireUnique("標籤目錄 identity", reading.tagCatalogHistory.map { it.tagId })
+        requireUnique("RSS 搜尋 identity", reading.rssSearchHistory.map { it.subscriptionId })
+        requireUnique("RSS 目錄 identity", reading.rssCatalogHistory.map { it.subscriptionId })
+        requireUnique(
+            "章節 identity",
+            reading.chapterState.map { "${it.targetType}:${it.parentId}:${it.targetId}" },
+        )
+        requireUnique("閱讀時間 identity", reading.readingTimeStats.map { it.dateKey })
+        requireUnique("更新 identity", updates.events.map { it.syncId })
+        requireUnique("FID 篩選 identity", updates.fidFilters.map { it.fid })
+        requireUnique("分類篩選 identity", updates.categoryFilters.map { it.categorySyncId })
+
+        val categoryIds = favorites.categories.mapTo(hashSetOf()) { it.localId }
+        val collectionIds = favorites.collections.mapTo(hashSetOf()) { it.localId }
+        val itemIds = favorites.items.mapTo(hashSetOf()) { it.localId }
+        favorites.collections.forEach {
+            require(it.categoryLocalId in categoryIds) { "收藏集合引用不存在的分類" }
+        }
+        favorites.itemCategories.forEach {
+            require(it.itemLocalId in itemIds && it.categoryLocalId in categoryIds) {
+                "收藏項目與分類關聯無法解析"
+            }
+        }
+        favorites.itemCollections.forEach {
+            require(it.itemLocalId in itemIds && it.collectionLocalId in collectionIds) {
+                "收藏項目與集合關聯無法解析"
+            }
+        }
+        backup.settings.forEach(::validateSetting)
+        reading.chapterState.forEach {
+            require(it.progressPercent in 0L..100L) { "章節進度必須介於 0 到 100" }
+            require(it.updatedAt >= 0L) { "章節進度時間無效" }
+        }
+        updates.events.forEach { event ->
+            require(event.detectedAt >= 0L) { "更新紀錄時間無效" }
+            val expected = favoriteUpdateEventIdentity(
+                targetType = event.targetType,
+                targetId = event.targetId,
+                authorId = event.authorId,
+                mode = event.mode,
+                detailIds = event.detailIds,
+                ambiguous = event.ambiguous,
+                detectedAt = event.detectedAt,
+                summary = event.summary,
+                title = event.title,
+            )
+            require(event.syncId == expected.syncId && event.sourceFingerprint == expected.sourceFingerprint) {
+                "更新紀錄 identity 驗證失敗"
+            }
+        }
+
+        val categorySyncIds = favorites.categories.mapNotNullTo(hashSetOf()) { it.syncId }
+        val validCategoryFilters = updates.categoryFilters.filter { it.categorySyncId in categorySyncIds }
+        return RestorePlan(
+            backup = backup.copy(
+                favoriteUpdates = updates.copy(categoryFilters = validCategoryFilters),
+            ),
+            skippedCategoryFilters = updates.categoryFilters.size - validCategoryFilters.size,
+        )
+    }
+
+    private fun <T> requireUnique(name: String, values: List<T>) {
+        require(values.size == values.toSet().size) { "$name 包含重複值" }
+    }
+
+    private fun validateSetting(setting: BackupSetting) {
+        require(setting.key.isNotBlank()) { "設定 key 不可為空" }
+        when (setting.type) {
+            BackupSettingType.Int -> requireNotNull(setting.value.toIntOrNull()) { "設定整數格式錯誤" }
+            BackupSettingType.Float -> requireNotNull(setting.value.toFloatOrNull()) { "設定浮點格式錯誤" }
+            BackupSettingType.Bool -> requireNotNull(setting.value.toBooleanStrictOrNull()) { "設定布林格式錯誤" }
+            BackupSettingType.String,
+            BackupSettingType.Enum -> Unit
+        }
+    }
+
+    private fun restoreSnapshot(
+        plan: RestorePlan,
+        mode: BackupRepository.RestoreMode,
+    ): BackupRepository.RestoreSummary {
+        val backup = plan.backup
+        val settingsToTouch = if (mode == BackupRepository.RestoreMode.Overwrite) {
+            val registered = settingsRegistries.flatMap { it.exportableSettingItems }
+                .filterNot { shouldSkipSetting(it.storageKey) }
+                .mapNotNull(::settingToBackup)
+            (registered + backup.settings.filterNot { shouldSkipSetting(it.key) })
+                .distinctBy { it.key }
+        } else {
+            backup.settings.filterNot { shouldSkipSetting(it.key) }
+        }
+        val settingsSnapshot = captureSettings(settingsToTouch)
 
         val categoryIdMap = mutableMapOf<Long, Long>()
         val collectionIdMap = mutableMapOf<Long, Long>()
         val itemIdMap = mutableMapOf<Long, Long>()
 
-        db.transaction {
+        try {
+            db.transaction {
+                if (mode == BackupRepository.RestoreMode.Overwrite) {
+                    clearRestorableDataWithinTransaction()
+                    settingsToTouch.forEach { settingsStore.remove(it.key) }
+                }
+                restoreFailureInjector?.invoke("after-clear")
+                restoreSettings(backup.settings)
+                restoreFailureInjector?.invoke("after-settings")
+
             backup.favorites.categories.forEach { category ->
                 val existing = if (mode == BackupRepository.RestoreMode.Merge) {
-                    categoryQueries.getAll().executeAsList()
-                        .firstOrNull { it.name.trim().equals(category.name.trim(), ignoreCase = true) }
+                    category.syncId?.let { categoryQueries.getBySyncId(it).executeAsOneOrNull() }
+                        ?: categoryQueries.getAll().executeAsList()
+                            .firstOrNull { it.name.trim().equals(category.name.trim(), ignoreCase = true) }
                 } else null
                 val targetId = existing?.id ?: run {
                     categoryQueries.insertCategory(category.name, category.sortOrder, category.createdAt, category.updatedAt)
@@ -261,8 +560,9 @@ class BackupRepositoryImpl(
             backup.favorites.collections.forEach { collection ->
                 val mappedCategoryId = categoryIdMap[collection.categoryLocalId] ?: return@forEach
                 val existing = if (mode == BackupRepository.RestoreMode.Merge) {
-                    collectionQueries.getByCategoryId(mappedCategoryId).executeAsList()
-                        .firstOrNull { it.name.trim().equals(collection.name.trim(), ignoreCase = true) }
+                    collection.syncId?.let { collectionQueries.getBySyncId(it).executeAsOneOrNull() }
+                        ?: collectionQueries.getByCategoryId(mappedCategoryId).executeAsList()
+                            .firstOrNull { it.name.trim().equals(collection.name.trim(), ignoreCase = true) }
                 } else null
                 val targetId = existing?.id ?: run {
                     collectionQueries.insertCollection(
@@ -335,11 +635,27 @@ class BackupRepositoryImpl(
                 itemCollectionQueries.insertCrossRef(itemId, collectionId, ref.createdAt)
             }
 
-            backup.notes.forEach {
+            backup.notes.forEach note@{
+                val existing = noteQueries.getByTarget(it.targetType, it.targetId, it.authorId)
+                    .executeAsOneOrNull()
+                if (mode == BackupRepository.RestoreMode.Merge &&
+                    existing != null &&
+                    existing.updatedAt >= it.updatedAt
+                ) {
+                    return@note
+                }
                 noteQueries.upsert(it.targetType, it.targetId, it.authorId, it.content, it.createdAt, it.updatedAt)
             }
 
-            backup.bookmarks.forEach {
+            backup.bookmarks.forEach bookmark@{
+                val existing = bookmarkQueries.getByTarget(it.targetType, it.parentId, it.targetId)
+                    .executeAsOneOrNull()
+                if (mode == BackupRepository.RestoreMode.Merge &&
+                    existing != null &&
+                    existing.updatedAt >= it.updatedAt
+                ) {
+                    return@bookmark
+                }
                 bookmarkQueries.upsert(
                     targetType = it.targetType,
                     parentId = it.parentId,
@@ -352,7 +668,19 @@ class BackupRepositoryImpl(
                 )
             }
 
-            backup.readingState.threadHistory.forEach {
+            backup.readingState.threadHistory.forEach history@{
+                val existing = readingQueries.getAllForBackup().executeAsList().firstOrNull { row ->
+                    row.threadId == it.threadId &&
+                        row.threadType == it.threadType &&
+                        row.authorId == it.authorId &&
+                        row.historyOrigin == it.historyOrigin
+                }
+                if (mode == BackupRepository.RestoreMode.Merge &&
+                    existing != null &&
+                    existing.lastVisitTime >= it.lastVisitTime
+                ) {
+                    return@history
+                }
                 readingQueries.upsert(
                     threadId = it.threadId,
                     threadType = it.threadType,
@@ -379,7 +707,14 @@ class BackupRepositoryImpl(
                 )
             }
 
-            backup.readingState.imageHistory.forEach {
+            backup.readingState.imageHistory.forEach history@{
+                val existing = imageHistoryQueries.getByPostId(it.postId).executeAsOneOrNull()
+                if (mode == BackupRepository.RestoreMode.Merge &&
+                    existing != null &&
+                    existing.lastVisitTime >= it.lastVisitTime
+                ) {
+                    return@history
+                }
                 imageHistoryQueries.upsert(
                     postId = it.postId,
                     threadId = it.threadId,
@@ -391,7 +726,14 @@ class BackupRepositoryImpl(
                 )
             }
 
-            backup.readingState.tagMangaHistory.forEach {
+            backup.readingState.tagMangaHistory.forEach history@{
+                val existing = tagHistoryQueries.getByTagId(it.tagId).executeAsOneOrNull()
+                if (mode == BackupRepository.RestoreMode.Merge &&
+                    existing != null &&
+                    existing.lastVisitTime >= it.lastVisitTime
+                ) {
+                    return@history
+                }
                 tagHistoryQueries.upsert(
                     tagId = it.tagId,
                     tagName = it.tagName,
@@ -407,9 +749,141 @@ class BackupRepositoryImpl(
                 )
             }
 
-            backup.readingState.readingTimeStats.forEach {
+            backup.readingState.tagCatalogHistory.forEach history@{
+                val existing = tagCatalogHistoryQueries.getByTagId(it.tagId).executeAsOneOrNull()
+                if (mode == BackupRepository.RestoreMode.Merge &&
+                    existing != null &&
+                    existing.lastVisitTime >= it.lastVisitTime
+                ) {
+                    return@history
+                }
+                tagCatalogHistoryQueries.upsert(
+                    tagId = it.tagId,
+                    tagName = it.tagName,
+                    tagPage = it.tagPage,
+                    threadId = it.threadId,
+                    threadTitle = it.threadTitle,
+                    threadPage = it.threadPage,
+                    postId = it.postId,
+                    postTitle = it.postTitle,
+                    authorId = it.authorId,
+                    anchorPostId = it.anchorPostId,
+                    anchorPostRatio = it.anchorPostRatio,
+                    anchorBlockId = it.anchorBlockId,
+                    anchorBlockType = it.anchorBlockType,
+                    anchorBlockRatio = it.anchorBlockRatio,
+                    viewportHeight = it.viewportHeight,
+                    firstVisibleItemIndex = it.firstVisibleItemIndex,
+                    firstVisibleItemOffset = it.firstVisibleItemOffset,
+                    lastVisitTime = it.lastVisitTime,
+                    coverUrl = it.coverUrl,
+                )
+            }
+
+            backup.readingState.rssSearchHistory.forEach history@{
+                val existing = rssSearchHistoryQueries.getBySubscriptionId(it.subscriptionId)
+                    .executeAsOneOrNull()
+                if (mode == BackupRepository.RestoreMode.Merge &&
+                    existing != null &&
+                    existing.lastVisitTime >= it.lastVisitTime
+                ) {
+                    return@history
+                }
+                rssSearchHistoryQueries.upsert(
+                    subscriptionId = it.subscriptionId,
+                    subscriptionTitle = it.subscriptionTitle,
+                    subscriptionQuery = it.subscriptionQuery,
+                    subscriptionPage = it.subscriptionPage,
+                    threadId = it.threadId,
+                    threadTitle = it.threadTitle,
+                    threadImagePageIndex = it.threadImagePageIndex,
+                    threadImageTotalPages = it.threadImageTotalPages,
+                    firstVisibleItemIndex = it.firstVisibleItemIndex,
+                    firstVisibleItemOffset = it.firstVisibleItemOffset,
+                    lastVisitTime = it.lastVisitTime,
+                    coverUrl = it.coverUrl,
+                )
+            }
+
+            backup.readingState.rssCatalogHistory.forEach history@{
+                val existing = rssCatalogHistoryQueries.getBySubscriptionId(it.subscriptionId)
+                    .executeAsOneOrNull()
+                if (mode == BackupRepository.RestoreMode.Merge &&
+                    existing != null &&
+                    existing.lastVisitTime >= it.lastVisitTime
+                ) {
+                    return@history
+                }
+                rssCatalogHistoryQueries.upsert(
+                    subscriptionId = it.subscriptionId,
+                    subscriptionTitle = it.subscriptionTitle,
+                    subscriptionQuery = it.subscriptionQuery,
+                    subscriptionPage = it.subscriptionPage,
+                    threadId = it.threadId,
+                    threadTitle = it.threadTitle,
+                    threadPage = it.threadPage,
+                    postId = it.postId,
+                    postTitle = it.postTitle,
+                    authorId = it.authorId,
+                    anchorPostId = it.anchorPostId,
+                    anchorPostRatio = it.anchorPostRatio,
+                    anchorBlockId = it.anchorBlockId,
+                    anchorBlockType = it.anchorBlockType,
+                    anchorBlockRatio = it.anchorBlockRatio,
+                    viewportHeight = it.viewportHeight,
+                    firstVisibleItemIndex = it.firstVisibleItemIndex,
+                    firstVisibleItemOffset = it.firstVisibleItemOffset,
+                    lastVisitTime = it.lastVisitTime,
+                    coverUrl = it.coverUrl,
+                )
+            }
+
+            backup.readingState.chapterState.forEach chapter@{
+                val existing = chapterStateQueries.getByTarget(it.targetType, it.parentId, it.targetId)
+                    .executeAsOneOrNull()
+                if (mode == BackupRepository.RestoreMode.Merge &&
+                    existing != null &&
+                    existing.updatedAt >= it.updatedAt
+                ) {
+                    return@chapter
+                }
+                chapterStateQueries.upsert(
+                    targetType = it.targetType,
+                    parentId = it.parentId,
+                    targetId = it.targetId,
+                    title = it.title,
+                    read = if (it.read) 1L else 0L,
+                    progressPercent = it.progressPercent,
+                    lastPageIndex = it.lastPageIndex,
+                    totalPages = it.totalPages,
+                    updatedAt = it.updatedAt,
+                )
+            }
+
+            val localReadingTimes = readingTimeQueries.getAll().executeAsList().associateBy { it.dateKey }
+            backup.readingState.readingTimeStats.forEach stat@{
+                val existing = localReadingTimes[it.dateKey]
+                if (mode == BackupRepository.RestoreMode.Merge &&
+                    existing != null &&
+                    existing.updatedAt >= it.updatedAt
+                ) {
+                    return@stat
+                }
                 readingTimeQueries.upsert(it.dateKey, it.durationMillis, it.updatedAt)
             }
+
+            restoreFavoriteUpdates(
+                backup = backup,
+                categoryIdMap = categoryIdMap,
+                mode = mode,
+            )
+            restoreFailureInjector?.invoke("before-commit")
+            }
+        } catch (error: Throwable) {
+            runCatching { restoreCapturedSettings(settingsSnapshot) }
+                .exceptionOrNull()
+                ?.let(error::addSuppressed)
+            throw error
         }
 
         return BackupRepository.RestoreSummary(
@@ -419,12 +893,18 @@ class BackupRepositoryImpl(
             bookmarks = backup.bookmarks.size,
             readingHistory = backup.readingState.threadHistory.size +
                 backup.readingState.imageHistory.size +
-                backup.readingState.tagMangaHistory.size,
+                backup.readingState.tagMangaHistory.size +
+                backup.readingState.tagCatalogHistory.size +
+                backup.readingState.rssSearchHistory.size +
+                backup.readingState.rssCatalogHistory.size +
+                backup.readingState.chapterState.size +
+                backup.readingState.readingTimeStats.size,
+            updateRecords = backup.favoriteUpdates.events.size,
+            skippedRecords = plan.skippedCategoryFilters,
         )
     }
 
-    private fun clearRestorableData() {
-        db.transaction {
+    private fun clearRestorableDataWithinTransaction() {
             itemCategoryQueries.deleteAll()
             itemCollectionQueries.deleteAll()
             collectionQueries.deleteAll()
@@ -435,7 +915,139 @@ class BackupRepositoryImpl(
             readingQueries.deleteAll()
             imageHistoryQueries.deleteAll()
             tagHistoryQueries.deleteAll()
+            tagCatalogHistoryQueries.deleteAll()
+            rssSearchHistoryQueries.deleteAll()
+            rssCatalogHistoryQueries.deleteAll()
+            chapterStateQueries.deleteAll()
             readingTimeQueries.deleteAll()
+            updateEventQueries.deleteAll()
+            updateFidFilterQueries.deleteAll()
+            updateCategoryFilterQueries.deleteAll()
+    }
+
+    private fun restoreFavoriteUpdates(
+        backup: YamiboBackupFile,
+        categoryIdMap: Map<Long, Long>,
+        mode: BackupRepository.RestoreMode,
+    ) {
+        val existingEvents = updateEventQueries.getAll().executeAsList().associateBy { event ->
+            favoriteUpdateEventIdentity(
+                targetType = event.targetType,
+                targetId = event.targetId,
+                authorId = event.authorId,
+                mode = event.mode,
+                detailIds = event.detailIds.csvLongs(),
+                ambiguous = event.ambiguous != 0L,
+                detectedAt = event.detectedAt,
+                summary = event.summary,
+                title = event.title,
+            ).syncId
+        }
+        backup.favoriteUpdates.events.forEach { event ->
+            val existing = existingEvents[event.syncId]
+            if (existing == null) {
+                updateEventQueries.insertEvent(
+                    targetType = event.targetType,
+                    targetId = event.targetId,
+                    authorId = event.authorId,
+                    fid = event.fid,
+                    forumName = event.forumName,
+                    title = event.title,
+                    latestPostTitle = event.latestPostTitle,
+                    mode = event.mode,
+                    summary = event.summary,
+                    detailIds = event.detailIds.distinct().sorted().joinToString(","),
+                    coverUrl = event.coverUrl,
+                    detectedAt = event.detectedAt,
+                    readAt = event.readAt,
+                    dismissedAt = event.dismissedAt,
+                    ambiguous = if (event.ambiguous) 1L else 0L,
+                )
+            } else if (mode == BackupRepository.RestoreMode.Merge) {
+                laterNonNull(existing.readAt, event.readAt)?.let {
+                    if (it != existing.readAt) updateEventQueries.markRead(it, existing.id)
+                }
+                laterNonNull(existing.dismissedAt, event.dismissedAt)?.let {
+                    if (it != existing.dismissedAt) updateEventQueries.dismiss(it, existing.id)
+                }
+            }
+        }
+
+        val now = currentTimeMillis()
+        val existingFidFilters = updateFidFilterQueries.getAll().executeAsList().associateBy { it.fid }
+        val fidCounts = backup.favorites.items.groupingBy { it.forumId }.eachCount()
+        backup.favoriteUpdates.fidFilters.forEach { filter ->
+            val current = existingFidFilters[filter.fid]
+            val matchingItem = backup.favorites.items.firstOrNull { it.forumId == filter.fid }
+            updateFidFilterQueries.upsertFilter(
+                fid = filter.fid,
+                forumName = matchingItem?.forumName ?: current?.forumName ?: "FID ${filter.fid}",
+                enabled = if (filter.enabled) 1L else 0L,
+                itemCount = (fidCounts[filter.fid] ?: current?.itemCount?.toInt() ?: 0).toLong(),
+                updatedAt = now,
+            )
+        }
+
+        val categoryBySyncId = backup.favorites.categories
+            .mapNotNull { category ->
+                val syncId = category.syncId ?: return@mapNotNull null
+                val localId = categoryIdMap[category.localId] ?: return@mapNotNull null
+                syncId to (localId to category.name)
+            }.toMap()
+        val categoryCounts = backup.favorites.itemCategories
+            .groupingBy { it.categoryLocalId }
+            .eachCount()
+        backup.favoriteUpdates.categoryFilters.forEach { filter ->
+            val (localId, name) = categoryBySyncId[filter.categorySyncId] ?: return@forEach
+            updateCategoryFilterQueries.upsertFilter(
+                categoryId = localId,
+                categoryName = name,
+                enabled = if (filter.enabled) 1L else 0L,
+                itemCount = (categoryCounts.entries.firstOrNull { (backupId, _) ->
+                    categoryIdMap[backupId] == localId
+                }?.value ?: 0).toLong(),
+                updatedAt = now,
+            )
+        }
+    }
+
+    private fun laterNonNull(left: Long?, right: Long?): Long? = when {
+        left == null -> right
+        right == null -> left
+        else -> maxOf(left, right)
+    }
+
+    private data class CapturedSetting(
+        val setting: BackupSetting,
+        val existed: Boolean,
+    )
+
+    private fun captureSettings(settings: List<BackupSetting>): List<CapturedSetting> =
+        settings.distinctBy { it.key }.map { setting ->
+            val existed = settingsStore.hasKey(setting.key)
+            val current = if (existed) {
+                setting.copy(
+                    value = when (setting.type) {
+                        BackupSettingType.Int -> settingsStore.getInt(setting.key, 0).toString()
+                        BackupSettingType.Float -> settingsStore.getFloat(setting.key, 0f).toString()
+                        BackupSettingType.Bool -> settingsStore.getBoolean(setting.key, false).toString()
+                        BackupSettingType.String,
+                        BackupSettingType.Enum -> settingsStore.getString(setting.key, "")
+                    },
+                )
+            } else {
+                setting
+            }
+            CapturedSetting(current, existed)
+        }
+
+    private fun restoreCapturedSettings(settings: List<CapturedSetting>) {
+        settings.forEach { captured ->
+            if (captured.existed) {
+                restoreSettings(listOf(captured.setting))
+            } else {
+                settingsStore.remove(captured.setting.key)
+            }
         }
     }
 
@@ -521,7 +1133,11 @@ class BackupRepositoryImpl(
 
     private fun BackupFavoriteItem.forNameSafe(): String? = forumName
 
+    private fun String?.csvLongs(): List<Long> =
+        this?.split(",")?.mapNotNull { it.trim().toLongOrNull() }.orEmpty()
+
     private companion object {
+        const val MAX_RECORDS_PER_DOMAIN = 100_000
         const val DAY_MILLIS = 86_400_000L
         const val UTC_PLUS_8_OFFSET_MILLIS = 8L * 60L * 60L * 1000L
     }

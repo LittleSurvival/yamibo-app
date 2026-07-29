@@ -839,3 +839,9 @@ RSS收藏,RSS favorites,RSS收藏,RSS收藏
 確認強制載入,Confirm force pull,確認強制載入,确认强制载入
 本機資料將成為權威；雲端獨有資料會被明確刪除。,Local data will become authoritative; cloud-only data will be explicitly deleted.,本機資料將成為權威；雲端獨有資料會被明確刪除。,本地数据将成为权威；云端独有数据会被明确删除。
 雲端資料將成為權威；未上傳的本機差異會被捨棄。,Cloud data will become authoritative; unuploaded local differences will be discarded.,雲端資料將成為權威；未上傳的本機差異會被捨棄。,云端数据将成为权威；未上传的本地差异会被舍弃。
+本地資料備份,Local data backup,本地資料備份,本地数据备份
+備份收藏、設定、歷史進度與更新紀錄,"Back up favorites, settings, reading progress, and update records",備份收藏、設定、歷史進度與更新紀錄,备份收藏、设置、历史进度与更新记录
+備份範圍包含收藏、設定、筆記、書籤、歷史進度與更新紀錄。,"Backup includes favorites, settings, notes, bookmarks, reading progress, and update records.",備份範圍包含收藏、設定、筆記、書籤、歷史進度與更新紀錄。,备份范围包含收藏、设置、笔记、书签、历史进度与更新记录。
+還原完成：收藏 {}，設定 {}，歷史進度 {}，更新紀錄 {},"Restore complete: {} favorites, {} settings, {} history/progress records, {} update records",還原完成：收藏 {}，設定 {}，歷史進度 {}，更新紀錄 {},还原完成：收藏 {}，设置 {}，历史进度 {}，更新记录 {}
+略過無法對應的輔助紀錄 {},Skipped {} unmatched auxiliary records,略過無法對應的輔助紀錄 {},略过无法对应的辅助记录 {}
+下載內容會存放在本地資料備份指定的資料夾。,Downloaded content is stored in the folder selected under Local data backup.,下載內容會存放在本地資料備份指定的資料夾。,下载内容会存放在本地数据备份指定的文件夹。

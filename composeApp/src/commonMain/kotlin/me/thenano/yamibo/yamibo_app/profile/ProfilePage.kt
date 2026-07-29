@@ -293,7 +293,7 @@ fun ProfilePage(
             )
 
             EntryCard(
-                title = i18n("設定與收藏備份"),
+                title = i18n("本地資料備份"),
                 icon = YamiboIcons.Backup,
                 onClick = { navigator.navigate(IBackupSettingsScreen()) }
             )

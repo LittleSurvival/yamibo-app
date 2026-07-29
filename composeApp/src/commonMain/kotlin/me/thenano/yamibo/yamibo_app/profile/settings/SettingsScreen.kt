@@ -101,8 +101,8 @@ internal fun SettingsScreen() {
 
             SettingsItem(
                 icon = YamiboIcons.Backup,
-                title = i18n("設定與收藏備份"),
-                subtitle = i18n("建立、載入與管理本地備份檔案"),
+                title = i18n("本地資料備份"),
+                subtitle = i18n("備份收藏、設定、歷史進度與更新紀錄"),
                 onClick = { navigator.navigate(IBackupSettingsScreen()) },
             )
             SettingsDivider()

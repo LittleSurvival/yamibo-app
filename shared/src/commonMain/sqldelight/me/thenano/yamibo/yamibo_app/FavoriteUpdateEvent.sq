@@ -9,6 +9,10 @@ SELECT * FROM FavoriteUpdateEvent
 WHERE dismissedAt IS NULL
 ORDER BY detectedAt DESC, id DESC;
 
+getAll:
+SELECT * FROM FavoriteUpdateEvent
+ORDER BY detectedAt DESC, id DESC;
+
 countActive:
 SELECT COUNT(*) FROM FavoriteUpdateEvent
 WHERE dismissedAt IS NULL;
@@ -31,4 +35,7 @@ WHERE dismissedAt IS NULL;
 deleteForTarget:
 DELETE FROM FavoriteUpdateEvent
 WHERE targetType = ? AND targetId = ? AND authorId = ?;
+
+deleteAll:
+DELETE FROM FavoriteUpdateEvent;
 
