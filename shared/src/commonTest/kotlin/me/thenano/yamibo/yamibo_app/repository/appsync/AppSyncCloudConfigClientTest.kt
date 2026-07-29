@@ -75,7 +75,7 @@ class AppSyncCloudConfigClientTest {
             <?xml version="1.0" encoding="utf-8"?>
             <root><![CDATA[
               <div id="messagetext"><p>
-                ????
+                操作成功
                 <script>succeedhandle_blog('home.php?mod=space&do=blog&id=42')</script>
               </p></div>
             ]]></root>
@@ -84,7 +84,7 @@ class AppSyncCloudConfigClientTest {
         val result = assertIs<AppSyncCloudResult.VerifiedSuccess<AppSyncPostAcknowledgement>>(
             AppSyncDiscuzResponseParser.parse(200, body),
         )
-        assertEquals("????", result.value.messageText)
+        assertEquals("操作成功", result.value.messageText)
         assertEquals(listOf(BlogId(42)), result.value.candidateBlogIds)
     }
 
@@ -92,7 +92,7 @@ class AppSyncCloudConfigClientTest {
     fun discuzParserCollectsRedirectIdentityHintWithoutTrustingItAsSuccessState() {
         val body = """
             <div id="messagetext"><p>
-              ????<script>succeedhandle_blog()</script>
+              操作成功<script>succeedhandle_blog()</script>
             </p></div>
         """.trimIndent()
 
@@ -132,6 +132,39 @@ class AppSyncCloudConfigClientTest {
                 503,
                 "Illegal request: please login again",
             ),
+        )
+    }
+
+    @Test
+    fun discuzParserRecognizesCapturedChinesePromptMessages() {
+        val success = """
+            <div id="messagetext"><p>
+              操作成功
+              <script>setTimeout("location.href='home.php?do=blog&id=44'", 1000)</script>
+            </p></div>
+        """.trimIndent()
+        val verified = assertIs<AppSyncCloudResult.VerifiedSuccess<AppSyncPostAcknowledgement>>(
+            AppSyncDiscuzResponseParser.parse(200, success),
+        )
+        assertEquals("操作成功", verified.value.messageText)
+        assertEquals(listOf(BlogId(44)), verified.value.candidateBlogIds)
+
+        val staleForm = """
+            <div id="messagetext"><p>表單驗證串不符，無法提交。</p></div>
+        """.trimIndent()
+        assertIs<AppSyncCloudResult.FormExpired>(
+            AppSyncDiscuzResponseParser.parse(200, staleForm),
+        )
+
+        val denied = """
+            <div id="messagetext"><p>沒有權限進行此操作。</p></div>
+        """.trimIndent()
+        assertIs<AppSyncCloudResult.NoPermission>(
+            AppSyncDiscuzResponseParser.parse(200, denied),
+        )
+
+        assertIs<AppSyncCloudResult.Maintenance>(
+            AppSyncDiscuzResponseParser.parse(200, "<p>網站維護中</p>"),
         )
     }
 
@@ -453,7 +486,7 @@ class AppSyncCloudConfigClientTest {
         val provider = providerWithSingleCandidate(classId, blogId, damaged).apply {
             deleteHandler = { request ->
                 blogs[request.blogId] = AppSyncCloudResult.NotFound
-                success(AppSyncPostAcknowledgement("????", emptyList()))
+                success(AppSyncPostAcknowledgement("操作成功", emptyList()))
             }
         }
         val store = FakeConfigStore(
@@ -523,7 +556,7 @@ class AppSyncCloudConfigClientTest {
                     blogListPage(listOf(summary(blogId, 500L))),
                 )
                 blogs[blogId] = success(blogPage(blogId, request.message))
-                success(AppSyncPostAcknowledgement("????", listOf(blogId)))
+                success(AppSyncPostAcknowledgement("操作成功", listOf(blogId)))
             }
         }
         val store = FakeConfigStore()
@@ -551,7 +584,7 @@ class AppSyncCloudConfigClientTest {
             pageResults[PageKey(null, 1)] = success(UserSpaceBlogPage(emptyList()))
             submitHandler = {
                 pageResults[PageKey(null, 1)] = AppSyncCloudResult.Timeout("reload timeout")
-                success(AppSyncPostAcknowledgement("????", listOf(BlogId(72))))
+                success(AppSyncPostAcknowledgement("操作成功", listOf(BlogId(72))))
             }
         }
 
@@ -578,7 +611,7 @@ class AppSyncCloudConfigClientTest {
             blogs[blogId] = success(blogPage(blogId, validBody("old", 1L)))
             submitHandler = { request ->
                 blogs[blogId] = success(blogPage(blogId, request.message))
-                success(AppSyncPostAcknowledgement("????", listOf(blogId)))
+                success(AppSyncPostAcknowledgement("操作成功", listOf(blogId)))
             }
         }
 
@@ -611,7 +644,7 @@ class AppSyncCloudConfigClientTest {
             blogs[blogId] = success(blogPage(blogId, validBody("old", 1L)))
             submitHandler = { request ->
                 blogs[blogId] = success(blogPage(blogId, request.message))
-                success(AppSyncPostAcknowledgement("????", listOf(blogId)))
+                success(AppSyncPostAcknowledgement("操作成功", listOf(blogId)))
             }
         }
 
@@ -688,7 +721,7 @@ class AppSyncCloudConfigClientTest {
                     assertIs<AppSyncBlogClassSelection.Existing>(request.classSelection).classId,
                 )
                 blogs[blogId] = success(blogPage(blogId, request.message))
-                success(AppSyncPostAcknowledgement("????", listOf(blogId)))
+                success(AppSyncPostAcknowledgement("操作成功", listOf(blogId)))
             }
         }
 
@@ -787,7 +820,7 @@ class AppSyncCloudConfigClientTest {
         val provider = FakeBlogProvider().apply {
             blogs[blogId] = success(blogPage(blogId, validBody("current", 10L)))
             deleteHandler = {
-                success(AppSyncPostAcknowledgement("????", emptyList()))
+                success(AppSyncPostAcknowledgement("操作成功", emptyList()))
             }
         }
 
@@ -812,7 +845,7 @@ class AppSyncCloudConfigClientTest {
             blogs[blogId] = success(blogPage(blogId, validBody("current", 10L)))
             deleteHandler = { request ->
                 blogs[request.blogId] = AppSyncCloudResult.NotFound
-                success(AppSyncPostAcknowledgement("????", emptyList()))
+                success(AppSyncPostAcknowledgement("操作成功", emptyList()))
             }
         }
 
@@ -837,7 +870,7 @@ class AppSyncCloudConfigClientTest {
             pageResults[PageKey(null, 1)] = success(UserSpaceBlogPage(emptyList()))
             deleteHandler = { request ->
                 blogs[request.blogId] = AppSyncCloudResult.ParseFailed("deleted prompt layout")
-                success(AppSyncPostAcknowledgement("????", emptyList()))
+                success(AppSyncPostAcknowledgement("操作成功", emptyList()))
             }
         }
 
@@ -852,7 +885,7 @@ class AppSyncCloudConfigClientTest {
             pageResults[PageKey(null, 1)] = AppSyncCloudResult.NetworkFailed("list offline")
             deleteHandler = { request ->
                 blogs[request.blogId] = AppSyncCloudResult.ParseFailed("deleted prompt layout")
-                success(AppSyncPostAcknowledgement("????", emptyList()))
+                success(AppSyncPostAcknowledgement("操作成功", emptyList()))
             }
         }
 

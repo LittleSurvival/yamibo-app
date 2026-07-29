@@ -1,0 +1,833 @@
+package me.thenano.yamibo.yamibo_app.repository.appsync
+
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.CancellationException
+import me.thenano.yamibo.yamibo_app.Database
+import me.thenano.yamibo.yamibo_app.repository.AuthRepository
+import me.thenano.yamibo.yamibo_app.repository.BookMarkRepository
+import me.thenano.yamibo.yamibo_app.repository.DetailNoteRepository
+import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository
+import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
+import me.thenano.yamibo.yamibo_app.repository.appsync.domain.stableAppSyncFingerprint
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncBootstrapResult
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.BackupSnapshotMigrationPlanner
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.BootstrapCoordinator
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.CheckpointCoordinator
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.CheckpointCreationResult
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.DatabaseSyncDomainMaterializer
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.OperationSyncEngine
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.OperationSyncResult
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.OperationChangeAction
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.OperationChangeDirection
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.OperationChangeSummary
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.ManualSyncApplyResult
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.ManualSyncOverrideCoordinator
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.ManualSyncOverrideDirection
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.ManualSyncOverridePreview
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.ManualSyncPreviewResult
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.SqlDelightSyncDomainStateAdapter
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncInstallationState
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncAccountBinding
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncIdentityGenerator
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.YamiboAppSyncBlogProvider
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.YamiboAppSyncJournalRemote
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCloudResetResult
+import me.thenano.yamibo.yamibo_app.repository.bookmark.BookMarkRepositoryImpl
+import me.thenano.yamibo.yamibo_app.repository.backup.BackupRepositoryImpl
+import me.thenano.yamibo.yamibo_app.repository.detailnote.DetailNoteRepositoryImpl
+import me.thenano.yamibo.yamibo_app.repository.favorite.FavoriteStoreRepositoryImpl
+import me.thenano.yamibo.yamibo_app.repository.settings.core.BoolSetting
+import me.thenano.yamibo.yamibo_app.repository.settings.core.EnumSetting
+import me.thenano.yamibo.yamibo_app.repository.settings.core.FloatSetting
+import me.thenano.yamibo.yamibo_app.repository.settings.core.IntSetting
+import me.thenano.yamibo.yamibo_app.repository.settings.core.SettingsRegistry
+import me.thenano.yamibo.yamibo_app.repository.settings.core.StringSetting
+import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncOperationStore
+import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncRemoteBlogStore
+import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
+import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
+
+enum class AppSyncServicePhase {
+    Disabled,
+    BootstrapRequired,
+    Running,
+    Active,
+    PausedAuth,
+    PausedProvider,
+    Quarantined,
+    RetryPending,
+}
+
+data class AppSyncServiceStatus(
+    val phase: AppSyncServicePhase,
+    val automaticEnabled: Boolean,
+    val pendingOperationCount: Int,
+    val lastVerifiedAtEpochMillis: Long?,
+    val message: String,
+    val changeSummaries: List<AppSyncChangeSummary> = emptyList(),
+)
+
+enum class AppSyncChangeDirection {
+    Received,
+    Uploaded,
+}
+
+enum class AppSyncChangeAction {
+    Added,
+    Updated,
+    Deleted,
+    Enabled,
+    Disabled,
+}
+
+data class AppSyncChangeSummary(
+    val direction: AppSyncChangeDirection,
+    val domainId: String,
+    val action: AppSyncChangeAction,
+    val count: Int,
+)
+
+enum class AppSyncForceDirection {
+    Push,
+    Pull,
+}
+
+data class AppSyncForceDifference(
+    val domainId: String,
+    val added: Int,
+    val updated: Int,
+    val deleted: Int,
+    val enabled: Int,
+    val disabled: Int,
+)
+
+data class AppSyncForcePreview(
+    val direction: AppSyncForceDirection,
+    val token: String,
+    val differences: List<AppSyncForceDifference>,
+)
+
+sealed interface AppSyncForcePreviewResult {
+    data class Ready(val preview: AppSyncForcePreview) : AppSyncForcePreviewResult
+    data class Failed(val reason: String) : AppSyncForcePreviewResult
+}
+
+sealed interface AppSyncForceApplyResult {
+    data class Applied(val status: AppSyncServiceStatus) : AppSyncForceApplyResult
+    data object StalePreview : AppSyncForceApplyResult
+    data class Failed(val reason: String) : AppSyncForceApplyResult
+}
+
+internal data class PendingReliabilityDemand(
+    val runId: String,
+    val startedAtEpochMillis: Long,
+    val retryCount: Long,
+)
+
+internal data class ReliabilityDemandContext(
+    val runId: String,
+    val trigger: String,
+    val startedAtEpochMillis: Long,
+    val retryCount: Long,
+)
+
+internal fun nextReliabilityDemand(
+    trigger: String,
+    nowEpochMillis: Long,
+    deviceEpoch: String?,
+    pending: PendingReliabilityDemand?,
+): ReliabilityDemandContext = if (pending != null) {
+    ReliabilityDemandContext(
+        runId = pending.runId,
+        trigger = trigger,
+        startedAtEpochMillis = pending.startedAtEpochMillis,
+        retryCount = pending.retryCount + 1,
+    )
+} else {
+    ReliabilityDemandContext(
+        runId = "run-${
+            stableAppSyncFingerprint("$trigger:$nowEpochMillis:$deviceEpoch").take(24)
+        }",
+        trigger = trigger,
+        startedAtEpochMillis = nowEpochMillis,
+        retryCount = 0,
+    )
+}
+
+/**
+ * App-scoped entry point. Platform schedulers and the UI call this service;
+ * synchronization policy remains in the shared engine.
+ */
+class AppSyncService(
+    private val db: Database,
+    private val settingsStore: SettingsStore,
+    private val authRepository: AuthRepository,
+    private val nowMillis: () -> Long = ::currentTimeMillis,
+) {
+    private val featureEnabled = settingsStore.getBoolean(FEATURE_ENABLED_KEY, false)
+    private val store = SqlDelightAppSyncOperationStore(db)
+    private val domainState = SqlDelightSyncDomainStateAdapter(
+        db = db,
+        materializer = DatabaseSyncDomainMaterializer(db, settingsStore),
+        nowMillis = nowMillis,
+    )
+    private val remote = YamiboAppSyncJournalRemote(
+        provider = YamiboAppSyncBlogProvider(
+            cookieStore = authRepository.cookieStore,
+            yamiboClient = authRepository.yamiboClient,
+        ),
+        store = SqlDelightAppSyncRemoteBlogStore(db),
+        nowMillis = nowMillis,
+    )
+    private var localSnapshotSource: BackupRepositoryImpl? = null
+    private val migrationPlanner = BackupSnapshotMigrationPlanner()
+    private val bootstrap = BootstrapCoordinator(
+        store,
+        remote,
+        domainState,
+        nowMillis = nowMillis,
+        captureLocalMigrationDrafts = {
+            val source = checkNotNull(localSnapshotSource) {
+                "Backup snapshot source is not configured"
+            }
+            migrationPlanner.plan(source.createAppSyncSnapshot())
+        },
+    )
+    private val engine = OperationSyncEngine(
+        store = store,
+        remote = remote,
+        domainState = domainState,
+        nowMillis = nowMillis,
+        ownerId = { SyncIdentityGenerator.writerNonce().value },
+    )
+    private val manualOverride = ManualSyncOverrideCoordinator(
+        store = store,
+        remote = remote,
+        domainState = domainState,
+        nowMillis = nowMillis,
+    )
+    private val checkpointCoordinator = CheckpointCoordinator(
+        store = store,
+        remote = remote,
+        domainState = domainState,
+        snapshot = {
+            checkNotNull(localSnapshotSource) {
+                "Backup snapshot source is not configured"
+            }.createAppSyncSnapshot()
+        },
+        nowMillis = nowMillis,
+    )
+    internal val mutationRecorder = AppSyncMutationRecorder(
+        enabled = featureEnabled,
+        store = store,
+        domainState = domainState,
+        nowMillis = nowMillis,
+    )
+    private val mutableStatus: MutableStateFlow<AppSyncServiceStatus>
+
+    val status: StateFlow<AppSyncServiceStatus>
+        get() = mutableStatus.asStateFlow()
+
+    init {
+        val generation = settingsStore.getString(DATABASE_GENERATION_KEY, "").ifBlank {
+            SyncIdentityGenerator.writerNonce().value.also {
+                settingsStore.putString(DATABASE_GENERATION_KEY, it)
+            }
+        }
+        val installation = store.initialize(generation)
+        backfillStableContainerIds(db)
+        if (featureEnabled) {
+            domainState.reconcileProjections()
+        }
+        mutableStatus = MutableStateFlow(
+            if (featureEnabled) {
+                statusFor(installation.state, "尚未開始同步")
+            } else {
+                disabledStatus(installation.automaticEnabled)
+            },
+        )
+    }
+
+    fun operationRecordingSettingsStore(
+        db: Database,
+        delegate: SettingsStore,
+    ): SettingsStore = if (featureEnabled) {
+        OperationRecordingSettingsStore(db, delegate, mutationRecorder)
+    } else {
+        delegate
+    }
+
+    fun detailNoteRepository(db: Database): DetailNoteRepository =
+        DetailNoteRepositoryImpl(db, mutationRecorder)
+
+    fun bookMarkRepository(db: Database): BookMarkRepository =
+        BookMarkRepositoryImpl(db, mutationRecorder)
+
+    fun favoriteStoreRepository(db: Database): FavoriteStoreRepository =
+        FavoriteStoreRepositoryImpl(db, mutationRecorder)
+
+    fun readHistoryRepository(delegate: ReadHistoryRepository): ReadHistoryRepository =
+        if (featureEnabled) OperationRecordingReadHistoryRepository(delegate, mutationRecorder) else delegate
+
+    fun registerSyncableSettings(registries: List<SettingsRegistry>) {
+        if (!featureEnabled) return
+        db.transaction {
+            registries.flatMap { it.exportableSettingItems }
+                .distinctBy { it.storageKey }
+                .filter { settingsStore.hasKey(it.storageKey) }
+                .forEach { setting ->
+                    if (db.appSyncOperationQueries.getSyncSettingValue(setting.storageKey)
+                            .executeAsOneOrNull() != null
+                    ) {
+                        return@forEach
+                    }
+                    val (type, value) = when (setting) {
+                        is IntSetting -> "int" to settingsStore.getInt(setting.storageKey, setting.default).toString()
+                        is FloatSetting -> "float" to settingsStore.getFloat(setting.storageKey, setting.default).toString()
+                        is BoolSetting -> "bool" to settingsStore.getBoolean(setting.storageKey, setting.default).toString()
+                        is StringSetting ->
+                            "string" to settingsStore.getString(setting.storageKey, setting.default)
+                        is EnumSetting<*> ->
+                            "enum" to settingsStore.getString(setting.storageKey, setting.default.name)
+                        else -> return@forEach
+                    }
+                    db.appSyncOperationQueries.upsertSyncSettingValue(
+                        settingKey = setting.storageKey,
+                        type = type,
+                        value_ = value,
+                        winnerOperationId = PENDING_SETTINGS_MIGRATION_WINNER,
+                        updatedAtEpochMillis = 0,
+                    )
+                    db.appSyncOperationQueries.recordKnownSyncSettingKey(setting.storageKey)
+                }
+        }
+    }
+
+    fun registerLocalSnapshotSource(repository: BackupRepositoryImpl) {
+        localSnapshotSource = repository
+    }
+
+    suspend fun refresh(forceDiscovery: Boolean = false): AppSyncServiceStatus {
+        if (!featureEnabled) return disabledStatus()
+        val binding = currentAccountBinding() ?: return pausedAuth("foreground_refresh")
+        val installation = store.installation()
+        return if (
+            installation?.state != AppSyncInstallationState.Active ||
+            installation.accountBinding != binding
+        ) {
+            bootstrap(binding, forceDiscovery = true)
+        } else {
+            synchronize(binding, forceDiscovery, trigger = "foreground_refresh")
+        }
+    }
+
+    suspend fun synchronizeNow(
+        forceDiscovery: Boolean = false,
+        trigger: String = "manual",
+    ): AppSyncServiceStatus {
+        if (!featureEnabled) return disabledStatus()
+        val binding = currentAccountBinding() ?: return pausedAuth(trigger)
+        val demand = beginReliabilityDemand(trigger)
+        return try {
+            val installation = store.installation()
+            if (
+                installation?.state != AppSyncInstallationState.Active ||
+                installation.accountBinding != binding
+            ) {
+                val bootstrapped = bootstrap(binding, forceDiscovery = true)
+                if (bootstrapped.phase != AppSyncServicePhase.Active) {
+                    return finishReliabilityDemand(demand, bootstrapped)
+                }
+            }
+            synchronize(binding, forceDiscovery, trigger, demand)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            val status = statusFor(
+                requireNotNull(store.installation()).state,
+                "同步發生未預期錯誤，已保留待同步操作並排定重試",
+                AppSyncServicePhase.RetryPending,
+            )
+            mutableStatus.value = status
+            finishReliabilityDemand(demand, status)
+        }
+    }
+
+    fun setAutomaticEnabled(enabled: Boolean) {
+        if (!featureEnabled) {
+            mutableStatus.value = disabledStatus()
+            return
+        }
+        store.setAutomaticEnabled(enabled)
+        val installation = requireNotNull(store.installation())
+        mutableStatus.value = statusFor(
+            installation.state,
+            if (enabled) "已排定自動同步" else "自動同步已關閉",
+            changeSummaries = mutableStatus.value.changeSummaries,
+        )
+    }
+
+    suspend fun deleteCloudData(): AppSyncServiceStatus {
+        if (!featureEnabled) return disabledStatus()
+        val binding = currentAccountBinding() ?: return pausedAuth("cloud_reset")
+        val formHash = authRepository.currentUser()?.formHash
+            ?: return pausedAuth("cloud_reset")
+
+        // Enter pull-only bootstrap before the first remote delete. If the process
+        // stops during a partial purge, surviving cloud data is loaded before any
+        // local migration operation can be published.
+        store.prepareForCloudReset()
+        mutableStatus.value = mutableStatus.value.copy(
+            phase = AppSyncServicePhase.Running,
+            message = "正在驗證並清除雲端同步資料",
+        )
+        val status = when (val result = remote.deleteAllVerifiedSyncData(binding, formHash)) {
+            is AppSyncCloudResetResult.Verified -> {
+                val bootstrapped = bootstrap(binding, forceDiscovery = true)
+                if (bootstrapped.phase == AppSyncServicePhase.Active) {
+                    bootstrapped.copy(
+                        message = "已清除 ${result.deletedBlogCount} 筆雲端同步資料；本機資料已排入安全重建",
+                    )
+                } else {
+                    bootstrapped
+                }
+            }
+            AppSyncCloudResetResult.FormExpired -> {
+                store.updateState(AppSyncInstallationState.PausedAuth)
+                statusFor(
+                    AppSyncInstallationState.PausedAuth,
+                    "登入狀態已過期；重新整理登入後會先載入仍存活的雲端資料",
+                )
+            }
+            is AppSyncCloudResetResult.RetryableFailure -> statusFor(
+                AppSyncInstallationState.Unbound,
+                "雲端清除未完整確認：${result.reason}；下次會先安全載入再繼續",
+                AppSyncServicePhase.RetryPending,
+            )
+            is AppSyncCloudResetResult.TerminalFailure -> {
+                store.updateState(AppSyncInstallationState.Quarantined)
+                statusFor(AppSyncInstallationState.Quarantined, result.reason)
+            }
+        }
+        mutableStatus.value = status
+        return status
+    }
+
+    suspend fun previewForceOverride(
+        direction: AppSyncForceDirection,
+    ): AppSyncForcePreviewResult {
+        if (!featureEnabled) return AppSyncForcePreviewResult.Failed("同步核心尚未啟用")
+        val binding = currentAccountBinding()
+            ?: return AppSyncForcePreviewResult.Failed("登入狀態已過期，請先刷新登入狀態")
+        val internalDirection = direction.toInternal()
+        return when (val result = manualOverride.preview(binding, internalDirection)) {
+            is ManualSyncPreviewResult.Ready -> AppSyncForcePreviewResult.Ready(
+                result.preview.toPublic(),
+            )
+            is ManualSyncPreviewResult.Failed -> AppSyncForcePreviewResult.Failed(result.reason)
+        }
+    }
+
+    suspend fun applyForceOverride(
+        preview: AppSyncForcePreview,
+    ): AppSyncForceApplyResult {
+        if (!featureEnabled) return AppSyncForceApplyResult.Failed("同步核心尚未啟用")
+        val binding = currentAccountBinding()
+            ?: return AppSyncForceApplyResult.Failed("登入狀態已過期，請先刷新登入狀態")
+        if (preview.direction == AppSyncForceDirection.Push &&
+            authRepository.currentUser()?.formHash == null
+        ) {
+            return AppSyncForceApplyResult.Failed("登入狀態已過期，請先刷新登入狀態")
+        }
+        mutableStatus.value = mutableStatus.value.copy(
+            phase = AppSyncServicePhase.Running,
+            message = if (preview.direction == AppSyncForceDirection.Push) {
+                "正在執行強制上傳並驗證雲端結果"
+            } else {
+                "正在載入並套用已驗證的雲端狀態"
+            },
+        )
+        return when (val result = manualOverride.apply(binding, preview.toInternal())) {
+            is ManualSyncApplyResult.Applied -> {
+                val status = if (preview.direction == AppSyncForceDirection.Push) {
+                    synchronize(
+                        binding = binding,
+                        forceDiscovery = false,
+                        trigger = "manual_force_push",
+                    )
+                } else {
+                    statusFor(
+                        AppSyncInstallationState.Active,
+                        "強制載入完成：已套用 ${result.operationCount} 項差異",
+                        changeSummaries = preview.differences.flatMap { difference ->
+                            difference.toChangeSummaries(AppSyncChangeDirection.Received)
+                        },
+                    ).also { mutableStatus.value = it }
+                }
+                AppSyncForceApplyResult.Applied(status)
+            }
+            ManualSyncApplyResult.StalePreview -> {
+                mutableStatus.value = currentStatus().copy(
+                    message = "本機或雲端資料已變更，請重新檢視差異後再確認",
+                )
+                AppSyncForceApplyResult.StalePreview
+            }
+            is ManualSyncApplyResult.Failed -> {
+                mutableStatus.value = currentStatus().copy(message = result.reason)
+                AppSyncForceApplyResult.Failed(result.reason)
+            }
+        }
+    }
+
+    fun currentStatus(): AppSyncServiceStatus {
+        if (!featureEnabled) return disabledStatus()
+        val installation = requireNotNull(store.installation())
+        return statusFor(installation.state, mutableStatus.value.message)
+            .copy(changeSummaries = mutableStatus.value.changeSummaries)
+            .also { mutableStatus.value = it }
+    }
+
+    private suspend fun bootstrap(
+        binding: SyncAccountBinding,
+        forceDiscovery: Boolean,
+    ): AppSyncServiceStatus {
+        mutableStatus.value = mutableStatus.value.copy(
+            phase = AppSyncServicePhase.Running,
+            message = "正在安全載入雲端紀錄，本階段不會上傳本機資料",
+        )
+        return when (val result = bootstrap.bootstrap(binding, forceDiscovery)) {
+            is AppSyncBootstrapResult.Ready -> statusFor(
+                AppSyncInstallationState.Active,
+                "安全載入完成，套用 ${result.appliedOperationCount} 筆操作",
+                changeSummaries = result.changes.map(OperationChangeSummary::toPublic),
+            )
+            is AppSyncBootstrapResult.RetryableFailure -> statusFor(
+                AppSyncInstallationState.Bootstrapping,
+                result.reason,
+                AppSyncServicePhase.RetryPending,
+            )
+            is AppSyncBootstrapResult.Paused -> {
+                val state = requireNotNull(store.installation()).state
+                statusFor(state, result.reason)
+            }
+        }.also { mutableStatus.value = it }
+    }
+
+    private suspend fun synchronize(
+        binding: SyncAccountBinding,
+        forceDiscovery: Boolean,
+        trigger: String,
+        existingDemand: ReliabilityDemandContext? = null,
+    ): AppSyncServiceStatus {
+        val demand = existingDemand ?: beginReliabilityDemand(trigger)
+        mutableStatus.value = mutableStatus.value.copy(
+            phase = AppSyncServicePhase.Running,
+            message = "正在同步操作紀錄",
+        )
+        val result = engine.synchronize(
+            accountBinding = binding,
+            formHash = authRepository.currentUser()?.formHash,
+            forceDiscovery = forceDiscovery,
+        )
+        var checkpointResult: CheckpointCreationResult? = null
+        if (result is OperationSyncResult.Converged) {
+            authRepository.currentUser()?.formHash?.let { formHash ->
+                if (localSnapshotSource != null) {
+                    checkpointResult = checkpointCoordinator.createIfNeeded(binding, formHash)
+                }
+            }
+        }
+        val status = if (checkpointResult is CheckpointCreationResult.StoragePressure) {
+            store.updateState(AppSyncInstallationState.PausedProvider)
+            statusFor(
+                AppSyncInstallationState.PausedProvider,
+                checkpointResult.reason,
+            )
+        } else when (result) {
+            is OperationSyncResult.Converged -> statusFor(
+                AppSyncInstallationState.Active,
+                "同步完成：接收 ${result.appliedRemoteCount}、確認 ${result.acknowledgedLocalCount}",
+                changeSummaries = result.changes.map(OperationChangeSummary::toPublic),
+            )
+            is OperationSyncResult.PausedAuth ->
+                statusFor(AppSyncInstallationState.PausedAuth, result.reason)
+            is OperationSyncResult.Quarantined ->
+                statusFor(AppSyncInstallationState.Quarantined, result.reason)
+            is OperationSyncResult.StoragePressure ->
+                statusFor(AppSyncInstallationState.PausedProvider, result.reason)
+            is OperationSyncResult.RebootstrapRequired ->
+                statusFor(AppSyncInstallationState.RebootstrapRequired, result.reason)
+            is OperationSyncResult.RetryScheduled -> statusFor(
+                requireNotNull(store.installation()).state,
+                result.reason,
+                AppSyncServicePhase.RetryPending,
+            )
+            OperationSyncResult.AlreadyRunning -> statusFor(
+                requireNotNull(store.installation()).state,
+                "已有同步工作執行中",
+                AppSyncServicePhase.RetryPending,
+            )
+        }
+        mutableStatus.value = status
+        return finishReliabilityDemand(demand, status)
+    }
+
+    private fun beginReliabilityDemand(trigger: String): ReliabilityDemandContext {
+        val latest = db.appSyncOperationQueries.getLatestReliabilityRun()
+            .executeAsOneOrNull()
+        val pending = latest
+            ?.takeIf { it.outcome == "RETRY" }
+            ?.let {
+                PendingReliabilityDemand(
+                    runId = it.runId,
+                    startedAtEpochMillis = it.startedAtEpochMillis,
+                    retryCount = it.retryCount,
+                )
+            }
+        val demand = nextReliabilityDemand(
+            trigger = trigger,
+            nowEpochMillis = nowMillis(),
+            deviceEpoch = store.installation()?.deviceEpoch?.value,
+            pending = pending,
+        )
+        val startingCoverage = store.causalContext().asStableMap()
+        db.appSyncOperationQueries.upsertReliabilityRun(
+            runId = demand.runId,
+            trigger = demand.trigger,
+            phase = "RUNNING",
+            outcome = null,
+            eligible = 1,
+            exclusionReason = null,
+            retryCount = demand.retryCount,
+            pendingCount = store.pendingOperations().size.toLong(),
+            quarantineCount = 0,
+            startedAtEpochMillis = demand.startedAtEpochMillis,
+            completedAtEpochMillis = null,
+            nextRetryAtEpochMillis = null,
+            durationMillis = null,
+            causalReplicaCount = startingCoverage.size.toLong(),
+            causalCoverageHash = coverageHash(startingCoverage),
+        )
+        return demand
+    }
+
+    private fun finishReliabilityDemand(
+        demand: ReliabilityDemandContext,
+        status: AppSyncServiceStatus,
+    ): AppSyncServiceStatus {
+        val retry = status.phase == AppSyncServicePhase.RetryPending
+        val nextRetryAt = if (retry) {
+            val exponent = demand.retryCount.coerceAtMost(6).toInt()
+            val base = 30_000L * (1L shl exponent)
+            val jitter = stableAppSyncFingerprint(demand.runId).take(4).toLong(16) % 10_000L
+            nowMillis() + base.coerceAtMost(30L * 60 * 1_000) + jitter
+        } else {
+            null
+        }
+        val completedAt = nowMillis()
+        val finalCoverage = store.causalContext().asStableMap()
+        db.appSyncOperationQueries.upsertReliabilityRun(
+            runId = demand.runId,
+            trigger = demand.trigger,
+            phase = status.phase.name.uppercase(),
+            outcome = reliabilityOutcomeFor(status.phase),
+            eligible = if (status.phase == AppSyncServicePhase.PausedAuth) 0 else 1,
+            exclusionReason = if (status.phase == AppSyncServicePhase.PausedAuth) status.message else null,
+            retryCount = demand.retryCount,
+            pendingCount = status.pendingOperationCount.toLong(),
+            quarantineCount = if (status.phase == AppSyncServicePhase.Quarantined) 1 else 0,
+            startedAtEpochMillis = demand.startedAtEpochMillis,
+            completedAtEpochMillis = completedAt,
+            nextRetryAtEpochMillis = nextRetryAt,
+            durationMillis = (completedAt - demand.startedAtEpochMillis).coerceAtLeast(0L),
+            causalReplicaCount = finalCoverage.size.toLong(),
+            causalCoverageHash = coverageHash(finalCoverage),
+        )
+        return status
+    }
+
+    private fun coverageHash(coverage: Map<String, Long>): String =
+        stableAppSyncFingerprint(
+            coverage.entries
+                .sortedBy { it.key }
+                .joinToString(";") { (replica, sequence) -> "$replica=$sequence" },
+        )
+
+    private fun currentAccountBinding(): SyncAccountBinding? =
+        authRepository.currentUser()?.uid?.value?.toString()?.let {
+            SyncAccountBinding(stableAppSyncFingerprint("yamibo-account:$it"))
+        }
+
+    private fun pausedAuth(trigger: String): AppSyncServiceStatus {
+        store.updateState(AppSyncInstallationState.PausedAuth)
+        val at = nowMillis()
+        val coverage = store.causalContext().asStableMap()
+        db.appSyncOperationQueries.upsertReliabilityRun(
+            runId = "run-${stableAppSyncFingerprint("$trigger:$at:excluded-auth").take(24)}",
+            trigger = trigger,
+            phase = AppSyncServicePhase.PausedAuth.name.uppercase(),
+            outcome = "EXCLUDED_AUTH",
+            eligible = 0,
+            exclusionReason = "LOGIN_UNAVAILABLE",
+            retryCount = 0,
+            pendingCount = store.pendingOperations().size.toLong(),
+            quarantineCount = 0,
+            startedAtEpochMillis = at,
+            completedAtEpochMillis = at,
+            nextRetryAtEpochMillis = null,
+            durationMillis = 0,
+            causalReplicaCount = coverage.size.toLong(),
+            causalCoverageHash = coverageHash(coverage),
+        )
+        return statusFor(
+            AppSyncInstallationState.PausedAuth,
+            "登入狀態已過期，請先刷新登入狀態",
+        ).also { mutableStatus.value = it }
+    }
+
+    private fun disabledStatus(
+        automaticEnabled: Boolean = store.installation()?.automaticEnabled ?: false,
+    ) = AppSyncServiceStatus(
+        phase = AppSyncServicePhase.Disabled,
+        automaticEnabled = automaticEnabled && featureEnabled,
+        pendingOperationCount = store.pendingOperations().size,
+        lastVerifiedAtEpochMillis = store.installation()?.lastVerifiedHeartbeatAt,
+        message = "新同步核心仍在驗證中，尚未開放雲端寫入",
+    )
+
+    private fun statusFor(
+        state: AppSyncInstallationState,
+        message: String,
+        phaseOverride: AppSyncServicePhase? = null,
+        changeSummaries: List<AppSyncChangeSummary> = emptyList(),
+    ): AppSyncServiceStatus {
+        val installation = requireNotNull(store.installation())
+        val phase = phaseOverride ?: when (state) {
+            AppSyncInstallationState.Unbound,
+            AppSyncInstallationState.Bootstrapping,
+            AppSyncInstallationState.RebootstrapRequired,
+            -> AppSyncServicePhase.BootstrapRequired
+            AppSyncInstallationState.Active -> AppSyncServicePhase.Active
+            AppSyncInstallationState.PausedAuth -> AppSyncServicePhase.PausedAuth
+            AppSyncInstallationState.PausedProvider -> AppSyncServicePhase.PausedProvider
+            AppSyncInstallationState.Quarantined -> AppSyncServicePhase.Quarantined
+        }
+        return AppSyncServiceStatus(
+            phase = phase,
+            automaticEnabled = installation.automaticEnabled,
+            pendingOperationCount = store.pendingOperations().size,
+            lastVerifiedAtEpochMillis = installation.lastVerifiedHeartbeatAt,
+            message = message,
+            changeSummaries = changeSummaries,
+        )
+    }
+
+    private fun backfillStableContainerIds(db: Database) {
+        db.transaction {
+            db.localFavoriteCategoryQueries.getAll().executeAsList()
+                .filter { it.syncId == null }
+                .forEach {
+                    db.localFavoriteCategoryQueries.setSyncId(
+                        SyncIdentityGenerator.stableEntityId().value,
+                        it.id,
+                    )
+                }
+            db.localFavoriteCollectionQueries.getAll().executeAsList()
+                .filter { it.syncId == null }
+                .forEach {
+                    db.localFavoriteCollectionQueries.setSyncId(
+                        SyncIdentityGenerator.stableEntityId().value,
+                        it.id,
+                    )
+                }
+        }
+    }
+
+    private companion object {
+        const val DATABASE_GENERATION_KEY = "appsync.database_generation"
+        const val FEATURE_ENABLED_KEY = "appsync.operation_log_engine_enabled"
+    }
+}
+
+private fun AppSyncForceDirection.toInternal(): ManualSyncOverrideDirection = when (this) {
+    AppSyncForceDirection.Push -> ManualSyncOverrideDirection.ForcePush
+    AppSyncForceDirection.Pull -> ManualSyncOverrideDirection.ForcePull
+}
+
+private fun ManualSyncOverridePreview.toPublic() = AppSyncForcePreview(
+    direction = when (direction) {
+        ManualSyncOverrideDirection.ForcePush -> AppSyncForceDirection.Push
+        ManualSyncOverrideDirection.ForcePull -> AppSyncForceDirection.Pull
+    },
+    token = token,
+    differences = differences.map {
+        AppSyncForceDifference(
+            domainId = it.domainId,
+            added = it.added,
+            updated = it.updated,
+            deleted = it.deleted,
+            enabled = it.enabled,
+            disabled = it.disabled,
+        )
+    },
+)
+
+private fun AppSyncForcePreview.toInternal() = ManualSyncOverridePreview(
+    direction = direction.toInternal(),
+    token = token,
+    differences = differences.map {
+        me.thenano.yamibo.yamibo_app.repository.appsync.engine.ManualSyncDifference(
+            domainId = it.domainId,
+            added = it.added,
+            updated = it.updated,
+            deleted = it.deleted,
+            enabled = it.enabled,
+            disabled = it.disabled,
+        )
+    },
+)
+
+private fun AppSyncForceDifference.toChangeSummaries(
+    direction: AppSyncChangeDirection,
+): List<AppSyncChangeSummary> = buildList {
+    fun add(action: AppSyncChangeAction, count: Int) {
+        if (count > 0) add(AppSyncChangeSummary(direction, domainId, action, count))
+    }
+    add(AppSyncChangeAction.Added, added)
+    add(AppSyncChangeAction.Updated, updated)
+    add(AppSyncChangeAction.Deleted, deleted)
+    add(AppSyncChangeAction.Enabled, enabled)
+    add(AppSyncChangeAction.Disabled, disabled)
+}
+
+private fun OperationChangeSummary.toPublic() = AppSyncChangeSummary(
+    direction = when (direction) {
+        OperationChangeDirection.Received -> AppSyncChangeDirection.Received
+        OperationChangeDirection.Uploaded -> AppSyncChangeDirection.Uploaded
+    },
+    domainId = domainId,
+    action = when (action) {
+        OperationChangeAction.Added -> AppSyncChangeAction.Added
+        OperationChangeAction.Updated -> AppSyncChangeAction.Updated
+        OperationChangeAction.Deleted -> AppSyncChangeAction.Deleted
+        OperationChangeAction.Enabled -> AppSyncChangeAction.Enabled
+        OperationChangeAction.Disabled -> AppSyncChangeAction.Disabled
+    },
+    count = count,
+)
+
+internal fun reliabilityOutcomeFor(phase: AppSyncServicePhase): String = when (phase) {
+    AppSyncServicePhase.Active -> "CONVERGED"
+    AppSyncServicePhase.RetryPending,
+    AppSyncServicePhase.Running,
+    AppSyncServicePhase.BootstrapRequired,
+    -> "RETRY"
+    AppSyncServicePhase.PausedAuth,
+    AppSyncServicePhase.Disabled,
+    -> "EXCLUDED_AUTH"
+    AppSyncServicePhase.PausedProvider,
+    AppSyncServicePhase.Quarantined,
+    -> "MANUAL_INTERVENTION"
+}
