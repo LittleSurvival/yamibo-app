@@ -156,7 +156,7 @@ fun MainViewController() = ComposeUIViewController {
         )
     }
     val favoriteUpdateRepository = remember {
-        FavoriteUpdateRepositoryImpl(
+        appSyncService.favoriteUpdateRepository(
             db = favoriteSyncDatabase,
             localFavoriteRepository = favoriteRepository,
             threadRepository = threadRepository,

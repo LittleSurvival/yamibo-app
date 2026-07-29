@@ -15,6 +15,9 @@ internal class DatabaseSyncDomainMaterializer(
             "favorite.item" -> applyFavoriteItem(entity)
             "favorite.item-category" -> applyItemCategory(entity)
             "favorite.item-collection" -> applyItemCollection(entity)
+            "favorite.update-event" -> applyFavoriteUpdateEvent(entity)
+            "favorite.update-fid-filter" -> applyFavoriteUpdateFidChoice(entity)
+            "favorite.update-category-filter" -> applyFavoriteUpdateCategoryChoice(entity)
             "detail-note" -> applyDetailNote(entity)
             "bookmark" -> applyBookmark(entity)
             "reading.thread" -> applyThreadHistory(entity)
@@ -45,6 +48,23 @@ internal class DatabaseSyncDomainMaterializer(
                 }
             }
         }
+        db.favoriteUpdateFidChoiceQueries.getAll().executeAsList().forEach { choice ->
+            db.favoriteUpdateFidFilterQueries.setEnabled(
+                choice.enabled,
+                choice.updatedAt,
+                choice.fid,
+            )
+        }
+        db.favoriteUpdateCategoryChoiceQueries.getAll().executeAsList().forEach { choice ->
+            val category = db.localFavoriteCategoryQueries.getBySyncId(choice.categorySyncId)
+                .executeAsOneOrNull()
+                ?: return@forEach
+            db.favoriteUpdateCategoryFilterQueries.setEnabled(
+                choice.enabled,
+                choice.updatedAt,
+                category.id,
+            )
+        }
     }
 
     override fun clearSyncableData() {
@@ -62,6 +82,16 @@ internal class DatabaseSyncDomainMaterializer(
         db.imageReadingHistoryQueries.deleteAll()
         db.mangaTagReadingHistoryQueries.deleteAll()
         db.readingTimeStatQueries.deleteAll()
+        val now = 0L
+        db.favoriteUpdateFidFilterQueries.getAll().executeAsList().forEach {
+            db.favoriteUpdateFidFilterQueries.setEnabled(1, now, it.fid)
+        }
+        db.favoriteUpdateCategoryFilterQueries.getAll().executeAsList().forEach {
+            db.favoriteUpdateCategoryFilterQueries.setEnabled(1, now, it.categoryId)
+        }
+        db.favoriteUpdateEventQueries.deleteAll()
+        db.favoriteUpdateFidChoiceQueries.deleteAll()
+        db.favoriteUpdateCategoryChoiceQueries.deleteAll()
         db.appSyncOperationQueries.clearSyncSettingValues()
     }
 
@@ -350,6 +380,71 @@ internal class DatabaseSyncDomainMaterializer(
                 fields.long("updatedAt"),
             )
         }
+    }
+
+    private fun applyFavoriteUpdateEvent(entity: ResolvedSyncEntity) {
+        val queries = db.favoriteUpdateEventQueries
+        val syncId = entity.key.entityId.value
+        if (entity.tombstone != null) {
+            queries.deleteBySyncId(syncId)
+            return
+        }
+        val fields = entity.values()
+        val readAt = fields["readAt"]?.toLongOrNull()
+        val dismissedAt = fields["dismissedAt"]?.toLongOrNull()
+        queries.upsertBySyncId(
+            targetType = fields.require("targetType"),
+            targetId = fields.long("targetId"),
+            authorId = fields.long("authorId"),
+            fid = fields["fid"]?.toLongOrNull(),
+            forumName = fields["forumName"],
+            title = fields.require("title"),
+            latestPostTitle = fields["latestPostTitle"],
+            mode = fields.require("mode"),
+            summary = fields.require("summary"),
+            detailIds = fields.require("detailIds"),
+            coverUrl = fields["coverUrl"],
+            detectedAt = fields.long("detectedAt"),
+            readAt = readAt,
+            dismissedAt = dismissedAt,
+            ambiguous = fields.boolLong("ambiguous"),
+            syncId = syncId,
+            sourceFingerprint = fields.require("sourceFingerprint"),
+            sourceDiscriminator = fields.require("sourceDiscriminator"),
+        )
+        queries.updateBySyncId(
+            fid = fields["fid"]?.toLongOrNull(),
+            forumName = fields["forumName"],
+            title = fields.require("title"),
+            latestPostTitle = fields["latestPostTitle"],
+            summary = fields.require("summary"),
+            coverUrl = fields["coverUrl"],
+            readAt = readAt,
+            dismissedAt = dismissedAt,
+            syncId = syncId,
+        )
+    }
+
+    private fun applyFavoriteUpdateFidChoice(entity: ResolvedSyncEntity) {
+        val fields = entity.values()
+        val winner = entity.fields["enabled"]?.operation
+        db.favoriteUpdateFidChoiceQueries.upsertChoice(
+            fid = fields.long("fid"),
+            enabled = fields.boolLong("enabled"),
+            winnerOperationId = winner?.operationId?.value,
+            updatedAt = winner?.createdAtEpochMillis ?: 0L,
+        )
+    }
+
+    private fun applyFavoriteUpdateCategoryChoice(entity: ResolvedSyncEntity) {
+        val fields = entity.values()
+        val winner = entity.fields["enabled"]?.operation
+        db.favoriteUpdateCategoryChoiceQueries.upsertChoice(
+            categorySyncId = fields.require("categorySyncId"),
+            enabled = fields.boolLong("enabled"),
+            winnerOperationId = winner?.operationId?.value,
+            updatedAt = winner?.createdAtEpochMillis ?: 0L,
+        )
     }
 
     private fun favoriteItem(fields: Map<String, String?>) =

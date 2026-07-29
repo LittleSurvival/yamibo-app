@@ -108,8 +108,8 @@ class PortableBackupCoverageContractTest {
         if (reading.chapterState.isNotEmpty()) add("LocalChapterState")
         if (reading.readingTimeStats.isNotEmpty()) add("ReadingTimeStat")
         if (updates.events.isNotEmpty()) add("FavoriteUpdateEvent")
-        if (updates.fidFilters.isNotEmpty()) add("FavoriteUpdateFidFilter")
-        if (updates.categoryFilters.isNotEmpty()) add("FavoriteUpdateCategoryFilter")
+        if (updates.fidFilters.isNotEmpty()) add("FavoriteUpdateFidChoice")
+        if (updates.categoryFilters.isNotEmpty()) add("FavoriteUpdateCategoryChoice")
     }
 
     private fun repoRoot(): File =

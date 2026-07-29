@@ -274,6 +274,7 @@ internal data class BackupFavoriteUpdates(
 internal data class BackupFavoriteUpdateEvent(
     val syncId: String,
     val sourceFingerprint: String,
+    val sourceDiscriminator: String = "",
     val targetType: String,
     val targetId: Long,
     val authorId: Long?,

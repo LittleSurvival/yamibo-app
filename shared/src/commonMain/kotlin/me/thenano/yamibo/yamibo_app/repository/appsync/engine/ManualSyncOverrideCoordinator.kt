@@ -329,6 +329,13 @@ internal class ManualSyncOverrideCoordinator(
                     after?.fields?.get("type")?.value == "bool" -> {
                     if (after.fields["value"]?.value == "true") bucket.enabled++ else bucket.disabled++
                 }
+                domainId in FAVORITE_UPDATE_FILTER_DOMAINS -> {
+                    if (after?.fields?.get("enabled")?.value == "true") {
+                        bucket.enabled++
+                    } else {
+                        bucket.disabled++
+                    }
+                }
                 else -> bucket.updated++
             }
         }
@@ -396,6 +403,10 @@ internal class ManualSyncOverrideCoordinator(
         added + updated + deleted + enabled + disabled
 
     private companion object {
+        val FAVORITE_UPDATE_FILTER_DOMAINS = setOf(
+            "favorite.update-fid-filter",
+            "favorite.update-category-filter",
+        )
         const val FORCE_PUSH_SCOPE = "manual-force-push"
         const val AUTHORIZATION_WINDOW_MILLIS = 5 * 60 * 1_000L
         const val LEASE_DURATION_MILLIS = 15 * 60 * 1_000L

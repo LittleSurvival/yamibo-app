@@ -41,6 +41,8 @@ class BackupRepositoryImpl(
     private val updateEventQueries = db.favoriteUpdateEventQueries
     private val updateFidFilterQueries = db.favoriteUpdateFidFilterQueries
     private val updateCategoryFilterQueries = db.favoriteUpdateCategoryFilterQueries
+    private val updateFidChoiceQueries = db.favoriteUpdateFidChoiceQueries
+    private val updateCategoryChoiceQueries = db.favoriteUpdateCategoryChoiceQueries
 
     suspend fun createBackup(automatic: Boolean): Result<BackupRepository.BackupFileInfo> =
         createBackup(automatic = automatic, customName = null)
@@ -322,11 +324,7 @@ class BackupRepositoryImpl(
                     BackupReadingTimeStat(it.dateKey, it.durationMillis, it.updatedAt)
                 },
             ),
-            favoriteUpdates = if (scope == PortableSnapshotScope.LocalBackup) {
-                createFavoriteUpdateSnapshot()
-            } else {
-                BackupFavoriteUpdates()
-            },
+            favoriteUpdates = createFavoriteUpdateSnapshot(),
         )
     }
 
@@ -346,10 +344,12 @@ class BackupRepositoryImpl(
                     detectedAt = event.detectedAt,
                     summary = event.summary,
                     title = event.title,
+                    sourceDiscriminator = event.sourceDiscriminator,
                 )
                 BackupFavoriteUpdateEvent(
-                    syncId = identity.syncId,
-                    sourceFingerprint = identity.sourceFingerprint,
+                    syncId = event.syncId.ifBlank { identity.syncId },
+                    sourceFingerprint = event.sourceFingerprint.ifBlank { identity.sourceFingerprint },
+                    sourceDiscriminator = event.sourceDiscriminator.ifBlank { identity.sourceDiscriminator },
                     targetType = event.targetType,
                     targetId = event.targetId,
                     authorId = event.authorId,
@@ -367,13 +367,21 @@ class BackupRepositoryImpl(
                     ambiguous = event.ambiguous != 0L,
                 )
             },
-            fidFilters = updateFidFilterQueries.getAll().executeAsList().map {
-                BackupFavoriteUpdateFidFilter(it.fid, it.enabled != 0L)
-            },
-            categoryFilters = updateCategoryFilterQueries.getAll().executeAsList().mapNotNull {
-                val syncId = categorySyncIds[it.categoryId] ?: return@mapNotNull null
-                BackupFavoriteUpdateCategoryFilter(syncId, it.enabled != 0L)
-            },
+            fidFilters = updateFidChoiceQueries.getAll().executeAsList()
+                .map { BackupFavoriteUpdateFidFilter(it.fid, it.enabled != 0L) }
+                .ifEmpty {
+                    updateFidFilterQueries.getAll().executeAsList().map {
+                        BackupFavoriteUpdateFidFilter(it.fid, it.enabled != 0L)
+                    }
+                },
+            categoryFilters = updateCategoryChoiceQueries.getAll().executeAsList()
+                .map { BackupFavoriteUpdateCategoryFilter(it.categorySyncId, it.enabled != 0L) }
+                .ifEmpty {
+                    updateCategoryFilterQueries.getAll().executeAsList().mapNotNull {
+                        val syncId = categorySyncIds[it.categoryId] ?: return@mapNotNull null
+                        BackupFavoriteUpdateCategoryFilter(syncId, it.enabled != 0L)
+                    }
+                },
         )
     }
 
@@ -460,7 +468,7 @@ class BackupRepositoryImpl(
             require(it.progressPercent in 0L..100L) { "章節進度必須介於 0 到 100" }
             require(it.updatedAt >= 0L) { "章節進度時間無效" }
         }
-        updates.events.forEach { event ->
+        val normalizedEvents = updates.events.map { event ->
             require(event.detectedAt >= 0L) { "更新紀錄時間無效" }
             val expected = favoriteUpdateEventIdentity(
                 targetType = event.targetType,
@@ -472,17 +480,22 @@ class BackupRepositoryImpl(
                 detectedAt = event.detectedAt,
                 summary = event.summary,
                 title = event.title,
+                sourceDiscriminator = event.sourceDiscriminator,
             )
             require(event.syncId == expected.syncId && event.sourceFingerprint == expected.sourceFingerprint) {
                 "更新紀錄 identity 驗證失敗"
             }
+            event.copy(sourceDiscriminator = expected.sourceDiscriminator)
         }
 
         val categorySyncIds = favorites.categories.mapNotNullTo(hashSetOf()) { it.syncId }
         val validCategoryFilters = updates.categoryFilters.filter { it.categorySyncId in categorySyncIds }
         return RestorePlan(
             backup = backup.copy(
-                favoriteUpdates = updates.copy(categoryFilters = validCategoryFilters),
+                favoriteUpdates = updates.copy(
+                    events = normalizedEvents,
+                    categoryFilters = validCategoryFilters,
+                ),
             ),
             skippedCategoryFilters = updates.categoryFilters.size - validCategoryFilters.size,
         )
@@ -921,6 +934,8 @@ class BackupRepositoryImpl(
             chapterStateQueries.deleteAll()
             readingTimeQueries.deleteAll()
             updateEventQueries.deleteAll()
+            updateFidChoiceQueries.deleteAll()
+            updateCategoryChoiceQueries.deleteAll()
             updateFidFilterQueries.deleteAll()
             updateCategoryFilterQueries.deleteAll()
     }
@@ -941,12 +956,13 @@ class BackupRepositoryImpl(
                 detectedAt = event.detectedAt,
                 summary = event.summary,
                 title = event.title,
+                sourceDiscriminator = event.sourceDiscriminator,
             ).syncId
         }
         backup.favoriteUpdates.events.forEach { event ->
             val existing = existingEvents[event.syncId]
             if (existing == null) {
-                updateEventQueries.insertEvent(
+                updateEventQueries.upsertBySyncId(
                     targetType = event.targetType,
                     targetId = event.targetId,
                     authorId = event.authorId,
@@ -962,6 +978,9 @@ class BackupRepositoryImpl(
                     readAt = event.readAt,
                     dismissedAt = event.dismissedAt,
                     ambiguous = if (event.ambiguous) 1L else 0L,
+                    syncId = event.syncId,
+                    sourceFingerprint = event.sourceFingerprint,
+                    sourceDiscriminator = event.sourceDiscriminator,
                 )
             } else if (mode == BackupRepository.RestoreMode.Merge) {
                 laterNonNull(existing.readAt, event.readAt)?.let {
@@ -977,6 +996,12 @@ class BackupRepositoryImpl(
         val existingFidFilters = updateFidFilterQueries.getAll().executeAsList().associateBy { it.fid }
         val fidCounts = backup.favorites.items.groupingBy { it.forumId }.eachCount()
         backup.favoriteUpdates.fidFilters.forEach { filter ->
+            updateFidChoiceQueries.upsertChoice(
+                fid = filter.fid,
+                enabled = if (filter.enabled) 1L else 0L,
+                winnerOperationId = null,
+                updatedAt = now,
+            )
             val current = existingFidFilters[filter.fid]
             val matchingItem = backup.favorites.items.firstOrNull { it.forumId == filter.fid }
             updateFidFilterQueries.upsertFilter(
@@ -999,6 +1024,12 @@ class BackupRepositoryImpl(
             .eachCount()
         backup.favoriteUpdates.categoryFilters.forEach { filter ->
             val (localId, name) = categoryBySyncId[filter.categorySyncId] ?: return@forEach
+            updateCategoryChoiceQueries.upsertChoice(
+                categorySyncId = filter.categorySyncId,
+                enabled = if (filter.enabled) 1L else 0L,
+                winnerOperationId = null,
+                updatedAt = now,
+            )
             updateCategoryFilterQueries.upsertFilter(
                 categoryId = localId,
                 categoryName = name,

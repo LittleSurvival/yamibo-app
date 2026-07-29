@@ -147,6 +147,9 @@ internal class AppSyncCheckpointEnvelopeCodec(
         val snapshot = backupCodec.decode(payload.encodedSnapshot).getOrElse {
             return invalid("Checkpoint snapshot is invalid: ${it.message}", true)
         }
+        validateFavoriteUpdateProjection(snapshot, payload.resolvedEntities)?.let {
+            return invalid(it, true)
+        }
         return AppSyncCheckpointValidation.Valid(
             ParsedAppSyncCheckpointEnvelope(payload, snapshot, fingerprint),
         )
@@ -160,6 +163,76 @@ internal class AppSyncCheckpointEnvelopeCodec(
             .values
             .any { it.size > 1 }
         if (duplicateTombstone) return "Checkpoint contains duplicate tombstones"
+        return null
+    }
+
+    private fun validateFavoriteUpdateProjection(
+        snapshot: YamiboBackupFile,
+        entities: List<ResolvedSyncEntity>,
+    ): String? {
+        val live = entities.filter { it.tombstone == null }
+        val eventEntities = live.filter { it.key.domainId.value == "favorite.update-event" }
+            .associateBy { it.key.entityId.value }
+        val snapshotEvents = snapshot.favoriteUpdates.events.associateBy { it.syncId }
+        if (eventEntities.keys != snapshotEvents.keys) {
+            return "Checkpoint FavoriteUpdate event projection does not match resolved entities"
+        }
+        snapshotEvents.forEach { (syncId, event) ->
+            val fields = eventEntities.getValue(syncId).fields.mapValues { it.value.value }
+            val expected = mapOf(
+                "targetType" to event.targetType,
+                "targetId" to event.targetId.toString(),
+                "authorId" to (event.authorId ?: 0L).toString(),
+                "fid" to event.fid?.toString(),
+                "forumName" to event.forumName,
+                "title" to event.title,
+                "latestPostTitle" to event.latestPostTitle,
+                "mode" to event.mode,
+                "summary" to event.summary,
+                "detailIds" to event.detailIds.distinct().sorted().joinToString(","),
+                "coverUrl" to event.coverUrl,
+                "detectedAt" to event.detectedAt.toString(),
+                "readAt" to event.readAt?.toString(),
+                "dismissedAt" to event.dismissedAt?.toString(),
+                "ambiguous" to event.ambiguous.toString(),
+                "sourceFingerprint" to event.sourceFingerprint,
+                "sourceDiscriminator" to event.sourceDiscriminator,
+            )
+            if (expected.any { (key, value) -> fields[key] != value }) {
+                return "Checkpoint FavoriteUpdate event $syncId differs from resolved state"
+            }
+        }
+
+        val fidEntities = live.filter { it.key.domainId.value == "favorite.update-fid-filter" }
+            .associateBy { it.key.entityId.value }
+        val snapshotFids = snapshot.favoriteUpdates.fidFilters.associateBy { "fid:${it.fid}" }
+        if (fidEntities.keys != snapshotFids.keys) {
+            return "Checkpoint FavoriteUpdate FID choices do not match resolved entities"
+        }
+        snapshotFids.forEach { (entityId, choice) ->
+            val fields = fidEntities.getValue(entityId).fields.mapValues { it.value.value }
+            if (fields["fid"] != choice.fid.toString() || fields["enabled"] != choice.enabled.toString()) {
+                return "Checkpoint FavoriteUpdate FID choice $entityId differs from resolved state"
+            }
+        }
+
+        val categoryEntities = live
+            .filter { it.key.domainId.value == "favorite.update-category-filter" }
+            .associateBy { it.key.entityId.value }
+        val snapshotCategories = snapshot.favoriteUpdates.categoryFilters
+            .associateBy { "category:${it.categorySyncId}" }
+        if (categoryEntities.keys != snapshotCategories.keys) {
+            return "Checkpoint FavoriteUpdate category choices do not match resolved entities"
+        }
+        snapshotCategories.forEach { (entityId, choice) ->
+            val fields = categoryEntities.getValue(entityId).fields.mapValues { it.value.value }
+            if (
+                fields["categorySyncId"] != choice.categorySyncId ||
+                fields["enabled"] != choice.enabled.toString()
+            ) {
+                return "Checkpoint FavoriteUpdate category choice $entityId differs from resolved state"
+            }
+        }
         return null
     }
 

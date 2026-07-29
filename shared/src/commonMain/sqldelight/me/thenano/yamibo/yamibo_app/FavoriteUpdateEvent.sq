@@ -4,6 +4,37 @@ INSERT INTO FavoriteUpdateEvent(
     coverUrl, detectedAt, readAt, dismissedAt, ambiguous
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
+upsertBySyncId:
+INSERT OR IGNORE INTO FavoriteUpdateEvent(
+    targetType, targetId, authorId, fid, forumName, title, latestPostTitle, mode, summary, detailIds,
+    coverUrl, detectedAt, readAt, dismissedAt, ambiguous, syncId, sourceFingerprint, sourceDiscriminator
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+updateBySyncId:
+UPDATE FavoriteUpdateEvent
+SET fid = ?,
+    forumName = ?,
+    title = ?,
+    latestPostTitle = ?,
+    summary = ?,
+    coverUrl = ?,
+    readAt = ?,
+    dismissedAt = ?
+WHERE syncId = ?;
+
+setIdentity:
+UPDATE FavoriteUpdateEvent
+SET syncId = ?, sourceFingerprint = ?, sourceDiscriminator = ?
+WHERE id = ?;
+
+getBySyncId:
+SELECT * FROM FavoriteUpdateEvent
+WHERE syncId = ?;
+
+getById:
+SELECT * FROM FavoriteUpdateEvent
+WHERE id = ?;
+
 getActive:
 SELECT * FROM FavoriteUpdateEvent
 WHERE dismissedAt IS NULL
@@ -31,6 +62,14 @@ dismissAll:
 UPDATE FavoriteUpdateEvent
 SET dismissedAt = ?
 WHERE dismissedAt IS NULL;
+
+deleteBySyncId:
+DELETE FROM FavoriteUpdateEvent
+WHERE syncId = ?;
+
+deleteById:
+DELETE FROM FavoriteUpdateEvent
+WHERE id = ?;
 
 deleteForTarget:
 DELETE FROM FavoriteUpdateEvent

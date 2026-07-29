@@ -106,6 +106,42 @@ class CloudSyncUiStateTest {
         assertTrue(forceConfirmationEnabled(0))
     }
 
+    @Test
+    fun favoriteUpdateChangesUseSpecificModulesAndLifecycleActions() {
+        val state = status(
+            phase = AppSyncServicePhase.Active,
+            changes = listOf(
+                AppSyncChangeSummary(
+                    AppSyncChangeDirection.Received,
+                    "favorite.update-event",
+                    AppSyncChangeAction.Read,
+                    2,
+                ),
+                AppSyncChangeSummary(
+                    AppSyncChangeDirection.Uploaded,
+                    "favorite.update-event",
+                    AppSyncChangeAction.Dismissed,
+                    1,
+                ),
+                AppSyncChangeSummary(
+                    AppSyncChangeDirection.Uploaded,
+                    "favorite.update-category-filter",
+                    AppSyncChangeAction.Disabled,
+                    1,
+                ),
+            ),
+        ).toUiState(backgroundSchedulerAvailable = true)
+
+        assertEquals(
+            listOf(
+                CloudSyncChangeDetail("從雲端套用", "最近更新", "標為已讀 2"),
+                CloudSyncChangeDetail("上傳至雲端", "最近更新", "忽略 1"),
+                CloudSyncChangeDetail("上傳至雲端", "分類更新範圍", "關閉 1"),
+            ),
+            state.changes,
+        )
+    }
+
     private fun status(
         phase: AppSyncServicePhase,
         message: String = "ready",

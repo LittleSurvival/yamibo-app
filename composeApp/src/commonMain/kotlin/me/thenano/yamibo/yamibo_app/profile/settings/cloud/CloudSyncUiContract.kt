@@ -371,6 +371,9 @@ private fun moduleLabel(domainId: String): String = when (domainId) {
     "reading.image" -> "圖片閱讀進度"
     "reading.tag-manga" -> "標籤漫畫進度"
     "reading.time" -> "閱讀時間"
+    "favorite.update-event" -> "最近更新"
+    "favorite.update-fid-filter" -> "版塊更新範圍"
+    "favorite.update-category-filter" -> "分類更新範圍"
     else -> domainId
 }
 
@@ -380,6 +383,8 @@ private fun actionLabel(action: AppSyncChangeAction): String = when (action) {
     AppSyncChangeAction.Deleted -> "刪除"
     AppSyncChangeAction.Enabled -> "開啟"
     AppSyncChangeAction.Disabled -> "關閉"
+    AppSyncChangeAction.Read -> "標為已讀"
+    AppSyncChangeAction.Dismissed -> "忽略"
 }
 
 private fun statusLabel(phase: AppSyncServicePhase): String = when (phase) {

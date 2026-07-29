@@ -3,6 +3,7 @@ package me.thenano.yamibo.yamibo_app.repository.appsync.domain
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDomainId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperation
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationKind
+import me.thenano.yamibo.yamibo_app.repository.backup.favoriteUpdateEventIdentity
 
 internal enum class SyncConflictPolicy {
     FieldRegister,
@@ -18,6 +19,8 @@ internal data class SyncDomainContract(
     val allowedKinds: Set<SyncOperationKind>,
     val requiredFieldsByKind: Map<SyncOperationKind, Set<String>> = emptyMap(),
     val monotonicNumericFields: Set<String> = emptySet(),
+    val allowedFieldsByKind: Map<SyncOperationKind, Set<String>> = emptyMap(),
+    val semanticValidator: ((SyncOperation) -> String?)? = null,
 ) {
     init {
         require(policyVersion > 0) { "Policy version must be positive" }
@@ -29,7 +32,13 @@ internal data class SyncDomainContract(
         if (operation.kind !in allowedKinds) return "Operation kind is not allowed by ${id.value}"
         val missing = requiredFieldsByKind[operation.kind].orEmpty() - operation.fields.keys
         if (missing.isNotEmpty()) return "Missing required fields: ${missing.sorted().joinToString()}"
-        return null
+        allowedFieldsByKind[operation.kind]?.let { allowed ->
+            val unexpected = operation.fields.keys - allowed
+            if (unexpected.isNotEmpty()) {
+                return "Unexpected fields: ${unexpected.sorted().joinToString()}"
+            }
+        }
+        return semanticValidator?.invoke(operation)
     }
 }
 
@@ -84,6 +93,9 @@ internal class SyncDomainRegistry(
             "reading.time",
             "favorite.item-category",
             "favorite.item-collection",
+            "favorite.update-event",
+            "favorite.update-fid-filter",
+            "favorite.update-category-filter",
         ).mapTo(linkedSetOf(), ::SyncDomainId)
 
         val Default = SyncDomainRegistry(
@@ -129,6 +141,9 @@ internal class SyncDomainRegistry(
                     "favorite.item-collection",
                     setOf("targetType", "targetId", "authorId", "collectionSyncId"),
                 ),
+                favoriteUpdateEventDomain(),
+                favoriteUpdateFilterDomain("favorite.update-fid-filter", "fid"),
+                favoriteUpdateFilterDomain("favorite.update-category-filter", "categorySyncId"),
             ),
         ).also { it.requireExactCoverage(REQUIRED_DOMAIN_IDS) }
 
@@ -175,5 +190,104 @@ internal class SyncDomainRegistry(
                 SyncOperationKind.RelationRemove to identityFields,
             ),
         )
+
+        private fun favoriteUpdateEventDomain(): SyncDomainContract {
+            val putFields = setOf(
+                "targetType", "targetId", "authorId", "fid", "forumName", "title",
+                "latestPostTitle", "mode", "summary", "detailIds", "coverUrl", "detectedAt",
+                "ambiguous", "sourceFingerprint", "sourceDiscriminator",
+            )
+            val lifecycleFields = setOf("readAt", "dismissedAt")
+            return SyncDomainContract(
+                id = SyncDomainId("favorite.update-event"),
+                conflictPolicy = SyncConflictPolicy.RemoveWinsEntity,
+                allowedKinds = setOf(
+                    SyncOperationKind.Put,
+                    SyncOperationKind.Patch,
+                    SyncOperationKind.Delete,
+                ),
+                requiredFieldsByKind = mapOf(SyncOperationKind.Put to putFields),
+                allowedFieldsByKind = mapOf(
+                    SyncOperationKind.Put to putFields + lifecycleFields,
+                    SyncOperationKind.Patch to lifecycleFields,
+                ),
+                semanticValidator = { operation ->
+                    when (operation.kind) {
+                        SyncOperationKind.Put -> validateFavoriteUpdateEvent(operation)
+                        SyncOperationKind.Patch -> {
+                            if (operation.fields.isEmpty()) {
+                                "FavoriteUpdate lifecycle patch cannot be empty"
+                            } else {
+                                operation.fields.entries
+                                    .firstOrNull { (_, value) -> value?.toLongOrNull() == null }
+                                    ?.let { "FavoriteUpdate lifecycle markers must be non-null integers" }
+                            }
+                        }
+                        SyncOperationKind.Delete -> null
+                        else -> "Unsupported FavoriteUpdate event operation"
+                    }
+                },
+            )
+        }
+
+        private fun validateFavoriteUpdateEvent(operation: SyncOperation): String? = runCatching {
+            fun required(name: String) = requireNotNull(operation.fields[name])
+            val detailIds = required("detailIds").split(",")
+                .filter(String::isNotBlank)
+                .map(String::toLong)
+            val identity = favoriteUpdateEventIdentity(
+                targetType = required("targetType"),
+                targetId = required("targetId").toLong(),
+                authorId = required("authorId").toLong().takeIf { it != 0L },
+                mode = required("mode"),
+                detailIds = detailIds,
+                ambiguous = required("ambiguous").toBooleanStrict(),
+                detectedAt = required("detectedAt").toLong(),
+                summary = required("summary"),
+                title = required("title"),
+                sourceDiscriminator = required("sourceDiscriminator"),
+            )
+            require(operation.entityId.value == identity.syncId)
+            require(required("sourceFingerprint") == identity.sourceFingerprint)
+            listOf("readAt", "dismissedAt").forEach { field ->
+                operation.fields[field]?.toLong()
+            }
+        }.exceptionOrNull()?.let { "Invalid FavoriteUpdate event: ${it.message}" }
+
+        private fun favoriteUpdateFilterDomain(
+            domain: String,
+            identityField: String,
+        ): SyncDomainContract {
+            val fields = setOf(identityField, "enabled")
+            return SyncDomainContract(
+                id = SyncDomainId(domain),
+                conflictPolicy = SyncConflictPolicy.FieldRegister,
+                allowedKinds = setOf(SyncOperationKind.Put, SyncOperationKind.Patch),
+                requiredFieldsByKind = mapOf(
+                    SyncOperationKind.Put to fields,
+                    SyncOperationKind.Patch to fields,
+                ),
+                allowedFieldsByKind = mapOf(
+                    SyncOperationKind.Put to fields,
+                    SyncOperationKind.Patch to fields,
+                ),
+                semanticValidator = { operation ->
+                    val identity = operation.fields[identityField]
+                    val enabled = operation.fields["enabled"]
+                    when {
+                        identity.isNullOrBlank() -> "FavoriteUpdate filter identity is required"
+                        enabled !in setOf("true", "false") -> "FavoriteUpdate filter enabled must be canonical boolean"
+                        identityField == "fid" && identity.toLongOrNull() == null ->
+                            "FavoriteUpdate FID must be numeric"
+                        identityField == "fid" && operation.entityId.value != "fid:$identity" ->
+                            "FavoriteUpdate FID entity id mismatch"
+                        identityField == "categorySyncId" &&
+                            operation.entityId.value != "category:$identity" ->
+                            "FavoriteUpdate category entity id mismatch"
+                        else -> null
+                    }
+                },
+            )
+        }
     }
 }

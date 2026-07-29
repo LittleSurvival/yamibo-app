@@ -200,6 +200,54 @@ internal class BackupSnapshotMigrationPlanner {
                     ),
                 )
             }
+            snapshot.favoriteUpdates.events.forEach {
+                add(
+                    put(
+                        "favorite.update-event",
+                        it.syncId,
+                        mapOf(
+                            "targetType" to it.targetType,
+                            "targetId" to it.targetId.toString(),
+                            "authorId" to (it.authorId ?: 0L).toString(),
+                            "fid" to it.fid?.toString(),
+                            "forumName" to it.forumName,
+                            "title" to it.title,
+                            "latestPostTitle" to it.latestPostTitle,
+                            "mode" to it.mode,
+                            "summary" to it.summary,
+                            "detailIds" to it.detailIds.distinct().sorted().joinToString(","),
+                            "coverUrl" to it.coverUrl,
+                            "detectedAt" to it.detectedAt.toString(),
+                            "readAt" to it.readAt?.toString(),
+                            "dismissedAt" to it.dismissedAt?.toString(),
+                            "ambiguous" to it.ambiguous.toString(),
+                            "sourceFingerprint" to it.sourceFingerprint,
+                            "sourceDiscriminator" to it.sourceDiscriminator,
+                        ),
+                    ),
+                )
+            }
+            snapshot.favoriteUpdates.fidFilters.forEach {
+                add(
+                    put(
+                        "favorite.update-fid-filter",
+                        "fid:${it.fid}",
+                        mapOf("fid" to it.fid.toString(), "enabled" to it.enabled.toString()),
+                    ),
+                )
+            }
+            snapshot.favoriteUpdates.categoryFilters.forEach {
+                add(
+                    put(
+                        "favorite.update-category-filter",
+                        "category:${it.categorySyncId}",
+                        mapOf(
+                            "categorySyncId" to it.categorySyncId,
+                            "enabled" to it.enabled.toString(),
+                        ),
+                    ),
+                )
+            }
         }
     }
 

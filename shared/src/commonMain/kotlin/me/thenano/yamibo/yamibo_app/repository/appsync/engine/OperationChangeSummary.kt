@@ -15,6 +15,8 @@ internal enum class OperationChangeAction {
     Deleted,
     Enabled,
     Disabled,
+    Read,
+    Dismissed,
 }
 
 internal data class OperationChangeSummary(
@@ -58,6 +60,25 @@ private fun summarize(
         .sortedWith(compareBy({ it.direction }, { it.domainId }, { it.action }))
 
 private fun SyncOperation.changeAction(): OperationChangeAction {
+    if (domainId.value == "favorite.update-event" && kind == SyncOperationKind.Patch) {
+        return when {
+            "dismissedAt" in fields -> OperationChangeAction.Dismissed
+            "readAt" in fields -> OperationChangeAction.Read
+            else -> OperationChangeAction.Updated
+        }
+    }
+    if (
+        domainId.value in setOf(
+            "favorite.update-fid-filter",
+            "favorite.update-category-filter",
+        )
+    ) {
+        return if (fields["enabled"] == "true") {
+            OperationChangeAction.Enabled
+        } else {
+            OperationChangeAction.Disabled
+        }
+    }
     if (domainId.value == "settings" && fields["value"] in setOf("true", "false")) {
         return if (fields["value"] == "true") {
             OperationChangeAction.Enabled

@@ -9,7 +9,11 @@ import me.thenano.yamibo.yamibo_app.repository.AuthRepository
 import me.thenano.yamibo.yamibo_app.repository.BookMarkRepository
 import me.thenano.yamibo.yamibo_app.repository.DetailNoteRepository
 import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository
+import me.thenano.yamibo.yamibo_app.repository.FavoriteUpdateRepository
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
+import me.thenano.yamibo.yamibo_app.repository.RssSearchSubscriptionRepository
+import me.thenano.yamibo.yamibo_app.repository.TagRepository
+import me.thenano.yamibo.yamibo_app.repository.ThreadRepository
 import me.thenano.yamibo.yamibo_app.repository.appsync.domain.stableAppSyncFingerprint
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncBootstrapResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.BackupSnapshotMigrationPlanner
@@ -38,6 +42,7 @@ import me.thenano.yamibo.yamibo_app.repository.bookmark.BookMarkRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.backup.BackupRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.detailnote.DetailNoteRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.favorite.FavoriteStoreRepositoryImpl
+import me.thenano.yamibo.yamibo_app.repository.favorite.FavoriteUpdateRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.settings.core.BoolSetting
 import me.thenano.yamibo.yamibo_app.repository.settings.core.EnumSetting
 import me.thenano.yamibo.yamibo_app.repository.settings.core.FloatSetting
@@ -80,6 +85,8 @@ enum class AppSyncChangeAction {
     Deleted,
     Enabled,
     Disabled,
+    Read,
+    Dismissed,
 }
 
 data class AppSyncChangeSummary(
@@ -238,6 +245,7 @@ class AppSyncService(
         }
         val installation = store.initialize(generation)
         backfillStableContainerIds(db)
+        backfillFavoriteUpdateSyncState(db)
         if (featureEnabled) {
             domainState.reconcileProjections()
         }
@@ -267,6 +275,21 @@ class AppSyncService(
 
     fun favoriteStoreRepository(db: Database): FavoriteStoreRepository =
         FavoriteStoreRepositoryImpl(db, mutationRecorder)
+
+    fun favoriteUpdateRepository(
+        db: Database,
+        localFavoriteRepository: FavoriteStoreRepository,
+        threadRepository: ThreadRepository,
+        tagRepository: TagRepository,
+        rssSearchSubscriptionRepository: RssSearchSubscriptionRepository,
+    ): FavoriteUpdateRepository = FavoriteUpdateRepositoryImpl(
+        db = db,
+        localFavoriteRepository = localFavoriteRepository,
+        threadRepository = threadRepository,
+        tagRepository = tagRepository,
+        rssSearchSubscriptionRepository = rssSearchSubscriptionRepository,
+        mutationRecorder = mutationRecorder,
+    )
 
     fun readHistoryRepository(delegate: ReadHistoryRepository): ReadHistoryRepository =
         if (featureEnabled) OperationRecordingReadHistoryRepository(delegate, mutationRecorder) else delegate
@@ -814,6 +837,8 @@ private fun OperationChangeSummary.toPublic() = AppSyncChangeSummary(
         OperationChangeAction.Deleted -> AppSyncChangeAction.Deleted
         OperationChangeAction.Enabled -> AppSyncChangeAction.Enabled
         OperationChangeAction.Disabled -> AppSyncChangeAction.Disabled
+        OperationChangeAction.Read -> AppSyncChangeAction.Read
+        OperationChangeAction.Dismissed -> AppSyncChangeAction.Dismissed
     },
     count = count,
 )

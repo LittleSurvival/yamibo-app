@@ -111,7 +111,9 @@ class CloudBackupPayloadCodecTest {
     @Test
     fun localAndAppSyncScopesAreExplicit() {
         assertTrue("FavoriteUpdateEvent" in PortableDomainManifest.included(PortableSnapshotScope.LocalBackup))
-        assertTrue("FavoriteUpdateEvent" !in PortableDomainManifest.included(PortableSnapshotScope.AppSync))
+        assertTrue("FavoriteUpdateEvent" in PortableDomainManifest.included(PortableSnapshotScope.AppSync))
+        assertTrue("FavoriteUpdateFidChoice" in PortableDomainManifest.included(PortableSnapshotScope.AppSync))
+        assertTrue("FavoriteUpdateCategoryChoice" in PortableDomainManifest.included(PortableSnapshotScope.AppSync))
         assertTrue(PortableDomainManifest.declarations.all {
             it.localBackup == PortableDomainDisposition.Included ||
                 !it.exclusionReason.isNullOrBlank()
