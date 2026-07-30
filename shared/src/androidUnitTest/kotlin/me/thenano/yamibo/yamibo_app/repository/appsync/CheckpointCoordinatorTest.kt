@@ -166,6 +166,7 @@ class CheckpointCoordinatorTest {
             accountBinding: SyncAccountBinding,
             formHash: FormHash,
             maximumCheckpoints: Int,
+            pinnedCheckpointIds: Set<String>,
         ): AppSyncCheckpointRetentionResult {
             retentionCalls += 1
             return AppSyncCheckpointRetentionResult.Verified(

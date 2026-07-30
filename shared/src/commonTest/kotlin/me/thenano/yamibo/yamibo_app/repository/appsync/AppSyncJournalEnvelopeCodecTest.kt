@@ -3,6 +3,7 @@ package me.thenano.yamibo.yamibo_app.repository.appsync
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import me.thenano.yamibo.yamibo_app.repository.appsync.domain.stableAppSyncFingerprint
@@ -20,6 +21,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncWriterNonce
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncJournalEnvelopeCodec
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncJournalPayload
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncJournalValidation
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.resolvedPublishedThroughSequence
 
 class AppSyncJournalEnvelopeCodecTest {
     private val codec = AppSyncJournalEnvelopeCodec()
@@ -133,6 +135,42 @@ class AppSyncJournalEnvelopeCodecTest {
     }
 
     @Test
+    fun publishedThroughSequenceCannotFallBelowObservedOrRetainedSequence() {
+        val replica = me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncReplicaKey(
+            SyncDeviceId("device"),
+            SyncDeviceEpoch("epoch"),
+        )
+        val payload = payload().copy(
+            observed = SyncCausalContext().advance(replica, SyncSequence(2)),
+            publishedThroughSequence = 1,
+        )
+
+        val error = runCatching { codec.encode(payload) }.exceptionOrNull()
+
+        assertTrue(error?.message.orEmpty().contains("published-through"))
+    }
+
+    @Test
+    fun legacyPublishedThroughIsDerivedOnlyFromMatchingOwnWatermark() {
+        val replica = me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncReplicaKey(
+            SyncDeviceId("device"),
+            SyncDeviceEpoch("epoch"),
+        )
+        val derivable = payload().copy(
+            observed = SyncCausalContext().advance(replica, SyncSequence(1)),
+            publishedThroughSequence = null,
+        )
+        val ambiguous = derivable.copy(
+            operations = emptyList(),
+            firstSequence = 0,
+            lastSequence = 0,
+        )
+
+        assertEquals(1, derivable.resolvedPublishedThroughSequence())
+        assertNull(ambiguous.resolvedPublishedThroughSequence())
+    }
+
+    @Test
     fun operationFromWrongAccountFailsClosed() {
         val foreign = operation(1, account = SyncAccountBinding("other"))
 
@@ -157,6 +195,7 @@ class AppSyncJournalEnvelopeCodecTest {
         operations = operations,
         observed = SyncCausalContext(),
         heartbeatAtEpochMillis = 123,
+        publishedThroughSequence = lastSequence,
     )
 
     private fun operation(

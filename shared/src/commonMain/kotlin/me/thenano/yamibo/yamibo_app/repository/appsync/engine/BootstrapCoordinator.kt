@@ -2,6 +2,8 @@ package me.thenano.yamibo.yamibo_app.repository.appsync.engine
 
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncInstallationState
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncAccountBinding
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncReplicaKey
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.resolvedPublishedThroughSequence
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncCausalContext
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationOrigin
 import me.thenano.yamibo.yamibo_app.store.appsync.AppSyncOperationStore
@@ -77,6 +79,27 @@ internal class BootstrapCoordinator(
             return AppSyncBootstrapResult.Paused(
                 "A verified checkpoint is required before a device inactive for 90 days can publish",
             )
+        }
+        if (inactive && checkpoint != null) {
+            val oldReplica = SyncReplicaKey(installation.deviceId, installation.deviceEpoch)
+            val remotePublishedThrough = cloud.journals
+                .firstOrNull {
+                    it.payload.deviceId == installation.deviceId &&
+                        it.payload.deviceEpoch == installation.deviceEpoch
+                }
+                ?.payload
+                ?.resolvedPublishedThroughSequence()
+                ?: 0L
+            val requiredSequence = maxOf(
+                store.causalContext()[oldReplica],
+                remotePublishedThrough,
+            )
+            if (checkpoint.envelope.payload.coverage[oldReplica] < requiredSequence) {
+                store.updateState(AppSyncInstallationState.PausedProvider)
+                return AppSyncBootstrapResult.Paused(
+                    "Verified checkpoint does not cover the inactive device epoch",
+                )
+            }
         }
         val checkpointCoverage = checkpoint?.envelope?.payload?.coverage ?: SyncCausalContext()
         val initialState = checkpoint?.envelope?.payload?.resolvedEntities

@@ -49,12 +49,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import me.thenano.yamibo.yamibo_app.LocalAppSyncService
 import me.thenano.yamibo.yamibo_app.LocalAppSyncBackgroundScheduler
 import me.thenano.yamibo.yamibo_app.components.controls.YamiboActionChip
-import me.thenano.yamibo.yamibo_app.components.controls.YamiboSingleSelectDialog
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBar
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.i18n.localizedLabel
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
+import me.thenano.yamibo.yamibo_app.profile.settings.components.SettingsChipRow
 import me.thenano.yamibo.yamibo_app.util.time.FixedScheduleInterval
 
 @Composable
@@ -122,26 +122,27 @@ internal fun AppSyncSettingsContent(
                 .fillMaxSize()
                 .padding(paddingValues)
                 .verticalScroll(rememberScrollState())
+                .padding(20.dp)
                 .testTag("app_sync_screen"),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            CloudStatusRow(state = state, onRefresh = onRefresh)
+            CloudCard {
+                CloudStatusRow(state = state, onRefresh = onRefresh)
+            }
             state.notice?.let { notice ->
                 CloudSyncInlineNotice(notice)
             }
-            HorizontalDivider(color = colors.brownLight.copy(alpha = 0.2f))
-            AutomaticSyncSection(
-                state = state,
-                onEnabledChange = onAutomaticEnabledChange,
-                onSyncOnAppStartChange = onSyncOnAppStartChange,
-                onSyncOnForegroundExitChange = onSyncOnForegroundExitChange,
-                onPeriodicIntervalChange = onPeriodicIntervalChange,
-                onSyncNow = onSyncNow,
-            )
-            HorizontalDivider(color = colors.brownLight.copy(alpha = 0.2f))
-            Column(
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 20.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
+            CloudCard {
+                AutomaticSyncSection(
+                    state = state,
+                    onEnabledChange = onAutomaticEnabledChange,
+                    onSyncOnAppStartChange = onSyncOnAppStartChange,
+                    onSyncOnForegroundExitChange = onSyncOnForegroundExitChange,
+                    onPeriodicIntervalChange = onPeriodicIntervalChange,
+                    onSyncNow = onSyncNow,
+                )
+            }
+            CloudCard {
                 Text(
                     text = i18n("同步資料"),
                     color = colors.textStrong,
@@ -154,49 +155,52 @@ internal fun AppSyncSettingsContent(
                     fontSize = 13.sp,
                 )
             }
-            HorizontalDivider(color = colors.brownLight.copy(alpha = 0.2f))
-            SyncDetailsSection(
-                expanded = detailsExpanded,
-                details = state.details,
-                changes = state.changes,
-                onExpandedChange = { detailsExpanded = it },
-            )
-            HorizontalDivider(color = colors.brownLight.copy(alpha = 0.2f))
-            ManualOverrideSection(
-                state = state,
-                onRequestForce = onRequestForce,
-            )
-            HorizontalDivider(color = colors.brownLight.copy(alpha = 0.2f))
-            TextButton(
-                onClick = onClearCloudLinkCache,
-                enabled = state.actionsAvailable && !state.isBusy,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 4.dp)
-                    .testTag("app_sync_clear_link_cache"),
-            ) {
-                Text(
-                    text = i18n("清除雲端連結紀錄快取"),
-                    color = colors.textStrong.copy(
-                        alpha = if (state.actionsAvailable && !state.isBusy) 1f else 0.6f,
-                    ),
-                    fontWeight = FontWeight.SemiBold,
+            CloudCard(contentPadding = 0.dp) {
+                SyncDetailsSection(
+                    expanded = detailsExpanded,
+                    details = state.details,
+                    changes = state.changes,
+                    onExpandedChange = { detailsExpanded = it },
                 )
             }
-            TextButton(
-                onClick = { showDeleteConfirmation = true },
-                enabled = state.actionsAvailable && state.cloudDataExists && !state.isBusy,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 18.dp)
-                    .testTag("app_sync_delete_cloud"),
-            ) {
-                val enabled = state.actionsAvailable && state.cloudDataExists && !state.isBusy
-                Text(
-                    text = i18n("清除雲端資料"),
-                    color = colors.redAccent.copy(alpha = if (enabled) 1f else 0.6f),
-                    fontWeight = FontWeight.SemiBold,
+            CloudCard(contentPadding = 0.dp) {
+                ManualOverrideSection(
+                    state = state,
+                    onRequestForce = onRequestForce,
                 )
+            }
+            CloudCard(contentPadding = 0.dp) {
+                TextButton(
+                    onClick = onClearCloudLinkCache,
+                    enabled = state.actionsAvailable && !state.isBusy,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .testTag("app_sync_clear_link_cache"),
+                ) {
+                    Text(
+                        text = i18n("清除雲端連結紀錄快取"),
+                        color = colors.textStrong.copy(
+                            alpha = if (state.actionsAvailable && !state.isBusy) 1f else 0.6f,
+                        ),
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                TextButton(
+                    onClick = { showDeleteConfirmation = true },
+                    enabled = state.actionsAvailable && state.cloudDataExists && !state.isBusy,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .testTag("app_sync_delete_cloud"),
+                ) {
+                    val enabled = state.actionsAvailable && state.cloudDataExists && !state.isBusy
+                    Text(
+                        text = i18n("清除雲端資料"),
+                        color = colors.redAccent.copy(alpha = if (enabled) 1f else 0.6f),
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
         }
     }
@@ -228,7 +232,7 @@ private fun ManualOverrideSection(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 18.dp)
+            .padding(16.dp)
             .testTag("app_sync_manual_override"),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -281,8 +285,7 @@ private fun CloudStatusRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(88.dp)
-            .padding(horizontal = 20.dp)
+            .height(80.dp)
             .testTag("app_sync_status"),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -355,8 +358,9 @@ private fun CloudSyncInlineNotice(notice: CloudSyncNotice) {
         fontSize = 12.sp,
         modifier = Modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
             .background(color.copy(alpha = 0.09f))
-            .padding(horizontal = 20.dp, vertical = 10.dp)
+            .padding(16.dp)
             .testTag("app_sync_inline_notice"),
     )
 }
@@ -371,12 +375,10 @@ private fun AutomaticSyncSection(
     onSyncNow: () -> Unit,
 ) {
     val colors = YamiboTheme.colors
-    var intervalDialogVisible by remember { mutableStateOf(false) }
     val childEnabled = state.automaticEnabled && state.automaticAvailable && !state.isBusy
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 18.dp)
             .testTag("app_sync_automatic_section"),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -424,26 +426,22 @@ private fun AutomaticSyncSection(
             testTag = "app_sync_on_foreground_exit_toggle",
             onCheckedChange = onSyncOnForegroundExitChange,
         )
-        Row(
+        Text(
+            text = i18n("背景同步週期"),
+            color = colors.textStrong.copy(alpha = if (childEnabled) 1f else 0.42f),
+            fontSize = 14.sp,
             modifier = Modifier
-                .fillMaxWidth()
-                .clickable(enabled = childEnabled) { intervalDialogVisible = true }
-                .padding(vertical = 8.dp)
+                .padding(top = 4.dp)
                 .testTag("app_sync_periodic_interval"),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = i18n("背景同步週期"),
-                color = colors.textStrong.copy(alpha = if (childEnabled) 1f else 0.42f),
-                fontSize = 14.sp,
-                modifier = Modifier.weight(1f),
-            )
-            Text(
-                text = state.periodicInterval.localizedLabel(),
-                color = colors.textDark.copy(alpha = if (childEnabled) 0.68f else 0.36f),
-                fontSize = 13.sp,
-            )
-        }
+        )
+        SettingsChipRow(
+            options = state.periodicIntervalOptions.map { it to it.localizedLabel() },
+            selectedValue = state.periodicInterval,
+            onSelect = { if (childEnabled) onPeriodicIntervalChange(it) },
+            modifier = Modifier.graphicsLayer {
+                alpha = if (childEnabled) 1f else 0.42f
+            },
+        )
         CloudActionButton(
             text = i18n("立即同步"),
             icon = YamiboIcons.Sync,
@@ -451,18 +449,6 @@ private fun AutomaticSyncSection(
             enabled = state.automaticAvailable && !state.isBusy,
             testTag = "app_sync_sync_now",
             onClick = onSyncNow,
-        )
-    }
-    if (intervalDialogVisible) {
-        YamiboSingleSelectDialog(
-            title = i18n("背景同步週期"),
-            options = state.periodicIntervalOptions,
-            selected = state.periodicInterval,
-            onDismiss = { intervalDialogVisible = false },
-            onSelect = onPeriodicIntervalChange,
-            label = { it.localizedLabel() },
-            dismissOnSelect = true,
-            modifier = Modifier.testTag("app_sync_periodic_interval_dialog"),
         )
     }
 }
@@ -522,7 +508,7 @@ private fun SyncDetailsSection(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
                 ) { onExpandedChange(!expanded) }
-                .padding(horizontal = 20.dp)
+                .padding(horizontal = 16.dp)
                 .testTag("app_sync_details_toggle"),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -546,7 +532,7 @@ private fun SyncDetailsSection(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 20.dp, end = 20.dp, bottom = 16.dp)
+                    .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
                     .testTag("app_sync_details_content"),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -602,6 +588,21 @@ private fun SyncDetailsSection(
             }
         }
     }
+}
+
+@Composable
+private fun CloudCard(
+    contentPadding: androidx.compose.ui.unit.Dp = 16.dp,
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(YamiboTheme.colors.creamSurface)
+            .padding(contentPadding),
+        content = content,
+    )
 }
 
 @Composable

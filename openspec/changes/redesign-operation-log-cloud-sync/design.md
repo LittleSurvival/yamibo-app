@@ -1,6 +1,6 @@
 ## Context
 
-The retained branch foundation can encode `BackupModels`, create/read/edit/delete Yamibo blogs, parse Discuz prompt errors, discover type-safe blog ids, and verify a write by authoritative reload. The abandoned sync layer treated one config blog as a whole mutable snapshot and attempted to decide whether local or cloud state was newer. That model failed for reset installations, concurrent edits, deletion, and Yamibo's lack of server-side compare-and-swap.
+The retained branch foundation can encode `BackupModels`, create/read/edit/delete Yamibo blogs, parse typed Discuz success and error prompts, and discover type-safe blog ids. The abandoned sync layer treated one config blog as a whole mutable snapshot and attempted to decide whether local or cloud state was newer. That model failed for reset installations, concurrent edits, deletion, and Yamibo's lack of server-side compare-and-swap.
 
 Yamibo blog writes are whole-document form posts. Two devices that read one shared blog and then edit it can silently overwrite each other's changes even if both clients perform a preflight fingerprint check. The transport therefore cannot safely be used as a multi-writer log.
 
@@ -94,9 +94,21 @@ Known valid blog ids are cached locally. Opening the cloud-sync page reads cache
 - a cached blog returns a verified missing/wrong-identity result;
 - the index references an unknown journal;
 - the last full discovery is older than 24 hours;
-- the user explicitly refreshes or repairs cloud data.
+- the user explicitly clears link cache or starts a repair operation.
 
 Concurrent index updates may lose a reference, so all matching journal markers found by periodic discovery are unioned with cached/index references. Missing index membership never deletes a journal or local operation.
+
+The status reload control performs normal indexed validation rather than
+forcing full discovery. A valid newest index is merged with previously verified
+local links; it does not need to cover every Yamibo list entry because deleted
+blogs may remain visible and fetchable due to provider cache delay. The index
+overrides an older link for the same replica/checkpoint but does not erase other
+previously verified links. Unknown journals are recovered by the periodic
+24-hour discovery or explicit repair. If indexed loading fails, the
+already-loaded index is reused during fallback discovery so the same index page
+is not fetched twice. Compaction triggers publication only when newly covered
+acknowledged operations exist or a prior interrupted rewrite still exposes
+already-compacted operations.
 
 Alternative: trust only the index. Rejected because the index itself is a shared whole-document write.
 
@@ -183,19 +195,29 @@ flowchart TD
     D --> E["Validate envelope and operation schemas"]
     E --> F["Deduplicate and quarantine invalid operations"]
     F --> G["Causally reduce and apply one local transaction"]
-    G --> H["Read own journal preflight"]
+    G --> H["Use journal verified by initial pull"]
     H --> I["Append pending own operations and acknowledgements"]
     I --> J["POST whole own journal"]
-    J --> K["Authoritative reload and exact fingerprint/op-id verification"]
-    K --> L["Mark only verified op ids acknowledged"]
-    L --> M["Pull changed journals again"]
-    M --> N{"Fixed point reached?"}
-    N -- "No, bounded attempts remain" --> E
-    N -- "Yes" --> O["Commit success metrics and release lease"]
-    N -- "No attempts remain" --> P["Persist pending state and schedule retry"]
+    J --> K{"Typed VerifiedSuccess and one resolved blog id?"}
+    K -- "Yes" --> L["Acknowledge exact submitted operation ids"]
+    L --> O["Commit success metrics and release lease"]
+    K -- "No or unknown" --> P["Persist pending state and schedule retry"]
 ```
 
-The POST response is only an acknowledgement hint. Pending operations remain pending until authoritative reload contains their exact ids and expected payload fingerprint. Unknown results retry idempotently.
+Normal journal, checkpoint, and index writes trust only the typed Yamibo
+`VerifiedSuccess` parser result. The application already knows an update target
+id; a create additionally requires exactly one id parsed from the success
+response. The exact submitted envelope becomes the verified local cache entry,
+so the client does not GET the page it just POSTed. Generic HTTP success,
+timeouts, ambiguous create ids, and unparsed pages leave operations pending and
+retry idempotently after the next normal authoritative pull.
+
+The initial pull remains authoritative for remote state and writer-nonce
+collision detection. A second full pull after every successful publication is
+not required: it only narrows a race window and cannot provide server-side CAS
+or global instantaneous convergence. A concurrent remote write is absorbed by
+the next scheduled, lifecycle, or manual sync. Destructive journal retirement
+continues to use its separate proof and index reload verification path.
 
 Remote application and high-watermark advancement occur in the same SQL transaction. A malformed journal quarantines that journal version without modifying valid local data or deleting cloud content.
 
@@ -208,7 +230,7 @@ Operation history cannot grow without bound, but pruning by age alone is unsafe.
 Checkpoint protocol:
 
 1. A device deterministically reduces all observed operations and creates a uniquely named immutable checkpoint blog containing a `BackupModels` projection, full causal vector, tombstones, schema, and fingerprint.
-2. It reloads and verifies the checkpoint.
+2. Typed POST success must identify exactly one immutable checkpoint blog id.
 3. Active device journals acknowledge that exact checkpoint id and vector.
 4. Only after every device active within the previous 90 days has acknowledged it may each device prune its own operations at or below the checkpoint vector.
 5. The checkpoint and enough predecessor metadata remain retained. It is never overwritten in place.
@@ -348,7 +370,7 @@ shared/src/commonTest/.../repository/appsync/
 4. Route every syncable local mutation through a transactional domain command that also appends its operation.
 5. Implement pure operation ordering/reducers and exhaustive policy tests before network wiring.
 6. Add journal/index/checkpoint codecs and adapt the retained blog provider to distinct fixed markers and private titles.
-7. Implement cached discovery, per-device journal publish/reload verification, bootstrap, bounded pull-again convergence, and typed retry.
+7. Implement cached discovery, typed per-device journal publication, bootstrap, bounded eventual convergence, and typed retry.
 8. Implement immutable checkpoints and acknowledgement-gated compaction only after provider-size measurements and failure tests pass.
 9. Wire the existing background scheduling system and retained cloud-sync UI to the new runtime; keep automatic sync disabled by migration default.
 10. Run deterministic 2-5-device model/property tests with reordered, duplicated, dropped, delayed, and concurrently delivered operations.
@@ -374,7 +396,7 @@ the user to review a new preview.
 Force push treats the local sync scope as authoritative. It emits causally
 later Put/Patch/Relation operations for local values and authorized Delete or
 RelationRemove operations for cloud-only values. Those operations use the
-ordinary journal publication, authoritative reload, and exact operation-id
+ordinary typed journal publication and exact submitted operation-id
 acknowledgement path.
 
 Force pull treats the fully validated cloud reduction as authoritative. In one

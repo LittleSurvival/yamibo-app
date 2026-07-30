@@ -9,6 +9,9 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncInstallation
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncOperationLifecycle
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRunLease
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncVerifiedCheckpoint
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncReplicaObservation
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncJournalRetirementIntent
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncJournalRetirementStage
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncAutomaticTrigger
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncScheduleSettings
 import me.thenano.yamibo.yamibo_app.repository.appsync.appSyncIntervalFromStorageKey
@@ -454,6 +457,158 @@ internal class SqlDelightAppSyncOperationStore(
                 .forEach(queries::deleteCheckpoint)
         }
     }
+
+    override fun recordReplicaObservation(
+        accountBinding: SyncAccountBinding,
+        replicaKey: String,
+        sourceBlogId: Long,
+        fingerprint: String,
+        publishedThroughSequence: Long,
+        observedAtEpochMillis: Long,
+        maximumObservationGapMillis: Long,
+    ): AppSyncReplicaObservation {
+        require(
+            replicaKey.isNotBlank() &&
+                sourceBlogId > 0L &&
+                fingerprint.isNotBlank() &&
+                publishedThroughSequence >= 0L &&
+                maximumObservationGapMillis > 0L,
+        )
+        var recorded: AppSyncReplicaObservation? = null
+        db.transaction {
+            val existing = queries.getReplicaObservation(
+                accountBinding.value,
+                replicaKey,
+            ).executeAsOneOrNull()
+            val unchanged = existing != null &&
+                existing.sourceBlogId == sourceBlogId &&
+                existing.fingerprint == fingerprint &&
+                existing.publishedThroughSequence == publishedThroughSequence &&
+                observedAtEpochMillis >= existing.lastObservedAtEpochMillis &&
+                observedAtEpochMillis - existing.lastObservedAtEpochMillis <=
+                maximumObservationGapMillis
+            val firstObservedAt = if (unchanged) {
+                requireNotNull(existing).firstObservedUnchangedAtEpochMillis
+            } else {
+                observedAtEpochMillis
+            }
+            queries.upsertReplicaObservation(
+                accountBinding = accountBinding.value,
+                replicaKey = replicaKey,
+                sourceBlogId = sourceBlogId,
+                fingerprint = fingerprint,
+                publishedThroughSequence = publishedThroughSequence,
+                firstObservedUnchangedAtEpochMillis = firstObservedAt,
+                lastObservedAtEpochMillis = observedAtEpochMillis,
+            )
+            recorded = AppSyncReplicaObservation(
+                accountBinding = accountBinding,
+                replicaKey = replicaKey,
+                sourceBlogId = sourceBlogId,
+                fingerprint = fingerprint,
+                publishedThroughSequence = publishedThroughSequence,
+                firstObservedUnchangedAtEpochMillis = firstObservedAt,
+                lastObservedAtEpochMillis = observedAtEpochMillis,
+            )
+        }
+        return requireNotNull(recorded)
+    }
+
+    override fun replicaObservations(
+        accountBinding: SyncAccountBinding,
+    ): List<AppSyncReplicaObservation> =
+        queries.getReplicaObservations(accountBinding.value).executeAsList().map {
+            AppSyncReplicaObservation(
+                accountBinding = SyncAccountBinding(it.accountBinding),
+                replicaKey = it.replicaKey,
+                sourceBlogId = it.sourceBlogId,
+                fingerprint = it.fingerprint,
+                publishedThroughSequence = it.publishedThroughSequence,
+                firstObservedUnchangedAtEpochMillis = it.firstObservedUnchangedAtEpochMillis,
+                lastObservedAtEpochMillis = it.lastObservedAtEpochMillis,
+            )
+        }
+
+    override fun saveRetirementIntent(intent: AppSyncJournalRetirementIntent) {
+        queries.upsertRetirementIntent(
+            accountBinding = intent.accountBinding.value,
+            replicaKey = intent.replicaKey,
+            sourceBlogId = intent.sourceBlogId,
+            fingerprint = intent.fingerprint,
+            publishedThroughSequence = intent.publishedThroughSequence,
+            checkpointId = intent.checkpointId,
+            checkpointFingerprint = intent.checkpointFingerprint,
+            checkpointVectorHash = intent.checkpointVectorHash,
+            activeSetHash = intent.activeSetHash,
+            stage = intent.stage.name.uppercase(),
+            attempts = intent.attempts,
+            lastResultCode = intent.lastResultCode,
+            createdAtEpochMillis = intent.createdAtEpochMillis,
+            updatedAtEpochMillis = intent.updatedAtEpochMillis,
+            completedAtEpochMillis = intent.completedAtEpochMillis,
+        )
+    }
+
+    override fun retirementIntents(
+        accountBinding: SyncAccountBinding,
+    ): List<AppSyncJournalRetirementIntent> =
+        queries.getRetirementIntents(accountBinding.value).executeAsList().map {
+            AppSyncJournalRetirementIntent(
+                accountBinding = SyncAccountBinding(it.accountBinding),
+                replicaKey = it.replicaKey,
+                sourceBlogId = it.sourceBlogId,
+                fingerprint = it.fingerprint,
+                publishedThroughSequence = it.publishedThroughSequence,
+                checkpointId = it.checkpointId,
+                checkpointFingerprint = it.checkpointFingerprint,
+                checkpointVectorHash = it.checkpointVectorHash,
+                activeSetHash = it.activeSetHash,
+                stage = AppSyncJournalRetirementStage.entries.first {
+                    stage -> stage.name.equals(it.stage, ignoreCase = true)
+                },
+                attempts = it.attempts,
+                lastResultCode = it.lastResultCode,
+                createdAtEpochMillis = it.createdAtEpochMillis,
+                updatedAtEpochMillis = it.updatedAtEpochMillis,
+                completedAtEpochMillis = it.completedAtEpochMillis,
+            )
+        }
+
+    override fun transitionRetirementIntent(
+        accountBinding: SyncAccountBinding,
+        replicaKey: String,
+        expectedStage: AppSyncJournalRetirementStage,
+        newStage: AppSyncJournalRetirementStage,
+        resultCode: String?,
+        atEpochMillis: Long,
+        incrementAttempts: Boolean,
+    ): Boolean {
+        var transitioned = false
+        db.transaction {
+            val current = queries.getRetirementIntents(accountBinding.value)
+                .executeAsList()
+                .firstOrNull { it.replicaKey == replicaKey }
+            if (current?.stage?.equals(expectedStage.name, ignoreCase = true) == true) {
+                queries.transitionRetirementIntent(
+                    stage = newStage.name.uppercase(),
+                    attempts = if (incrementAttempts) 1L else 0L,
+                    lastResultCode = resultCode,
+                    updatedAtEpochMillis = atEpochMillis,
+                    completedAtEpochMillis = atEpochMillis.takeIf {
+                        newStage == AppSyncJournalRetirementStage.Completed
+                    },
+                    accountBinding = accountBinding.value,
+                    replicaKey = replicaKey,
+                    stage_ = expectedStage.name.uppercase(),
+                )
+                transitioned = true
+            }
+        }
+        return transitioned
+    }
+
+    override fun pinnedRetirementCheckpointIds(): Set<String> =
+        queries.getPinnedRetirementCheckpointIds().executeAsList().toSet()
 
     private fun recordReductionMetadata(
         result: OperationReductionResult,

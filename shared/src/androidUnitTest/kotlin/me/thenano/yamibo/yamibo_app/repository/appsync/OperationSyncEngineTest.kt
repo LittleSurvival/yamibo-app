@@ -449,6 +449,21 @@ class OperationSyncEngineTest {
     }
 
     @Test
+    fun successfulPublishDoesNotRunASecondVerificationPull() = runBlocking {
+        val fixture = fixture()
+        activate(fixture)
+        appendSetting(fixture, "dark")
+        val loadsBeforeSync = fixture.remote.loadCount
+
+        assertIs<OperationSyncResult.Converged>(
+            fixture.engine.synchronize(account, formHash),
+        )
+
+        assertEquals(1, fixture.remote.loadCount - loadsBeforeSync)
+        assertEquals(1, fixture.remote.publishCount)
+    }
+
+    @Test
     fun concurrentSameFieldConvergesWithoutUserChoice() = runBlocking {
         val remote = FakeJournalRemote()
         val first = fixture(remote)

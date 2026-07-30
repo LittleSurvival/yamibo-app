@@ -1,6 +1,7 @@
 package me.thenano.yamibo.yamibo_app.repository.appsync.engine
 
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncCausalContext
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncOperationLifecycle
 import me.thenano.yamibo.yamibo_app.store.appsync.AppSyncOperationStore
 
 internal class CompactionCoordinator(
@@ -29,11 +30,19 @@ internal class CompactionCoordinator(
         }
         if (!fullyAcknowledged) return null
 
-        val covered = store.allOutboxOperations()
-            .map { it.first }
-            .filter(checkpoint.coverage::includes)
-            .mapTo(linkedSetOf()) { it.operationId }
-        store.markCompacted(covered)
+        val coveredOutbox = store.allOutboxOperations()
+            .filter { checkpoint.coverage.includes(it.first) }
+        val newlyCompacted = coveredOutbox
+            .filter { it.second == AppSyncOperationLifecycle.Acknowledged }
+            .mapTo(linkedSetOf()) { it.first.operationId }
+        val compactedIds = coveredOutbox
+            .filter { it.second == AppSyncOperationLifecycle.Compacted }
+            .mapTo(hashSetOf()) { it.first.operationId }
+        val compactedStillPublished = journals.any { journal ->
+            journal.payload.operations.any { it.operationId in compactedIds }
+        }
+        if (newlyCompacted.isEmpty() && !compactedStillPublished) return null
+        store.markCompacted(newlyCompacted)
         return checkpoint.coverage
     }
 

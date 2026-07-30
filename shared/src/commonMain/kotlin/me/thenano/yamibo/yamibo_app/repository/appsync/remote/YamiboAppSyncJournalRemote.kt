@@ -9,10 +9,13 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalPubl
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncCheckpointPublishResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncCheckpointRetentionResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalRemote
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalRetirementRemoteResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.LoadedAppSyncJournal
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.LoadedAppSyncCheckpoint
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncCloudConfigDefaults
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncCloudResult
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncJournalRetirementIntent
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncJournalRetirementStage
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncAccountBinding
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncReplicaKey
 import me.thenano.yamibo.yamibo_app.store.appsync.AppSyncRemoteBlogKind
@@ -34,7 +37,13 @@ internal class YamiboAppSyncJournalRemote(
     private val indexCodec: AppSyncIndexEnvelopeCodec = AppSyncIndexEnvelopeCodec(),
     private val checkpointCodec: AppSyncCheckpointEnvelopeCodec = AppSyncCheckpointEnvelopeCodec(),
     private val nowMillis: () -> Long = ::currentTimeMillis,
+    private val retirementIntents:
+        (SyncAccountBinding) -> List<AppSyncJournalRetirementIntent> = { emptyList() },
 ) : AppSyncJournalRemote {
+    private val verifiedJournalCache = mutableMapOf<String, LoadedAppSyncJournal>()
+    private val verifiedCheckpointCache = mutableMapOf<String, LoadedAppSyncCheckpoint>()
+    private var verifiedIndexCache: VerifiedIndex? = null
+
     suspend fun deleteAllVerifiedSyncData(
         accountBinding: SyncAccountBinding,
         formHash: FormHash,
@@ -125,13 +134,20 @@ internal class YamiboAppSyncJournalRemote(
             }
         }
         store.clear()
+        verifiedJournalCache.clear()
+        verifiedCheckpointCache.clear()
+        verifiedIndexCache = null
         return AppSyncCloudResetResult.Verified(deleted)
     }
 
     override suspend fun loadJournals(
         accountBinding: SyncAccountBinding,
         forceDiscovery: Boolean,
-    ): AppSyncJournalLoadResult = discoverCurrentLinks(accountBinding)
+    ): AppSyncJournalLoadResult = if (forceDiscovery) {
+        discoverAll(accountBinding)
+    } else {
+        discoverCurrentLinks(accountBinding)
+    }
 
     fun clearLinkCache(accountBinding: SyncAccountBinding): Int {
         val links = AppSyncRemoteBlogKind.entries.sumOf { store.loadKind(it).size }
@@ -145,7 +161,158 @@ internal class YamiboAppSyncJournalRemote(
                 .firstNotNullOfOrNull { it.classId }
                 ?.let { store.saveClassId(accountBinding, it) }
         store.clear()
+        verifiedJournalCache.clear()
+        verifiedCheckpointCache.clear()
+        verifiedIndexCache = null
         return links
+    }
+
+    override suspend fun publishRetirementIndex(
+        intent: AppSyncJournalRetirementIntent,
+        formHash: FormHash,
+    ): AppSyncJournalRetirementRemoteResult {
+        val existing = store.load(INDEX_REMOTE_KEY)
+            ?: return AppSyncJournalRetirementRemoteResult.RetryableFailure(
+                "尚未取得可驗證的同步 index",
+            )
+        val current = when (val result = loadIndex(existing, intent.accountBinding)) {
+            is IndexCandidateResult.Valid -> result
+            IndexCandidateResult.NotFound ->
+                return AppSyncJournalRetirementRemoteResult.RetryableFailure("同步 index 不存在")
+            is IndexCandidateResult.Retryable ->
+                return AppSyncJournalRetirementRemoteResult.RetryableFailure(result.reason)
+            is IndexCandidateResult.Terminal ->
+                return AppSyncJournalRetirementRemoteResult.TerminalFailure(result.reason)
+        }
+        val retirement = AppSyncIndexRetirementReference(
+            replicaKey = intent.replicaKey,
+            blogId = intent.sourceBlogId.toInt(),
+            fingerprint = intent.fingerprint,
+            publishedThroughSequence = intent.publishedThroughSequence,
+            checkpointId = intent.checkpointId,
+        )
+        val payload = current.payload.copy(
+            journals = current.payload.journals.filterNot {
+                it.replicaKey == intent.replicaKey && it.blogId == intent.sourceBlogId.toInt()
+            },
+            retirements = current.payload.retirements
+                .filterNot { it.replicaKey == intent.replicaKey } + retirement,
+            updatedAtEpochMillis = nowMillis(),
+        )
+        val classSelection = existing.classId?.let(AppSyncBlogClassSelection::Existing)
+            ?: return AppSyncJournalRetirementRemoteResult.RetryableFailure(
+                "同步 index 缺少 class identity",
+            )
+        val acknowledgement = when (
+            val result = provider.submitBlog(
+                AppSyncBlogWriteRequest(
+                    blogId = existing.blogId,
+                    title = APP_SYNC_INDEX_TITLE,
+                    message = indexCodec.encode(payload),
+                    classSelection = classSelection,
+                    formHash = formHash,
+                ),
+            )
+        ) {
+            is AppSyncCloudResult.VerifiedSuccess -> result.value
+            is AppSyncCloudResult.FormExpired,
+            AppSyncCloudResult.NotLoggedIn,
+            -> return AppSyncJournalRetirementRemoteResult.FormExpired
+            is AppSyncCloudResult.NetworkFailed,
+            is AppSyncCloudResult.Timeout,
+            is AppSyncCloudResult.HttpFailed,
+            AppSyncCloudResult.Maintenance,
+            is AppSyncCloudResult.AcknowledgedButUnverified,
+            -> return AppSyncJournalRetirementRemoteResult.RetryableFailure(
+                result.describeForJournal(),
+            )
+            else -> return AppSyncJournalRetirementRemoteResult.TerminalFailure(
+                result.describeForJournal(),
+            )
+        }
+        val candidateIds = (listOf(existing.blogId) + acknowledgement.candidateBlogIds).distinct()
+        for (blogId in candidateIds) {
+            val candidate = existing.copy(blogId = blogId)
+            val verified = loadIndex(candidate, intent.accountBinding)
+            if (verified is IndexCandidateResult.Valid &&
+                verified.payload.retirements.any { it == retirement } &&
+                verified.payload.journals.none {
+                    it.replicaKey == intent.replicaKey &&
+                        it.blogId == intent.sourceBlogId.toInt()
+                }
+            ) {
+                store.save(
+                    candidate.copy(
+                        fingerprint = verified.fingerprint,
+                        validatedAtEpochMillis = nowMillis(),
+                    ),
+                )
+                return AppSyncJournalRetirementRemoteResult.Verified
+            }
+        }
+        return AppSyncJournalRetirementRemoteResult.RetryableFailure(
+            "index retirement metadata reload verification failed",
+        )
+    }
+
+    override suspend fun deleteRetiredJournal(
+        intent: AppSyncJournalRetirementIntent,
+        formHash: FormHash,
+    ): AppSyncJournalRetirementRemoteResult {
+        val candidate = StoredAppSyncRemoteBlog(
+            remoteKey = intent.replicaKey,
+            kind = AppSyncRemoteBlogKind.Journal,
+            blogId = BlogId(intent.sourceBlogId.toInt()),
+            classId = store.loadClassId(intent.accountBinding),
+            fingerprint = intent.fingerprint,
+            validatedAtEpochMillis = 0,
+            contentUpdatedAtEpochMillis = null,
+        )
+        when (val loaded = loadJournal(candidate, intent.accountBinding)) {
+            JournalCandidateResult.NotFound ->
+                return AppSyncJournalRetirementRemoteResult.Verified
+            is JournalCandidateResult.Retryable ->
+                return AppSyncJournalRetirementRemoteResult.RetryableFailure(loaded.reason)
+            is JournalCandidateResult.Terminal ->
+                return AppSyncJournalRetirementRemoteResult.TerminalFailure(loaded.reason)
+            is JournalCandidateResult.Valid -> {
+                if (
+                    loaded.journal.fingerprint != intent.fingerprint ||
+                    loaded.journal.payload.resolvedPublishedThroughSequence() !=
+                    intent.publishedThroughSequence
+                ) {
+                    return AppSyncJournalRetirementRemoteResult.TerminalFailure(
+                        "Journal changed after retirement proof",
+                    )
+                }
+            }
+        }
+        return when (
+            val result = provider.deleteBlog(
+                AppSyncBlogDeleteRequest(candidate.blogId, formHash),
+            )
+        ) {
+            is AppSyncCloudResult.VerifiedSuccess,
+            AppSyncCloudResult.NotFound,
+            -> {
+                store.remove(intent.replicaKey)
+                AppSyncJournalRetirementRemoteResult.Verified
+            }
+            is AppSyncCloudResult.FormExpired,
+            AppSyncCloudResult.NotLoggedIn,
+            -> AppSyncJournalRetirementRemoteResult.FormExpired
+            is AppSyncCloudResult.NetworkFailed,
+            is AppSyncCloudResult.Timeout,
+            is AppSyncCloudResult.HttpFailed,
+            AppSyncCloudResult.Maintenance,
+            is AppSyncCloudResult.AcknowledgedButUnverified,
+            -> AppSyncJournalRetirementRemoteResult.RetryableFailure(
+                result.describeForJournal(),
+            )
+            else -> AppSyncJournalRetirementRemoteResult.TerminalFailure(
+                result.describeForJournal(),
+            )
+        }
     }
 
     override suspend fun publishOwnJournal(
@@ -156,33 +323,35 @@ internal class YamiboAppSyncJournalRemote(
         val remoteKey = payload.replicaKey()
         val cached = store.load(remoteKey)
         if (cached != null) {
-            when (val preflight = loadJournal(cached, payload.accountBinding)) {
-                is JournalCandidateResult.Valid -> {
-                    if (preflight.journal.payload.writerNonce != payload.writerNonce) {
-                        return AppSyncJournalPublishResult.Conflict(
-                            "Journal writer nonce belongs to another installation",
-                        )
+            var verifiedCached = verifiedJournalCache[remoteKey]?.takeIf {
+                it.remoteId == cached.blogId.value.toString() &&
+                    it.fingerprint == cached.fingerprint
+            }
+            if (verifiedCached == null) {
+                when (val loaded = loadJournal(cached, payload.accountBinding)) {
+                    is JournalCandidateResult.Valid -> {
+                        saveJournal(cached, loaded.journal)
+                        verifiedCached = loaded.journal
                     }
-                    if (expectedFingerprint != null &&
-                        preflight.journal.fingerprint != expectedFingerprint
-                    ) {
-                        return AppSyncJournalPublishResult.Conflict(
-                            "Journal changed after the caller's preflight",
-                        )
-                    }
-                }
-                JournalCandidateResult.NotFound -> {
-                    store.remove(remoteKey)
-                    if (expectedFingerprint != null) {
+                    JournalCandidateResult.NotFound ->
                         return AppSyncJournalPublishResult.Conflict(
                             "Previously verified journal is missing",
                         )
-                    }
+                    is JournalCandidateResult.Retryable ->
+                        return AppSyncJournalPublishResult.Unknown(loaded.reason)
+                    is JournalCandidateResult.Terminal ->
+                        return AppSyncJournalPublishResult.TerminalFailure(loaded.reason)
                 }
-                is JournalCandidateResult.Retryable ->
-                    return AppSyncJournalPublishResult.Unknown(preflight.reason)
-                is JournalCandidateResult.Terminal ->
-                    return AppSyncJournalPublishResult.TerminalFailure(preflight.reason)
+            }
+            if (verifiedCached.payload.writerNonce != payload.writerNonce) {
+                return AppSyncJournalPublishResult.Conflict(
+                    "Journal writer nonce belongs to another installation",
+                )
+            }
+            if (expectedFingerprint != null && cached.fingerprint != expectedFingerprint) {
+                return AppSyncJournalPublishResult.Conflict(
+                    "Journal changed after the caller's verified load",
+                )
             }
         }
 
@@ -223,58 +392,28 @@ internal class YamiboAppSyncJournalRemote(
             else -> return AppSyncJournalPublishResult.TerminalFailure(result.describeForJournal())
         }
 
-        val candidateIds = buildList {
-            cached?.blogId?.let(::add)
-            addAll(acknowledgement.candidateBlogIds)
-        }.distinct()
-        for (candidateId in candidateIds) {
-            val candidate = StoredAppSyncRemoteBlog(
-                remoteKey = remoteKey,
-                kind = AppSyncRemoteBlogKind.Journal,
-                blogId = candidateId,
-                classId = cached?.classId ?: classSelection.existingClassId(),
-                fingerprint = null,
-                validatedAtEpochMillis = 0,
-                contentUpdatedAtEpochMillis = null,
+        val blogId = cached?.blogId
+            ?: acknowledgement.candidateBlogIds.distinct().singleOrNull()
+            ?: return AppSyncJournalPublishResult.Unknown(
+                "Journal create succeeded but the response did not identify one blog id",
             )
-            when (val loaded = loadJournal(candidate, payload.accountBinding)) {
-                is JournalCandidateResult.Valid -> {
-                    val journal = loaded.journal
-                    if (journal.fingerprint == expectedEnvelope.envelope.fingerprint &&
-                        journal.payload.operations.map { it.operationId } ==
-                        payload.operations.map { it.operationId }
-                    ) {
-                        saveJournal(candidate, journal)
-                        updateIndexBestEffort(payload.accountBinding, classSelection, formHash)
-                        return AppSyncJournalPublishResult.Verified(journal)
-                    }
-                }
-                else -> Unit
-            }
-        }
-
-        return when (val discovered = discoverAll(payload.accountBinding)) {
-            is AppSyncJournalLoadResult.Success -> {
-                val journal = discovered.journals.singleOrNull {
-                    it.payload.deviceId == payload.deviceId &&
-                        it.payload.deviceEpoch == payload.deviceEpoch &&
-                        it.fingerprint == expectedEnvelope.envelope.fingerprint
-                }
-                if (journal != null) {
-                    updateIndexBestEffort(payload.accountBinding, classSelection, formHash)
-                    AppSyncJournalPublishResult.Verified(journal)
-                } else {
-                    AppSyncJournalPublishResult.Unknown(
-                        "Blog POST was acknowledged but exact journal reload verification failed",
-                    )
-                }
-            }
-            is AppSyncJournalLoadResult.RetryableFailure ->
-                AppSyncJournalPublishResult.Unknown(discovered.reason)
-            AppSyncJournalLoadResult.NotLoggedIn -> AppSyncJournalPublishResult.FormExpired
-            is AppSyncJournalLoadResult.TerminalFailure ->
-                AppSyncJournalPublishResult.TerminalFailure(discovered.reason)
-        }
+        val candidate = StoredAppSyncRemoteBlog(
+            remoteKey = remoteKey,
+            kind = AppSyncRemoteBlogKind.Journal,
+            blogId = blogId,
+            classId = cached?.classId ?: classSelection.existingClassId(),
+            fingerprint = expectedEnvelope.envelope.fingerprint,
+            validatedAtEpochMillis = nowMillis(),
+            contentUpdatedAtEpochMillis = payload.heartbeatAtEpochMillis,
+        )
+        val journal = LoadedAppSyncJournal(
+            remoteId = blogId.value.toString(),
+            fingerprint = expectedEnvelope.envelope.fingerprint,
+            payload = payload,
+        )
+        saveJournal(candidate, journal)
+        updateIndexBestEffort(payload.accountBinding, classSelection, formHash)
+        return AppSyncJournalPublishResult.Verified(journal)
     }
 
     override suspend fun publishCheckpoint(
@@ -318,53 +457,33 @@ internal class YamiboAppSyncJournalRemote(
             -> return AppSyncCheckpointPublishResult.Unknown(result.describeForJournal())
             else -> return AppSyncCheckpointPublishResult.TerminalFailure(result.describeForJournal())
         }
-        for (blogId in acknowledgement.candidateBlogIds.distinct()) {
-            val candidate = StoredAppSyncRemoteBlog(
-                remoteKey = checkpointRemoteKey(payload.checkpointId),
-                kind = AppSyncRemoteBlogKind.Checkpoint,
-                blogId = blogId,
-                classId = classSelection.existingClassId(),
-                fingerprint = null,
-                validatedAtEpochMillis = 0,
-                contentUpdatedAtEpochMillis = null,
+        val blogId = acknowledgement.candidateBlogIds.distinct().singleOrNull()
+            ?: return AppSyncCheckpointPublishResult.Unknown(
+                "Checkpoint create succeeded but the response did not identify one blog id",
             )
-            when (val loaded = loadCheckpoint(candidate, payload.accountBinding)) {
-                is CheckpointCandidateResult.Valid -> {
-                    val checkpoint = loaded.checkpoint
-                    if (checkpoint.envelope.payload.checkpointId == payload.checkpointId &&
-                        checkpoint.envelope.fingerprint == expected.envelope.fingerprint &&
-                        checkpoint.envelope.payload.coverage == payload.coverage
-                    ) {
-                        saveCheckpoint(candidate, checkpoint)
-                        updateIndexBestEffort(payload.accountBinding, classSelection, formHash)
-                        return AppSyncCheckpointPublishResult.Verified(checkpoint)
-                    }
-                }
-                else -> Unit
-            }
-        }
-        return when (val discovered = discoverAll(payload.accountBinding)) {
-            is AppSyncJournalLoadResult.Success -> {
-                discovered.checkpoints.singleOrNull {
-                    it.envelope.payload.checkpointId == payload.checkpointId &&
-                        it.envelope.fingerprint == expected.envelope.fingerprint
-                }?.let(AppSyncCheckpointPublishResult::Verified)
-                    ?: AppSyncCheckpointPublishResult.Unknown(
-                        "Checkpoint POST was acknowledged but exact reload verification failed",
-                    )
-            }
-            is AppSyncJournalLoadResult.RetryableFailure ->
-                AppSyncCheckpointPublishResult.Unknown(discovered.reason)
-            AppSyncJournalLoadResult.NotLoggedIn -> AppSyncCheckpointPublishResult.FormExpired
-            is AppSyncJournalLoadResult.TerminalFailure ->
-                AppSyncCheckpointPublishResult.TerminalFailure(discovered.reason)
-        }
+        val candidate = StoredAppSyncRemoteBlog(
+            remoteKey = checkpointRemoteKey(payload.checkpointId),
+            kind = AppSyncRemoteBlogKind.Checkpoint,
+            blogId = blogId,
+            classId = classSelection.existingClassId(),
+            fingerprint = expected.envelope.fingerprint,
+            validatedAtEpochMillis = nowMillis(),
+            contentUpdatedAtEpochMillis = payload.createdAtEpochMillis,
+        )
+        val checkpoint = LoadedAppSyncCheckpoint(
+            remoteId = blogId.value.toString(),
+            envelope = expected.envelope,
+        )
+        saveCheckpoint(candidate, checkpoint)
+        updateIndexBestEffort(payload.accountBinding, classSelection, formHash)
+        return AppSyncCheckpointPublishResult.Verified(checkpoint)
     }
 
     override suspend fun enforceCheckpointRetention(
         accountBinding: SyncAccountBinding,
         formHash: FormHash,
         maximumCheckpoints: Int,
+        pinnedCheckpointIds: Set<String>,
     ): AppSyncCheckpointRetentionResult {
         if (maximumCheckpoints <= 0) {
             return AppSyncCheckpointRetentionResult.TerminalFailure(
@@ -377,10 +496,10 @@ internal class YamiboAppSyncJournalRemote(
                     it.fingerprint != null &&
                     it.contentUpdatedAtEpochMillis != null
             }
-        if (cached.size <= maximumCheckpoints) {
+        if (cached.size <= maximumCheckpoints && pinnedCheckpointIds.isEmpty()) {
             return AppSyncCheckpointRetentionResult.NotNeeded
         }
-        val retained = cached
+        val sorted = cached
             .sortedWith(
                 compareByDescending<StoredAppSyncRemoteBlog> {
                     it.contentUpdatedAtEpochMillis
@@ -390,7 +509,12 @@ internal class YamiboAppSyncJournalRemote(
                     it.blogId.value
                 },
             )
-            .take(maximumCheckpoints)
+        val pinned = sorted.filter { checkpointId(it.remoteKey) in pinnedCheckpointIds }
+        val retained = (
+            pinned + sorted
+                .filterNot { checkpointId(it.remoteKey) in pinnedCheckpointIds }
+                .take(maximumCheckpoints)
+            ).distinctBy { it.remoteKey }
         val retainedRemoteKeys = retained.mapTo(hashSetOf()) { it.remoteKey }
         val toDelete = cached.filterNot { it.remoteKey in retainedRemoteKeys }
 
@@ -421,12 +545,21 @@ internal class YamiboAppSyncJournalRemote(
                 formHash = formHash,
             )
         }
-        return AppSyncCheckpointRetentionResult.Verified(
-            retainedCheckpointIds = retained.mapTo(linkedSetOf()) {
-                it.remoteKey.removePrefix(CHECKPOINT_REMOTE_KEY_PREFIX)
-            },
-            deletedBlogCount = deleted,
-        )
+        val retainedIds = retained.mapTo(linkedSetOf()) {
+            it.remoteKey.removePrefix(CHECKPOINT_REMOTE_KEY_PREFIX)
+        }
+        return if (retained.size > maximumCheckpoints) {
+            AppSyncCheckpointRetentionResult.StoragePressure(
+                reason = "退休復原基準已固定；暫時保留 ${retained.size} 個 checkpoint",
+                retainedCheckpointIds = retainedIds,
+                deletedBlogCount = deleted,
+            )
+        } else {
+            AppSyncCheckpointRetentionResult.Verified(
+                retainedCheckpointIds = retainedIds,
+                deletedBlogCount = deleted,
+            )
+        }
     }
 
     private fun checkpointRemoteKey(checkpointId: String): String =
@@ -447,36 +580,35 @@ internal class YamiboAppSyncJournalRemote(
         store.loadKind(AppSyncRemoteBlogKind.Checkpoint).forEach {
             cachedCheckpoints[it.remoteKey] = it
         }
+        var indexedReplicaKeys = emptySet<String>()
         val index = store.load(INDEX_REMOTE_KEY)
         if (index != null) {
             when (val loadedIndex = preloadedIndex ?: loadIndex(index, accountBinding)) {
                 is IndexCandidateResult.Valid -> {
+                    indexedReplicaKeys = loadedIndex.payload.journals
+                        .mapTo(linkedSetOf()) { it.replicaKey }
                     loadedIndex.payload.journals.forEach { reference ->
-                        if (reference.replicaKey !in cachedJournals) {
-                            cachedJournals[reference.replicaKey] = StoredAppSyncRemoteBlog(
-                                remoteKey = reference.replicaKey,
-                                kind = AppSyncRemoteBlogKind.Journal,
-                                blogId = BlogId(reference.blogId),
-                                classId = index.classId,
-                                fingerprint = reference.fingerprint,
-                                validatedAtEpochMillis = 0,
-                                contentUpdatedAtEpochMillis = null,
-                            )
-                        }
+                        cachedJournals[reference.replicaKey] = StoredAppSyncRemoteBlog(
+                            remoteKey = reference.replicaKey,
+                            kind = AppSyncRemoteBlogKind.Journal,
+                            blogId = BlogId(reference.blogId),
+                            classId = index.classId,
+                            fingerprint = reference.fingerprint,
+                            validatedAtEpochMillis = 0,
+                            contentUpdatedAtEpochMillis = null,
+                        )
                     }
                     loadedIndex.payload.checkpoints.forEach { reference ->
                         val remoteKey = checkpointRemoteKey(reference.checkpointId)
-                        if (remoteKey !in cachedCheckpoints) {
-                            cachedCheckpoints[remoteKey] = StoredAppSyncRemoteBlog(
-                                remoteKey = remoteKey,
-                                kind = AppSyncRemoteBlogKind.Checkpoint,
-                                blogId = BlogId(reference.blogId),
-                                classId = index.classId,
-                                fingerprint = reference.fingerprint,
-                                validatedAtEpochMillis = 0,
-                                contentUpdatedAtEpochMillis = null,
-                            )
-                        }
+                        cachedCheckpoints[remoteKey] = StoredAppSyncRemoteBlog(
+                            remoteKey = remoteKey,
+                            kind = AppSyncRemoteBlogKind.Checkpoint,
+                            blogId = BlogId(reference.blogId),
+                            classId = index.classId,
+                            fingerprint = reference.fingerprint,
+                            validatedAtEpochMillis = 0,
+                            contentUpdatedAtEpochMillis = null,
+                        )
                     }
                 }
                 IndexCandidateResult.NotFound -> store.remove(INDEX_REMOTE_KEY)
@@ -488,6 +620,16 @@ internal class YamiboAppSyncJournalRemote(
 
         val loadedJournals = mutableListOf<LoadedAppSyncJournal>()
         for (candidate in cachedJournals.values) {
+            val cachedPayload = verifiedJournalCache[candidate.remoteKey]
+                ?.takeIf {
+                    candidate.fingerprint != null &&
+                        it.remoteId == candidate.blogId.value.toString() &&
+                        it.fingerprint == candidate.fingerprint
+                }
+            if (cachedPayload != null) {
+                loadedJournals += cachedPayload
+                continue
+            }
             when (val result = loadJournal(candidate, accountBinding)) {
                 is JournalCandidateResult.Valid -> {
                     saveJournal(candidate, result.journal)
@@ -505,6 +647,16 @@ internal class YamiboAppSyncJournalRemote(
         }
         val loadedCheckpoints = mutableListOf<LoadedAppSyncCheckpoint>()
         for (candidate in cachedCheckpoints.values) {
+            val cachedPayload = verifiedCheckpointCache[candidate.remoteKey]
+                ?.takeIf {
+                    candidate.fingerprint != null &&
+                        it.remoteId == candidate.blogId.value.toString() &&
+                        it.envelope.fingerprint == candidate.fingerprint
+                }
+            if (cachedPayload != null) {
+                loadedCheckpoints += cachedPayload
+                continue
+            }
             when (val result = loadCheckpoint(candidate, accountBinding)) {
                 is CheckpointCandidateResult.Valid -> {
                     saveCheckpoint(candidate, result.checkpoint)
@@ -522,14 +674,29 @@ internal class YamiboAppSyncJournalRemote(
         }
         if (loadedJournals.isEmpty() && loadedCheckpoints.isEmpty()) return null
         return AppSyncJournalLoadResult.Success(
-            journals = loadedJournals.distinctBy { it.payload.replicaKey() },
+            journals = loadedJournals
+                .filterNot { journal ->
+                    completedRetirements(accountBinding).any { it.matches(journal) }
+                }
+                .distinctBy { it.payload.replicaKey() },
             checkpoints = loadedCheckpoints.distinctBy { it.envelope.payload.checkpointId },
+            indexedReplicaKeys = indexedReplicaKeys,
         )
     }
 
     private suspend fun discoverCurrentLinks(
         accountBinding: SyncAccountBinding,
     ): AppSyncJournalLoadResult {
+        store.load(INDEX_REMOTE_KEY)?.let { cachedIndex ->
+            when (val loadedIndex = loadIndex(cachedIndex, accountBinding)) {
+                is IndexCandidateResult.Valid ->
+                    loadCachedState(accountBinding, loadedIndex)?.let { return it }
+                IndexCandidateResult.NotFound -> store.remove(INDEX_REMOTE_KEY)
+                is IndexCandidateResult.Retryable ->
+                    return AppSyncJournalLoadResult.RetryableFailure(loadedIndex.reason)
+                is IndexCandidateResult.Terminal -> store.remove(INDEX_REMOTE_KEY)
+            }
+        }
         val classSelection = when (val resolved = resolveClassSelection(accountBinding)) {
             is ClassSelectionResult.Success -> resolved.selection
             is ClassSelectionResult.Retryable ->
@@ -546,8 +713,6 @@ internal class YamiboAppSyncJournalRemote(
             is AppSyncCloudResult.VerifiedSuccess -> result.value
             else -> return result.toJournalLoadFailure()
         }
-        store.clear()
-
         val latestIndexSummary = firstPage.blogs
             .filter {
                 normalizeListTitle(
@@ -568,28 +733,19 @@ internal class YamiboAppSyncJournalRemote(
             )
             when (val loadedIndex = loadIndex(index, accountBinding)) {
                 is IndexCandidateResult.Valid -> {
-                    val newestListedContentAt = firstPage.blogs
-                        .asSequence()
-                        .filter {
-                            val title = normalizeListTitle(
-                                it.title,
-                                AppSyncCloudConfigDefaults.BLOG_CLASS_NAME,
-                            )
-                            title.startsWith(AppSyncJournalDefaults.JOURNAL_TITLE_PREFIX) ||
-                                title.startsWith(AppSyncJournalDefaults.CHECKPOINT_TITLE_PREFIX)
-                        }
-                        .maxOfOrNull { it.timeInfo.epoch }
-                    if (newestListedContentAt == null ||
-                        newestListedContentAt <= latestIndexSummary.timeInfo.epoch
-                    ) {
-                        store.save(
-                            index.copy(
-                                fingerprint = loadedIndex.fingerprint,
-                                validatedAtEpochMillis = nowMillis(),
-                            ),
-                        )
-                        loadCachedState(accountBinding, loadedIndex)?.let { return it }
-                    }
+                    store.save(
+                        index.copy(
+                            fingerprint = loadedIndex.fingerprint,
+                            validatedAtEpochMillis = nowMillis(),
+                        ),
+                    )
+                    loadCachedState(accountBinding, loadedIndex)?.let { return it }
+                    return discoverAll(
+                        accountBinding = accountBinding,
+                        knownClassId = classId,
+                        firstClassPage = firstPage,
+                        preloadedIndex = loadedIndex,
+                    )
                 }
                 is IndexCandidateResult.Retryable ->
                     return AppSyncJournalLoadResult.RetryableFailure(loadedIndex.reason)
@@ -603,6 +759,7 @@ internal class YamiboAppSyncJournalRemote(
         accountBinding: SyncAccountBinding,
         knownClassId: BlogClassId? = null,
         firstClassPage: UserSpaceBlogPage? = null,
+        preloadedIndex: IndexCandidateResult.Valid? = null,
     ): AppSyncJournalLoadResult {
         val classId = knownClassId ?: when (val resolved = resolveClassSelection(accountBinding)) {
             is ClassSelectionResult.Success ->
@@ -620,7 +777,19 @@ internal class YamiboAppSyncJournalRemote(
         }
         val loaded = mutableListOf<LoadedAppSyncJournal>()
         val checkpoints = mutableListOf<LoadedAppSyncCheckpoint>()
-        for (summary in pages.flatMap { it.blogs }) {
+        val indexedReplicaKeys = linkedSetOf<String>()
+        val retirementDiscoveryIssues = mutableListOf<String>()
+        val summaries = pages.flatMap { it.blogs }
+        val latestIndexBlogId = summaries
+            .filter {
+                normalizeListTitle(
+                    it.title,
+                    AppSyncCloudConfigDefaults.BLOG_CLASS_NAME,
+                ) == APP_SYNC_INDEX_TITLE
+            }
+            .maxWithOrNull(compareBy({ it.timeInfo.epoch }, { it.bId.value }))
+            ?.bId
+        for (summary in summaries) {
             val normalizedTitle = normalizeListTitle(
                 summary.title,
                 AppSyncCloudConfigDefaults.BLOG_CLASS_NAME,
@@ -644,10 +813,14 @@ internal class YamiboAppSyncJournalRemote(
                         }
                         is JournalCandidateResult.Retryable ->
                             return AppSyncJournalLoadResult.RetryableFailure(result.reason)
-                        else -> Unit
+                        JournalCandidateResult.NotFound ->
+                            retirementDiscoveryIssues += "Journal disappeared during discovery"
+                        is JournalCandidateResult.Terminal ->
+                            retirementDiscoveryIssues += "Journal validation failed"
                     }
                 }
                 normalizedTitle == APP_SYNC_INDEX_TITLE -> {
+                    if (summary.bId != latestIndexBlogId) continue
                     val index = StoredAppSyncRemoteBlog(
                         remoteKey = INDEX_REMOTE_KEY,
                         kind = AppSyncRemoteBlogKind.Index,
@@ -657,14 +830,24 @@ internal class YamiboAppSyncJournalRemote(
                         validatedAtEpochMillis = 0,
                         contentUpdatedAtEpochMillis = summary.timeInfo.epoch * 1_000L,
                     )
-                    when (val result = loadIndex(index, accountBinding)) {
-                        is IndexCandidateResult.Valid -> store.save(
-                            index.copy(
-                                fingerprint = result.fingerprint,
-                                validatedAtEpochMillis = nowMillis(),
-                            ),
-                        )
-                        else -> Unit
+                    when (val result = preloadedIndex ?: loadIndex(index, accountBinding)) {
+                        is IndexCandidateResult.Valid -> {
+                            indexedReplicaKeys += result.payload.journals.map {
+                                it.replicaKey
+                            }
+                            store.save(
+                                index.copy(
+                                    fingerprint = result.fingerprint,
+                                    validatedAtEpochMillis = nowMillis(),
+                                ),
+                            )
+                        }
+                        IndexCandidateResult.NotFound ->
+                            retirementDiscoveryIssues += "Index disappeared during discovery"
+                        is IndexCandidateResult.Retryable ->
+                            return AppSyncJournalLoadResult.RetryableFailure(result.reason)
+                        is IndexCandidateResult.Terminal ->
+                            retirementDiscoveryIssues += "Index validation failed"
                     }
                 }
                 normalizedTitle.startsWith(AppSyncJournalDefaults.CHECKPOINT_TITLE_PREFIX) -> {
@@ -684,14 +867,23 @@ internal class YamiboAppSyncJournalRemote(
                         }
                         is CheckpointCandidateResult.Retryable ->
                             return AppSyncJournalLoadResult.RetryableFailure(result.reason)
-                        else -> Unit
+                        CheckpointCandidateResult.NotFound ->
+                            retirementDiscoveryIssues += "Checkpoint disappeared during discovery"
+                        is CheckpointCandidateResult.Terminal ->
+                            retirementDiscoveryIssues += "Checkpoint validation failed"
                     }
                 }
             }
         }
         return AppSyncJournalLoadResult.Success(
-            loaded.distinctBy { it.payload.replicaKey() },
+            loaded
+                .filterNot { journal ->
+                    completedRetirements(accountBinding).any { it.matches(journal) }
+                }
+                .distinctBy { it.payload.replicaKey() },
             checkpoints.distinctBy { it.envelope.payload.checkpointId },
+            indexedReplicaKeys = indexedReplicaKeys,
+            retirementDiscoveryIssues = retirementDiscoveryIssues.distinct(),
         )
     }
 
@@ -789,6 +981,11 @@ internal class YamiboAppSyncJournalRemote(
                 if (validation.envelope.payload.accountBinding != accountBinding) {
                     IndexCandidateResult.Terminal("Index account binding does not match")
                 } else {
+                    verifiedIndexCache = VerifiedIndex(
+                        blogId = candidate.blogId,
+                        payload = validation.envelope.payload,
+                        fingerprint = validation.envelope.fingerprint,
+                    )
                     IndexCandidateResult.Valid(
                         validation.envelope.payload,
                         validation.envelope.fingerprint,
@@ -807,6 +1004,17 @@ internal class YamiboAppSyncJournalRemote(
         val journals = store.loadKind(AppSyncRemoteBlogKind.Journal)
         if (journals.isEmpty()) return
         val existing = store.load(INDEX_REMOTE_KEY)
+        val existingPayload = existing?.let { stored ->
+            verifiedIndexCache
+                ?.takeIf {
+                    it.blogId == stored.blogId &&
+                        it.fingerprint == stored.fingerprint &&
+                        it.payload.accountBinding == accountBinding
+                }
+                ?.payload
+                ?: (loadIndex(stored, accountBinding) as? IndexCandidateResult.Valid)?.payload
+        }
+        if (existing != null && existingPayload == null) return
         val payload = AppSyncIndexPayload(
             accountBinding = accountBinding,
             journals = journals.map {
@@ -825,9 +1033,11 @@ internal class YamiboAppSyncJournalRemote(
                     fingerprint = fingerprint,
                 )
             },
+            retirements = existingPayload?.retirements.orEmpty(),
             updatedAtEpochMillis = nowMillis(),
         )
         val encoded = indexCodec.encode(payload)
+        val expected = indexCodec.validate(encoded) as AppSyncIndexValidation.Valid
         val result = provider.submitBlog(
             AppSyncBlogWriteRequest(
                 blogId = existing?.blogId,
@@ -837,34 +1047,23 @@ internal class YamiboAppSyncJournalRemote(
                 formHash = formHash,
             ),
         )
-        val candidateIds = when (result) {
-            is AppSyncCloudResult.VerifiedSuccess ->
-                listOfNotNull(existing?.blogId) + result.value.candidateBlogIds
-            else -> return
-        }.distinct()
-        candidateIds.forEach { blogId ->
-            val candidate = StoredAppSyncRemoteBlog(
+        val acknowledgement = (result as? AppSyncCloudResult.VerifiedSuccess)?.value ?: return
+        val blogId = existing?.blogId
+            ?: acknowledgement.candidateBlogIds.distinct().singleOrNull()
+            ?: return
+        val fingerprint = expected.envelope.fingerprint
+        verifiedIndexCache = VerifiedIndex(blogId, expected.envelope.payload, fingerprint)
+        store.save(
+            StoredAppSyncRemoteBlog(
                 remoteKey = INDEX_REMOTE_KEY,
                 kind = AppSyncRemoteBlogKind.Index,
                 blogId = blogId,
                 classId = classSelection.existingClassId(),
-                fingerprint = null,
-                validatedAtEpochMillis = 0,
-                contentUpdatedAtEpochMillis = null,
-            )
-            when (val verified = loadIndex(candidate, accountBinding)) {
-                is IndexCandidateResult.Valid -> {
-                    store.save(
-                        candidate.copy(
-                            fingerprint = verified.fingerprint,
-                            validatedAtEpochMillis = nowMillis(),
-                        ),
-                    )
-                    return
-                }
-                else -> Unit
-            }
-        }
+                fingerprint = fingerprint,
+                validatedAtEpochMillis = nowMillis(),
+                contentUpdatedAtEpochMillis = payload.updatedAtEpochMillis,
+            ),
+        )
     }
 
     private suspend fun resolveClassSelection(
@@ -927,6 +1126,7 @@ internal class YamiboAppSyncJournalRemote(
         candidate: StoredAppSyncRemoteBlog,
         journal: LoadedAppSyncJournal,
     ) {
+        verifiedJournalCache[journal.payload.replicaKey()] = journal
         store.save(
             candidate.copy(
                 remoteKey = journal.payload.replicaKey(),
@@ -941,6 +1141,8 @@ internal class YamiboAppSyncJournalRemote(
         candidate: StoredAppSyncRemoteBlog,
         checkpoint: LoadedAppSyncCheckpoint,
     ) {
+        verifiedCheckpointCache[checkpointRemoteKey(checkpoint.envelope.payload.checkpointId)] =
+            checkpoint
         store.save(
             candidate.copy(
                 remoteKey = checkpointRemoteKey(checkpoint.envelope.payload.checkpointId),
@@ -954,11 +1156,34 @@ internal class YamiboAppSyncJournalRemote(
     private fun AppSyncJournalPayload.replicaKey(): String =
         SyncReplicaKey(deviceId, deviceEpoch).stableKey
 
+    private data class VerifiedIndex(
+        val blogId: BlogId,
+        val payload: AppSyncIndexPayload,
+        val fingerprint: String,
+    )
+
     private fun normalizeListTitle(title: String, className: String): String =
         title.removePrefix("[$className] ").trim()
 
     private fun AppSyncBlogClassSelection.existingClassId(): BlogClassId? =
         (this as? AppSyncBlogClassSelection.Existing)?.classId
+
+    private fun completedRetirements(
+        accountBinding: SyncAccountBinding,
+    ): List<AppSyncJournalRetirementIntent> =
+        retirementIntents(accountBinding).filter {
+            it.stage == AppSyncJournalRetirementStage.Completed ||
+                it.stage == AppSyncJournalRetirementStage.Absorbed
+        }
+
+    private fun AppSyncJournalRetirementIntent.matches(
+        journal: LoadedAppSyncJournal,
+    ): Boolean =
+        replicaKey == journal.payload.replicaKey() &&
+            sourceBlogId.toString() == journal.remoteId &&
+            fingerprint == journal.fingerprint &&
+            publishedThroughSequence ==
+            journal.payload.resolvedPublishedThroughSequence()
 
     private sealed interface JournalCandidateResult {
         data class Valid(val journal: LoadedAppSyncJournal) : JournalCandidateResult

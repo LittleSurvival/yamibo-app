@@ -9,6 +9,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncCausalConte
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDeviceEpoch
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDeviceId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperation
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncReplicaKey
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncWriterNonce
 import okio.Buffer
 import okio.ByteString.Companion.decodeBase64
@@ -50,7 +51,13 @@ internal data class AppSyncJournalPayload(
     val observed: SyncCausalContext,
     val checkpointAcknowledgements: List<AppSyncCheckpointAcknowledgement> = emptyList(),
     val heartbeatAtEpochMillis: Long,
+    val publishedThroughSequence: Long? = null,
 )
+
+internal fun AppSyncJournalPayload.resolvedPublishedThroughSequence(): Long? {
+    val ownObserved = observed[SyncReplicaKey(deviceId, deviceEpoch)]
+    return publishedThroughSequence ?: lastSequence.takeIf { it == ownObserved }
+}
 
 internal data class ParsedAppSyncJournalEnvelope(
     val payload: AppSyncJournalPayload,
@@ -142,6 +149,14 @@ internal class AppSyncJournalEnvelopeCodec(
     }
 
     private fun validatePayload(payload: AppSyncJournalPayload): String? {
+        val ownObserved = payload.observed[
+            SyncReplicaKey(payload.deviceId, payload.deviceEpoch)
+        ]
+        payload.publishedThroughSequence?.let { publishedThrough ->
+            if (publishedThrough < payload.lastSequence || publishedThrough < ownObserved) {
+                return "Journal published-through sequence is below retained or observed sequence"
+            }
+        }
         if (payload.operations.isEmpty()) {
             if (payload.firstSequence != 0L || payload.lastSequence != 0L) {
                 return "Empty journal must use a zero sequence range"

@@ -17,6 +17,8 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.engine.SqlDelightSyncDoma
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncInstallationState
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncOperationLifecycle
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncVerifiedCheckpoint
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncJournalRetirementIntent
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncJournalRetirementStage
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.CompactionCoordinator
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.LoadedAppSyncJournal
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointAcknowledgement
@@ -41,6 +43,101 @@ import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 import me.thenano.yamibo.yamibo_app.util.time.FixedScheduleInterval
 
 class SqlDelightAppSyncOperationStoreTest {
+    @Test
+    fun replicaObservationAndRetirementIntentSurviveStoreRestart() {
+        val db = inMemoryDatabase()
+        val binding = SyncAccountBinding("account")
+        val firstStore = activeStore(db)
+        val first = firstStore.recordReplicaObservation(
+            accountBinding = binding,
+            replicaKey = "device:epoch",
+            sourceBlogId = 42,
+            fingerprint = "fingerprint",
+            publishedThroughSequence = 8,
+            observedAtEpochMillis = 100,
+            maximumObservationGapMillis = 1_000,
+        )
+        val unchanged = firstStore.recordReplicaObservation(
+            accountBinding = binding,
+            replicaKey = "device:epoch",
+            sourceBlogId = 42,
+            fingerprint = "fingerprint",
+            publishedThroughSequence = 8,
+            observedAtEpochMillis = 200,
+            maximumObservationGapMillis = 1_000,
+        )
+        assertEquals(first.firstObservedUnchangedAtEpochMillis, unchanged.firstObservedUnchangedAtEpochMillis)
+
+        firstStore.saveRetirementIntent(
+            AppSyncJournalRetirementIntent(
+                accountBinding = binding,
+                replicaKey = "device:epoch",
+                sourceBlogId = 42,
+                fingerprint = "fingerprint",
+                publishedThroughSequence = 8,
+                checkpointId = "checkpoint",
+                checkpointFingerprint = "checkpoint-fingerprint",
+                checkpointVectorHash = "vector",
+                activeSetHash = "active",
+                stage = AppSyncJournalRetirementStage.IntentRecorded,
+                attempts = 0,
+                lastResultCode = null,
+                createdAtEpochMillis = 200,
+                updatedAtEpochMillis = 200,
+                completedAtEpochMillis = null,
+            ),
+        )
+
+        val restarted = SqlDelightAppSyncOperationStore(db)
+        assertEquals(unchanged, restarted.replicaObservations(binding).single())
+        assertEquals(
+            AppSyncJournalRetirementStage.IntentRecorded,
+            restarted.retirementIntents(binding).single().stage,
+        )
+        assertEquals(setOf("checkpoint"), restarted.pinnedRetirementCheckpointIds())
+        assertTrue(
+            restarted.transitionRetirementIntent(
+                binding,
+                "device:epoch",
+                AppSyncJournalRetirementStage.IntentRecorded,
+                AppSyncJournalRetirementStage.IndexRetirementPublished,
+                "INDEX_VERIFIED",
+                300,
+            ),
+        )
+        assertFalse(
+            restarted.transitionRetirementIntent(
+                binding,
+                "device:epoch",
+                AppSyncJournalRetirementStage.IntentRecorded,
+                AppSyncJournalRetirementStage.Completed,
+                "STALE",
+                400,
+            ),
+        )
+    }
+
+    @Test
+    fun replicaObservationResetsOnIdentityChangeOrClockAnomaly() {
+        val store = activeStore(inMemoryDatabase())
+        val binding = SyncAccountBinding("account")
+        fun observe(fingerprint: String, at: Long) = store.recordReplicaObservation(
+            binding,
+            "device:epoch",
+            42,
+            fingerprint,
+            8,
+            at,
+            maximumObservationGapMillis = 1_000,
+        )
+
+        observe("one", 100)
+        assertEquals(200, observe("one", 200).lastObservedAtEpochMillis)
+        assertEquals(300, observe("two", 300).firstObservedUnchangedAtEpochMillis)
+        assertEquals(250, observe("two", 250).firstObservedUnchangedAtEpochMillis)
+        assertEquals(2_000, observe("two", 2_000).firstObservedUnchangedAtEpochMillis)
+    }
+
     @Test
     fun remoteBlogCacheClearPreservesAccountBoundClassId() {
         val db = inMemoryDatabase()
@@ -288,15 +385,23 @@ class SqlDelightAppSyncOperationStoreTest {
         )
 
         val exactAck = AppSyncCheckpointAcknowledgement("checkpoint", coverage)
+        val publishedJournal = journalFor(operation, coverage, listOf(exactAck))
         assertEquals(
             coverage,
-            coordinator.compactIfSafe(
-                listOf(journalFor(operation, coverage, listOf(exactAck))),
-            ),
+            coordinator.compactIfSafe(listOf(publishedJournal)),
         )
         assertEquals(
             AppSyncOperationLifecycle.Compacted,
             store.allOutboxOperations().single().second,
+        )
+        assertNull(
+            coordinator.compactIfSafe(
+                listOf(
+                    publishedJournal.copy(
+                        payload = publishedJournal.payload.copy(operations = emptyList()),
+                    ),
+                ),
+            ),
         )
     }
 

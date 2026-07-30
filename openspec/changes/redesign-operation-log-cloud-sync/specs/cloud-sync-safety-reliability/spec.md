@@ -56,7 +56,7 @@ The system SHALL persist pending operations and sync phase before network work, 
 The system SHALL never prune, replace, or forget an acknowledged operation unless a retained verified checkpoint covers it and the active-device acknowledgement protocol is complete. This is a correctness invariant and SHALL NOT be weakened to a percentage objective.
 
 #### Scenario: Checkpoint creation fails
-- **WHEN** checkpoint POST or authoritative reload fails
+- **WHEN** checkpoint POST is not a typed success or does not identify one created blog
 - **THEN** all covered journal operations remain retained and readable
 
 #### Scenario: Active device has not acknowledged checkpoint
@@ -100,7 +100,7 @@ The system SHALL expose force push and force pull only as explicit recovery acti
 - **WHEN** the user confirms a current force-push preview after the delay
 - **THEN** the system SHALL create causally later local operations for every semantic difference
 - **AND** cloud-only live entities SHALL receive explicitly authorized delete operations
-- **AND** the normal publish and authoritative-reload verification path SHALL acknowledge the batch
+- **AND** the normal typed publication path SHALL acknowledge the exact submitted batch
 
 #### Scenario: Force pull makes verified cloud state authoritative
 - **WHEN** the user confirms a current force-pull preview after the delay

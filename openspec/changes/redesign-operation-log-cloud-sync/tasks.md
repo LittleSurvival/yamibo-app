@@ -39,7 +39,7 @@
 
 - [x] 6.1 Adapt the retained typed blog CRUD/provider layer for config/index, per-device journal, and immutable checkpoint lifecycle operations
 - [x] 6.2 Implement cached verified blog identities and 24-hour/error/repair-triggered full discovery with `fetchUserSpaceMyBlogs(userId = null)`
-- [x] 6.3 Implement own-journal preflight append, FormHash-authenticated POST, authoritative reload, and exact fingerprint/operation-id verification
+- [x] 6.3 Implement initial-pull-verified own-journal append, FormHash-authenticated typed POST success, response blog-id resolution, and exact submitted operation acknowledgement without post-GET
 - [x] 6.4 Detect writer-nonce collisions and rotate the installation to a new device epoch before any conflicting publication
 - [x] 6.5 Add request-parser and fake-provider tests for success prompts, `messageText` errors, form expiry, unknown POST result, stale index, missing cached ids, and same-install writer races
 
@@ -47,8 +47,8 @@
 
 - [x] 7.1 Implement validated journal pulls after local high-watermarks and idempotent operation deduplication
 - [x] 7.2 Implement deterministic reduction, transactional apply, conflict-history retention, and per-operation quarantine that does not block valid journals
-- [x] 7.3 Implement serialized pull-reduce-publish-verify-pull-again cycles with fixed-point detection and bounded attempts
-- [x] 7.4 Persist operation lifecycle states and ensure acknowledgement occurs only after authoritative reload verification
+- [x] 7.3 Implement serialized pull-reduce-publish cycles with durable later-trigger convergence and bounded retry
+- [x] 7.4 Persist operation lifecycle states and acknowledge only exact submitted operations after typed POST success
 - [x] 7.5 Add deterministic 2-5-device model/property tests with reordered, duplicated, dropped, delayed, and concurrent deliveries
 
 ## 8. Bootstrap and Destructive Safety
@@ -62,7 +62,7 @@
 
 ## 9. Verified Checkpoint Compaction
 
-- [x] 9.1 Implement deterministic immutable checkpoint creation and authoritative reload verification
+- [x] 9.1 Implement deterministic immutable checkpoint creation with typed POST success and unique response blog-id verification
 - [x] 9.2 Implement exact checkpoint/vector acknowledgements in each active device journal
 - [x] 9.3 Implement pruning only after all devices active within 90 days acknowledge coverage, retaining tombstones and recovery checkpoints
 - [x] 9.4 Implement typed storage-pressure pause when safe compaction cannot complete

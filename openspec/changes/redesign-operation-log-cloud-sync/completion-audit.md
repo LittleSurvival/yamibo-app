@@ -28,7 +28,7 @@ converted into a passing result from unit tests or authenticated emulators.
   retries and converges without duplicate publication.
 - Cloud-load failure changes no local domain data, acknowledgement, verified
   identity, or remote content.
-- Real publication is acknowledged only after authoritative reload.
+- Real publication is acknowledged only after typed Yamibo POST success resolves the target blog id.
 - Runtime retry and recovery now update one eligible-demand row instead of
   counting each attempt as a separate denominator entry.
 - Active devices persist verified peer checkpoints and publish causal
@@ -46,7 +46,7 @@ converted into a passing result from unit tests or authenticated emulators.
   SQL transaction. A failed materialization rolls back SQL state and leaves
   external preference-backed settings unchanged.
 - Force push expresses local authority as later operations and authorized
-  deletes, then uses the normal publication and authoritative reload
+  deletes, then uses the normal typed publication
   verification path.
 - The cloud page formats epoch milliseconds as a local date-time and reports
   final inbound/outbound changes by module and action without exposing payload

@@ -5,13 +5,16 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncInstallationState
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncJournalRetirementIntent
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncVerifiedCheckpoint
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncAccountBinding
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperation
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationId
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncReplicaKey
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncJournalPayload
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointAcknowledgement
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.ParsedAppSyncCheckpointEnvelope
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.resolvedPublishedThroughSequence
 import me.thenano.yamibo.yamibo_app.store.appsync.AppSyncOperationStore
 
 internal data class LoadedAppSyncJournal(
@@ -29,6 +32,8 @@ internal sealed interface AppSyncJournalLoadResult {
     data class Success(
         val journals: List<LoadedAppSyncJournal>,
         val checkpoints: List<LoadedAppSyncCheckpoint> = emptyList(),
+        val indexedReplicaKeys: Set<String> = emptySet(),
+        val retirementDiscoveryIssues: List<String> = emptyList(),
     ) : AppSyncJournalLoadResult
     data object NotLoggedIn : AppSyncJournalLoadResult
     data class RetryableFailure(val reason: String) : AppSyncJournalLoadResult
@@ -72,8 +77,20 @@ internal sealed interface AppSyncCheckpointRetentionResult {
     ) : AppSyncCheckpointRetentionResult
 
     data object FormExpired : AppSyncCheckpointRetentionResult
+    data class StoragePressure(
+        val reason: String,
+        val retainedCheckpointIds: Set<String>,
+        val deletedBlogCount: Int,
+    ) : AppSyncCheckpointRetentionResult
     data class RetryableFailure(val reason: String) : AppSyncCheckpointRetentionResult
     data class TerminalFailure(val reason: String) : AppSyncCheckpointRetentionResult
+}
+
+internal sealed interface AppSyncJournalRetirementRemoteResult {
+    data object Verified : AppSyncJournalRetirementRemoteResult
+    data object FormExpired : AppSyncJournalRetirementRemoteResult
+    data class RetryableFailure(val reason: String) : AppSyncJournalRetirementRemoteResult
+    data class TerminalFailure(val reason: String) : AppSyncJournalRetirementRemoteResult
 }
 
 internal interface AppSyncJournalRemote {
@@ -98,8 +115,25 @@ internal interface AppSyncJournalRemote {
         accountBinding: SyncAccountBinding,
         formHash: FormHash,
         maximumCheckpoints: Int,
+        pinnedCheckpointIds: Set<String> = emptySet(),
     ): AppSyncCheckpointRetentionResult =
         AppSyncCheckpointRetentionResult.NotNeeded
+
+    suspend fun publishRetirementIndex(
+        intent: AppSyncJournalRetirementIntent,
+        formHash: FormHash,
+    ): AppSyncJournalRetirementRemoteResult =
+        AppSyncJournalRetirementRemoteResult.TerminalFailure(
+            "Journal retirement index publication is unsupported",
+        )
+
+    suspend fun deleteRetiredJournal(
+        intent: AppSyncJournalRetirementIntent,
+        formHash: FormHash,
+    ): AppSyncJournalRetirementRemoteResult =
+        AppSyncJournalRetirementRemoteResult.TerminalFailure(
+            "Journal retirement deletion is unsupported",
+        )
 }
 
 internal interface SyncDomainStateAdapter {
@@ -327,6 +361,13 @@ internal class OperationSyncEngine(
                     observed = store.causalContext(),
                     checkpointAcknowledgements = checkpointAcknowledgements,
                     heartbeatAtEpochMillis = nowMillis(),
+                    publishedThroughSequence = maxOf(
+                        ownJournal?.payload?.resolvedPublishedThroughSequence() ?: 0L,
+                        store.causalContext()[
+                            SyncReplicaKey(installation.deviceId, installation.deviceEpoch)
+                        ],
+                        mergedOwnOperations.lastOrNull()?.sequence?.value ?: 0L,
+                    ),
                 )
                 val pendingIds = pending.mapTo(linkedSetOf()) { it.operationId }
                 store.markPublishedUnverified(pendingIds)
@@ -382,20 +423,7 @@ internal class OperationSyncEngine(
                 }
             }
 
-            val confirmPull = when (val result = remote.loadJournals(accountBinding, false)) {
-                is AppSyncJournalLoadResult.Success -> result.journals
-                AppSyncJournalLoadResult.NotLoggedIn ->
-                    return OperationSyncResult.PausedAuth("Login expired during verification pull")
-                is AppSyncJournalLoadResult.RetryableFailure ->
-                    return OperationSyncResult.RetryScheduled(result.reason)
-                is AppSyncJournalLoadResult.TerminalFailure ->
-                    return OperationSyncResult.Quarantined(result.reason)
-            }
-            val unseenAfterPublish = confirmPull
-                .asSequence()
-                .flatMap { it.payload.operations.asSequence() }
-                .any { it.operationId !in localOutboxIds && !store.isApplied(it.operationId) }
-            if (!unseenAfterPublish && store.pendingOperations().isEmpty()) {
+            if (store.pendingOperations().isEmpty()) {
                 return OperationSyncResult.Converged(
                     appliedRemoteCount = totalApplied,
                     acknowledgedLocalCount = totalAcknowledged,

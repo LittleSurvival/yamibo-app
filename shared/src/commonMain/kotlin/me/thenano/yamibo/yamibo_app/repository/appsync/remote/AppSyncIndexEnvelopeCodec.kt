@@ -24,10 +24,20 @@ internal data class AppSyncIndexCheckpointReference(
 )
 
 @Serializable
+internal data class AppSyncIndexRetirementReference(
+    val replicaKey: String,
+    val blogId: Int,
+    val fingerprint: String,
+    val publishedThroughSequence: Long,
+    val checkpointId: String,
+)
+
+@Serializable
 internal data class AppSyncIndexPayload(
     val accountBinding: SyncAccountBinding,
-    val journals: List<AppSyncIndexJournalReference>,
+    val journals: List<AppSyncIndexJournalReference> = emptyList(),
     val checkpoints: List<AppSyncIndexCheckpointReference> = emptyList(),
+    val retirements: List<AppSyncIndexRetirementReference> = emptyList(),
     val updatedAtEpochMillis: Long,
 )
 
@@ -50,7 +60,22 @@ internal class AppSyncIndexEnvelopeCodec(
         val normalized = payload.copy(
             journals = payload.journals.distinctBy { it.replicaKey }.sortedBy { it.replicaKey },
             checkpoints = payload.checkpoints.distinctBy { it.checkpointId }.sortedBy { it.checkpointId },
+            retirements = payload.retirements.distinctBy { it.replicaKey }.sortedBy { it.replicaKey },
         )
+        require(normalized.retirements.size <= MAX_RETIREMENT_REFERENCES) {
+            "Index retirement references exceed $MAX_RETIREMENT_REFERENCES"
+        }
+        normalized.retirements.forEach {
+            require(
+                it.replicaKey.isNotBlank() &&
+                    it.blogId > 0 &&
+                    it.fingerprint.isNotBlank() &&
+                    it.publishedThroughSequence >= 0L &&
+                    it.checkpointId.isNotBlank(),
+            ) {
+                "Index retirement reference is invalid"
+            }
+        }
         val encoded = json.encodeToString(AppSyncIndexPayload.serializer(), normalized)
         return frame(encoded, stableAppSyncFingerprint(encoded))
     }
@@ -94,6 +119,17 @@ internal class AppSyncIndexEnvelopeCodec(
                 true,
             )
         }
+        if (payload.retirements.size > MAX_RETIREMENT_REFERENCES ||
+            payload.retirements.any {
+                it.replicaKey.isBlank() ||
+                    it.blogId <= 0 ||
+                    it.fingerprint.isBlank() ||
+                    it.publishedThroughSequence < 0L ||
+                    it.checkpointId.isBlank()
+            }
+        ) {
+            return AppSyncIndexValidation.Invalid("Index retirement references are invalid", true)
+        }
         return AppSyncIndexValidation.Valid(ParsedAppSyncIndexEnvelope(payload, fingerprint))
     }
 
@@ -106,6 +142,7 @@ internal class AppSyncIndexEnvelopeCodec(
     }
 
     private companion object {
+        const val MAX_RETIREMENT_REFERENCES = 128
         val SCHEMA = Regex("""(?:^|\s)schema=(\d+)(?=\s|$)""")
         val FINGERPRINT = Regex("""(?:^|\s)fingerprint=([0-9a-fA-F]+)(?=\s|$)""")
         val PAYLOAD = Regex("""(?:^|\s)payload=(\{.*\})\s*$""", RegexOption.DOT_MATCHES_ALL)

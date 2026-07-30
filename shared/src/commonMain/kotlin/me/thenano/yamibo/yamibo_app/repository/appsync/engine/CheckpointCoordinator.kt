@@ -39,6 +39,7 @@ internal class CheckpointCoordinator(
                 accountBinding,
                 formHash,
                 maximumRetainedCheckpoints,
+                store.pinnedRetirementCheckpointIds(),
             ),
         )?.let { return it }
         val acknowledged = store.allOutboxOperations().filter {
@@ -103,6 +104,7 @@ internal class CheckpointCoordinator(
                         accountBinding,
                         formHash,
                         maximumRetainedCheckpoints,
+                        store.pinnedRetirementCheckpointIds(),
                     ),
                 )?.let { return it }
                 CheckpointCreationResult.Verified(checkpointId)
@@ -128,6 +130,10 @@ internal class CheckpointCoordinator(
         is AppSyncCheckpointRetentionResult.Verified -> {
             store.retainVerifiedCheckpoints(result.retainedCheckpointIds)
             null
+        }
+        is AppSyncCheckpointRetentionResult.StoragePressure -> {
+            store.retainVerifiedCheckpoints(result.retainedCheckpointIds)
+            CheckpointCreationResult.StoragePressure(result.reason)
         }
         AppSyncCheckpointRetentionResult.FormExpired ->
             CheckpointCreationResult.Paused("Cached FormHash expired during checkpoint retention")

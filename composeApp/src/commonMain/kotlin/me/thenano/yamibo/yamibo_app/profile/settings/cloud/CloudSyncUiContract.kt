@@ -170,7 +170,7 @@ internal class AppSyncCloudUiController(
     }
 
     override fun refresh() {
-        scope.launch { service.refresh(forceDiscovery = true) }
+        scope.launch { service.refresh(forceDiscovery = false) }
     }
 
     override fun clearCloudLinkCache() {
@@ -335,6 +335,7 @@ private fun CloudSyncForcePreview.toService() = AppSyncForcePreview(
 internal fun AppSyncServiceStatus.toUiState(
     backgroundSchedulerAvailable: Boolean,
 ): CloudSyncUiState {
+    val displayMessage = message.toCloudSyncDisplayMessage()
     val busy = phase == AppSyncServicePhase.Running
     val available = phase == AppSyncServicePhase.Active
     val needsAttention = phase in setOf(
@@ -360,7 +361,7 @@ internal fun AppSyncServiceStatus.toUiState(
             AppSyncServicePhase.Quarantined -> "有資料需要檢查"
             AppSyncServicePhase.RetryPending -> "等待重試"
         },
-        statusSupport = message,
+        statusSupport = displayMessage,
         operation = if (busy) CloudSyncOperation.Syncing else CloudSyncOperation.Idle,
         automaticEnabled = automaticEnabled,
         automaticAvailable = backgroundSchedulerAvailable &&
@@ -380,27 +381,34 @@ internal fun AppSyncServiceStatus.toUiState(
         actionsAvailable = !busy,
         cloudDataExists = available || lastVerifiedAtEpochMillis != null,
         notice = if (needsAttention) {
-            CloudSyncNotice(message, CloudSyncNoticeSeverity.Warning)
+            CloudSyncNotice(displayMessage, CloudSyncNoticeSeverity.Warning)
         } else {
             null
         },
-        details = listOf(
-            CloudSyncDetail("同步狀態", statusLabel(phase)),
-            CloudSyncDetail(
-                "最後驗證",
-                lastVerifiedAtEpochMillis?.let(::formatDateTime) ?: "尚無紀錄",
-            ),
-            CloudSyncDetail(
-                "自動同步",
-                when {
-                    !backgroundSchedulerAvailable -> "此平台尚未提供背景同步"
-                    automaticEnabled -> "已啟用"
-                    else -> "已關閉"
-                },
-            ),
-            CloudSyncDetail("待上傳操作", pendingOperationCount.toString()),
-            CloudSyncDetail("最近結果", message),
-        ),
+        details = buildList {
+            add(CloudSyncDetail("同步狀態", statusLabel(phase)))
+            add(
+                CloudSyncDetail(
+                    "最後驗證",
+                    lastVerifiedAtEpochMillis?.let(::formatDateTime) ?: "尚無紀錄",
+                ),
+            )
+            add(
+                CloudSyncDetail(
+                    "自動同步",
+                    when {
+                        !backgroundSchedulerAvailable -> "此平台尚未提供背景同步"
+                        automaticEnabled -> "已啟用"
+                        else -> "已關閉"
+                    },
+                ),
+            )
+            add(CloudSyncDetail("待上傳操作", pendingOperationCount.toString()))
+            journalRetirementStatus?.let {
+                add(CloudSyncDetail("Journal 清理", it.message))
+            }
+            add(CloudSyncDetail("最近結果", displayMessage))
+        },
         changes = changeSummaries.map {
             CloudSyncChangeDetail(
                 direction = when (it.direction) {
@@ -414,6 +422,14 @@ internal fun AppSyncServiceStatus.toUiState(
             )
         },
     )
+}
+
+private fun String.toCloudSyncDisplayMessage(): String = when (trim().lowercase()) {
+    "maintenance" -> "Yamibo 正在維護，將稍後自動重試"
+    "not found" -> "找不到雲端同步資料，將重新探索"
+    "not logged in" -> "登入狀態已失效，請重新整理登入狀態"
+    "form expired" -> "登入憑證已過期，請重新整理登入狀態"
+    else -> this
 }
 
 private fun moduleLabel(domainId: String): String = when (domainId) {

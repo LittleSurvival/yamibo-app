@@ -77,3 +77,40 @@ internal data class AppSyncVerifiedCheckpoint(
     val createdAtEpochMillis: Long,
     val verifiedAtEpochMillis: Long,
 )
+
+internal data class AppSyncReplicaObservation(
+    val accountBinding: SyncAccountBinding,
+    val replicaKey: String,
+    val sourceBlogId: Long,
+    val fingerprint: String,
+    val publishedThroughSequence: Long,
+    val firstObservedUnchangedAtEpochMillis: Long,
+    val lastObservedAtEpochMillis: Long,
+)
+
+internal enum class AppSyncJournalRetirementStage {
+    IntentRecorded,
+    IndexRetirementPublished,
+    DeleteRequested,
+    Completed,
+    Blocked,
+    Absorbed,
+}
+
+internal data class AppSyncJournalRetirementIntent(
+    val accountBinding: SyncAccountBinding,
+    val replicaKey: String,
+    val sourceBlogId: Long,
+    val fingerprint: String,
+    val publishedThroughSequence: Long,
+    val checkpointId: String,
+    val checkpointFingerprint: String,
+    val checkpointVectorHash: String,
+    val activeSetHash: String,
+    val stage: AppSyncJournalRetirementStage,
+    val attempts: Long,
+    val lastResultCode: String?,
+    val createdAtEpochMillis: Long,
+    val updatedAtEpochMillis: Long,
+    val completedAtEpochMillis: Long?,
+)

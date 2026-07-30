@@ -12,6 +12,8 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncChangeDirection
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncChangeSummary
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncPeriodicIntervals
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncScheduleSettings
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncJournalRetirementState
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncJournalRetirementStatus
 import me.thenano.yamibo.yamibo_app.util.time.FixedScheduleInterval
 
 class CloudSyncUiStateTest {
@@ -79,6 +81,19 @@ class CloudSyncUiStateTest {
             assertEquals("typed failure", state.statusSupport)
             assertNotNull(state.notice)
         }
+    }
+
+    @Test
+    fun providerMaintenanceCodeIsRenderedAsUserFacingText() {
+        val state = status(
+            phase = AppSyncServicePhase.RetryPending,
+            message = "maintenance",
+        ).toUiState(backgroundSchedulerAvailable = true)
+
+        val expected = "Yamibo 正在維護，將稍後自動重試"
+        assertEquals(expected, state.statusSupport)
+        assertEquals(expected, assertNotNull(state.notice).message)
+        assertEquals(expected, state.details.single { it.label == "最近結果" }.value)
     }
 
     @Test
@@ -190,6 +205,21 @@ class CloudSyncUiStateTest {
             ),
             state.changes.single(),
         )
+    }
+
+    @Test
+    fun journalRetirementStatusIsShownWithoutRawIdentityData() {
+        val state = status(AppSyncServicePhase.Active).copy(
+            journalRetirementStatus = AppSyncJournalRetirementStatus(
+                AppSyncJournalRetirementState.Blocked,
+                "等待 checkpoint 完整覆蓋與所有活躍 replica 確認",
+            ),
+        ).toUiState(backgroundSchedulerAvailable = true)
+
+        val detail = state.details.single { it.label == "Journal 清理" }
+        assertEquals("等待 checkpoint 完整覆蓋與所有活躍 replica 確認", detail.value)
+        assertFalse(detail.value.contains("blogId"))
+        assertFalse(detail.value.contains("fingerprint"))
     }
 
     private fun status(

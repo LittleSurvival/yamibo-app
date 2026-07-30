@@ -32,7 +32,7 @@ None. These capabilities supersede the unarchived `redesign-app-sync-architectur
 ## Impact
 
 - Affects `shared/src/commonMain/kotlin/me/thenano/yamibo/yamibo_app/repository/appsync/**`, sync-domain mutation entry points, SQLDelight schema/migrations, background scheduling, and cloud-sync UI state.
-- Reuses the existing `BackupModels` adapters, typed blog identifiers, config-blog store, Yamibo API request handling, response parsing, and authoritative reload verification.
+- Reuses the existing `BackupModels` adapters, typed blog identifiers, config-blog store, Yamibo API request handling, typed success/error response parsing, and authoritative initial pulls.
 - Adds device identity/epoch state, outbox and operation-history tables, causal high-watermarks, tombstones, journal metadata, checkpoint acknowledgements, quarantine records, and sync-run telemetry.
 - Requires all syncable local mutations to participate in the same database transaction as their outbox operation.
 - Requires deterministic multi-device model tests, process/network failure injection, stale/reset-device tests, blog race tests, compaction recovery tests, and emulator verification.

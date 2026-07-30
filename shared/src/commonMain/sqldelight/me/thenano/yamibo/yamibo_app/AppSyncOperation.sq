@@ -363,6 +363,65 @@ getRemoteClassLink:
 SELECT classId FROM AppSyncRemoteClassLink
 WHERE accountBinding = ?;
 
+getReplicaObservation:
+SELECT * FROM AppSyncReplicaObservation
+WHERE accountBinding = ? AND replicaKey = ?;
+
+getReplicaObservations:
+SELECT * FROM AppSyncReplicaObservation
+WHERE accountBinding = ?
+ORDER BY replicaKey ASC;
+
+upsertReplicaObservation:
+INSERT OR REPLACE INTO AppSyncReplicaObservation(
+    accountBinding,
+    replicaKey,
+    sourceBlogId,
+    fingerprint,
+    publishedThroughSequence,
+    firstObservedUnchangedAtEpochMillis,
+    lastObservedAtEpochMillis
+) VALUES (?, ?, ?, ?, ?, ?, ?);
+
+getRetirementIntents:
+SELECT * FROM AppSyncJournalRetirementIntent
+WHERE accountBinding = ?
+ORDER BY createdAtEpochMillis ASC, replicaKey ASC;
+
+upsertRetirementIntent:
+INSERT OR REPLACE INTO AppSyncJournalRetirementIntent(
+    accountBinding,
+    replicaKey,
+    sourceBlogId,
+    fingerprint,
+    publishedThroughSequence,
+    checkpointId,
+    checkpointFingerprint,
+    checkpointVectorHash,
+    activeSetHash,
+    stage,
+    attempts,
+    lastResultCode,
+    createdAtEpochMillis,
+    updatedAtEpochMillis,
+    completedAtEpochMillis
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+transitionRetirementIntent:
+UPDATE AppSyncJournalRetirementIntent
+SET stage = ?,
+    attempts = attempts + ?,
+    lastResultCode = ?,
+    updatedAtEpochMillis = ?,
+    completedAtEpochMillis = ?
+WHERE accountBinding = ?
+  AND replicaKey = ?
+  AND stage = ?;
+
+getPinnedRetirementCheckpointIds:
+SELECT DISTINCT checkpointId FROM AppSyncJournalRetirementIntent
+WHERE stage != 'ABSORBED';
+
 upsertResolvedEntity:
 INSERT OR REPLACE INTO AppSyncResolvedEntity(
     entityKey,

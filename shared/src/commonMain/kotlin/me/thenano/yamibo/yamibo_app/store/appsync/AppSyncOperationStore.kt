@@ -7,6 +7,9 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncOperationLif
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRunLease
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncBulkDeleteAuthorization
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncVerifiedCheckpoint
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncReplicaObservation
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncJournalRetirementIntent
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncJournalRetirementStage
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncAutomaticTrigger
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncScheduleSettings
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncAccountBinding
@@ -104,6 +107,39 @@ internal interface AppSyncOperationStore {
     fun saveVerifiedCheckpoint(checkpoint: AppSyncVerifiedCheckpoint)
     fun verifiedCheckpoints(): List<AppSyncVerifiedCheckpoint>
     fun retainVerifiedCheckpoints(checkpointIds: Set<String>) = Unit
+    fun recordReplicaObservation(
+        accountBinding: SyncAccountBinding,
+        replicaKey: String,
+        sourceBlogId: Long,
+        fingerprint: String,
+        publishedThroughSequence: Long,
+        observedAtEpochMillis: Long,
+        maximumObservationGapMillis: Long,
+    ): AppSyncReplicaObservation = AppSyncReplicaObservation(
+        accountBinding,
+        replicaKey,
+        sourceBlogId,
+        fingerprint,
+        publishedThroughSequence,
+        observedAtEpochMillis,
+        observedAtEpochMillis,
+    )
+    fun replicaObservations(accountBinding: SyncAccountBinding): List<AppSyncReplicaObservation> =
+        emptyList()
+    fun saveRetirementIntent(intent: AppSyncJournalRetirementIntent) = Unit
+    fun retirementIntents(
+        accountBinding: SyncAccountBinding,
+    ): List<AppSyncJournalRetirementIntent> = emptyList()
+    fun transitionRetirementIntent(
+        accountBinding: SyncAccountBinding,
+        replicaKey: String,
+        expectedStage: AppSyncJournalRetirementStage,
+        newStage: AppSyncJournalRetirementStage,
+        resultCode: String?,
+        atEpochMillis: Long,
+        incrementAttempts: Boolean = false,
+    ): Boolean = false
+    fun pinnedRetirementCheckpointIds(): Set<String> = emptySet()
     fun causalContext(): SyncCausalContext
 
     fun acquireLease(

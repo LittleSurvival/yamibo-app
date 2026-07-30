@@ -1,0 +1,32 @@
+CREATE TABLE AppSyncReplicaObservation (
+    accountBinding TEXT NOT NULL,
+    replicaKey TEXT NOT NULL,
+    sourceBlogId INTEGER NOT NULL,
+    fingerprint TEXT NOT NULL,
+    publishedThroughSequence INTEGER NOT NULL,
+    firstObservedUnchangedAtEpochMillis INTEGER NOT NULL,
+    lastObservedAtEpochMillis INTEGER NOT NULL,
+    PRIMARY KEY(accountBinding, replicaKey)
+);
+
+CREATE TABLE AppSyncJournalRetirementIntent (
+    accountBinding TEXT NOT NULL,
+    replicaKey TEXT NOT NULL,
+    sourceBlogId INTEGER NOT NULL,
+    fingerprint TEXT NOT NULL,
+    publishedThroughSequence INTEGER NOT NULL,
+    checkpointId TEXT NOT NULL,
+    checkpointFingerprint TEXT NOT NULL,
+    checkpointVectorHash TEXT NOT NULL,
+    activeSetHash TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    attempts INTEGER NOT NULL,
+    lastResultCode TEXT,
+    createdAtEpochMillis INTEGER NOT NULL,
+    updatedAtEpochMillis INTEGER NOT NULL,
+    completedAtEpochMillis INTEGER,
+    PRIMARY KEY(accountBinding, replicaKey)
+);
+
+CREATE INDEX AppSyncJournalRetirementIntent_checkpoint
+ON AppSyncJournalRetirementIntent(checkpointId, stage);

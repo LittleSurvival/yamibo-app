@@ -32,6 +32,8 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.engine.ManualSyncOverride
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.ManualSyncOverrideDirection
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.ManualSyncOverridePreview
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.ManualSyncPreviewResult
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.JournalRetirementCoordinator
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalRetirementMaintenanceResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.SqlDelightSyncDomainStateAdapter
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncInstallationState
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncAccountBinding
@@ -76,7 +78,23 @@ data class AppSyncServiceStatus(
     val changeSummaries: List<AppSyncChangeSummary> = emptyList(),
     val scheduleSettings: AppSyncScheduleSettings = AppSyncScheduleSettings(),
     val pendingTriggerGeneration: Long? = null,
+    val journalRetirementStatus: AppSyncJournalRetirementStatus? = null,
 )
+
+data class AppSyncJournalRetirementStatus(
+    val state: AppSyncJournalRetirementState,
+    val message: String,
+)
+
+enum class AppSyncJournalRetirementState {
+    Observed,
+    Candidate,
+    Blocked,
+    Pending,
+    Completed,
+    RetryPending,
+    PausedAuth,
+}
 
 enum class AppSyncChangeDirection {
     Received,
@@ -195,6 +213,7 @@ class AppSyncService(
         ),
         store = SqlDelightAppSyncRemoteBlogStore(db),
         nowMillis = nowMillis,
+        retirementIntents = store::retirementIntents,
     )
     private var localSnapshotSource: BackupRepositoryImpl? = null
     private val migrationPlanner = BackupSnapshotMigrationPlanner()
@@ -233,6 +252,12 @@ class AppSyncService(
             }.createAppSyncSnapshot()
         },
         nowMillis = nowMillis,
+    )
+    private val journalRetirementCoordinator = JournalRetirementCoordinator(
+        store = store,
+        remote = remote,
+        nowMillis = nowMillis,
+        ownerId = { SyncIdentityGenerator.writerNonce().value },
     )
     internal val mutationRecorder = AppSyncMutationRecorder(
         enabled = featureEnabled,
@@ -608,7 +633,10 @@ class AppSyncService(
         if (!featureEnabled) return disabledStatus()
         val installation = requireNotNull(store.installation())
         return statusFor(installation.state, mutableStatus.value.message)
-            .copy(changeSummaries = mutableStatus.value.changeSummaries)
+            .copy(
+                changeSummaries = mutableStatus.value.changeSummaries,
+                journalRetirementStatus = mutableStatus.value.journalRetirementStatus,
+            )
             .also { mutableStatus.value = it }
     }
 
@@ -655,13 +683,30 @@ class AppSyncService(
             forceDiscovery = forceDiscovery,
         )
         var checkpointResult: CheckpointCreationResult? = null
+        var retirementResult: AppSyncJournalRetirementMaintenanceResult? = null
         if (result is OperationSyncResult.Converged) {
             authRepository.currentUser()?.formHash?.let { formHash ->
                 if (localSnapshotSource != null) {
                     checkpointResult = checkpointCoordinator.createIfNeeded(binding, formHash)
                 }
+                if (
+                    checkpointResult !is CheckpointCreationResult.StoragePressure &&
+                    checkpointResult !is CheckpointCreationResult.RetryableFailure &&
+                    checkpointResult !is CheckpointCreationResult.Paused
+                ) {
+                    retirementResult = journalRetirementCoordinator.maintain(
+                        accountBinding = binding,
+                        formHash = formHash,
+                        force = forceDiscovery,
+                        allowDelete = settingsStore.getBoolean(
+                            JOURNAL_RETIREMENT_DELETE_ENABLED_KEY,
+                            false,
+                        ),
+                    )
+                }
             }
         }
+        val retirementStatus = retirementResult?.toPublicStatus()
         val status = when (checkpointResult) {
             is CheckpointCreationResult.StoragePressure -> {
                 store.updateState(AppSyncInstallationState.PausedProvider)
@@ -680,6 +725,7 @@ class AppSyncService(
                     AppSyncInstallationState.Active,
                     "同步完成：接收 ${result.appliedRemoteCount}、確認 ${result.acknowledgedLocalCount}",
                     changeSummaries = result.changes.map(OperationChangeSummary::toPublic),
+                    journalRetirementStatus = retirementStatus,
                 )
                 is OperationSyncResult.PausedAuth ->
                     statusFor(AppSyncInstallationState.PausedAuth, result.reason)
@@ -839,6 +885,7 @@ class AppSyncService(
         message: String,
         phaseOverride: AppSyncServicePhase? = null,
         changeSummaries: List<AppSyncChangeSummary> = emptyList(),
+        journalRetirementStatus: AppSyncJournalRetirementStatus? = null,
     ): AppSyncServiceStatus {
         val installation = requireNotNull(store.installation())
         val phase = phaseOverride ?: when (state) {
@@ -862,6 +909,7 @@ class AppSyncService(
             pendingTriggerGeneration = installation.requestedTriggerGeneration.takeIf {
                 it > installation.accountedTriggerGeneration
             },
+            journalRetirementStatus = journalRetirementStatus,
         )
     }
 
@@ -898,6 +946,8 @@ class AppSyncService(
     private companion object {
         const val DATABASE_GENERATION_KEY = "appsync.database_generation"
         const val FEATURE_ENABLED_KEY = "appsync.operation_log_engine_enabled"
+        const val JOURNAL_RETIREMENT_DELETE_ENABLED_KEY =
+            "appsync.journal_retirement_delete_enabled"
     }
 }
 
@@ -987,6 +1037,56 @@ private fun OperationChangeSummary.toPublic() = AppSyncChangeSummary(
     details = details,
     remainingDetailCount = remainingDetailCount,
 )
+
+private fun AppSyncJournalRetirementMaintenanceResult.toPublicStatus():
+    AppSyncJournalRetirementStatus? = when (this) {
+    AppSyncJournalRetirementMaintenanceResult.NotDue -> null
+    is AppSyncJournalRetirementMaintenanceResult.Observed ->
+        AppSyncJournalRetirementStatus(
+            AppSyncJournalRetirementState.Observed,
+            "已驗證 $journalCount 個 journal，尚無可退休項目",
+        )
+    is AppSyncJournalRetirementMaintenanceResult.Candidate ->
+        AppSyncJournalRetirementStatus(
+            AppSyncJournalRetirementState.Candidate,
+            "發現 $count 個安全退休候選；目前為只觀察模式",
+        )
+    is AppSyncJournalRetirementMaintenanceResult.Blocked ->
+        AppSyncJournalRetirementStatus(
+            AppSyncJournalRetirementState.Blocked,
+            reason,
+        )
+    is AppSyncJournalRetirementMaintenanceResult.Pending ->
+        AppSyncJournalRetirementStatus(
+            AppSyncJournalRetirementState.Pending,
+            "journal 退休程序等待下一次重新驗證：${stage.name}",
+        )
+    AppSyncJournalRetirementMaintenanceResult.Completed ->
+        AppSyncJournalRetirementStatus(
+            AppSyncJournalRetirementState.Completed,
+            "已完成一個 inactive journal 的安全退休",
+        )
+    AppSyncJournalRetirementMaintenanceResult.PausedAuth ->
+        AppSyncJournalRetirementStatus(
+            AppSyncJournalRetirementState.PausedAuth,
+            "登入狀態不足，journal 退休已暫停",
+        )
+    is AppSyncJournalRetirementMaintenanceResult.RetryableFailure ->
+        AppSyncJournalRetirementStatus(
+            AppSyncJournalRetirementState.RetryPending,
+            reason,
+        )
+    is AppSyncJournalRetirementMaintenanceResult.TerminalFailure ->
+        AppSyncJournalRetirementStatus(
+            AppSyncJournalRetirementState.Blocked,
+            reason,
+        )
+    AppSyncJournalRetirementMaintenanceResult.AlreadyRunning ->
+        AppSyncJournalRetirementStatus(
+            AppSyncJournalRetirementState.Pending,
+            "已有同步或 journal 維護工作執行中",
+        )
+}
 
 internal fun reliabilityOutcomeFor(phase: AppSyncServicePhase): String = when (phase) {
     AppSyncServicePhase.Active -> "CONVERGED"
