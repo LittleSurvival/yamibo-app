@@ -6,6 +6,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDeviceEpoch
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDeviceId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncWriterNonce
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncCausalContext
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncScheduleSettings
 
 @Serializable
 enum class AppSyncInstallationState {
@@ -48,6 +49,9 @@ internal data class AppSyncInstallation(
     val journalBlogId: Long?,
     val lastFullDiscoveryAt: Long?,
     val automaticEnabled: Boolean,
+    val scheduleSettings: AppSyncScheduleSettings,
+    val requestedTriggerGeneration: Long,
+    val accountedTriggerGeneration: Long,
 )
 
 internal data class AppSyncRunLease(

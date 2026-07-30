@@ -34,12 +34,8 @@ fun FavoriteSortMode.localizedLabel(): String = when (this) {
 
 fun FavoriteUpdateInterval.localizedLabel(): String = when (this) {
     FavoriteUpdateInterval.MANUAL -> i18n("手動刷新")
-    FavoriteUpdateInterval.HOURS_6 -> i18n("6 小時")
-    FavoriteUpdateInterval.HOURS_12 -> i18n("12 小時")
-    FavoriteUpdateInterval.HOURS_24 -> i18n("24 小時")
-    FavoriteUpdateInterval.DAYS_3 -> i18n("3 天")
-    FavoriteUpdateInterval.DAYS_7 -> i18n("7 天")
     FavoriteUpdateInterval.SMART -> i18n("智能更新（TODO）")
+    else -> requireNotNull(fixedInterval).localizedLabel()
 }
 
 fun SignInMode.localizedLabel(): String = when (this) {

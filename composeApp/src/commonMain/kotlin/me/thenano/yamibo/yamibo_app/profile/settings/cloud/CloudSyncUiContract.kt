@@ -17,6 +17,8 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncForcePreview
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncForcePreviewResult
 import me.thenano.yamibo.yamibo_app.appsync.AppSyncBackgroundScheduler
 import me.thenano.yamibo.yamibo_app.util.time.formatDateTime
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncPeriodicIntervals
+import me.thenano.yamibo.yamibo_app.util.time.FixedScheduleInterval
 
 internal enum class CloudSyncStatus {
     Checking,
@@ -91,6 +93,10 @@ internal data class CloudSyncUiState(
     val automaticEnabled: Boolean = false,
     val automaticAvailable: Boolean = false,
     val automaticStatus: String = "背景同步尚未提供",
+    val syncOnAppStart: Boolean = false,
+    val syncOnForegroundExit: Boolean = false,
+    val periodicInterval: FixedScheduleInterval = FixedScheduleInterval.Hours6,
+    val periodicIntervalOptions: List<FixedScheduleInterval> = AppSyncPeriodicIntervals,
     val actionsAvailable: Boolean = false,
     val cloudDataExists: Boolean = false,
     val notice: CloudSyncNotice? = null,
@@ -114,8 +120,12 @@ internal interface CloudSyncUiController {
     val state: StateFlow<CloudSyncUiState>
 
     fun refresh()
+    fun clearCloudLinkCache()
     fun deleteCloudData()
     fun setAutomaticEnabled(enabled: Boolean)
+    fun setSyncOnAppStart(enabled: Boolean)
+    fun setSyncOnForegroundExit(enabled: Boolean)
+    fun setPeriodicInterval(interval: FixedScheduleInterval)
     fun syncNow()
     fun requestForceOverride(direction: CloudSyncForceDirection)
     fun confirmForceOverride(preview: CloudSyncForcePreview)
@@ -126,8 +136,12 @@ internal object StubCloudSyncUiController : CloudSyncUiController {
     override val state = MutableStateFlow(CloudSyncUiState())
 
     override fun refresh() = Unit
+    override fun clearCloudLinkCache() = Unit
     override fun deleteCloudData() = Unit
     override fun setAutomaticEnabled(enabled: Boolean) = Unit
+    override fun setSyncOnAppStart(enabled: Boolean) = Unit
+    override fun setSyncOnForegroundExit(enabled: Boolean) = Unit
+    override fun setPeriodicInterval(interval: FixedScheduleInterval) = Unit
     override fun syncNow() = Unit
     override fun requestForceOverride(direction: CloudSyncForceDirection) = Unit
     override fun confirmForceOverride(preview: CloudSyncForcePreview) = Unit
@@ -159,6 +173,10 @@ internal class AppSyncCloudUiController(
         scope.launch { service.refresh(forceDiscovery = true) }
     }
 
+    override fun clearCloudLinkCache() {
+        service.clearCloudLinkCache()
+    }
+
     override fun deleteCloudData() {
         scope.launch { service.deleteCloudData() }
     }
@@ -166,7 +184,25 @@ internal class AppSyncCloudUiController(
     override fun setAutomaticEnabled(enabled: Boolean) {
         if (enabled && scheduler == null) return
         service.setAutomaticEnabled(enabled)
-        scope.launch { scheduler?.setEnabled(enabled) }
+        scheduler?.setEnabled(enabled, service.currentStatus().scheduleSettings.periodicInterval)
+    }
+
+    override fun setSyncOnAppStart(enabled: Boolean) {
+        updateScheduleSettings {
+            it.copy(syncOnAppStart = enabled)
+        }
+    }
+
+    override fun setSyncOnForegroundExit(enabled: Boolean) {
+        updateScheduleSettings {
+            it.copy(syncOnForegroundExit = enabled)
+        }
+    }
+
+    override fun setPeriodicInterval(interval: FixedScheduleInterval) {
+        updateScheduleSettings {
+            it.copy(periodicInterval = interval)
+        }
     }
 
     override fun syncNow() {
@@ -224,6 +260,15 @@ internal class AppSyncCloudUiController(
     override fun clearForcePreview() {
         forcePreview = null
         publishState()
+    }
+
+    private fun updateScheduleSettings(
+        transform: (me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncScheduleSettings) ->
+            me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncScheduleSettings,
+    ) {
+        val settings = transform(service.currentStatus().scheduleSettings)
+        service.setScheduleSettings(settings)
+        scheduler?.setEnabled(service.currentStatus().automaticEnabled, settings.periodicInterval)
     }
 
     private fun publishState() {
@@ -329,6 +374,9 @@ internal fun AppSyncServiceStatus.toUiState(
             automaticEnabled -> "已啟用"
             else -> "已關閉"
         },
+        syncOnAppStart = scheduleSettings.syncOnAppStart,
+        syncOnForegroundExit = scheduleSettings.syncOnForegroundExit,
+        periodicInterval = scheduleSettings.periodicInterval,
         actionsAvailable = !busy,
         cloudDataExists = available || lastVerifiedAtEpochMillis != null,
         notice = if (needsAttention) {

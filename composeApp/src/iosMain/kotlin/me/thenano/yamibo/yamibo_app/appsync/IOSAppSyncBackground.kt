@@ -6,6 +6,8 @@ import io.github.littlesurvival.YamiboClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import me.thenano.yamibo.yamibo_app.AppVersion
 import me.thenano.yamibo.yamibo_app.Database
@@ -14,6 +16,7 @@ import me.thenano.yamibo.yamibo_app.repository.IOSAuthRepository
 import me.thenano.yamibo.yamibo_app.repository.IOSBackupStorageProvider
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncService
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncServicePhase
+import me.thenano.yamibo.yamibo_app.repository.appsync.isDurableAutomaticTriggerOutcome
 import me.thenano.yamibo.yamibo_app.repository.backup.BackupRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.settings.AppSettingsRepository
 import me.thenano.yamibo.yamibo_app.repository.settings.MangaReaderSettingsRepository
@@ -25,12 +28,13 @@ import me.thenano.yamibo.yamibo_app.store.settings.IOSSettingsStore
 import platform.BackgroundTasks.BGProcessingTaskRequest
 import platform.BackgroundTasks.BGTaskScheduler
 import platform.Foundation.NSDate
+import me.thenano.yamibo.yamibo_app.util.time.FixedScheduleInterval
 
 const val APP_SYNC_BACKGROUND_TASK_IDENTIFIER =
     "me.thenano.yamibo.yamibo-app.app-sync"
 
 class IOSAppSyncBackgroundScheduler : AppSyncBackgroundScheduler {
-    override suspend fun setEnabled(enabled: Boolean) {
+    override fun setEnabled(enabled: Boolean, interval: FixedScheduleInterval) {
         if (!enabled) {
             BGTaskScheduler.sharedScheduler.cancelTaskRequestWithIdentifier(
                 APP_SYNC_BACKGROUND_TASK_IDENTIFIER,
@@ -40,10 +44,10 @@ class IOSAppSyncBackgroundScheduler : AppSyncBackgroundScheduler {
         BGTaskScheduler.sharedScheduler.cancelTaskRequestWithIdentifier(
             APP_SYNC_BACKGROUND_TASK_IDENTIFIER,
         )
-        submit(earliestBeginSeconds = PERIODIC_EARLIEST_BEGIN_SECONDS)
+        submit(earliestBeginSeconds = interval.duration.inWholeSeconds.toDouble())
     }
 
-    override suspend fun runNow() {
+    override fun runNow() {
         BGTaskScheduler.sharedScheduler.cancelTaskRequestWithIdentifier(
             APP_SYNC_BACKGROUND_TASK_IDENTIFIER,
         )
@@ -64,23 +68,32 @@ class IOSAppSyncBackgroundScheduler : AppSyncBackgroundScheduler {
 
     private companion object {
         const val MANUAL_EARLIEST_BEGIN_SECONDS = 1.0
-        const val PERIODIC_EARLIEST_BEGIN_SECONDS = 6.0 * 60.0 * 60.0
     }
 }
 
+private var activeBackgroundJob: Job? = null
+
 fun runAppSyncBackground(completion: (Boolean) -> Unit) {
-    CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
+    activeBackgroundJob?.cancel()
+    activeBackgroundJob = CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
         val outcome = runCatching { runAppSyncOnce() }.getOrNull()
         if (outcome?.automaticEnabled == true) {
-            IOSAppSyncBackgroundScheduler().setEnabled(true)
+            IOSAppSyncBackgroundScheduler().setEnabled(true, outcome.periodicInterval)
         }
         completion(outcome?.success == true)
+        activeBackgroundJob = null
     }
+}
+
+fun cancelAppSyncBackground() {
+    activeBackgroundJob?.cancel()
+    activeBackgroundJob = null
 }
 
 private data class IOSAppSyncRunOutcome(
     val success: Boolean,
     val automaticEnabled: Boolean,
+    val periodicInterval: FixedScheduleInterval,
 )
 
 private suspend fun runAppSyncOnce(): IOSAppSyncRunOutcome {
@@ -98,6 +111,14 @@ private suspend fun runAppSyncOnce(): IOSAppSyncRunOutcome {
         settingsStore = rawSettings,
         authRepository = auth,
     )
+    service.currentStatus().let { initial ->
+        if (initial.automaticEnabled) {
+            IOSAppSyncBackgroundScheduler().setEnabled(
+                enabled = true,
+                interval = initial.scheduleSettings.periodicInterval,
+            )
+        }
+    }
     val settings = service.operationRecordingSettingsStore(db, rawSettings)
     val appSettings = AppSettingsRepository(settings)
     val novelSettings = NovelReaderSettingsRepository(settings)
@@ -112,9 +133,58 @@ private suspend fun runAppSyncOnce(): IOSAppSyncRunOutcome {
             appVersionCode = AppVersion.VersionCode.toInt(),
         ),
     )
+    val pendingGeneration = service.pendingAutomaticTriggerGeneration()
     val status = service.synchronizeNow(trigger = "background_bgtask")
+    if (pendingGeneration != null && status.phase.isDurableAutomaticTriggerOutcome()) {
+        service.accountAutomaticTrigger(pendingGeneration)
+    }
     return IOSAppSyncRunOutcome(
-        success = status.phase == AppSyncServicePhase.Active,
+        success = status.phase == AppSyncServicePhase.Active &&
+            service.pendingAutomaticTriggerGeneration() == null,
         automaticEnabled = status.automaticEnabled,
+        periodicInterval = status.scheduleSettings.periodicInterval,
     )
+}
+
+private var lifecycleController: AppSyncLifecycleController? = null
+private var sceneActive = false
+private var sceneGeneration = 0L
+private var deliveredSceneGeneration = 0L
+
+fun attachIOSAppSyncLifecycle(controller: AppSyncLifecycleController) {
+    lifecycleController = controller
+    controller.reconcileRegistration()
+    deliverIOSStartupIfNeeded()
+}
+
+fun detachIOSAppSyncLifecycle(controller: AppSyncLifecycleController) {
+    if (lifecycleController === controller) lifecycleController = null
+}
+
+fun appSyncSceneDidBecomeActive() {
+    if (!sceneActive) {
+        sceneActive = true
+        sceneGeneration += 1
+    }
+    deliverIOSStartupIfNeeded()
+}
+
+fun appSyncSceneDidEnterBackground(completion: (Boolean) -> Unit) {
+    if (!sceneActive) {
+        completion(false)
+        return
+    }
+    sceneActive = false
+    if (lifecycleController?.onForegroundSessionExited() == true) {
+        runAppSyncBackground(completion)
+    } else {
+        completion(false)
+    }
+}
+
+private fun deliverIOSStartupIfNeeded() {
+    val current = lifecycleController ?: return
+    if (!sceneActive || deliveredSceneGeneration == sceneGeneration) return
+    deliveredSceneGeneration = sceneGeneration
+    current.onForegroundSessionStarted()
 }

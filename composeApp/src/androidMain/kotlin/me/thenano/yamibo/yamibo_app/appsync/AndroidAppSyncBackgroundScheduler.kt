@@ -9,19 +9,20 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
-import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.toJavaDuration
+import me.thenano.yamibo.yamibo_app.util.time.FixedScheduleInterval
 
 class AndroidAppSyncBackgroundScheduler(context: Context) : AppSyncBackgroundScheduler {
     private val workManager = WorkManager.getInstance(context.applicationContext)
 
-    override suspend fun setEnabled(enabled: Boolean) {
+    override fun setEnabled(enabled: Boolean, interval: FixedScheduleInterval) {
         if (!enabled) {
             workManager.cancelUniqueWork(PERIODIC_WORK)
+            workManager.cancelUniqueWork(LIFECYCLE_WORK)
             return
         }
-        val request = PeriodicWorkRequestBuilder<AppSyncWorker>(6.hours.toJavaDuration())
+        val request = PeriodicWorkRequestBuilder<AppSyncWorker>(interval.duration.toJavaDuration())
             .setConstraints(constraints())
             .addTag(WORK_TAG)
             .build()
@@ -32,13 +33,13 @@ class AndroidAppSyncBackgroundScheduler(context: Context) : AppSyncBackgroundSch
         )
     }
 
-    override suspend fun runNow() {
+    override fun runNow() {
         val request = OneTimeWorkRequestBuilder<AppSyncWorker>()
             .setConstraints(constraints())
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30.seconds.toJavaDuration())
             .addTag(WORK_TAG)
             .build()
-        workManager.enqueueUniqueWork(MANUAL_WORK, ExistingWorkPolicy.KEEP, request)
+        workManager.enqueueUniqueWork(LIFECYCLE_WORK, ExistingWorkPolicy.KEEP, request)
     }
 
     private fun constraints() = Constraints.Builder()
@@ -49,6 +50,6 @@ class AndroidAppSyncBackgroundScheduler(context: Context) : AppSyncBackgroundSch
     private companion object {
         const val WORK_TAG = "yamibo-app-sync"
         const val PERIODIC_WORK = "yamibo-app-sync-periodic"
-        const val MANUAL_WORK = "yamibo-app-sync-manual"
+        const val LIFECYCLE_WORK = "yamibo-app-sync-lifecycle"
     }
 }

@@ -120,7 +120,8 @@ fun App() {
     var launchUpdateRelease by remember { mutableStateOf<AppUpdateRelease?>(null) }
     LaunchedEffect(Unit) {
         val threshold = appSettingsRepository.appUpdateLaunchCheckThreshold.getValue()
-        val intervalMillis = threshold.hours?.times(60L * 60L * 1000L) ?: return@LaunchedEffect
+        val intervalMillis = threshold.fixedInterval?.duration?.inWholeMilliseconds
+            ?: return@LaunchedEffect
         val now = currentTimeMillis()
         val lastCheckAt = appSettingsRepository.appUpdateLastCheckAt.getValue().toLongOrNull() ?: 0L
         if (now - lastCheckAt >= intervalMillis) {

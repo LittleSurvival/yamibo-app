@@ -63,6 +63,19 @@ internal sealed interface AppSyncCheckpointPublishResult {
     data class TerminalFailure(val reason: String) : AppSyncCheckpointPublishResult
 }
 
+internal sealed interface AppSyncCheckpointRetentionResult {
+    data object NotNeeded : AppSyncCheckpointRetentionResult
+
+    data class Verified(
+        val retainedCheckpointIds: Set<String>,
+        val deletedBlogCount: Int,
+    ) : AppSyncCheckpointRetentionResult
+
+    data object FormExpired : AppSyncCheckpointRetentionResult
+    data class RetryableFailure(val reason: String) : AppSyncCheckpointRetentionResult
+    data class TerminalFailure(val reason: String) : AppSyncCheckpointRetentionResult
+}
+
 internal interface AppSyncJournalRemote {
     suspend fun loadJournals(
         accountBinding: SyncAccountBinding,
@@ -80,6 +93,13 @@ internal interface AppSyncJournalRemote {
         formHash: FormHash,
     ): AppSyncCheckpointPublishResult =
         AppSyncCheckpointPublishResult.TerminalFailure("Checkpoint publication is unsupported")
+
+    suspend fun enforceCheckpointRetention(
+        accountBinding: SyncAccountBinding,
+        formHash: FormHash,
+        maximumCheckpoints: Int,
+    ): AppSyncCheckpointRetentionResult =
+        AppSyncCheckpointRetentionResult.NotNeeded
 }
 
 internal interface SyncDomainStateAdapter {

@@ -45,6 +45,8 @@ import me.thenano.yamibo.yamibo_app.repository.appupdate.DefaultAppUpdateReposit
 import me.thenano.yamibo.yamibo_app.repository.backup.BackupRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncService
 import me.thenano.yamibo.yamibo_app.appsync.AndroidAppSyncBackgroundScheduler
+import me.thenano.yamibo.yamibo_app.appsync.AndroidAppSyncLifecycleBridge
+import me.thenano.yamibo.yamibo_app.appsync.AppSyncLifecycleController
 import me.thenano.yamibo.yamibo_app.repository.chineseconversion.createChineseConversionRepository
 import me.thenano.yamibo.yamibo_app.repository.contentcover.ContentCoverRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.download.AndroidDownloadStorageProvider
@@ -78,6 +80,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         AndroidAppForegroundTracker.markForeground(true)
+        AndroidAppSyncLifecycleBridge.onActivityStarted()
     }
 
     override fun onNewIntent(intent: android.content.Intent) {
@@ -94,6 +97,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        AndroidAppSyncLifecycleBridge.onActivityStopped(isChangingConfigurations)
         AndroidAppForegroundTracker.markForeground(false)
         super.onStop()
     }
@@ -258,6 +262,18 @@ class MainActivity : ComponentActivity() {
             }
             val appSyncBackgroundScheduler = remember {
                 AndroidAppSyncBackgroundScheduler(context)
+            }
+            val appSyncLifecycleController = remember(
+                appSyncService,
+                appSyncBackgroundScheduler,
+            ) {
+                AppSyncLifecycleController(appSyncService, appSyncBackgroundScheduler)
+            }
+            DisposableEffect(appSyncLifecycleController) {
+                AndroidAppSyncLifecycleBridge.attach(appSyncLifecycleController)
+                onDispose {
+                    AndroidAppSyncLifecycleBridge.detach(appSyncLifecycleController)
+                }
             }
             val downloadRepository = remember {
                 DownloadRepositoryImpl(

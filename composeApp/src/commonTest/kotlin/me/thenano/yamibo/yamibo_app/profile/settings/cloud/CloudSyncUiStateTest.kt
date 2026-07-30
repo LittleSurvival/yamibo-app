@@ -10,8 +10,30 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncServiceStatus
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncChangeAction
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncChangeDirection
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncChangeSummary
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncPeriodicIntervals
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncScheduleSettings
+import me.thenano.yamibo.yamibo_app.util.time.FixedScheduleInterval
 
 class CloudSyncUiStateTest {
+    @Test
+    fun schedulingPolicyAndCanonicalOptionOrderReachTheUi() {
+        val state = status(
+            phase = AppSyncServicePhase.Active,
+            automaticEnabled = true,
+        ).copy(
+            scheduleSettings = AppSyncScheduleSettings(
+                syncOnAppStart = true,
+                syncOnForegroundExit = true,
+                periodicInterval = FixedScheduleInterval.Days2,
+            ),
+        ).toUiState(backgroundSchedulerAvailable = true)
+
+        assertTrue(state.syncOnAppStart)
+        assertTrue(state.syncOnForegroundExit)
+        assertEquals(FixedScheduleInterval.Days2, state.periodicInterval)
+        assertEquals(AppSyncPeriodicIntervals, state.periodicIntervalOptions)
+    }
+
     @Test
     fun expiredAuthenticationShowsDurableInlineAttentionState() {
         val state = status(

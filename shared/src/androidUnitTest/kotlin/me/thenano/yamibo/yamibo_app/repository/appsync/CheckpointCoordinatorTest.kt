@@ -9,6 +9,7 @@ import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncCheckpointPublishResult
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncCheckpointRetentionResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalLoadResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalPublishResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalRemote
@@ -65,6 +66,7 @@ class CheckpointCoordinatorTest {
         assertEquals(2, fixture.remote.publishedIds.size)
         assertEquals(fixture.remote.publishedIds[0], fixture.remote.publishedIds[1])
         assertEquals(verified.checkpointId, fixture.store.verifiedCheckpoints().single().checkpointId)
+        assertEquals(3, fixture.remote.retentionCalls)
     }
 
     private fun fixture(): Fixture {
@@ -124,6 +126,7 @@ class CheckpointCoordinatorTest {
         var returnMismatchedPayload = false
         var returnUnknownOnce = false
         val publishedIds = mutableListOf<String>()
+        var retentionCalls = 0
         private val codec = AppSyncCheckpointEnvelopeCodec()
 
         override suspend fun loadJournals(
@@ -156,6 +159,18 @@ class CheckpointCoordinatorTest {
                 as AppSyncCheckpointValidation.Valid
             return AppSyncCheckpointPublishResult.Verified(
                 LoadedAppSyncCheckpoint("77", validation.envelope),
+            )
+        }
+
+        override suspend fun enforceCheckpointRetention(
+            accountBinding: SyncAccountBinding,
+            formHash: FormHash,
+            maximumCheckpoints: Int,
+        ): AppSyncCheckpointRetentionResult {
+            retentionCalls += 1
+            return AppSyncCheckpointRetentionResult.Verified(
+                retainedCheckpointIds = publishedIds.toSet(),
+                deletedBlogCount = 0,
             )
         }
     }

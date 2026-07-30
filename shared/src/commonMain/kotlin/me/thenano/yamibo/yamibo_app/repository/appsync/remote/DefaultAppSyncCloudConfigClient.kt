@@ -551,40 +551,11 @@ class DefaultAppSyncCloudConfigClient(
         val deletionValidation = validateDeletionTarget(page, blogId, requireDamaged)
         if (deletionValidation != null) return deletionValidation
 
-        val acknowledgement = when (
-            val result = provider.deleteBlog(AppSyncBlogDeleteRequest(blogId, formHash))
-        ) {
-            is AppSyncCloudResult.VerifiedSuccess -> result.value
-            else -> return result.propagateFailure()
-        }
-        return when (val reloaded = provider.fetchBlog(blogId)) {
-            is AppSyncCloudResult.NotFound ->
-                completeVerifiedDeletion(blogId, mutateStore)
-            is AppSyncCloudResult.ParseFailed -> {
-                when (val absent = confirmBlogAbsentFromUserSpace(blogId)) {
-                    is AppSyncCloudResult.VerifiedSuccess -> {
-                        if (absent.value) {
-                            completeVerifiedDeletion(blogId, mutateStore)
-                        } else {
-                            AppSyncCloudResult.AcknowledgedButUnverified(
-                                messageText = acknowledgement.messageText,
-                                reason = "Delete was acknowledged but the blog is still listed",
-                                candidateBlogId = blogId,
-                            )
-                        }
-                    }
-                    else -> AppSyncCloudResult.AcknowledgedButUnverified(
-                        messageText = acknowledgement.messageText,
-                        reason = "Delete was acknowledged but list verification failed: ${absent.describe()}",
-                        candidateBlogId = blogId,
-                    )
-                }
-            }
-            else -> AppSyncCloudResult.AcknowledgedButUnverified(
-                messageText = acknowledgement.messageText,
-                reason = "Delete was acknowledged but absence was not verified: ${reloaded.describe()}",
-                candidateBlogId = blogId,
-            )
+        return when (val result = provider.deleteBlog(AppSyncBlogDeleteRequest(blogId, formHash))) {
+            is AppSyncCloudResult.VerifiedSuccess,
+            AppSyncCloudResult.NotFound,
+            -> completeVerifiedDeletion(blogId, mutateStore)
+            else -> result.propagateFailure()
         }
     }
 
@@ -627,27 +598,6 @@ class DefaultAppSyncCloudConfigClient(
                 )
             else -> resolved.propagateFailure()
         }
-    }
-
-    private suspend fun confirmBlogAbsentFromUserSpace(
-        blogId: BlogId,
-    ): AppSyncCloudResult<Boolean> {
-        val initial = when (val result = provider.fetchMyBlogs()) {
-            is AppSyncCloudResult.VerifiedSuccess -> result.value
-            else -> return result.propagateFailure()
-        }
-        val pages = when (
-            val result = fetchAllBlogPages(
-                blogClassId = null,
-                firstPage = initial,
-            )
-        ) {
-            is AppSyncCloudResult.VerifiedSuccess -> result.value
-            else -> return result.propagateFailure()
-        }
-        return AppSyncCloudResult.VerifiedSuccess(
-            pages.none { page -> page.blogs.any { it.bId == blogId } },
-        )
     }
 
     private fun completeVerifiedDeletion(

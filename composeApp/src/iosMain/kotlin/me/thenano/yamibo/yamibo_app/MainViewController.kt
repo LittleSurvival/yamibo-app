@@ -51,6 +51,9 @@ import me.thenano.yamibo.yamibo_app.update.IOSAppUpdatePlatform
 import me.thenano.yamibo.yamibo_app.task.AppTaskManager
 import me.thenano.yamibo.yamibo_app.confirmation.AppConfirmationController
 import me.thenano.yamibo.yamibo_app.appsync.IOSAppSyncBackgroundScheduler
+import me.thenano.yamibo.yamibo_app.appsync.AppSyncLifecycleController
+import me.thenano.yamibo.yamibo_app.appsync.attachIOSAppSyncLifecycle
+import me.thenano.yamibo.yamibo_app.appsync.detachIOSAppSyncLifecycle
 
 fun MainViewController() = ComposeUIViewController {
     /** Navigator Logic */
@@ -192,6 +195,13 @@ fun MainViewController() = ComposeUIViewController {
     }
     val backupScheduler = remember { IOSBackupScheduler() }
     val appSyncBackgroundScheduler = remember { IOSAppSyncBackgroundScheduler() }
+    val appSyncLifecycleController = remember(appSyncService, appSyncBackgroundScheduler) {
+        AppSyncLifecycleController(appSyncService, appSyncBackgroundScheduler)
+    }
+    DisposableEffect(appSyncLifecycleController) {
+        attachIOSAppSyncLifecycle(appSyncLifecycleController)
+        onDispose { detachIOSAppSyncLifecycle(appSyncLifecycleController) }
+    }
     androidx.compose.runtime.LaunchedEffect(backupRepository) {
         diskCacheFactory.backupStorageUsageProvider = { backupRepository.getBackupStorageBytes() }
     }

@@ -10,6 +10,7 @@ import me.thenano.yamibo.yamibo_app.db.DatabaseFactory
 import me.thenano.yamibo.yamibo_app.repository.AndroidAuthRepository
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncService
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncServicePhase
+import me.thenano.yamibo.yamibo_app.repository.appsync.isDurableAutomaticTriggerOutcome
 import me.thenano.yamibo.yamibo_app.repository.backup.BackupRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.settings.AppSettingsRepository
 import me.thenano.yamibo.yamibo_app.repository.settings.MangaReaderSettingsRepository
@@ -53,8 +54,16 @@ class AppSyncWorker(
                 appVersionCode = AppVersion.VersionCode.toInt(),
             ),
         )
-        when (service.synchronizeNow(trigger = "background_workmanager").phase) {
-            AppSyncServicePhase.Active -> Result.success()
+        val pendingGeneration = service.pendingAutomaticTriggerGeneration()
+        val phase = service.synchronizeNow(trigger = "background_workmanager").phase
+        if (pendingGeneration != null && phase.isDurableAutomaticTriggerOutcome()) {
+            service.accountAutomaticTrigger(pendingGeneration)
+        }
+        when (phase) {
+            AppSyncServicePhase.Active -> {
+                if (service.pendingAutomaticTriggerGeneration() != null) Result.retry()
+                else Result.success()
+            }
             AppSyncServicePhase.PausedAuth,
             AppSyncServicePhase.Quarantined,
             AppSyncServicePhase.Disabled,

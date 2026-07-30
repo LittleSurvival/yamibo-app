@@ -26,6 +26,7 @@ internal class CheckpointCoordinator(
     private val snapshot: () -> YamiboBackupFile,
     private val nowMillis: () -> Long,
     private val minimumAcknowledgedOperations: Int = 64,
+    private val maximumRetainedCheckpoints: Int = 3,
     private val codec: AppSyncCheckpointEnvelopeCodec = AppSyncCheckpointEnvelopeCodec(),
 ) {
     suspend fun createIfNeeded(
@@ -33,6 +34,13 @@ internal class CheckpointCoordinator(
         formHash: FormHash,
     ): CheckpointCreationResult {
         if (store.pendingOperations().isNotEmpty()) return CheckpointCreationResult.NotNeeded
+        retentionFailure(
+            remote.enforceCheckpointRetention(
+                accountBinding,
+                formHash,
+                maximumRetainedCheckpoints,
+            ),
+        )?.let { return it }
         val acknowledged = store.allOutboxOperations().filter {
             it.second == AppSyncOperationLifecycle.Acknowledged
         }
@@ -90,6 +98,13 @@ internal class CheckpointCoordinator(
                         verifiedAtEpochMillis = nowMillis(),
                     ),
                 )
+                retentionFailure(
+                    remote.enforceCheckpointRetention(
+                        accountBinding,
+                        formHash,
+                        maximumRetainedCheckpoints,
+                    ),
+                )?.let { return it }
                 CheckpointCreationResult.Verified(checkpointId)
             }
             is AppSyncCheckpointPublishResult.Unknown ->
@@ -104,6 +119,22 @@ internal class CheckpointCoordinator(
             is AppSyncCheckpointPublishResult.TerminalFailure ->
                 CheckpointCreationResult.Paused(published.reason)
         }
+    }
+
+    private fun retentionFailure(
+        result: AppSyncCheckpointRetentionResult,
+    ): CheckpointCreationResult? = when (result) {
+        AppSyncCheckpointRetentionResult.NotNeeded -> null
+        is AppSyncCheckpointRetentionResult.Verified -> {
+            store.retainVerifiedCheckpoints(result.retainedCheckpointIds)
+            null
+        }
+        AppSyncCheckpointRetentionResult.FormExpired ->
+            CheckpointCreationResult.Paused("Cached FormHash expired during checkpoint retention")
+        is AppSyncCheckpointRetentionResult.RetryableFailure ->
+            CheckpointCreationResult.RetryableFailure(result.reason)
+        is AppSyncCheckpointRetentionResult.TerminalFailure ->
+            CheckpointCreationResult.Paused(result.reason)
     }
 
     private fun deterministicCheckpointId(

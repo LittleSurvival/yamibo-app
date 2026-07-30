@@ -74,6 +74,8 @@ data class AppSyncServiceStatus(
     val lastVerifiedAtEpochMillis: Long?,
     val message: String,
     val changeSummaries: List<AppSyncChangeSummary> = emptyList(),
+    val scheduleSettings: AppSyncScheduleSettings = AppSyncScheduleSettings(),
+    val pendingTriggerGeneration: Long? = null,
 )
 
 enum class AppSyncChangeDirection {
@@ -403,7 +405,7 @@ class AppSyncService(
             synchronize(binding, forceDiscovery, trigger, demand)
         } catch (error: CancellationException) {
             throw error
-        } catch (error: Throwable) {
+        } catch (_: Throwable) {
             val status = statusFor(
                 requireNotNull(store.installation()).state,
                 "同步發生未預期錯誤，已保留待同步操作並排定重試",
@@ -424,6 +426,53 @@ class AppSyncService(
         mutableStatus.value = statusFor(
             installation.state,
             if (enabled) "已排定自動同步" else "自動同步已關閉",
+            changeSummaries = mutableStatus.value.changeSummaries,
+        )
+    }
+
+    fun setScheduleSettings(settings: AppSyncScheduleSettings) {
+        if (!featureEnabled) {
+            mutableStatus.value = disabledStatus()
+            return
+        }
+        store.setScheduleSettings(settings)
+        val installation = requireNotNull(store.installation())
+        mutableStatus.value = statusFor(
+            installation.state,
+            "自動同步排程設定已更新",
+            changeSummaries = mutableStatus.value.changeSummaries,
+        )
+    }
+
+    fun requestAutomaticTrigger(trigger: AppSyncAutomaticTrigger): Long? {
+        if (!featureEnabled) return null
+        val generation = store.requestAutomaticTrigger(trigger)
+        if (generation != null) {
+            val installation = requireNotNull(store.installation())
+            mutableStatus.value = statusFor(
+                installation.state,
+                when (trigger) {
+                    AppSyncAutomaticTrigger.AppStartup -> "已排定 App 啟動同步"
+                    AppSyncAutomaticTrigger.ForegroundExit -> "已排定離開前台同步"
+                },
+                changeSummaries = mutableStatus.value.changeSummaries,
+            )
+        }
+        return generation
+    }
+
+    fun pendingAutomaticTriggerGeneration(): Long? =
+        store.installation()?.let { installation ->
+            installation.requestedTriggerGeneration
+                .takeIf { it > installation.accountedTriggerGeneration }
+        }
+
+    fun accountAutomaticTrigger(upToGeneration: Long) {
+        store.accountAutomaticTrigger(upToGeneration)
+        val installation = requireNotNull(store.installation())
+        mutableStatus.value = statusFor(
+            installation.state,
+            mutableStatus.value.message,
             changeSummaries = mutableStatus.value.changeSummaries,
         )
     }
@@ -472,6 +521,21 @@ class AppSyncService(
         }
         mutableStatus.value = status
         return status
+    }
+
+    fun clearCloudLinkCache(): AppSyncServiceStatus {
+        if (!featureEnabled) return disabledStatus()
+        val binding = currentAccountBinding() ?: return pausedAuth("clear_cloud_link_cache")
+        if (mutableStatus.value.phase == AppSyncServicePhase.Running) {
+            return mutableStatus.value
+        }
+        val cleared = remote.clearLinkCache(binding)
+        val installation = requireNotNull(store.installation())
+        return statusFor(
+            installation.state,
+            "已清除 $cleared 筆雲端連結紀錄；下次同步會重新驗證最新索引",
+            changeSummaries = mutableStatus.value.changeSummaries,
+        ).also { mutableStatus.value = it }
     }
 
     suspend fun previewForceOverride(
@@ -598,36 +662,44 @@ class AppSyncService(
                 }
             }
         }
-        val status = if (checkpointResult is CheckpointCreationResult.StoragePressure) {
-            store.updateState(AppSyncInstallationState.PausedProvider)
-            statusFor(
-                AppSyncInstallationState.PausedProvider,
+        val status = when (checkpointResult) {
+            is CheckpointCreationResult.StoragePressure -> {
+                store.updateState(AppSyncInstallationState.PausedProvider)
+                statusFor(
+                    AppSyncInstallationState.PausedProvider,
+                    checkpointResult.reason,
+                )
+            }
+            is CheckpointCreationResult.RetryableFailure -> statusFor(
+                requireNotNull(store.installation()).state,
                 checkpointResult.reason,
-            )
-        } else when (result) {
-            is OperationSyncResult.Converged -> statusFor(
-                AppSyncInstallationState.Active,
-                "同步完成：接收 ${result.appliedRemoteCount}、確認 ${result.acknowledgedLocalCount}",
-                changeSummaries = result.changes.map(OperationChangeSummary::toPublic),
-            )
-            is OperationSyncResult.PausedAuth ->
-                statusFor(AppSyncInstallationState.PausedAuth, result.reason)
-            is OperationSyncResult.Quarantined ->
-                statusFor(AppSyncInstallationState.Quarantined, result.reason)
-            is OperationSyncResult.StoragePressure ->
-                statusFor(AppSyncInstallationState.PausedProvider, result.reason)
-            is OperationSyncResult.RebootstrapRequired ->
-                statusFor(AppSyncInstallationState.RebootstrapRequired, result.reason)
-            is OperationSyncResult.RetryScheduled -> statusFor(
-                requireNotNull(store.installation()).state,
-                result.reason,
                 AppSyncServicePhase.RetryPending,
             )
-            OperationSyncResult.AlreadyRunning -> statusFor(
-                requireNotNull(store.installation()).state,
-                "已有同步工作執行中",
-                AppSyncServicePhase.RetryPending,
-            )
+            else -> when (result) {
+                is OperationSyncResult.Converged -> statusFor(
+                    AppSyncInstallationState.Active,
+                    "同步完成：接收 ${result.appliedRemoteCount}、確認 ${result.acknowledgedLocalCount}",
+                    changeSummaries = result.changes.map(OperationChangeSummary::toPublic),
+                )
+                is OperationSyncResult.PausedAuth ->
+                    statusFor(AppSyncInstallationState.PausedAuth, result.reason)
+                is OperationSyncResult.Quarantined ->
+                    statusFor(AppSyncInstallationState.Quarantined, result.reason)
+                is OperationSyncResult.StoragePressure ->
+                    statusFor(AppSyncInstallationState.PausedProvider, result.reason)
+                is OperationSyncResult.RebootstrapRequired ->
+                    statusFor(AppSyncInstallationState.RebootstrapRequired, result.reason)
+                is OperationSyncResult.RetryScheduled -> statusFor(
+                    requireNotNull(store.installation()).state,
+                    result.reason,
+                    AppSyncServicePhase.RetryPending,
+                )
+                OperationSyncResult.AlreadyRunning -> statusFor(
+                    requireNotNull(store.installation()).state,
+                    "已有同步工作執行中",
+                    AppSyncServicePhase.RetryPending,
+                )
+            }
         }
         mutableStatus.value = status
         return finishReliabilityDemand(demand, status)
@@ -754,6 +826,12 @@ class AppSyncService(
         pendingOperationCount = store.pendingOperations().size,
         lastVerifiedAtEpochMillis = store.installation()?.lastVerifiedHeartbeatAt,
         message = "新同步核心仍在驗證中，尚未開放雲端寫入",
+        scheduleSettings = store.installation()?.scheduleSettings ?: AppSyncScheduleSettings(),
+        pendingTriggerGeneration = store.installation()?.let {
+            it.requestedTriggerGeneration.takeIf { generation ->
+                generation > it.accountedTriggerGeneration
+            }
+        },
     )
 
     private fun statusFor(
@@ -780,6 +858,10 @@ class AppSyncService(
             lastVerifiedAtEpochMillis = installation.lastVerifiedHeartbeatAt,
             message = message,
             changeSummaries = changeSummaries,
+            scheduleSettings = installation.scheduleSettings,
+            pendingTriggerGeneration = installation.requestedTriggerGeneration.takeIf {
+                it > installation.accountedTriggerGeneration
+            },
         )
     }
 

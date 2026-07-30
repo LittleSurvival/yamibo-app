@@ -20,6 +20,7 @@ import kotlin.test.assertTrue
 import me.thenano.yamibo.yamibo_app.repository.appsync.domain.stableAppSyncFingerprint
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalLoadResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalPublishResult
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncCheckpointRetentionResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncCloudConfigDefaults
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncCloudResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncAccountBinding
@@ -59,23 +60,61 @@ class YamiboAppSyncJournalRemoteTest {
     private val checkpointCodec = AppSyncCheckpointEnvelopeCodec()
 
     @Test
-    fun validCachedJournalAvoidsDiscovery() = runBlocking {
-        val payload = payload()
-        val blogId = BlogId(10)
+    fun clearLinkCacheRemovesBlogIdsButKeepsClassId() {
+        val journal = payload()
+        val store = FakeRemoteStore(
+            storedJournal(journal, BlogId(10)),
+        )
+        val remote = remote(FakeProvider(), store)
+
+        assertEquals(1, remote.clearLinkCache(ACCOUNT))
+
+        assertTrue(store.loadKind(AppSyncRemoteBlogKind.Journal).isEmpty())
+        assertEquals(CLASS_ID, store.loadClassId(ACCOUNT))
+    }
+
+    @Test
+    fun currentIndexReplacesPreviouslyCachedJournalLink() = runBlocking {
+        val stale = payload(heartbeat = 10)
+        val current = payload(heartbeat = 20)
+        val staleBlogId = BlogId(10)
+        val currentBlogId = BlogId(11)
+        val indexBlogId = BlogId(12)
+        val index = AppSyncIndexPayload(
+            accountBinding = ACCOUNT,
+            journals = listOf(
+                AppSyncIndexJournalReference(
+                    replicaKey = current.replicaKey(),
+                    blogId = currentBlogId.value,
+                    fingerprint = null,
+                ),
+            ),
+            updatedAtEpochMillis = 1_000,
+        )
         val provider = FakeProvider().apply {
-            blogs[blogId] = success(journalPage(blogId, payload))
+            pages[PageKey(CLASS_ID, 1)] = success(
+                UserSpaceBlogPage(
+                    blogs = listOf(summary(indexBlogId, APP_SYNC_INDEX_TITLE)),
+                ),
+            )
+            blogs[staleBlogId] = success(journalPage(staleBlogId, stale))
+            blogs[currentBlogId] = success(journalPage(currentBlogId, current))
+            blogs[indexBlogId] = success(
+                page(indexBlogId, APP_SYNC_INDEX_TITLE, indexCodec.encode(index)),
+            )
         }
         val store = FakeRemoteStore(
-            storedJournal(payload, blogId),
-        )
+            storedJournal(stale, staleBlogId),
+        ).apply { saveClassId(ACCOUNT, CLASS_ID) }
 
         val result = assertIs<AppSyncJournalLoadResult.Success>(
             remote(provider, store).loadJournals(ACCOUNT, forceDiscovery = false),
         )
 
-        assertEquals(listOf(payload), result.journals.map { it.payload })
-        assertEquals(0, provider.fetchBlogListCalls)
-        assertEquals(1, provider.fetchBlogCalls)
+        assertEquals(listOf(current), result.journals.map { it.payload })
+        assertEquals(1, provider.fetchBlogListCalls)
+        assertEquals(2, provider.fetchBlogCalls)
+        assertEquals(currentBlogId, store.load(current.replicaKey())?.blogId)
     }
 
     @Test
@@ -114,6 +153,11 @@ class YamiboAppSyncJournalRemoteTest {
             updatedAtEpochMillis = 100,
         )
         val provider = FakeProvider().apply {
+            pages[PageKey(CLASS_ID, 1)] = success(
+                UserSpaceBlogPage(
+                    blogs = listOf(summary(indexBlogId, APP_SYNC_INDEX_TITLE)),
+                ),
+            )
             blogs[indexBlogId] = success(
                 page(indexBlogId, APP_SYNC_INDEX_TITLE, indexCodec.encode(index)),
             )
@@ -136,7 +180,7 @@ class YamiboAppSyncJournalRemoteTest {
                 validatedAtEpochMillis = 0,
                 contentUpdatedAtEpochMillis = null,
             ),
-        )
+        ).apply { saveClassId(ACCOUNT, CLASS_ID) }
 
         val result = assertIs<AppSyncJournalLoadResult.Success>(
             remote(provider, store).loadJournals(ACCOUNT, forceDiscovery = false),
@@ -147,7 +191,7 @@ class YamiboAppSyncJournalRemoteTest {
             it.envelope.payload.checkpointId
         })
         assertEquals(checkpointBlogId, store.load("checkpoint:${checkpoint.checkpointId}")?.blogId)
-        assertEquals(0, provider.fetchBlogListCalls)
+        assertEquals(1, provider.fetchBlogListCalls)
         assertEquals(3, provider.fetchBlogCalls)
     }
 
@@ -348,9 +392,10 @@ class YamiboAppSyncJournalRemoteTest {
     @Test
     fun providerOutageAndRateLimitRemainRetryableWithoutCachedMutation() = runBlocking {
         val store = FakeRemoteStore(storedJournal(payload(), BlogId(40)))
+            .apply { saveClassId(ACCOUNT, CLASS_ID) }
         val provider = FakeProvider().apply {
             blogs[BlogId(40)] = AppSyncCloudResult.NetworkFailed("offline")
-            pages[PageKey(null, 1)] = AppSyncCloudResult.NetworkFailed("offline")
+            pages[PageKey(CLASS_ID, 1)] = AppSyncCloudResult.NetworkFailed("offline")
         }
 
         assertIs<AppSyncJournalLoadResult.RetryableFailure>(
@@ -496,6 +541,87 @@ class YamiboAppSyncJournalRemoteTest {
         assertEquals(2, provider.deleteRequests.size)
     }
 
+    @Test
+    fun checkpointRetentionUsesVerifiedCacheAndKeepsOnlyNewestThree() = runBlocking {
+        val checkpoints = (1..5).map { index ->
+            val blogId = BlogId(70 + index)
+            StoredAppSyncRemoteBlog(
+                remoteKey = "checkpoint:checkpoint-$index",
+                kind = AppSyncRemoteBlogKind.Checkpoint,
+                blogId = blogId,
+                classId = CLASS_ID,
+                fingerprint = "fingerprint-$index",
+                validatedAtEpochMillis = index * 10L,
+                contentUpdatedAtEpochMillis = index * 100L,
+            )
+        }
+        val provider = FakeProvider().apply {
+            deleteHandler = { request ->
+                success(AppSyncPostAcknowledgement("操作成功", listOf(request.blogId)))
+            }
+        }
+        val store = FakeRemoteStore(*checkpoints.toTypedArray())
+        val retentionRemote = remote(provider, store)
+        val result = assertIs<AppSyncCheckpointRetentionResult.Verified>(
+            retentionRemote.enforceCheckpointRetention(
+                ACCOUNT,
+                FORM_HASH,
+                maximumCheckpoints = 3,
+            ),
+        )
+
+        assertEquals(setOf("checkpoint-3", "checkpoint-4", "checkpoint-5"), result.retainedCheckpointIds)
+        assertEquals(2, result.deletedBlogCount)
+        assertEquals(
+            checkpoints.take(2).map { it.blogId },
+            provider.deleteRequests.map { it.blogId },
+        )
+        assertEquals(0, provider.fetchBlogListCalls)
+        assertEquals(0, provider.fetchBlogCalls)
+        assertEquals(null, store.load("checkpoint:checkpoint-1"))
+        assertEquals(null, store.load("checkpoint:checkpoint-2"))
+
+        assertIs<AppSyncCheckpointRetentionResult.NotNeeded>(
+            retentionRemote.enforceCheckpointRetention(
+                ACCOUNT,
+                FORM_HASH,
+                maximumCheckpoints = 3,
+            ),
+        )
+        assertEquals(0, provider.fetchBlogListCalls)
+        assertEquals(0, provider.fetchBlogCalls)
+    }
+
+    @Test
+    fun checkpointRetentionLeavesCacheForRetryWhenDeleteFails() = runBlocking {
+        val checkpoints = (1..4).map { index ->
+            StoredAppSyncRemoteBlog(
+                remoteKey = "checkpoint:retry-$index",
+                kind = AppSyncRemoteBlogKind.Checkpoint,
+                blogId = BlogId(80 + index),
+                classId = CLASS_ID,
+                fingerprint = "fingerprint-$index",
+                validatedAtEpochMillis = index.toLong(),
+                contentUpdatedAtEpochMillis = index.toLong(),
+            )
+        }
+        val provider = FakeProvider().apply {
+            deleteHandler = { AppSyncCloudResult.NetworkFailed("delete offline") }
+        }
+        val store = FakeRemoteStore(*checkpoints.toTypedArray())
+
+        assertIs<AppSyncCheckpointRetentionResult.RetryableFailure>(
+            remote(provider, store).enforceCheckpointRetention(
+                ACCOUNT,
+                FORM_HASH,
+                maximumCheckpoints = 3,
+            ),
+        )
+        assertEquals(listOf(checkpoints.first().blogId), provider.deleteRequests.map { it.blogId })
+        assertEquals(0, provider.fetchBlogCalls)
+        assertEquals(checkpoints.first(), store.load(checkpoints.first().remoteKey))
+    }
+
     private fun remote(
         provider: FakeProvider,
         store: FakeRemoteStore,
@@ -629,6 +755,7 @@ class YamiboAppSyncJournalRemoteTest {
         vararg initial: StoredAppSyncRemoteBlog,
     ) : AppSyncRemoteBlogStore {
         private val values = initial.associateByTo(linkedMapOf()) { it.remoteKey }
+        private val classIds = mutableMapOf<SyncAccountBinding, BlogClassId>()
 
         override fun load(remoteKey: String): StoredAppSyncRemoteBlog? = values[remoteKey]
 
@@ -645,6 +772,16 @@ class YamiboAppSyncJournalRemoteTest {
 
         override fun clear() {
             values.clear()
+        }
+
+        override fun loadClassId(accountBinding: SyncAccountBinding): BlogClassId? =
+            classIds[accountBinding]
+
+        override fun saveClassId(
+            accountBinding: SyncAccountBinding,
+            classId: BlogClassId,
+        ) {
+            classIds[accountBinding] = classId
         }
     }
 

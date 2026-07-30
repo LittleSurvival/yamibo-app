@@ -1,6 +1,8 @@
 package me.thenano.yamibo.yamibo_app.repository.appsync
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import io.github.littlesurvival.dto.value.BlogClassId
+import io.github.littlesurvival.dto.value.BlogId
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -31,10 +33,39 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationKi
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationOrigin
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncSequence
 import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncOperationStore
+import me.thenano.yamibo.yamibo_app.store.appsync.AppSyncRemoteBlogKind
+import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncRemoteBlogStore
+import me.thenano.yamibo.yamibo_app.store.appsync.StoredAppSyncRemoteBlog
 import me.thenano.yamibo.yamibo_app.store.appsync.LocalSyncOperationDraft
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
+import me.thenano.yamibo.yamibo_app.util.time.FixedScheduleInterval
 
 class SqlDelightAppSyncOperationStoreTest {
+    @Test
+    fun remoteBlogCacheClearPreservesAccountBoundClassId() {
+        val db = inMemoryDatabase()
+        val store = SqlDelightAppSyncRemoteBlogStore(db)
+        val binding = SyncAccountBinding("account")
+        val classId = BlogClassId(4568)
+        store.saveClassId(binding, classId)
+        store.save(
+            StoredAppSyncRemoteBlog(
+                remoteKey = "index",
+                kind = AppSyncRemoteBlogKind.Index,
+                blogId = BlogId(12),
+                classId = classId,
+                fingerprint = "fingerprint",
+                validatedAtEpochMillis = 100,
+                contentUpdatedAtEpochMillis = 100,
+            ),
+        )
+
+        store.clear()
+
+        assertNull(store.load("index"))
+        assertEquals(classId, store.loadClassId(binding))
+    }
+
     @Test
     fun localMutationAndOutboxCommitTogether() {
         val db = inMemoryDatabase()
@@ -328,6 +359,87 @@ class SqlDelightAppSyncOperationStoreTest {
             AppSyncOperationLifecycle.Acknowledged,
             store.allOutboxOperations().single().second,
         )
+    }
+
+    @Test
+    fun schedulingPolicyDefaultsAndRoundTrips() {
+        val store = SqlDelightAppSyncOperationStore(inMemoryDatabase())
+        val initial = store.initialize("generation")
+
+        assertEquals(AppSyncScheduleSettings(), initial.scheduleSettings)
+        assertEquals(0L, initial.requestedTriggerGeneration)
+        assertEquals(0L, initial.accountedTriggerGeneration)
+
+        val changed = AppSyncScheduleSettings(
+            syncOnAppStart = true,
+            syncOnForegroundExit = true,
+            periodicInterval = FixedScheduleInterval.Days2,
+        )
+        store.setScheduleSettings(changed)
+
+        assertEquals(changed, store.installation()?.scheduleSettings)
+    }
+
+    @Test
+    fun schedulingPolicyRejectsIntervalsOutsideAppSyncSubset() {
+        val store = SqlDelightAppSyncOperationStore(inMemoryDatabase())
+        store.initialize("generation")
+
+        assertFailsWith<IllegalArgumentException> {
+            store.setScheduleSettings(
+                AppSyncScheduleSettings(
+                    periodicInterval = FixedScheduleInterval.Hours24,
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun everySupportedSchedulingIntervalRoundTripsAndCorruptionFallsBack() {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        Database.Schema.create(driver)
+        val store = SqlDelightAppSyncOperationStore(Database(driver))
+        store.initialize("generation")
+
+        AppSyncPeriodicIntervals.forEach { interval ->
+            store.setScheduleSettings(AppSyncScheduleSettings(periodicInterval = interval))
+            assertEquals(interval, store.installation()?.scheduleSettings?.periodicInterval)
+        }
+
+        driver.execute(
+            null,
+            "UPDATE AppSyncInstallation SET periodicIntervalKey = 'corrupt'",
+            0,
+        )
+        assertEquals(
+            FixedScheduleInterval.Hours6,
+            store.installation()?.scheduleSettings?.periodicInterval,
+        )
+    }
+
+    @Test
+    fun automaticTriggerGenerationIsGatedAndConditionallyAccounted() {
+        val store = SqlDelightAppSyncOperationStore(inMemoryDatabase())
+        store.initialize("generation")
+        store.setScheduleSettings(
+            AppSyncScheduleSettings(
+                syncOnAppStart = true,
+                syncOnForegroundExit = false,
+            ),
+        )
+
+        assertNull(store.requestAutomaticTrigger(AppSyncAutomaticTrigger.AppStartup))
+        store.setAutomaticEnabled(true)
+        assertNull(store.requestAutomaticTrigger(AppSyncAutomaticTrigger.ForegroundExit))
+
+        assertEquals(1L, store.requestAutomaticTrigger(AppSyncAutomaticTrigger.AppStartup))
+        assertEquals(2L, store.requestAutomaticTrigger(AppSyncAutomaticTrigger.AppStartup))
+        store.accountAutomaticTrigger(1L)
+        assertEquals(1L, store.installation()?.accountedTriggerGeneration)
+        assertEquals(2L, store.installation()?.requestedTriggerGeneration)
+
+        store.accountAutomaticTrigger(99L)
+        assertEquals(2L, store.installation()?.accountedTriggerGeneration)
     }
 
     @Test

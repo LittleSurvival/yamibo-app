@@ -1,6 +1,8 @@
 package me.thenano.yamibo.yamibo_app.appsync
 
+import me.thenano.yamibo.yamibo_app.util.time.FixedScheduleInterval
+
 interface AppSyncBackgroundScheduler {
-    suspend fun setEnabled(enabled: Boolean)
-    suspend fun runNow()
+    fun setEnabled(enabled: Boolean, interval: FixedScheduleInterval)
+    fun runNow()
 }

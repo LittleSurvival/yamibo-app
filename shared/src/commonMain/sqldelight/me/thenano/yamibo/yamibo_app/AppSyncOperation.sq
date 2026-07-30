@@ -15,8 +15,13 @@ INSERT INTO AppSyncInstallation(
     lastVerifiedHeartbeatAt,
     journalBlogId,
     lastFullDiscoveryAt,
-    automaticEnabled
-) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    automaticEnabled,
+    syncOnAppStart,
+    syncOnForegroundExit,
+    periodicIntervalKey,
+    requestedTriggerGeneration,
+    accountedTriggerGeneration
+) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 updateInstallationIdentity:
 UPDATE AppSyncInstallation
@@ -49,6 +54,23 @@ WHERE singletonId = 1;
 setAutomaticEnabled:
 UPDATE AppSyncInstallation
 SET automaticEnabled = ?
+WHERE singletonId = 1;
+
+setScheduleSettings:
+UPDATE AppSyncInstallation
+SET syncOnAppStart = ?,
+    syncOnForegroundExit = ?,
+    periodicIntervalKey = ?
+WHERE singletonId = 1;
+
+advanceRequestedTriggerGeneration:
+UPDATE AppSyncInstallation
+SET requestedTriggerGeneration = requestedTriggerGeneration + 1
+WHERE singletonId = 1;
+
+setAccountedTriggerGeneration:
+UPDATE AppSyncInstallation
+SET accountedTriggerGeneration = ?
 WHERE singletonId = 1;
 
 prepareInstallationForCloudReset:
@@ -235,6 +257,10 @@ SELECT * FROM AppSyncCheckpoint
 WHERE state = 'VERIFIED'
 ORDER BY verifiedAtEpochMillis DESC, checkpointId DESC;
 
+deleteCheckpoint:
+DELETE FROM AppSyncCheckpoint
+WHERE checkpointId = ?;
+
 upsertCheckpointAcknowledgement:
 INSERT OR REPLACE INTO AppSyncCheckpointAcknowledgement(
     checkpointId,
@@ -328,6 +354,14 @@ WHERE remoteKey = ?;
 
 clearRemoteBlogs:
 DELETE FROM AppSyncRemoteBlog;
+
+upsertRemoteClassLink:
+INSERT OR REPLACE INTO AppSyncRemoteClassLink(accountBinding, classId)
+VALUES (?, ?);
+
+getRemoteClassLink:
+SELECT classId FROM AppSyncRemoteClassLink
+WHERE accountBinding = ?;
 
 upsertResolvedEntity:
 INSERT OR REPLACE INTO AppSyncResolvedEntity(

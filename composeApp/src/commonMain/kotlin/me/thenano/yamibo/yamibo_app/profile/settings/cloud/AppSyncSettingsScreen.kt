@@ -49,10 +49,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import me.thenano.yamibo.yamibo_app.LocalAppSyncService
 import me.thenano.yamibo.yamibo_app.LocalAppSyncBackgroundScheduler
 import me.thenano.yamibo.yamibo_app.components.controls.YamiboActionChip
+import me.thenano.yamibo.yamibo_app.components.controls.YamiboSingleSelectDialog
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBar
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.i18n.i18n
+import me.thenano.yamibo.yamibo_app.i18n.localizedLabel
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
+import me.thenano.yamibo.yamibo_app.util.time.FixedScheduleInterval
 
 @Composable
 internal fun AppSyncSettingsScreen(
@@ -71,8 +74,12 @@ internal fun AppSyncSettingsScreen(
         state = state,
         onBack = { navigator.pop() },
         onRefresh = activeController::refresh,
+        onClearCloudLinkCache = activeController::clearCloudLinkCache,
         onDeleteCloud = activeController::deleteCloudData,
         onAutomaticEnabledChange = activeController::setAutomaticEnabled,
+        onSyncOnAppStartChange = activeController::setSyncOnAppStart,
+        onSyncOnForegroundExitChange = activeController::setSyncOnForegroundExit,
+        onPeriodicIntervalChange = activeController::setPeriodicInterval,
         onSyncNow = activeController::syncNow,
         onRequestForce = activeController::requestForceOverride,
         onConfirmForce = activeController::confirmForceOverride,
@@ -85,8 +92,12 @@ internal fun AppSyncSettingsContent(
     state: CloudSyncUiState,
     onBack: () -> Unit,
     onRefresh: () -> Unit,
+    onClearCloudLinkCache: () -> Unit,
     onDeleteCloud: () -> Unit,
     onAutomaticEnabledChange: (Boolean) -> Unit,
+    onSyncOnAppStartChange: (Boolean) -> Unit,
+    onSyncOnForegroundExitChange: (Boolean) -> Unit,
+    onPeriodicIntervalChange: (FixedScheduleInterval) -> Unit,
     onSyncNow: () -> Unit,
     onRequestForce: (CloudSyncForceDirection) -> Unit,
     onConfirmForce: (CloudSyncForcePreview) -> Unit,
@@ -121,6 +132,9 @@ internal fun AppSyncSettingsContent(
             AutomaticSyncSection(
                 state = state,
                 onEnabledChange = onAutomaticEnabledChange,
+                onSyncOnAppStartChange = onSyncOnAppStartChange,
+                onSyncOnForegroundExitChange = onSyncOnForegroundExitChange,
+                onPeriodicIntervalChange = onPeriodicIntervalChange,
                 onSyncNow = onSyncNow,
             )
             HorizontalDivider(color = colors.brownLight.copy(alpha = 0.2f))
@@ -153,6 +167,22 @@ internal fun AppSyncSettingsContent(
                 onRequestForce = onRequestForce,
             )
             HorizontalDivider(color = colors.brownLight.copy(alpha = 0.2f))
+            TextButton(
+                onClick = onClearCloudLinkCache,
+                enabled = state.actionsAvailable && !state.isBusy,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                    .testTag("app_sync_clear_link_cache"),
+            ) {
+                Text(
+                    text = i18n("清除雲端連結紀錄快取"),
+                    color = colors.textStrong.copy(
+                        alpha = if (state.actionsAvailable && !state.isBusy) 1f else 0.6f,
+                    ),
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
             TextButton(
                 onClick = { showDeleteConfirmation = true },
                 enabled = state.actionsAvailable && state.cloudDataExists && !state.isBusy,
@@ -335,9 +365,14 @@ private fun CloudSyncInlineNotice(notice: CloudSyncNotice) {
 private fun AutomaticSyncSection(
     state: CloudSyncUiState,
     onEnabledChange: (Boolean) -> Unit,
+    onSyncOnAppStartChange: (Boolean) -> Unit,
+    onSyncOnForegroundExitChange: (Boolean) -> Unit,
+    onPeriodicIntervalChange: (FixedScheduleInterval) -> Unit,
     onSyncNow: () -> Unit,
 ) {
     val colors = YamiboTheme.colors
+    var intervalDialogVisible by remember { mutableStateOf(false) }
+    val childEnabled = state.automaticEnabled && state.automaticAvailable && !state.isBusy
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -375,6 +410,40 @@ private fun AutomaticSyncSection(
                 ),
             )
         }
+        AutomaticSyncOptionSwitch(
+            title = i18n("App 啟動時同步"),
+            checked = state.syncOnAppStart,
+            enabled = childEnabled,
+            testTag = "app_sync_on_start_toggle",
+            onCheckedChange = onSyncOnAppStartChange,
+        )
+        AutomaticSyncOptionSwitch(
+            title = i18n("離開前台時同步"),
+            checked = state.syncOnForegroundExit,
+            enabled = childEnabled,
+            testTag = "app_sync_on_foreground_exit_toggle",
+            onCheckedChange = onSyncOnForegroundExitChange,
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(enabled = childEnabled) { intervalDialogVisible = true }
+                .padding(vertical = 8.dp)
+                .testTag("app_sync_periodic_interval"),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = i18n("背景同步週期"),
+                color = colors.textStrong.copy(alpha = if (childEnabled) 1f else 0.42f),
+                fontSize = 14.sp,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = state.periodicInterval.localizedLabel(),
+                color = colors.textDark.copy(alpha = if (childEnabled) 0.68f else 0.36f),
+                fontSize = 13.sp,
+            )
+        }
         CloudActionButton(
             text = i18n("立即同步"),
             icon = YamiboIcons.Sync,
@@ -382,6 +451,52 @@ private fun AutomaticSyncSection(
             enabled = state.automaticAvailable && !state.isBusy,
             testTag = "app_sync_sync_now",
             onClick = onSyncNow,
+        )
+    }
+    if (intervalDialogVisible) {
+        YamiboSingleSelectDialog(
+            title = i18n("背景同步週期"),
+            options = state.periodicIntervalOptions,
+            selected = state.periodicInterval,
+            onDismiss = { intervalDialogVisible = false },
+            onSelect = onPeriodicIntervalChange,
+            label = { it.localizedLabel() },
+            dismissOnSelect = true,
+            modifier = Modifier.testTag("app_sync_periodic_interval_dialog"),
+        )
+    }
+}
+
+@Composable
+private fun AutomaticSyncOptionSwitch(
+    title: String,
+    checked: Boolean,
+    enabled: Boolean,
+    testTag: String,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    val colors = YamiboTheme.colors
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = title,
+            color = colors.textStrong.copy(alpha = if (enabled) 1f else 0.42f),
+            fontSize = 14.sp,
+            modifier = Modifier.weight(1f),
+        )
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            enabled = enabled,
+            modifier = Modifier.testTag(testTag),
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = colors.brownDeep,
+                checkedTrackColor = colors.brownPrimary.copy(alpha = 0.5f),
+                uncheckedThumbColor = colors.textDark.copy(alpha = 0.5f),
+                uncheckedTrackColor = colors.brownLight.copy(alpha = 0.3f),
+            ),
         )
     }
 }

@@ -7,6 +7,8 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncOperationLif
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRunLease
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncBulkDeleteAuthorization
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncVerifiedCheckpoint
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncAutomaticTrigger
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncScheduleSettings
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncAccountBinding
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncCausalContext
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDomainId
@@ -34,6 +36,9 @@ internal interface AppSyncOperationStore {
     fun updateVerifiedHeartbeat(atEpochMillis: Long, journalBlogId: Long?)
     fun updateDiscoveryTime(atEpochMillis: Long)
     fun setAutomaticEnabled(enabled: Boolean)
+    fun setScheduleSettings(settings: AppSyncScheduleSettings)
+    fun requestAutomaticTrigger(trigger: AppSyncAutomaticTrigger): Long?
+    fun accountAutomaticTrigger(upToGeneration: Long)
     fun prepareForCloudReset()
 
     fun appendLocalOperation(
@@ -98,6 +103,7 @@ internal interface AppSyncOperationStore {
     )
     fun saveVerifiedCheckpoint(checkpoint: AppSyncVerifiedCheckpoint)
     fun verifiedCheckpoints(): List<AppSyncVerifiedCheckpoint>
+    fun retainVerifiedCheckpoints(checkpointIds: Set<String>) = Unit
     fun causalContext(): SyncCausalContext
 
     fun acquireLease(

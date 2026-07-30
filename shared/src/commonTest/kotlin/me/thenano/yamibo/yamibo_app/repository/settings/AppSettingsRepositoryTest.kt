@@ -3,6 +3,8 @@ package me.thenano.yamibo.yamibo_app.repository.settings
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 import kotlin.test.Test
 import kotlin.test.assertFalse
+import kotlin.test.assertEquals
+import me.thenano.yamibo.yamibo_app.util.time.FixedScheduleInterval
 
 class AppSettingsRepositoryTest {
     @Test
@@ -11,6 +13,29 @@ class AppSettingsRepositoryTest {
 
         assertFalse(repository.favoriteUpdateAutoDownload.getValue())
         assertFalse(repository.downloadedContentRefreshAutoUpdate.getValue())
+    }
+
+    @Test
+    fun fixedIntervalRefactorPreservesPersistedEnumNamesAndDurations() {
+        val store = AppSettingsMemoryStore()
+        val repository = AppSettingsRepository(store)
+
+        repository.favoriteUpdateInterval.setValue(FavoriteUpdateInterval.DAYS_3)
+        repository.appUpdateLaunchCheckThreshold.setValue(
+            AppUpdateLaunchCheckThreshold.HOURS_24,
+        )
+        repository.backupInterval.setValue(BackupInterval.WEEK_1)
+
+        val recreated = AppSettingsRepository(store)
+        assertEquals(FavoriteUpdateInterval.DAYS_3, recreated.favoriteUpdateInterval.getValue())
+        assertEquals(
+            AppUpdateLaunchCheckThreshold.HOURS_24,
+            recreated.appUpdateLaunchCheckThreshold.getValue(),
+        )
+        assertEquals(BackupInterval.WEEK_1, recreated.backupInterval.getValue())
+        assertEquals(FixedScheduleInterval.Days3, FavoriteUpdateInterval.DAYS_3.fixedInterval)
+        assertEquals(FixedScheduleInterval.Hours24, AppUpdateLaunchCheckThreshold.HOURS_24.fixedInterval)
+        assertEquals(FixedScheduleInterval.Week1, BackupInterval.WEEK_1.fixedInterval)
     }
 }
 

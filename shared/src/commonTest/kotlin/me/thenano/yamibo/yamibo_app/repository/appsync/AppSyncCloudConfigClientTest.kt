@@ -807,7 +807,7 @@ class AppSyncCloudConfigClientTest {
     }
 
     @Test
-    fun deleteAcknowledgementWithoutConfirmedAbsencePreservesMetadata() = runBlocking {
+    fun deleteAcknowledgementClearsMetadataWithoutImmediateAbsenceCheck() = runBlocking {
         val classId = BlogClassId(90)
         val blogId = BlogId(91)
         val original = StoredAppSyncBlogConfig(
@@ -826,13 +826,13 @@ class AppSyncCloudConfigClientTest {
 
         val result = client(provider, store).deleteBlogConfig(blogId, FORM_HASH)
 
-        assertIs<AppSyncCloudResult.AcknowledgedButUnverified>(result)
-        assertEquals(original, store.value)
-        assertEquals(0, store.clearCount)
+        assertIs<AppSyncCloudResult.VerifiedSuccess<Unit>>(result)
+        assertNull(store.value)
+        assertEquals(1, store.clearCount)
     }
 
     @Test
-    fun deleteClearsMatchingMetadataOnlyAfterReaderConfirmsNotFound() = runBlocking {
+    fun deleteClearsMatchingMetadataAfterVerifiedPostResult() = runBlocking {
         val blogId = BlogId(101)
         val store = FakeConfigStore(
             StoredAppSyncBlogConfig(
@@ -857,7 +857,7 @@ class AppSyncCloudConfigClientTest {
     }
 
     @Test
-    fun deleteParserFailureNeedsCompleteListScanBeforeMetadataClear() = runBlocking {
+    fun deleteDoesNotDependOnStaleReaderOrBlogListAfterPostSuccess() = runBlocking {
         val blogId = BlogId(111)
         val original = StoredAppSyncBlogConfig(
             AppSyncCloudConfigDefaults.BLOG_NAME,
@@ -889,11 +889,11 @@ class AppSyncCloudConfigClientTest {
             }
         }
 
-        assertIs<AppSyncCloudResult.AcknowledgedButUnverified>(
+        assertIs<AppSyncCloudResult.VerifiedSuccess<Unit>>(
             client(failedProvider, failedStore).deleteBlogConfig(blogId, FORM_HASH),
         )
-        assertEquals(original, failedStore.value)
-        assertEquals(0, failedStore.clearCount)
+        assertNull(failedStore.value)
+        assertEquals(1, failedStore.clearCount)
     }
 
     private fun client(

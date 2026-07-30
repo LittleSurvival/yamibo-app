@@ -9,6 +9,9 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncInstallation
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncOperationLifecycle
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRunLease
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncVerifiedCheckpoint
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncAutomaticTrigger
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncScheduleSettings
+import me.thenano.yamibo.yamibo_app.repository.appsync.appSyncIntervalFromStorageKey
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.CURRENT_SYNC_OPERATION_SCHEMA_VERSION
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncAccountBinding
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncCausalContext
@@ -59,6 +62,11 @@ internal class SqlDelightAppSyncOperationStore(
             journalBlogId = null,
             lastFullDiscoveryAt = null,
             automaticEnabled = 0L,
+            syncOnAppStart = 0L,
+            syncOnForegroundExit = 0L,
+            periodicIntervalKey = "6h",
+            requestedTriggerGeneration = 0L,
+            accountedTriggerGeneration = 0L,
         )
         return installation() ?: error("Failed to initialize AppSync installation")
     }
@@ -77,6 +85,13 @@ internal class SqlDelightAppSyncOperationStore(
                 journalBlogId = row.journalBlogId,
                 lastFullDiscoveryAt = row.lastFullDiscoveryAt,
                 automaticEnabled = row.automaticEnabled != 0L,
+                scheduleSettings = AppSyncScheduleSettings(
+                    syncOnAppStart = row.syncOnAppStart != 0L,
+                    syncOnForegroundExit = row.syncOnForegroundExit != 0L,
+                    periodicInterval = appSyncIntervalFromStorageKey(row.periodicIntervalKey),
+                ),
+                requestedTriggerGeneration = row.requestedTriggerGeneration,
+                accountedTriggerGeneration = row.accountedTriggerGeneration,
             )
         }
 
@@ -136,6 +151,44 @@ internal class SqlDelightAppSyncOperationStore(
 
     override fun setAutomaticEnabled(enabled: Boolean) {
         queries.setAutomaticEnabled(if (enabled) 1L else 0L)
+    }
+
+    override fun setScheduleSettings(settings: AppSyncScheduleSettings) {
+        require(settings.periodicInterval in me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncPeriodicIntervals) {
+            "Unsupported AppSync periodic interval"
+        }
+        queries.setScheduleSettings(
+            syncOnAppStart = if (settings.syncOnAppStart) 1L else 0L,
+            syncOnForegroundExit = if (settings.syncOnForegroundExit) 1L else 0L,
+            periodicIntervalKey = settings.periodicInterval.storageKey,
+        )
+    }
+
+    override fun requestAutomaticTrigger(trigger: AppSyncAutomaticTrigger): Long? {
+        var requestedGeneration: Long? = null
+        db.transaction {
+            val current = requireInstallation()
+            val triggerEnabled = when (trigger) {
+                AppSyncAutomaticTrigger.AppStartup -> current.scheduleSettings.syncOnAppStart
+                AppSyncAutomaticTrigger.ForegroundExit ->
+                    current.scheduleSettings.syncOnForegroundExit
+            }
+            if (current.automaticEnabled && triggerEnabled) {
+                queries.advanceRequestedTriggerGeneration()
+                requestedGeneration = requireInstallation().requestedTriggerGeneration
+            }
+        }
+        return requestedGeneration
+    }
+
+    override fun accountAutomaticTrigger(upToGeneration: Long) {
+        db.transaction {
+            val current = requireInstallation()
+            val accounted = minOf(upToGeneration, current.requestedTriggerGeneration)
+            if (accounted > current.accountedTriggerGeneration) {
+                queries.setAccountedTriggerGeneration(accounted)
+            }
+        }
     }
 
     override fun prepareForCloudReset() {
@@ -391,6 +444,16 @@ internal class SqlDelightAppSyncOperationStore(
                 verifiedAtEpochMillis = requireNotNull(it.verifiedAtEpochMillis),
             )
         }
+
+    override fun retainVerifiedCheckpoints(checkpointIds: Set<String>) {
+        queries.transaction {
+            queries.getVerifiedCheckpoints().executeAsList()
+                .asSequence()
+                .map { it.checkpointId }
+                .filterNot(checkpointIds::contains)
+                .forEach(queries::deleteCheckpoint)
+        }
+    }
 
     private fun recordReductionMetadata(
         result: OperationReductionResult,
