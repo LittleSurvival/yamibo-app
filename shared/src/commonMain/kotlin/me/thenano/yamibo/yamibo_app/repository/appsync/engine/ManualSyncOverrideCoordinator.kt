@@ -24,6 +24,8 @@ internal data class ManualSyncDifference(
     val deleted: Int = 0,
     val enabled: Int = 0,
     val disabled: Int = 0,
+    val details: List<String> = emptyList(),
+    val remainingDetailCount: Int = 0,
 )
 
 internal data class ManualSyncOverridePreview(
@@ -310,6 +312,7 @@ internal class ManualSyncOverrideCoordinator(
             var deleted: Int = 0,
             var enabled: Int = 0,
             var disabled: Int = 0,
+            val details: MutableList<String> = mutableListOf(),
         )
         val counts = linkedMapOf<String, Counts>()
         val sourceByIdentity = latestByIdentity(source)
@@ -329,7 +332,7 @@ internal class ManualSyncOverrideCoordinator(
                     after?.fields?.get("type")?.value == "bool" -> {
                     if (after.fields["value"]?.value == "true") bucket.enabled++ else bucket.disabled++
                 }
-                domainId in FAVORITE_UPDATE_FILTER_DOMAINS -> {
+                domainId in TOGGLE_DOMAINS -> {
                     if (after?.fields?.get("enabled")?.value == "true") {
                         bucket.enabled++
                     } else {
@@ -338,8 +341,13 @@ internal class ManualSyncOverrideCoordinator(
                 }
                 else -> bucket.updated++
             }
+            val detail = (after ?: before)?.safeDisplayDetail(domainId)
+            if (detail != null && detail !in bucket.details && bucket.details.size < MAX_DETAILS) {
+                bucket.details += detail
+            }
         }
         return counts.map { (domain, value) ->
+            val total = value.added + value.updated + value.deleted + value.enabled + value.disabled
             ManualSyncDifference(
                 domainId = domain,
                 added = value.added,
@@ -347,7 +355,31 @@ internal class ManualSyncOverrideCoordinator(
                 deleted = value.deleted,
                 enabled = value.enabled,
                 disabled = value.disabled,
+                details = value.details,
+                remainingDetailCount = if (value.details.isEmpty()) {
+                    0
+                } else {
+                    (total - value.details.size).coerceAtLeast(0)
+                },
             )
+        }
+    }
+
+    private fun ResolvedSyncEntity.safeDisplayDetail(domainId: String): String? {
+        fun field(name: String): String? = fields[name]?.value?.takeIf { it.isNotBlank() }
+        return when (domainId) {
+            "favorite.update-event" ->
+                field("title") ?: field("latestPostTitle") ?: field("forumName") ?: "未命名更新項目"
+            "favorite.update-fid-filter" ->
+                field("forumName") ?: field("fid")?.let { "FID $it" } ?: "未命名版塊篩選"
+            "favorite.update-category-filter" -> "分類更新篩選"
+            "rss.search-subscription" -> field("title") ?: field("query")
+            "favorite.item",
+            "favorite.category",
+            "favorite.collection",
+            "reading.thread",
+            -> field("title") ?: field("name") ?: field("threadName") ?: "未命名項目"
+            else -> field("title") ?: field("name")
         }
     }
 
@@ -403,12 +435,14 @@ internal class ManualSyncOverrideCoordinator(
         added + updated + deleted + enabled + disabled
 
     private companion object {
-        val FAVORITE_UPDATE_FILTER_DOMAINS = setOf(
+        val TOGGLE_DOMAINS = setOf(
             "favorite.update-fid-filter",
             "favorite.update-category-filter",
+            "rss.search-subscription",
         )
         const val FORCE_PUSH_SCOPE = "manual-force-push"
         const val AUTHORIZATION_WINDOW_MILLIS = 5 * 60 * 1_000L
         const val LEASE_DURATION_MILLIS = 15 * 60 * 1_000L
+        const val MAX_DETAILS = 5
     }
 }

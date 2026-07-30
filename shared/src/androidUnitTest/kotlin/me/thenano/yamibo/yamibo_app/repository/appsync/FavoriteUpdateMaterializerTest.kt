@@ -22,6 +22,102 @@ import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 
 class FavoriteUpdateMaterializerTest {
     @Test
+    fun fieldlessRemoteTombstonesDeleteStableIdentityProjections() {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        Database.Schema.create(driver)
+        val db = Database(driver)
+        val adapter = SqlDelightSyncDomainStateAdapter(
+            db,
+            DatabaseSyncDomainMaterializer(db, MemorySettingsStore()),
+            nowMillis = { 1_000 },
+        )
+        val puts = listOf(
+            operation(
+                "a", 1, "favorite.item", "ThreadNormal|42|9", SyncOperationKind.Put,
+                mapOf(
+                    "targetType" to "ThreadNormal", "targetId" to "42", "authorId" to "9",
+                    "title" to "favorite", "coverUrl" to null, "lastUpdatedTime" to null,
+                    "forumId" to null, "forumName" to null, "createdAt" to "1",
+                    "lastFavoriteStatusUpdateAt" to "1",
+                ),
+            ),
+            operation(
+                "a", 2, "detail-note", "Thread|42|9", SyncOperationKind.Put,
+                mapOf(
+                    "targetType" to "Thread", "targetId" to "42", "authorId" to "9",
+                    "content" to "note", "createdAt" to "1", "updatedAt" to "1",
+                ),
+            ),
+            operation(
+                "a", 3, "bookmark", "Thread|42|7", SyncOperationKind.Put,
+                mapOf(
+                    "targetType" to "Thread", "parentId" to "42", "targetId" to "7",
+                    "title" to "bookmark", "bookmarked" to "true", "read" to "false",
+                    "createdAt" to "1", "updatedAt" to "1",
+                ),
+            ),
+            operation(
+                "a", 4, "reading.thread", "42|Normal|9|Direct", SyncOperationKind.Put,
+                mapOf(
+                    "threadId" to "42", "threadType" to "Normal", "authorId" to "9",
+                    "historyOrigin" to "Direct", "threadName" to "thread", "threadCover" to null,
+                    "forumName" to null, "forumId" to null, "page" to "1", "postId" to "7",
+                    "postTitle" to "post", "anchorPostId" to "7", "anchorPostRatio" to null,
+                    "anchorBlockId" to null, "anchorBlockType" to null, "anchorBlockRatio" to null,
+                    "globalScrollY" to null, "viewportHeight" to null,
+                    "firstVisibleItemIndex" to null, "firstVisibleItemOffset" to null,
+                    "lastVisitTime" to "1", "lastUpdatedTime" to null,
+                ),
+            ),
+            operation(
+                "a", 5, "reading.image", "7", SyncOperationKind.Put,
+                mapOf(
+                    "postId" to "7", "threadId" to "42", "pageIndex" to "1",
+                    "totalPages" to "2", "firstVisibleItemIndex" to null,
+                    "firstVisibleItemOffset" to null, "lastVisitTime" to "1",
+                ),
+            ),
+            operation(
+                "a", 6, "reading.tag-manga", "21661", SyncOperationKind.Put,
+                mapOf(
+                    "tagId" to "21661", "tagName" to "tag", "tagPage" to "1",
+                    "threadId" to "42", "threadTitle" to "thread",
+                    "threadImagePageIndex" to "1", "threadImageTotalPages" to "2",
+                    "firstVisibleItemIndex" to null, "firstVisibleItemOffset" to null,
+                    "lastVisitTime" to "1", "coverUrl" to null,
+                ),
+            ),
+        )
+        adapter.apply(OperationReducer().reduce(adapter.currentState(), puts))
+
+        assertEquals(1, db.localFavoriteItemQueries.getAll().executeAsList().size)
+        assertEquals(1, db.detailNoteQueries.getAll().executeAsList().size)
+        assertEquals(1, db.localBookMarkQueries.getAll().executeAsList().size)
+        assertEquals(1, db.readingHistoryQueries.getAll().executeAsList().size)
+        assertEquals(1, db.imageReadingHistoryQueries.getAll().executeAsList().size)
+        assertEquals(1, db.mangaTagReadingHistoryQueries.getAll().executeAsList().size)
+
+        val deletes = puts.mapIndexed { index, put ->
+            operation(
+                "b",
+                (index + 1).toLong(),
+                put.domainId.value,
+                put.entityId.value,
+                SyncOperationKind.Delete,
+                emptyMap(),
+            )
+        }
+        adapter.apply(OperationReducer().reduce(adapter.currentState(), deletes))
+
+        assertEquals(0, db.localFavoriteItemQueries.getAll().executeAsList().size)
+        assertEquals(0, db.detailNoteQueries.getAll().executeAsList().size)
+        assertEquals(0, db.localBookMarkQueries.getAll().executeAsList().size)
+        assertEquals(0, db.readingHistoryQueries.getAll().executeAsList().size)
+        assertEquals(0, db.imageReadingHistoryQueries.getAll().executeAsList().size)
+        assertEquals(0, db.mangaTagReadingHistoryQueries.getAll().executeAsList().size)
+    }
+
+    @Test
     fun materializesLifecycleAndChoicesAndPreservesTransientScannerState() {
         val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
         Database.Schema.create(driver)

@@ -22,6 +22,7 @@ internal object PortableDomainManifest {
         included("LocalFavoriteCategory", appSync = true),
         included("LocalFavoriteCollection", appSync = true),
         included("LocalFavoriteItem", appSync = true),
+        included("RssSearchSubscription", appSync = true),
         included("LocalFavoriteItemCategoryCrossRef", appSync = true),
         included("LocalFavoriteItemCollectionCrossRef", appSync = true),
         included("DetailNote", appSync = true),

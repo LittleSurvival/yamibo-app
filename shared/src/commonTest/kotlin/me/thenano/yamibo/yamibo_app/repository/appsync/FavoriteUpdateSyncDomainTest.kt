@@ -101,6 +101,51 @@ class FavoriteUpdateSyncDomainTest {
     }
 
     @Test
+    fun clockSkewCannotOverrideCausalOrOperationIdOrdering() {
+        val oldClock = operation(
+            "a", 1, "favorite.update-fid-filter", "fid:7",
+            SyncOperationKind.Put, mapOf("fid" to "7", "enabled" to "true"),
+            createdAtEpochMillis = 9_000,
+        )
+        val causalSuccessor = operation(
+            "b", 1, "favorite.update-fid-filter", "fid:7",
+            SyncOperationKind.Patch, mapOf("fid" to "7", "enabled" to "false"),
+            context = SyncCausalContext().advance(oldClock.replicaKey, oldClock.sequence),
+            createdAtEpochMillis = 1,
+        )
+        val concurrentLowClock = operation(
+            "c", 1, "favorite.update-fid-filter", "fid:8",
+            SyncOperationKind.Put, mapOf("fid" to "8", "enabled" to "true"),
+            createdAtEpochMillis = 9_000,
+        )
+        val concurrentHighId = operation(
+            "z", 1, "favorite.update-fid-filter", "fid:8",
+            SyncOperationKind.Put, mapOf("fid" to "8", "enabled" to "false"),
+            createdAtEpochMillis = 1,
+        )
+
+        val state = OperationReducer().reduce(
+            operations = listOf(
+                concurrentHighId,
+                causalSuccessor,
+                concurrentLowClock,
+                oldClock,
+            ),
+        ).entities.values.associateBy { it.key.entityId.value }
+        val concurrentWinner = maxOf(
+            concurrentLowClock,
+            concurrentHighId,
+            compareBy { it.operationId.value },
+        )
+
+        assertEquals("false", state.getValue("fid:7").fields.getValue("enabled").value)
+        assertEquals(
+            concurrentWinner.fields.getValue("enabled"),
+            state.getValue("fid:8").fields.getValue("enabled").value,
+        )
+    }
+
+    @Test
     fun backupProjectionCreatesExactlyOneDraftPerDurableFavoriteUpdateEntity() {
         val put = eventPut("a", 1)
         val fields = put.fields
@@ -275,6 +320,7 @@ class FavoriteUpdateSyncDomainTest {
         kind: SyncOperationKind,
         fields: Map<String, String?>,
         context: SyncCausalContext = SyncCausalContext(),
+        createdAtEpochMillis: Long = 100,
     ): SyncOperation {
         val deviceId = SyncDeviceId(device)
         val epoch = SyncDeviceEpoch("epoch")
@@ -290,7 +336,7 @@ class FavoriteUpdateSyncDomainTest {
             kind = kind,
             fields = fields,
             causalContext = context,
-            createdAtEpochMillis = 100,
+            createdAtEpochMillis = createdAtEpochMillis,
             origin = SyncOperationOrigin.UserAction,
         )
     }

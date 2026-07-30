@@ -10,9 +10,15 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDeviceEpoch
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDeviceId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperation
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncWriterNonce
+import okio.Buffer
+import okio.ByteString.Companion.decodeBase64
+import okio.GzipSink
+import okio.GzipSource
+import okio.buffer
 
 internal object AppSyncJournalDefaults {
     const val JOURNAL_SCHEMA_VERSION = 1
+    const val COMPRESSED_ENVELOPE_SCHEMA_VERSION = 2
     const val JOURNAL_MARKER = "YAMIBO_APP_SYNC_JOURNAL:ymb-sync-9f4c2a7"
     const val INDEX_MARKER = "YAMIBO_APP_SYNC_INDEX:ymb-sync-9f4c2a7"
     const val CHECKPOINT_MARKER = "YAMIBO_APP_SYNC_CHECKPOINT:ymb-sync-9f4c2a7"
@@ -68,11 +74,12 @@ internal class AppSyncJournalEnvelopeCodec(
         validatePayload(payload)?.let { throw IllegalArgumentException(it) }
         val payloadJson = json.encodeToString(AppSyncJournalPayload.serializer(), payload)
         val fingerprint = stableAppSyncFingerprint(payloadJson)
+        val encodedPayload = compress(payloadJson)
         return buildString {
             appendLine("[${AppSyncJournalDefaults.JOURNAL_MARKER}:BEGIN]")
-            appendLine("schema=${AppSyncJournalDefaults.JOURNAL_SCHEMA_VERSION}")
+            appendLine("schema=${AppSyncJournalDefaults.COMPRESSED_ENVELOPE_SCHEMA_VERSION}")
             appendLine("fingerprint=$fingerprint")
-            appendLine("payload=$payloadJson")
+            appendLine("payload=$encodedPayload")
             append("[${AppSyncJournalDefaults.JOURNAL_MARKER}:END]")
         }
     }
@@ -99,13 +106,27 @@ internal class AppSyncJournalEnvelopeCodec(
         val body = text.substring(beginIndex + begin.length, endIndex).trim()
         val schema = SCHEMA_REGEX.find(body)?.groupValues?.get(1)?.toIntOrNull()
             ?: return invalid("Journal schema is missing", true)
-        if (schema != AppSyncJournalDefaults.JOURNAL_SCHEMA_VERSION) {
+        if (
+            schema != AppSyncJournalDefaults.COMPRESSED_ENVELOPE_SCHEMA_VERSION &&
+            schema != AppSyncJournalDefaults.JOURNAL_SCHEMA_VERSION
+        ) {
             return invalid("Unsupported journal schema: $schema", true)
         }
         val fingerprint = FINGERPRINT_REGEX.find(body)?.groupValues?.get(1)
             ?: return invalid("Journal fingerprint is missing", true)
-        val payloadJson = PAYLOAD_REGEX.find(body)?.groupValues?.get(1)?.trim()
+        val encodedPayload = PAYLOAD_REGEX.find(body)?.groupValues?.get(1)?.trim()
             ?: return invalid("Journal payload is missing", true)
+        val payloadJson = if (schema == AppSyncJournalDefaults.JOURNAL_SCHEMA_VERSION) {
+            encodedPayload
+        } else {
+            decompress(encodedPayload).getOrElse {
+                return invalid(
+                    "Journal compressed payload is invalid: " +
+                        (it.message ?: it::class.simpleName),
+                    true,
+                )
+            }
+        }
         val payload = try {
             json.decodeFromString(AppSyncJournalPayload.serializer(), payloadJson)
         } catch (error: Throwable) {
@@ -152,9 +173,62 @@ internal class AppSyncJournalEnvelopeCodec(
     private fun invalid(reason: String, markerPresent: Boolean) =
         AppSyncJournalValidation.Invalid(reason, markerPresent)
 
+    private fun compress(value: String): String {
+        val bytes = value.encodeToByteArray()
+        require(bytes.size <= MAX_DECOMPRESSED_BYTES) {
+            "Journal JSON exceeds $MAX_DECOMPRESSED_BYTES bytes"
+        }
+        val output = Buffer()
+        val sink = GzipSink(output).buffer()
+        try {
+            sink.write(bytes)
+        } finally {
+            sink.close()
+        }
+        require(output.size <= MAX_COMPRESSED_BYTES) {
+            "Compressed journal exceeds $MAX_COMPRESSED_BYTES bytes"
+        }
+        return COMPRESSED_PAYLOAD_PREFIX + output.readByteString().base64()
+    }
+
+    private fun decompress(value: String): Result<String> = runCatching {
+        require(value.startsWith(COMPRESSED_PAYLOAD_PREFIX)) {
+            "Compressed journal framing prefix is missing"
+        }
+        val compressed = requireNotNull(
+            value.removePrefix(COMPRESSED_PAYLOAD_PREFIX).decodeBase64(),
+        ) {
+            "Journal Base64 payload is invalid"
+        }
+        require(compressed.size <= MAX_COMPRESSED_BYTES) {
+            "Compressed journal exceeds $MAX_COMPRESSED_BYTES bytes"
+        }
+        val source = GzipSource(Buffer().write(compressed)).buffer()
+        val output = Buffer()
+        try {
+            while (true) {
+                val remaining = MAX_DECOMPRESSED_BYTES.toLong() - output.size
+                require(remaining >= 0) {
+                    "Decoded journal exceeds $MAX_DECOMPRESSED_BYTES bytes"
+                }
+                val read = source.read(output, minOf(8_192L, remaining + 1L))
+                if (read == -1L) break
+                require(output.size <= MAX_DECOMPRESSED_BYTES) {
+                    "Decoded journal exceeds $MAX_DECOMPRESSED_BYTES bytes"
+                }
+            }
+        } finally {
+            source.close()
+        }
+        output.readByteArray().decodeToString(throwOnInvalidSequence = true)
+    }
+
     private companion object {
+        const val COMPRESSED_PAYLOAD_PREFIX = "gzip-base64:"
+        const val MAX_COMPRESSED_BYTES = 4 * 1024 * 1024
+        const val MAX_DECOMPRESSED_BYTES = 32 * 1024 * 1024
         val SCHEMA_REGEX = Regex("""(?:^|\s)schema=(\d+)(?=\s|$)""")
         val FINGERPRINT_REGEX = Regex("""(?:^|\s)fingerprint=([0-9a-fA-F]+)(?=\s|$)""")
-        val PAYLOAD_REGEX = Regex("""(?:^|\s)payload=(\{.*\})\s*$""", RegexOption.DOT_MATCHES_ALL)
+        val PAYLOAD_REGEX = Regex("""(?:^|\s)payload=(.*)\s*$""", RegexOption.DOT_MATCHES_ALL)
     }
 }

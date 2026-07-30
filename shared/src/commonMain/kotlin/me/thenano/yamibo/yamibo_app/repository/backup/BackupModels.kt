@@ -23,6 +23,7 @@ internal data class BackupFavorites(
     val categories: List<BackupFavoriteCategory> = emptyList(),
     val collections: List<BackupFavoriteCollection> = emptyList(),
     val items: List<BackupFavoriteItem> = emptyList(),
+    val rssSubscriptions: List<BackupRssSearchSubscription> = emptyList(),
     val itemCategories: List<BackupFavoriteItemCategory> = emptyList(),
     val itemCollections: List<BackupFavoriteItemCollection> = emptyList(),
 )
@@ -62,6 +63,19 @@ internal data class BackupFavoriteItem(
     val authorId: Long,
     val createdAt: Long,
     val lastFavoriteStatusUpdateAt: Long,
+)
+
+@Serializable
+internal data class BackupRssSearchSubscription(
+    val localId: Long,
+    val syncId: String,
+    val title: String,
+    val query: String,
+    val forumId: Long?,
+    val forumName: String?,
+    val enabled: Boolean,
+    val createdAt: Long,
+    val updatedAt: Long,
 )
 
 @Serializable

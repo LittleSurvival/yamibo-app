@@ -154,6 +154,13 @@ class AppSyncLocalMutationRoutingTest {
             categoryIds = listOf(category.id),
             collectionIds = emptyList(),
         )
+        repository.addTagMangaFavorite(
+            tagId = TagId(77),
+            tagName = "title",
+            coverUrl = null,
+            categoryIds = listOf(category.id),
+            collectionIds = emptyList(),
+        )
 
         val pending = fixture.store.pendingOperations()
         assertEquals(

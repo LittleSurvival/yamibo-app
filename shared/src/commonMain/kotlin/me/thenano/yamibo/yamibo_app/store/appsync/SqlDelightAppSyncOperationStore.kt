@@ -100,14 +100,20 @@ internal class SqlDelightAppSyncOperationStore(
         state: AppSyncInstallationState,
     ) {
         val current = requireInstallation()
-        queries.updateInstallationIdentity(
-            accountBinding = accountBinding.value,
-            deviceId = SyncIdentityGenerator.deviceId().value,
-            deviceEpoch = SyncIdentityGenerator.deviceEpoch().value,
-            writerNonce = SyncIdentityGenerator.writerNonce().value,
-            nextSequence = 1L,
-            state = state.toDb(),
-        )
+        db.transaction {
+            queries.markReplicaOperationsDiscardedByRebootstrap(
+                deviceId = current.deviceId.value,
+                deviceEpoch = current.deviceEpoch.value,
+            )
+            queries.updateInstallationIdentity(
+                accountBinding = accountBinding.value,
+                deviceId = SyncIdentityGenerator.deviceId().value,
+                deviceEpoch = SyncIdentityGenerator.deviceEpoch().value,
+                writerNonce = SyncIdentityGenerator.writerNonce().value,
+                nextSequence = 1L,
+                state = state.toDb(),
+            )
+        }
         check(current.databaseGeneration == requireInstallation().databaseGeneration)
     }
 

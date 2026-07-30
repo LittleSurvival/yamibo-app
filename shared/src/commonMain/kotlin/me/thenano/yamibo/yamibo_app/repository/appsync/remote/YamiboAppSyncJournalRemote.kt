@@ -145,8 +145,8 @@ internal class YamiboAppSyncJournalRemote(
         forceDiscovery: Boolean,
     ): AppSyncJournalLoadResult {
         if (!forceDiscovery) {
-            val cached = loadCachedJournals(accountBinding)
-            if (cached != null) return AppSyncJournalLoadResult.Success(cached)
+            val cached = loadCachedState(accountBinding)
+            if (cached != null) return cached
         }
         return discoverAll(accountBinding)
     }
@@ -364,20 +364,40 @@ internal class YamiboAppSyncJournalRemote(
         }
     }
 
-    private suspend fun loadCachedJournals(
+    private suspend fun loadCachedState(
         accountBinding: SyncAccountBinding,
-    ): List<LoadedAppSyncJournal>? {
-        val cached = linkedMapOf<String, StoredAppSyncRemoteBlog>()
-        store.loadKind(AppSyncRemoteBlogKind.Journal).forEach { cached[it.remoteKey] = it }
+    ): AppSyncJournalLoadResult.Success? {
+        val cachedJournals = linkedMapOf<String, StoredAppSyncRemoteBlog>()
+        val cachedCheckpoints = linkedMapOf<String, StoredAppSyncRemoteBlog>()
+        store.loadKind(AppSyncRemoteBlogKind.Journal).forEach {
+            cachedJournals[it.remoteKey] = it
+        }
+        store.loadKind(AppSyncRemoteBlogKind.Checkpoint).forEach {
+            cachedCheckpoints[it.remoteKey] = it
+        }
         val index = store.load(INDEX_REMOTE_KEY)
         if (index != null) {
             when (val loadedIndex = loadIndex(index, accountBinding)) {
                 is IndexCandidateResult.Valid -> {
                     loadedIndex.payload.journals.forEach { reference ->
-                        if (reference.replicaKey !in cached) {
-                            cached[reference.replicaKey] = StoredAppSyncRemoteBlog(
+                        if (reference.replicaKey !in cachedJournals) {
+                            cachedJournals[reference.replicaKey] = StoredAppSyncRemoteBlog(
                                 remoteKey = reference.replicaKey,
                                 kind = AppSyncRemoteBlogKind.Journal,
+                                blogId = BlogId(reference.blogId),
+                                classId = index.classId,
+                                fingerprint = reference.fingerprint,
+                                validatedAtEpochMillis = 0,
+                                contentUpdatedAtEpochMillis = null,
+                            )
+                        }
+                    }
+                    loadedIndex.payload.checkpoints.forEach { reference ->
+                        val remoteKey = "checkpoint:${reference.checkpointId}"
+                        if (remoteKey !in cachedCheckpoints) {
+                            cachedCheckpoints[remoteKey] = StoredAppSyncRemoteBlog(
+                                remoteKey = remoteKey,
+                                kind = AppSyncRemoteBlogKind.Checkpoint,
                                 blogId = BlogId(reference.blogId),
                                 classId = index.classId,
                                 fingerprint = reference.fingerprint,
@@ -392,14 +412,14 @@ internal class YamiboAppSyncJournalRemote(
                 is IndexCandidateResult.Terminal -> Unit
             }
         }
-        if (cached.isEmpty()) return null
+        if (cachedJournals.isEmpty() && cachedCheckpoints.isEmpty()) return null
 
-        val loaded = mutableListOf<LoadedAppSyncJournal>()
-        for (candidate in cached.values) {
+        val loadedJournals = mutableListOf<LoadedAppSyncJournal>()
+        for (candidate in cachedJournals.values) {
             when (val result = loadJournal(candidate, accountBinding)) {
                 is JournalCandidateResult.Valid -> {
                     saveJournal(candidate, result.journal)
-                    loaded += result.journal
+                    loadedJournals += result.journal
                 }
                 JournalCandidateResult.NotFound -> {
                     store.remove(candidate.remoteKey)
@@ -411,7 +431,28 @@ internal class YamiboAppSyncJournalRemote(
                 }
             }
         }
-        return loaded.takeIf { it.isNotEmpty() }
+        val loadedCheckpoints = mutableListOf<LoadedAppSyncCheckpoint>()
+        for (candidate in cachedCheckpoints.values) {
+            when (val result = loadCheckpoint(candidate, accountBinding)) {
+                is CheckpointCandidateResult.Valid -> {
+                    saveCheckpoint(candidate, result.checkpoint)
+                    loadedCheckpoints += result.checkpoint
+                }
+                CheckpointCandidateResult.NotFound -> {
+                    store.remove(candidate.remoteKey)
+                    return null
+                }
+                is CheckpointCandidateResult.Retryable -> return null
+                is CheckpointCandidateResult.Terminal -> {
+                    // Corruption of one checkpoint does not block valid journals.
+                }
+            }
+        }
+        if (loadedJournals.isEmpty() && loadedCheckpoints.isEmpty()) return null
+        return AppSyncJournalLoadResult.Success(
+            journals = loadedJournals.distinctBy { it.payload.replicaKey() },
+            checkpoints = loadedCheckpoints.distinctBy { it.envelope.payload.checkpointId },
+        )
     }
 
     private suspend fun discoverAll(

@@ -54,6 +54,23 @@ internal class BackupSnapshotMigrationPlanner {
             snapshot.favorites.items.forEach {
                 add(put("favorite.item", it.entityId(), it.fields()))
             }
+            snapshot.favorites.rssSubscriptions.forEach {
+                add(
+                    put(
+                        "rss.search-subscription",
+                        it.syncId,
+                        mapOf(
+                            "title" to it.title,
+                            "query" to it.query,
+                            "forumId" to it.forumId?.toString(),
+                            "forumName" to it.forumName,
+                            "enabled" to it.enabled.toString(),
+                            "createdAt" to it.createdAt.toString(),
+                            "updatedAt" to it.updatedAt.toString(),
+                        ),
+                    ),
+                )
+            }
             snapshot.favorites.itemCategories.forEach {
                 val item = requireNotNull(items[it.itemLocalId])
                 val categorySyncId = requireNotNull(categorySyncIds[it.categoryLocalId])

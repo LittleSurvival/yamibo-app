@@ -95,6 +95,7 @@ class PortableBackupCoverageContractTest {
         if (favorites.categories.isNotEmpty()) add("LocalFavoriteCategory")
         if (favorites.collections.isNotEmpty()) add("LocalFavoriteCollection")
         if (favorites.items.isNotEmpty()) add("LocalFavoriteItem")
+        if (favorites.rssSubscriptions.isNotEmpty()) add("RssSearchSubscription")
         if (favorites.itemCategories.isNotEmpty()) add("LocalFavoriteItemCategoryCrossRef")
         if (favorites.itemCollections.isNotEmpty()) add("LocalFavoriteItemCollectionCrossRef")
         if (backup.notes.isNotEmpty()) add("DetailNote")
@@ -128,7 +129,6 @@ class PortableBackupCoverageContractTest {
             "FavoriteSyncRemoteThread",
             "FavoriteSyncTask",
             "RssSearchPageCache",
-            "RssSearchSubscription",
             "RssSearchSubscriptionResult",
             "SignDailyRecord",
         )

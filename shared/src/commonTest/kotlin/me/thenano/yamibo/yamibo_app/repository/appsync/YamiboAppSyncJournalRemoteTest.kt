@@ -17,6 +17,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import me.thenano.yamibo.yamibo_app.repository.appsync.domain.stableAppSyncFingerprint
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalLoadResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalPublishResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncCloudConfigDefaults
@@ -33,10 +34,12 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationOr
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncSequence
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncWriterNonce
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.APP_SYNC_INDEX_TITLE
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointEnvelopeCodec
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncBlogDeleteRequest
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncBlogProvider
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncBlogWriteRequest
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCloudResetResult
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncIndexCheckpointReference
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncIndexEnvelopeCodec
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncIndexJournalReference
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncIndexPayload
@@ -45,6 +48,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncJournalEnve
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncJournalPayload
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncPostAcknowledgement
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.YamiboAppSyncJournalRemote
+import me.thenano.yamibo.yamibo_app.repository.backup.YamiboBackupFile
 import me.thenano.yamibo.yamibo_app.store.appsync.AppSyncRemoteBlogKind
 import me.thenano.yamibo.yamibo_app.store.appsync.AppSyncRemoteBlogStore
 import me.thenano.yamibo.yamibo_app.store.appsync.StoredAppSyncRemoteBlog
@@ -52,6 +56,7 @@ import me.thenano.yamibo.yamibo_app.store.appsync.StoredAppSyncRemoteBlog
 class YamiboAppSyncJournalRemoteTest {
     private val journalCodec = AppSyncJournalEnvelopeCodec()
     private val indexCodec = AppSyncIndexEnvelopeCodec()
+    private val checkpointCodec = AppSyncCheckpointEnvelopeCodec()
 
     @Test
     fun validCachedJournalAvoidsDiscovery() = runBlocking {
@@ -71,6 +76,79 @@ class YamiboAppSyncJournalRemoteTest {
         assertEquals(listOf(payload), result.journals.map { it.payload })
         assertEquals(0, provider.fetchBlogListCalls)
         assertEquals(1, provider.fetchBlogCalls)
+    }
+
+    @Test
+    fun validCachedIndexLoadsCheckpointWithoutDiscovery() = runBlocking {
+        val journal = payload()
+        val journalBlogId = BlogId(14)
+        val checkpointBlogId = BlogId(15)
+        val indexBlogId = BlogId(16)
+        val checkpoint = checkpointCodec.createPayload(
+            checkpointId = "checkpoint-1",
+            accountBinding = ACCOUNT,
+            coverage = SyncCausalContext(),
+            snapshot = YamiboBackupFile(appVersionCode = 1, createdAt = 100),
+            tombstones = emptyList(),
+            createdAtEpochMillis = 100,
+        )
+        val checkpointFingerprint = assertIs<
+            me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointValidation.Valid
+            >(checkpointCodec.validate(checkpointCodec.encode(checkpoint))).envelope.fingerprint
+        val index = AppSyncIndexPayload(
+            accountBinding = ACCOUNT,
+            journals = listOf(
+                AppSyncIndexJournalReference(
+                    replicaKey = journal.replicaKey(),
+                    blogId = journalBlogId.value,
+                    fingerprint = null,
+                ),
+            ),
+            checkpoints = listOf(
+                AppSyncIndexCheckpointReference(
+                    checkpointId = checkpoint.checkpointId,
+                    blogId = checkpointBlogId.value,
+                    fingerprint = checkpointFingerprint,
+                ),
+            ),
+            updatedAtEpochMillis = 100,
+        )
+        val provider = FakeProvider().apply {
+            blogs[indexBlogId] = success(
+                page(indexBlogId, APP_SYNC_INDEX_TITLE, indexCodec.encode(index)),
+            )
+            blogs[journalBlogId] = success(journalPage(journalBlogId, journal))
+            blogs[checkpointBlogId] = success(
+                page(
+                    checkpointBlogId,
+                    AppSyncJournalDefaults.checkpointTitle(checkpoint.checkpointId),
+                    checkpointCodec.encode(checkpoint),
+                ),
+            )
+        }
+        val store = FakeRemoteStore(
+            StoredAppSyncRemoteBlog(
+                remoteKey = "index",
+                kind = AppSyncRemoteBlogKind.Index,
+                blogId = indexBlogId,
+                classId = CLASS_ID,
+                fingerprint = null,
+                validatedAtEpochMillis = 0,
+                contentUpdatedAtEpochMillis = null,
+            ),
+        )
+
+        val result = assertIs<AppSyncJournalLoadResult.Success>(
+            remote(provider, store).loadJournals(ACCOUNT, forceDiscovery = false),
+        )
+
+        assertEquals(listOf(journal), result.journals.map { it.payload })
+        assertEquals(listOf(checkpoint.checkpointId), result.checkpoints.map {
+            it.envelope.payload.checkpointId
+        })
+        assertEquals(checkpointBlogId, store.load("checkpoint:${checkpoint.checkpointId}")?.blogId)
+        assertEquals(0, provider.fetchBlogListCalls)
+        assertEquals(3, provider.fetchBlogCalls)
     }
 
     @Test
@@ -185,7 +263,12 @@ class YamiboAppSyncJournalRemoteTest {
             domainId = SyncDomainId("settings"),
             entityId = SyncEntityId("oversized"),
             kind = SyncOperationKind.Put,
-            fields = mapOf("type" to "string", "value" to "x".repeat(50_000)),
+            fields = buildMap {
+                put("type", "string")
+                repeat(8_000) { index ->
+                    put("field-$index", stableAppSyncFingerprint("value-$index"))
+                }
+            },
             createdAtEpochMillis = 1,
             origin = SyncOperationOrigin.UserAction,
         )
@@ -306,7 +389,7 @@ class YamiboAppSyncJournalRemoteTest {
                 page(
                     blogId,
                     title,
-                    journalCodec.encode(payload()).replace("schema=1", "schema=99"),
+                    journalCodec.encode(payload()).replace("schema=2", "schema=99"),
                 ),
             )
         }

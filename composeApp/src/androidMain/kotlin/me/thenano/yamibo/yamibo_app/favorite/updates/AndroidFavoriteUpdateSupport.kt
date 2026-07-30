@@ -47,7 +47,7 @@ internal object AndroidFavoriteUpdateSupport {
             localFavoriteRepository = appSyncService.favoriteStoreRepository(db),
             threadRepository = AndroidThreadRepository(cookieStore, yamiboClient, diskCacheFactory),
             tagRepository = AndroidTagRepository(cookieStore, yamiboClient, diskCacheFactory),
-            rssSearchSubscriptionRepository = RssSearchSubscriptionRepositoryImpl(
+            rssSearchSubscriptionRepository = appSyncService.rssSearchSubscriptionRepository(
                 db = db,
                 authRepository = authRepository,
                 forumRepository = forumRepository,

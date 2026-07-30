@@ -215,6 +215,7 @@ class SqlDelightAppSyncOperationStoreTest {
     fun rotatingEpochDoesNotReuseWriterIdentity() {
         val store = activeStore(inMemoryDatabase())
         val before = requireNotNull(store.installation())
+        val pending = appendSetting(store)
 
         store.rotateDeviceEpoch(SyncAccountBinding("account"), AppSyncInstallationState.Bootstrapping)
         val after = requireNotNull(store.installation())
@@ -223,6 +224,11 @@ class SqlDelightAppSyncOperationStoreTest {
         assertNotEquals(before.deviceEpoch, after.deviceEpoch)
         assertNotEquals(before.writerNonce, after.writerNonce)
         assertEquals(1L, after.nextSequence)
+        assertTrue(store.pendingOperations().isEmpty())
+        assertEquals(
+            AppSyncOperationLifecycle.DiscardedByRebootstrap,
+            store.allOutboxOperations().single { it.first.operationId == pending.operationId }.second,
+        )
     }
 
     @Test

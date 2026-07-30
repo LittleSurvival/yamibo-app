@@ -102,6 +102,7 @@ internal class SqlDelightSyncDomainStateAdapter(
             "favorite.category" to 10,
             "favorite.collection" to 20,
             "favorite.item" to 30,
+            "rss.search-subscription" to 35,
             "favorite.item-category" to 40,
             "favorite.item-collection" to 50,
             "favorite.update-event" to 55,

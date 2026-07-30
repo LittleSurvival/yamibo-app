@@ -81,7 +81,7 @@ internal class BootstrapCoordinator(
         val checkpointCoverage = checkpoint?.envelope?.payload?.coverage ?: SyncCausalContext()
         val initialState = checkpoint?.envelope?.payload?.resolvedEntities
             ?.associateBy { it.key }
-            ?: domainState.currentState()
+            ?: emptyMap()
 
         val operations = cloud.journals
             .asSequence()
@@ -112,10 +112,21 @@ internal class BootstrapCoordinator(
                 },
             )
         } else {
-            store.applyRemoteReduction(
-                reduction,
-                nowMillis(),
-                domainState::applyWithinTransaction,
+            val cloudCoverage = operations.fold(checkpointCoverage) { coverage, operation ->
+                coverage.advance(operation.replicaKey, operation.sequence)
+            }
+            val cloudOperationIds = cloud.journals
+                .asSequence()
+                .flatMap { it.payload.operations.asSequence() }
+                .mapTo(linkedSetOf()) { it.operationId }
+            store.replaceWithVerifiedCloudState(
+                result = reduction,
+                coverage = cloudCoverage,
+                cloudOperationIds = cloudOperationIds,
+                appliedAtEpochMillis = nowMillis(),
+                domainMutation = {
+                    domainState.adoptCheckpointWithinTransaction(it.entities.values)
+                },
             )
         }
         domainState.reconcileProjections()

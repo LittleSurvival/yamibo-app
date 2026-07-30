@@ -93,6 +93,8 @@ WHERE operationId = ?;
 getPendingOperations:
 SELECT * FROM AppSyncOutbox
 WHERE lifecycle IN ('PENDING_LOCAL', 'PUBLISHED_UNVERIFIED')
+  AND deviceId = (SELECT deviceId FROM AppSyncInstallation WHERE singletonId = 1)
+  AND deviceEpoch = (SELECT deviceEpoch FROM AppSyncInstallation WHERE singletonId = 1)
 ORDER BY sequence ASC;
 
 getAllOutboxOperations:
@@ -101,7 +103,9 @@ ORDER BY sequence ASC;
 
 countPendingOperations:
 SELECT COUNT(*) FROM AppSyncOutbox
-WHERE lifecycle IN ('PENDING_LOCAL', 'PUBLISHED_UNVERIFIED');
+WHERE lifecycle IN ('PENDING_LOCAL', 'PUBLISHED_UNVERIFIED')
+  AND deviceId = (SELECT deviceId FROM AppSyncInstallation WHERE singletonId = 1)
+  AND deviceEpoch = (SELECT deviceEpoch FROM AppSyncInstallation WHERE singletonId = 1);
 
 markOperationsPublishedUnverified:
 UPDATE AppSyncOutbox
@@ -123,6 +127,13 @@ markOperationsDiscardedByForcePull:
 UPDATE AppSyncOutbox
 SET lifecycle = 'DISCARDED_BY_FORCE_PULL'
 WHERE operationId IN ?
+  AND lifecycle IN ('PENDING_LOCAL', 'PUBLISHED_UNVERIFIED');
+
+markReplicaOperationsDiscardedByRebootstrap:
+UPDATE AppSyncOutbox
+SET lifecycle = 'DISCARDED_BY_REBOOTSTRAP'
+WHERE deviceId = ?
+  AND deviceEpoch = ?
   AND lifecycle IN ('PENDING_LOCAL', 'PUBLISHED_UNVERIFIED');
 
 insertAppliedOperation:

@@ -145,6 +145,32 @@ internal fun expandedBackup(
             items = listOf(
                 BackupFavoriteItem(300, "ThreadNormal", 50, "favorite", null, 80, 1, "管理版", 6, 10, 80),
             ),
+            rssSubscriptions = listOf(
+                BackupRssSearchSubscription(
+                    30,
+                    me.thenano.yamibo.yamibo_app.repository.rss
+                        .rssSearchSubscriptionSyncId("app", null),
+                    "rss search",
+                    "app",
+                    null,
+                    null,
+                    true,
+                    10,
+                    progressTime,
+                ),
+                BackupRssSearchSubscription(
+                    40,
+                    me.thenano.yamibo.yamibo_app.repository.rss
+                        .rssSearchSubscriptionSyncId("app", 1),
+                    "rss catalog",
+                    "app",
+                    1,
+                    "管理版",
+                    true,
+                    10,
+                    progressTime,
+                ),
+            ),
             itemCategories = listOf(BackupFavoriteItemCategory(300, categoryLocalId, 10)),
             itemCollections = listOf(BackupFavoriteItemCollection(300, 200, 10)),
         ),

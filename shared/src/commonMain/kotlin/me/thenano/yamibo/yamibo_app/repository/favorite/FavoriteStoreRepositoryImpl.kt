@@ -414,16 +414,19 @@ class FavoriteStoreRepositoryImpl internal constructor(
             upsertCanonicalCover(FavoriteTargetType.TagManga, tagId.value.toLong(), coverUrl, now)
 
             val itemId = if (existing != null) {
-                itemQueries.updateFavoriteItem(
-                    title = tagName,
-                    coverUrl = coverUrl ?: existing.coverUrl,
-                    lastUpdatedTime = null,
-                    forumId = null,
-                    forumName = null,
-                    authorId = 0L,
-                    lastFavoriteStatusUpdateAt = now,
-                    id = existing.id
-                )
+                val effectiveCoverUrl = coverUrl ?: existing.coverUrl
+                if (existing.title != tagName || existing.coverUrl != effectiveCoverUrl) {
+                    itemQueries.updateFavoriteItem(
+                        title = tagName,
+                        coverUrl = effectiveCoverUrl,
+                        lastUpdatedTime = null,
+                        forumId = null,
+                        forumName = null,
+                        authorId = 0L,
+                        lastFavoriteStatusUpdateAt = now,
+                        id = existing.id
+                    )
+                }
                 existing.id
             } else {
                 itemQueries.insertFavoriteItem(
@@ -637,16 +640,25 @@ class FavoriteStoreRepositoryImpl internal constructor(
         upsertCanonicalCover(targetType, tid.value.toLong(), effectiveCoverUrl, now)
 
         val itemId = if (existing != null) {
-            itemQueries.updateFavoriteItem(
-                title = title,
-                coverUrl = effectiveCoverUrl,
-                lastUpdatedTime = effectiveLastUpdatedTime,
-                forumId = forumId?.value?.toLong(),
-                forumName = forumName,
-                authorId = storedAuthorId,
-                lastFavoriteStatusUpdateAt = now,
-                id = existing.id
-            )
+            if (
+                existing.title != title ||
+                existing.coverUrl != effectiveCoverUrl ||
+                existing.lastUpdatedTime != effectiveLastUpdatedTime ||
+                existing.forumId != forumId?.value?.toLong() ||
+                existing.forumName != forumName ||
+                existing.authorId != storedAuthorId
+            ) {
+                itemQueries.updateFavoriteItem(
+                    title = title,
+                    coverUrl = effectiveCoverUrl,
+                    lastUpdatedTime = effectiveLastUpdatedTime,
+                    forumId = forumId?.value?.toLong(),
+                    forumName = forumName,
+                    authorId = storedAuthorId,
+                    lastFavoriteStatusUpdateAt = now,
+                    id = existing.id
+                )
+            }
             existing.id
         } else {
             itemQueries.insertFavoriteItem(
@@ -692,16 +704,24 @@ class FavoriteStoreRepositoryImpl internal constructor(
         upsertCanonicalCover(targetType, targetId, coverUrl, now)
 
         val itemId = if (existing != null) {
-            itemQueries.updateFavoriteItem(
-                title = title,
-                coverUrl = coverUrl ?: existing.coverUrl,
-                lastUpdatedTime = lastUpdatedTime ?: existing.lastUpdatedTime,
-                forumId = null,
-                forumName = null,
-                authorId = 0L,
-                lastFavoriteStatusUpdateAt = now,
-                id = existing.id
-            )
+            val effectiveCoverUrl = coverUrl ?: existing.coverUrl
+            val effectiveLastUpdatedTime = lastUpdatedTime ?: existing.lastUpdatedTime
+            if (
+                existing.title != title ||
+                existing.coverUrl != effectiveCoverUrl ||
+                existing.lastUpdatedTime != effectiveLastUpdatedTime
+            ) {
+                itemQueries.updateFavoriteItem(
+                    title = title,
+                    coverUrl = effectiveCoverUrl,
+                    lastUpdatedTime = effectiveLastUpdatedTime,
+                    forumId = null,
+                    forumName = null,
+                    authorId = 0L,
+                    lastFavoriteStatusUpdateAt = now,
+                    id = existing.id
+                )
+            }
             existing.id
         } else {
             itemQueries.insertFavoriteItem(
@@ -765,31 +785,34 @@ class FavoriteStoreRepositoryImpl internal constructor(
         val existingCategories = itemCategoryCrossRefQueries.getCategoryIdsByItemId(itemId).executeAsList().toSet()
         val existingCollections = crossRefQueries.getCollectionIdsByItemId(itemId).executeAsList().toSet()
 
-        existingCategories
-            .filterNot(targetCategoryIds::contains)
-            .forEach { categoryId ->
+        val removedCategories = existingCategories.filterNot(targetCategoryIds::contains)
+        removedCategories.forEach { categoryId ->
                 itemCategoryCrossRefQueries.deleteByItemIdAndCategoryId(itemId, categoryId)
             }
 
-        targetCategoryIds
-            .filterNot(existingCategories::contains)
-            .forEach { categoryId ->
+        val addedCategories = targetCategoryIds.filterNot(existingCategories::contains)
+        addedCategories.forEach { categoryId ->
                 itemCategoryCrossRefQueries.insertCrossRef(itemId, categoryId, updatedAt)
             }
 
-        existingCollections
-            .filterNot(targetCollectionIds::contains)
-            .forEach { collectionId ->
+        val removedCollections = existingCollections.filterNot(targetCollectionIds::contains)
+        removedCollections.forEach { collectionId ->
                 crossRefQueries.deleteByItemIdAndCollectionId(itemId, collectionId)
             }
 
-        targetCollectionIds
-            .filterNot(existingCollections::contains)
-            .forEach { collectionId ->
+        val addedCollections = targetCollectionIds.filterNot(existingCollections::contains)
+        addedCollections.forEach { collectionId ->
                 crossRefQueries.insertCrossRef(itemId, collectionId, updatedAt)
             }
 
-        itemQueries.markFavoriteStatusUpdated(updatedAt, itemId)
+        if (
+            removedCategories.isNotEmpty() ||
+            addedCategories.isNotEmpty() ||
+            removedCollections.isNotEmpty() ||
+            addedCollections.isNotEmpty()
+        ) {
+            itemQueries.markFavoriteStatusUpdated(updatedAt, itemId)
+        }
     }
 
     private fun appendItemLocations(
@@ -801,19 +824,24 @@ class FavoriteStoreRepositoryImpl internal constructor(
         val existingCategories = itemCategoryCrossRefQueries.getCategoryIdsByItemId(itemId).executeAsList().toMutableSet()
         val existingCollections = crossRefQueries.getCollectionIdsByItemId(itemId).executeAsList().toMutableSet()
 
+        var changed = false
         targetCategoryIds.forEach { categoryId ->
             if (existingCategories.add(categoryId)) {
                 itemCategoryCrossRefQueries.insertCrossRef(itemId, categoryId, updatedAt)
+                changed = true
             }
         }
 
         targetCollectionIds.forEach { collectionId ->
             if (existingCollections.add(collectionId)) {
                 crossRefQueries.insertCrossRef(itemId, collectionId, updatedAt)
+                changed = true
             }
         }
 
-        itemQueries.markFavoriteStatusUpdated(updatedAt, itemId)
+        if (changed) {
+            itemQueries.markFavoriteStatusUpdated(updatedAt, itemId)
+        }
     }
 
     private fun cleanupOrphanItems(itemIds: List<Long>) {

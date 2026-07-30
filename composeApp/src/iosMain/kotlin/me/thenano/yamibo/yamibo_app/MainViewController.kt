@@ -143,7 +143,7 @@ fun MainViewController() = ComposeUIViewController {
         )
     }
     val rssSearchSubscriptionRepository = remember {
-        RssSearchSubscriptionRepositoryImpl(
+        appSyncService.rssSearchSubscriptionRepository(
             db = favoriteSyncDatabase,
             authRepository = authRepository,
             forumRepository = forumRepository,

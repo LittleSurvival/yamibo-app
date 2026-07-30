@@ -24,6 +24,8 @@ internal data class OperationChangeSummary(
     val domainId: String,
     val action: OperationChangeAction,
     val count: Int,
+    val details: List<String> = emptyList(),
+    val remainingDetailCount: Int = 0,
 )
 
 internal fun summarizeWinningOperations(
@@ -52,12 +54,52 @@ private fun summarize(
     operations
         .distinctBy { it.operationId }
         .filter { it.operationId in winnerIds }
-        .groupingBy { Triple(direction, it.domainId.value, it.changeAction()) }
-        .eachCount()
-        .map { (key, count) ->
-            OperationChangeSummary(key.first, key.second, key.third, count)
+        .groupBy { Triple(direction, it.domainId.value, it.changeAction()) }
+        .map { (key, groupedOperations) ->
+            val details = groupedOperations
+                .mapNotNull { it.safeDisplayDetail() }
+                .distinct()
+                .take(MAX_DETAILS)
+            OperationChangeSummary(
+                direction = key.first,
+                domainId = key.second,
+                action = key.third,
+                count = groupedOperations.size,
+                details = details,
+                remainingDetailCount = if (details.isEmpty()) {
+                    0
+                } else {
+                    (groupedOperations.size - details.size).coerceAtLeast(0)
+                },
+            )
         }
         .sortedWith(compareBy({ it.direction }, { it.domainId }, { it.action }))
+
+private fun SyncOperation.safeDisplayDetail(): String? = when (domainId.value) {
+    "favorite.update-event" ->
+        fields["title"].nonBlank()
+            ?: fields["latestPostTitle"].nonBlank()
+            ?: fields["forumName"].nonBlank()
+            ?: "未命名更新項目"
+    "favorite.update-fid-filter" ->
+        fields["forumName"].nonBlank()
+            ?: fields["fid"].nonBlank()?.let { "FID $it" }
+            ?: "未命名版塊篩選"
+    "favorite.update-category-filter" -> "分類更新篩選"
+    "rss.search-subscription" ->
+        fields["title"].nonBlank() ?: fields["query"].nonBlank()
+    "favorite.item",
+    "favorite.category",
+    "favorite.collection",
+    "reading.thread",
+    -> fields["title"].nonBlank()
+        ?: fields["name"].nonBlank()
+        ?: fields["threadName"].nonBlank()
+        ?: "未命名項目"
+    else -> fields["title"].nonBlank() ?: fields["name"].nonBlank()
+}
+
+private fun String?.nonBlank(): String? = this?.takeIf { it.isNotBlank() }
 
 private fun SyncOperation.changeAction(): OperationChangeAction {
     if (domainId.value == "favorite.update-event" && kind == SyncOperationKind.Patch) {
@@ -71,7 +113,9 @@ private fun SyncOperation.changeAction(): OperationChangeAction {
         domainId.value in setOf(
             "favorite.update-fid-filter",
             "favorite.update-category-filter",
+            "rss.search-subscription",
         )
+            && "enabled" in fields
     ) {
         return if (fields["enabled"] == "true") {
             OperationChangeAction.Enabled
@@ -96,3 +140,5 @@ private fun SyncOperation.changeAction(): OperationChangeAction {
         -> OperationChangeAction.Deleted
     }
 }
+
+private const val MAX_DETAILS = 5

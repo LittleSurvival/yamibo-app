@@ -4,6 +4,8 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import kotlinx.serialization.json.Json
+import me.thenano.yamibo.yamibo_app.repository.appsync.domain.stableAppSyncFingerprint
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncAccountBinding
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncCausalContext
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDeviceEpoch
@@ -25,11 +27,63 @@ class AppSyncJournalEnvelopeCodecTest {
     @Test
     fun roundTripPreservesJournal() {
         val payload = payload()
+        val encoded = codec.encode(payload)
 
-        val validated = assertIs<AppSyncJournalValidation.Valid>(codec.validate(codec.encode(payload)))
+        val validated = assertIs<AppSyncJournalValidation.Valid>(codec.validate(encoded))
 
         assertEquals(payload, validated.envelope.payload)
         assertTrue(validated.envelope.fingerprint.isNotBlank())
+        assertTrue(encoded.contains("schema=2"))
+        assertTrue(encoded.contains("payload=gzip-base64:"))
+    }
+
+    @Test
+    fun legacySchemaOneJournalRemainsReadable() {
+        val payload = payload()
+        val json = Json {
+            encodeDefaults = true
+            explicitNulls = true
+        }.encodeToString(AppSyncJournalPayload.serializer(), payload)
+        val encoded = """
+            [YAMIBO_APP_SYNC_JOURNAL:ymb-sync-9f4c2a7:BEGIN]
+            schema=1
+            fingerprint=${stableAppSyncFingerprint(json)}
+            payload=$json
+            [YAMIBO_APP_SYNC_JOURNAL:ymb-sync-9f4c2a7:END]
+        """.trimIndent()
+
+        val validated = assertIs<AppSyncJournalValidation.Valid>(codec.validate(encoded))
+
+        assertEquals(payload, validated.envelope.payload)
+    }
+
+    @Test
+    fun repetitiveOperationJournalCompressesBelowPlainJsonSize() {
+        val operations = (1L..100L).map(::operation)
+        val payload = payload(operations, firstSequence = 1, lastSequence = 100)
+        val plainJson = Json {
+            encodeDefaults = true
+            explicitNulls = true
+        }.encodeToString(AppSyncJournalPayload.serializer(), payload)
+
+        val encoded = codec.encode(payload)
+
+        assertTrue(encoded.length < plainJson.length / 2)
+        assertEquals(
+            payload,
+            assertIs<AppSyncJournalValidation.Valid>(codec.validate(encoded)).envelope.payload,
+        )
+    }
+
+    @Test
+    fun corruptedCompressedPayloadFailsClosed() {
+        val encoded = codec.encode(payload())
+        val corrupted = encoded.replace("payload=gzip-base64:", "payload=gzip-base64:!")
+
+        val invalid = assertIs<AppSyncJournalValidation.Invalid>(codec.validate(corrupted))
+
+        assertTrue(invalid.markerPresent)
+        assertTrue(invalid.reason.contains("compressed payload"))
     }
 
     @Test
@@ -71,7 +125,7 @@ class AppSyncJournalEnvelopeCodecTest {
             codec.validate(encoded.replace(":END]", ":BROKEN]")),
         )
         val unsupported = assertIs<AppSyncJournalValidation.Invalid>(
-            codec.validate(encoded.replace("schema=1", "schema=99")),
+            codec.validate(encoded.replace("schema=2", "schema=99")),
         )
 
         assertTrue(malformed.markerPresent)

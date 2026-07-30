@@ -216,7 +216,7 @@ class MainActivity : ComponentActivity() {
                 )
             }
             val rssSearchSubscriptionRepository = remember {
-                RssSearchSubscriptionRepositoryImpl(
+                appSyncService.rssSearchSubscriptionRepository(
                     db = favoriteSyncDatabase,
                     authRepository = authRepository,
                     forumRepository = forumRepository,

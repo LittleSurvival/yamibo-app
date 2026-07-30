@@ -12,6 +12,7 @@ import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository
 import me.thenano.yamibo.yamibo_app.repository.FavoriteUpdateRepository
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
 import me.thenano.yamibo.yamibo_app.repository.RssSearchSubscriptionRepository
+import me.thenano.yamibo.yamibo_app.repository.ForumRepository
 import me.thenano.yamibo.yamibo_app.repository.TagRepository
 import me.thenano.yamibo.yamibo_app.repository.ThreadRepository
 import me.thenano.yamibo.yamibo_app.repository.appsync.domain.stableAppSyncFingerprint
@@ -43,6 +44,7 @@ import me.thenano.yamibo.yamibo_app.repository.backup.BackupRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.detailnote.DetailNoteRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.favorite.FavoriteStoreRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.favorite.FavoriteUpdateRepositoryImpl
+import me.thenano.yamibo.yamibo_app.repository.rss.RssSearchSubscriptionRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.settings.core.BoolSetting
 import me.thenano.yamibo.yamibo_app.repository.settings.core.EnumSetting
 import me.thenano.yamibo.yamibo_app.repository.settings.core.FloatSetting
@@ -94,6 +96,8 @@ data class AppSyncChangeSummary(
     val domainId: String,
     val action: AppSyncChangeAction,
     val count: Int,
+    val details: List<String> = emptyList(),
+    val remainingDetailCount: Int = 0,
 )
 
 enum class AppSyncForceDirection {
@@ -108,6 +112,8 @@ data class AppSyncForceDifference(
     val deleted: Int,
     val enabled: Int,
     val disabled: Int,
+    val details: List<String> = emptyList(),
+    val remainingDetailCount: Int = 0,
 )
 
 data class AppSyncForcePreview(
@@ -276,6 +282,17 @@ class AppSyncService(
     fun favoriteStoreRepository(db: Database): FavoriteStoreRepository =
         FavoriteStoreRepositoryImpl(db, mutationRecorder)
 
+    fun rssSearchSubscriptionRepository(
+        db: Database,
+        authRepository: AuthRepository,
+        forumRepository: ForumRepository,
+    ): RssSearchSubscriptionRepository = RssSearchSubscriptionRepositoryImpl(
+        db = db,
+        authRepository = authRepository,
+        forumRepository = forumRepository,
+        mutationRecorder = mutationRecorder,
+    )
+
     fun favoriteUpdateRepository(
         db: Database,
         localFavoriteRepository: FavoriteStoreRepository,
@@ -336,13 +353,20 @@ class AppSyncService(
         if (!featureEnabled) return disabledStatus()
         val binding = currentAccountBinding() ?: return pausedAuth("foreground_refresh")
         val installation = store.installation()
-        return if (
-            installation?.state != AppSyncInstallationState.Active ||
-            installation.accountBinding != binding
-        ) {
-            bootstrap(binding, forceDiscovery = true)
-        } else {
-            synchronize(binding, forceDiscovery, trigger = "foreground_refresh")
+        return when {
+            installation == null || installation.accountBinding != binding ->
+                bootstrap(binding, forceDiscovery = true)
+            installation.state == AppSyncInstallationState.Quarantined ->
+                statusFor(
+                    AppSyncInstallationState.Quarantined,
+                    "同步資料已隔離；重新檢查不會修改本機資料",
+                )
+            installation.state.requiresBootstrapForSync() ->
+                bootstrap(binding, forceDiscovery = true)
+            else -> {
+                resumeRetryableInstallation(installation.state)
+                synchronize(binding, forceDiscovery, trigger = "foreground_refresh")
+            }
         }
     }
 
@@ -355,14 +379,26 @@ class AppSyncService(
         val demand = beginReliabilityDemand(trigger)
         return try {
             val installation = store.installation()
-            if (
-                installation?.state != AppSyncInstallationState.Active ||
-                installation.accountBinding != binding
-            ) {
+            if (installation == null || installation.accountBinding != binding) {
                 val bootstrapped = bootstrap(binding, forceDiscovery = true)
                 if (bootstrapped.phase != AppSyncServicePhase.Active) {
                     return finishReliabilityDemand(demand, bootstrapped)
                 }
+            } else if (installation.state == AppSyncInstallationState.Quarantined) {
+                return finishReliabilityDemand(
+                    demand,
+                    statusFor(
+                        AppSyncInstallationState.Quarantined,
+                        "同步資料已隔離；手動同步不會修改本機資料",
+                    ),
+                )
+            } else if (installation.state.requiresBootstrapForSync()) {
+                val bootstrapped = bootstrap(binding, forceDiscovery = true)
+                if (bootstrapped.phase != AppSyncServicePhase.Active) {
+                    return finishReliabilityDemand(demand, bootstrapped)
+                }
+            } else {
+                resumeRetryableInstallation(installation.state)
             }
             synchronize(binding, forceDiscovery, trigger, demand)
         } catch (error: CancellationException) {
@@ -747,6 +783,15 @@ class AppSyncService(
         )
     }
 
+    private fun resumeRetryableInstallation(state: AppSyncInstallationState) {
+        if (
+            state == AppSyncInstallationState.PausedAuth ||
+            state == AppSyncInstallationState.PausedProvider
+        ) {
+            store.updateState(AppSyncInstallationState.Active)
+        }
+    }
+
     private fun backfillStableContainerIds(db: Database) {
         db.transaction {
             db.localFavoriteCategoryQueries.getAll().executeAsList()
@@ -774,6 +819,18 @@ class AppSyncService(
     }
 }
 
+internal fun AppSyncInstallationState.requiresBootstrapForSync(): Boolean = when (this) {
+    AppSyncInstallationState.Unbound,
+    AppSyncInstallationState.Bootstrapping,
+    AppSyncInstallationState.RebootstrapRequired,
+    -> true
+    AppSyncInstallationState.Active,
+    AppSyncInstallationState.PausedAuth,
+    AppSyncInstallationState.PausedProvider,
+    AppSyncInstallationState.Quarantined,
+    -> false
+}
+
 private fun AppSyncForceDirection.toInternal(): ManualSyncOverrideDirection = when (this) {
     AppSyncForceDirection.Push -> ManualSyncOverrideDirection.ForcePush
     AppSyncForceDirection.Pull -> ManualSyncOverrideDirection.ForcePull
@@ -793,6 +850,8 @@ private fun ManualSyncOverridePreview.toPublic() = AppSyncForcePreview(
             deleted = it.deleted,
             enabled = it.enabled,
             disabled = it.disabled,
+            details = it.details,
+            remainingDetailCount = it.remainingDetailCount,
         )
     },
 )
@@ -808,6 +867,8 @@ private fun AppSyncForcePreview.toInternal() = ManualSyncOverridePreview(
             deleted = it.deleted,
             enabled = it.enabled,
             disabled = it.disabled,
+            details = it.details,
+            remainingDetailCount = it.remainingDetailCount,
         )
     },
 )
@@ -841,6 +902,8 @@ private fun OperationChangeSummary.toPublic() = AppSyncChangeSummary(
         OperationChangeAction.Dismissed -> AppSyncChangeAction.Dismissed
     },
     count = count,
+    details = details,
+    remainingDetailCount = remainingDetailCount,
 )
 
 internal fun reliabilityOutcomeFor(phase: AppSyncServicePhase): String = when (phase) {

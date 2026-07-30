@@ -462,7 +462,21 @@ private fun SyncDetailsSection(
                                 modifier = Modifier.weight(0.32f),
                             )
                             Text(
-                                text = i18n("{}：{}", change.module, change.summary),
+                                text = buildString {
+                                    append(i18n("{}：{}", change.module, change.summary))
+                                    if (change.details.isNotEmpty()) {
+                                        appendLine()
+                                        append(change.details.joinToString("、"))
+                                    }
+                                    if (change.remainingDetailCount > 0) {
+                                        append(
+                                            i18n(
+                                                "，另有 {} 筆",
+                                                change.remainingDetailCount.toString(),
+                                            ),
+                                        )
+                                    }
+                                },
                                 color = colors.textStrong,
                                 fontSize = 12.sp,
                                 modifier = Modifier.weight(0.68f),
@@ -640,7 +654,21 @@ private fun ForceOverrideDialog(
                                 modifier = Modifier.weight(0.38f),
                             )
                             Text(
-                                text = i18n(difference.summary),
+                                text = buildString {
+                                    append(i18n(difference.summary))
+                                    if (difference.details.isNotEmpty()) {
+                                        appendLine()
+                                        append(difference.details.joinToString("、"))
+                                    }
+                                    if (difference.remainingDetailCount > 0) {
+                                        append(
+                                            i18n(
+                                                "，另有 {} 筆",
+                                                difference.remainingDetailCount.toString(),
+                                            ),
+                                        )
+                                    }
+                                },
                                 color = colors.textDark,
                                 fontSize = 12.sp,
                                 modifier = Modifier.weight(0.62f),

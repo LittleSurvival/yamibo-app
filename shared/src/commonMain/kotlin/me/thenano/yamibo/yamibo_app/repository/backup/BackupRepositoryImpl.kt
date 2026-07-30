@@ -9,6 +9,7 @@ import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 import me.thenano.yamibo.yamibo_app.util.time.currentLocalDateKeyAt
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncIdentityGenerator
+import me.thenano.yamibo.yamibo_app.repository.rss.rssSearchSubscriptionSyncId
 
 class BackupRepositoryImpl(
     private val db: Database,
@@ -36,6 +37,9 @@ class BackupRepositoryImpl(
     private val tagCatalogHistoryQueries = db.tagCatalogReadingHistoryQueries
     private val rssSearchHistoryQueries = db.rssSearchReadingHistoryQueries
     private val rssCatalogHistoryQueries = db.rssCatalogReadingHistoryQueries
+    private val rssSubscriptionQueries = db.rssSearchSubscriptionQueries
+    private val rssPageCacheQueries = db.rssSearchPageCacheQueries
+    private val rssSubscriptionResultQueries = db.rssSearchSubscriptionResultQueries
     private val chapterStateQueries = db.localChapterStateQueries
     private val readingTimeQueries = db.readingTimeStatQueries
     private val updateEventQueries = db.favoriteUpdateEventQueries
@@ -150,6 +154,19 @@ class BackupRepositoryImpl(
                         authorId = it.authorId,
                         createdAt = it.createdAt,
                         lastFavoriteStatusUpdateAt = it.lastFavoriteStatusUpdateAt,
+                    )
+                },
+                rssSubscriptions = rssSubscriptionQueries.getAll().executeAsList().map {
+                    BackupRssSearchSubscription(
+                        localId = it.id,
+                        syncId = rssSearchSubscriptionSyncId(it.query, it.forumId),
+                        title = it.title,
+                        query = it.query,
+                        forumId = it.forumId,
+                        forumName = it.forumName,
+                        enabled = it.enabled != 0L,
+                        createdAt = it.createdAt,
+                        updatedAt = it.updatedAt,
                     )
                 },
                 itemCategories = itemCategoryQueries.getAll().executeAsList().map {
@@ -407,6 +424,7 @@ class BackupRepositoryImpl(
             "收藏分類" to favorites.categories.size,
             "收藏集合" to favorites.collections.size,
             "收藏項目" to favorites.items.size,
+            "RSS 訂閱" to favorites.rssSubscriptions.size,
             "設定" to backup.settings.size,
             "筆記" to backup.notes.size,
             "書籤" to backup.bookmarks.size,
@@ -425,10 +443,20 @@ class BackupRepositoryImpl(
         requireUnique("收藏分類 localId", favorites.categories.map { it.localId })
         requireUnique("收藏集合 localId", favorites.collections.map { it.localId })
         requireUnique("收藏項目 localId", favorites.items.map { it.localId })
+        requireUnique("RSS 訂閱 localId", favorites.rssSubscriptions.map { it.localId })
+        requireUnique("RSS 訂閱 syncId", favorites.rssSubscriptions.map { it.syncId })
         requireUnique(
             "收藏項目 identity",
             favorites.items.map { "${it.targetType}:${it.targetId}:${it.authorId}" },
         )
+        favorites.rssSubscriptions.forEach {
+            require(it.syncId == rssSearchSubscriptionSyncId(it.query, it.forumId)) {
+                "RSS 訂閱 identity 驗證失敗"
+            }
+            require(it.query.isNotBlank()) { "RSS 訂閱搜尋字不可為空" }
+            require(it.title.isNotBlank()) { "RSS 訂閱標題不可為空" }
+            require(it.createdAt >= 0L && it.updatedAt >= 0L) { "RSS 訂閱時間無效" }
+        }
         requireUnique(
             "主題閱讀 identity",
             reading.threadHistory.map { "${it.threadId}:${it.threadType}:${it.authorId}:${it.historyOrigin}" },
@@ -535,6 +563,7 @@ class BackupRepositoryImpl(
         val categoryIdMap = mutableMapOf<Long, Long>()
         val collectionIdMap = mutableMapOf<Long, Long>()
         val itemIdMap = mutableMapOf<Long, Long>()
+        val rssSubscriptionIdMap = mutableMapOf<Long, Long>()
 
         try {
             db.transaction {
@@ -634,6 +663,47 @@ class BackupRepositoryImpl(
                     )
                 }
                 itemIdMap[item.localId] = targetId
+            }
+
+            backup.favorites.rssSubscriptions.forEach { subscription ->
+                val existing = if (mode == BackupRepository.RestoreMode.Merge) {
+                    rssSubscriptionQueries.getAll().executeAsList().firstOrNull {
+                        rssSearchSubscriptionSyncId(it.query, it.forumId) == subscription.syncId
+                    }
+                } else {
+                    null
+                }
+                val targetId = existing?.id ?: run {
+                    rssSubscriptionQueries.insertSubscription(
+                        title = subscription.title,
+                        query = subscription.query,
+                        forumId = subscription.forumId,
+                        forumName = subscription.forumName,
+                        enabled = if (subscription.enabled) 1 else 0,
+                        createdAt = subscription.createdAt,
+                        updatedAt = subscription.updatedAt,
+                        lastRefreshStartedAt = null,
+                        lastRefreshFinishedAt = null,
+                        lastRefreshStatus = null,
+                        lastRefreshMessage = null,
+                        lastSearchId = null,
+                        lastTotalCount = 0,
+                    )
+                    rssSubscriptionQueries.lastInsertedId().executeAsOne()
+                }
+                if (existing != null && subscription.updatedAt > existing.updatedAt) {
+                    rssSubscriptionQueries.rename(
+                        subscription.title,
+                        subscription.updatedAt,
+                        targetId,
+                    )
+                    rssSubscriptionQueries.setEnabled(
+                        if (subscription.enabled) 1 else 0,
+                        subscription.updatedAt,
+                        targetId,
+                    )
+                }
+                rssSubscriptionIdMap[subscription.localId] = targetId
             }
 
             backup.favorites.itemCategories.forEach { ref ->
@@ -794,7 +864,8 @@ class BackupRepositoryImpl(
             }
 
             backup.readingState.rssSearchHistory.forEach history@{
-                val existing = rssSearchHistoryQueries.getBySubscriptionId(it.subscriptionId)
+                val subscriptionId = rssSubscriptionIdMap[it.subscriptionId] ?: it.subscriptionId
+                val existing = rssSearchHistoryQueries.getBySubscriptionId(subscriptionId)
                     .executeAsOneOrNull()
                 if (mode == BackupRepository.RestoreMode.Merge &&
                     existing != null &&
@@ -803,7 +874,7 @@ class BackupRepositoryImpl(
                     return@history
                 }
                 rssSearchHistoryQueries.upsert(
-                    subscriptionId = it.subscriptionId,
+                    subscriptionId = subscriptionId,
                     subscriptionTitle = it.subscriptionTitle,
                     subscriptionQuery = it.subscriptionQuery,
                     subscriptionPage = it.subscriptionPage,
@@ -819,7 +890,8 @@ class BackupRepositoryImpl(
             }
 
             backup.readingState.rssCatalogHistory.forEach history@{
-                val existing = rssCatalogHistoryQueries.getBySubscriptionId(it.subscriptionId)
+                val subscriptionId = rssSubscriptionIdMap[it.subscriptionId] ?: it.subscriptionId
+                val existing = rssCatalogHistoryQueries.getBySubscriptionId(subscriptionId)
                     .executeAsOneOrNull()
                 if (mode == BackupRepository.RestoreMode.Merge &&
                     existing != null &&
@@ -828,7 +900,7 @@ class BackupRepositoryImpl(
                     return@history
                 }
                 rssCatalogHistoryQueries.upsert(
-                    subscriptionId = it.subscriptionId,
+                    subscriptionId = subscriptionId,
                     subscriptionTitle = it.subscriptionTitle,
                     subscriptionQuery = it.subscriptionQuery,
                     subscriptionPage = it.subscriptionPage,
@@ -900,7 +972,7 @@ class BackupRepositoryImpl(
         }
 
         return BackupRepository.RestoreSummary(
-            favorites = backup.favorites.items.size,
+            favorites = backup.favorites.items.size + backup.favorites.rssSubscriptions.size,
             settings = backup.settings.size,
             notes = backup.notes.size,
             bookmarks = backup.bookmarks.size,
@@ -931,6 +1003,11 @@ class BackupRepositoryImpl(
             tagCatalogHistoryQueries.deleteAll()
             rssSearchHistoryQueries.deleteAll()
             rssCatalogHistoryQueries.deleteAll()
+            rssSubscriptionQueries.getAll().executeAsList().forEach {
+                rssPageCacheQueries.deleteBySubscription(it.id)
+                rssSubscriptionResultQueries.deleteBySubscription(it.id)
+                rssSubscriptionQueries.deleteById(it.id)
+            }
             chapterStateQueries.deleteAll()
             readingTimeQueries.deleteAll()
             updateEventQueries.deleteAll()

@@ -233,20 +233,8 @@ internal class OperationSyncEngine(
                     return OperationSyncResult.Quarantined(result.reason)
                 }
             }
-            cloud.checkpoints.forEach { checkpoint ->
-                val envelope = checkpoint.envelope
-                store.saveVerifiedCheckpoint(
-                    AppSyncVerifiedCheckpoint(
-                        checkpointId = envelope.payload.checkpointId,
-                        blogId = checkpoint.remoteId.toLongOrNull(),
-                        coverage = envelope.payload.coverage,
-                        payloadFingerprint = envelope.fingerprint,
-                        createdAtEpochMillis = envelope.payload.createdAtEpochMillis,
-                        verifiedAtEpochMillis = nowMillis(),
-                    ),
-                )
-            }
             val loaded = cloud.journals
+            reconcileVerifiedCheckpoint(cloud.checkpoints, loaded)
 
             val installation = requireNotNull(store.installation())
             val compactedCoverage = compaction.compactIfSafe(loaded)
@@ -403,6 +391,80 @@ internal class OperationSyncEngine(
         }
 
         return OperationSyncResult.RetryScheduled("Sync did not reach a fixed point")
+    }
+
+    private fun reconcileVerifiedCheckpoint(
+        checkpoints: List<LoadedAppSyncCheckpoint>,
+        journals: List<LoadedAppSyncJournal>,
+    ) {
+        val selected = checkpoints.maxWithOrNull(
+            compareBy(
+                { it.envelope.payload.coverage.asStableMap().values.sum() },
+                { it.envelope.payload.createdAtEpochMillis },
+                { it.envelope.payload.checkpointId },
+            ),
+        )
+        checkpoints.filterNot { it === selected }.forEach(::saveVerifiedCheckpoint)
+        if (selected == null) return
+
+        val pending = store.pendingOperations()
+        if (pending.isNotEmpty()) {
+            saveVerifiedCheckpoint(selected)
+            return
+        }
+        val envelope = selected.envelope
+        val coverage = envelope.payload.coverage
+        val laterOperations = journals
+            .asSequence()
+            .flatMap { it.payload.operations.asSequence() }
+            .filterNot(coverage::includes)
+            .distinctBy { it.operationId }
+            .toList()
+        val guarded = bulkDeleteGuard.evaluate(laterOperations, domainState::entityCount)
+        val reduced = reducer.reduce(
+            envelope.payload.resolvedEntities.associateBy { it.key },
+            guarded.accepted,
+        ).let {
+            it.copy(quarantined = it.quarantined + guarded.quarantined)
+        }
+        if (reduced.quarantined.isNotEmpty() || domainState.currentState() == reduced.entities) {
+            saveVerifiedCheckpoint(selected)
+            return
+        }
+
+        val localOutboxIds = store.allOutboxOperations()
+            .mapTo(hashSetOf()) { it.first.operationId }
+        store.adoptCheckpoint(
+            checkpointId = envelope.payload.checkpointId,
+            blogId = selected.remoteId.toLongOrNull(),
+            coverage = coverage,
+            payloadFingerprint = envelope.fingerprint,
+            createdAtEpochMillis = envelope.payload.createdAtEpochMillis,
+            verifiedAtEpochMillis = nowMillis(),
+            laterReduction = reduced.copy(
+                appliedOperations = reduced.appliedOperations.filterNot {
+                    it.operationId in localOutboxIds
+                },
+            ),
+            domainMutation = {
+                domainState.adoptCheckpointWithinTransaction(it.entities.values)
+            },
+        )
+        domainState.reconcileProjections()
+    }
+
+    private fun saveVerifiedCheckpoint(checkpoint: LoadedAppSyncCheckpoint) {
+        val envelope = checkpoint.envelope
+        store.saveVerifiedCheckpoint(
+            AppSyncVerifiedCheckpoint(
+                checkpointId = envelope.payload.checkpointId,
+                blogId = checkpoint.remoteId.toLongOrNull(),
+                coverage = envelope.payload.coverage,
+                payloadFingerprint = envelope.fingerprint,
+                createdAtEpochMillis = envelope.payload.createdAtEpochMillis,
+                verifiedAtEpochMillis = nowMillis(),
+            ),
+        )
     }
 
     private fun mergeOwnOperations(

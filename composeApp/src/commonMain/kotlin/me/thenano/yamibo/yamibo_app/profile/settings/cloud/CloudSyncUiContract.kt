@@ -55,6 +55,8 @@ internal data class CloudSyncChangeDetail(
     val direction: String,
     val module: String,
     val summary: String,
+    val details: List<String> = emptyList(),
+    val remainingDetailCount: Int = 0,
 )
 
 internal enum class CloudSyncForceDirection {
@@ -71,6 +73,8 @@ internal data class CloudSyncForceDifference(
     val deleted: Int,
     val enabled: Int,
     val disabled: Int,
+    val details: List<String> = emptyList(),
+    val remainingDetailCount: Int = 0,
 )
 
 internal data class CloudSyncForcePreview(
@@ -256,6 +260,8 @@ private fun AppSyncForcePreview.toUi() = CloudSyncForcePreview(
             deleted = difference.deleted,
             enabled = difference.enabled,
             disabled = difference.disabled,
+            details = difference.details,
+            remainingDetailCount = difference.remainingDetailCount,
         )
     },
 )
@@ -275,6 +281,8 @@ private fun CloudSyncForcePreview.toService() = AppSyncForcePreview(
             deleted = it.deleted,
             enabled = it.enabled,
             disabled = it.disabled,
+            details = it.details,
+            remainingDetailCount = it.remainingDetailCount,
         )
     },
 )
@@ -353,6 +361,8 @@ internal fun AppSyncServiceStatus.toUiState(
                 },
                 module = moduleLabel(it.domainId),
                 summary = "${actionLabel(it.action)} ${it.count}",
+                details = it.details,
+                remainingDetailCount = it.remainingDetailCount,
             )
         },
     )
@@ -361,6 +371,7 @@ internal fun AppSyncServiceStatus.toUiState(
 private fun moduleLabel(domainId: String): String = when (domainId) {
     "settings" -> "設定"
     "favorite.item" -> "收藏項目"
+    "rss.search-subscription" -> "RSS 訂閱"
     "favorite.category" -> "收藏分類"
     "favorite.collection" -> "收藏集合"
     "favorite.item-category" -> "收藏分類歸屬"

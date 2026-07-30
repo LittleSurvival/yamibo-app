@@ -1,6 +1,7 @@
 package me.thenano.yamibo.yamibo_app.repository.appsync.engine
 
 import me.thenano.yamibo.yamibo_app.Database
+import me.thenano.yamibo.yamibo_app.repository.rss.rssSearchSubscriptionSyncId
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 
 internal class DatabaseSyncDomainMaterializer(
@@ -13,6 +14,7 @@ internal class DatabaseSyncDomainMaterializer(
             "favorite.category" -> applyFavoriteCategory(entity)
             "favorite.collection" -> applyFavoriteCollection(entity)
             "favorite.item" -> applyFavoriteItem(entity)
+            "rss.search-subscription" -> applyRssSearchSubscription(entity)
             "favorite.item-category" -> applyItemCategory(entity)
             "favorite.item-collection" -> applyItemCollection(entity)
             "favorite.update-event" -> applyFavoriteUpdateEvent(entity)
@@ -76,6 +78,7 @@ internal class DatabaseSyncDomainMaterializer(
         db.localFavoriteCollectionQueries.deleteAll()
         db.localFavoriteCategoryQueries.deleteAll()
         db.localFavoriteItemQueries.deleteAll()
+        clearRssSearchSubscriptions()
         db.detailNoteQueries.deleteAll()
         db.localBookMarkQueries.deleteAll()
         db.readingHistoryQueries.deleteAll()
@@ -175,10 +178,10 @@ internal class DatabaseSyncDomainMaterializer(
     private fun applyFavoriteItem(entity: ResolvedSyncEntity) {
         val queries = db.localFavoriteItemQueries
         val fields = entity.values()
-        val targetType = fields["targetType"] ?: entity.key.entityId.value.substringBefore('|')
-        val targetId = fields["targetId"]?.toLongOrNull()
-            ?: entity.key.entityId.value.substringAfter('|').substringBefore('|').toLong()
-        val authorId = fields["authorId"]?.toLongOrNull() ?: 0L
+        val identity = entity.key.entityId.value.parts(3)
+        val targetType = fields["targetType"] ?: identity[0]
+        val targetId = fields["targetId"]?.toLongOrNull() ?: identity[1].toLong()
+        val authorId = fields["authorId"]?.toLongOrNull() ?: identity[2].toLong()
         val existing = queries.findByTarget(targetType, targetId, authorId).executeAsOneOrNull()
         if (entity.tombstone != null) {
             existing?.let {
@@ -213,6 +216,51 @@ internal class DatabaseSyncDomainMaterializer(
                 statusAt,
                 existing.id,
             )
+        }
+    }
+
+    private fun applyRssSearchSubscription(entity: ResolvedSyncEntity) {
+        val queries = db.rssSearchSubscriptionQueries
+        val existing = queries.getAll().executeAsList().firstOrNull {
+            rssSearchSubscriptionSyncId(it.query, it.forumId) == entity.key.entityId.value
+        }
+        if (entity.tombstone != null) {
+            existing?.let {
+                db.rssSearchPageCacheQueries.deleteBySubscription(it.id)
+                db.rssSearchSubscriptionResultQueries.deleteBySubscription(it.id)
+                queries.deleteById(it.id)
+            }
+            return
+        }
+        val fields = entity.values()
+        val updatedAt = fields.long("updatedAt")
+        if (existing == null) {
+            queries.insertSubscription(
+                title = fields.require("title"),
+                query = fields.require("query"),
+                forumId = fields["forumId"]?.toLongOrNull(),
+                forumName = fields["forumName"],
+                enabled = fields.boolLong("enabled"),
+                createdAt = fields.long("createdAt"),
+                updatedAt = updatedAt,
+                lastRefreshStartedAt = null,
+                lastRefreshFinishedAt = null,
+                lastRefreshStatus = null,
+                lastRefreshMessage = null,
+                lastSearchId = null,
+                lastTotalCount = 0,
+            )
+        } else {
+            queries.rename(fields.require("title"), updatedAt, existing.id)
+            queries.setEnabled(fields.boolLong("enabled"), updatedAt, existing.id)
+        }
+    }
+
+    private fun clearRssSearchSubscriptions() {
+        db.rssSearchSubscriptionQueries.getAll().executeAsList().forEach {
+            db.rssSearchPageCacheQueries.deleteBySubscription(it.id)
+            db.rssSearchSubscriptionResultQueries.deleteBySubscription(it.id)
+            db.rssSearchSubscriptionQueries.deleteById(it.id)
         }
     }
 
@@ -254,56 +302,53 @@ internal class DatabaseSyncDomainMaterializer(
     }
 
     private fun applyDetailNote(entity: ResolvedSyncEntity) {
-        val fields = entity.values()
-        val targetType = fields.require("targetType")
-        val targetId = fields.long("targetId")
-        val authorId = fields.long("authorId")
         if (entity.tombstone != null) {
-            db.detailNoteQueries.deleteByTarget(targetType, targetId, authorId)
-        } else {
-            db.detailNoteQueries.upsert(
-                targetType,
-                targetId,
-                authorId,
-                fields.require("content"),
-                fields.long("createdAt"),
-                fields.long("updatedAt"),
-            )
+            val identity = entity.key.entityId.value.parts(3)
+            db.detailNoteQueries.deleteByTarget(identity[0], identity[1].toLong(), identity[2].toLong())
+            return
         }
+        val fields = entity.values()
+        db.detailNoteQueries.upsert(
+            fields.require("targetType"),
+            fields.long("targetId"),
+            fields.long("authorId"),
+            fields.require("content"),
+            fields.long("createdAt"),
+            fields.long("updatedAt"),
+        )
     }
 
     private fun applyBookmark(entity: ResolvedSyncEntity) {
-        val fields = entity.values()
-        val targetType = fields.require("targetType")
-        val parentId = fields.long("parentId")
-        val targetId = fields.long("targetId")
         if (entity.tombstone != null) {
-            db.localBookMarkQueries.deleteByTarget(targetType, parentId, targetId)
-        } else {
-            db.localBookMarkQueries.upsert(
-                targetType,
-                parentId,
-                targetId,
-                fields.require("title"),
-                fields.boolLong("bookmarked"),
-                fields.boolLong("read"),
-                fields.long("createdAt"),
-                fields.long("updatedAt"),
-            )
+            val identity = entity.key.entityId.value.parts(3)
+            db.localBookMarkQueries.deleteByTarget(identity[0], identity[1].toLong(), identity[2].toLong())
+            return
         }
+        val fields = entity.values()
+        db.localBookMarkQueries.upsert(
+            fields.require("targetType"),
+            fields.long("parentId"),
+            fields.long("targetId"),
+            fields.require("title"),
+            fields.boolLong("bookmarked"),
+            fields.boolLong("read"),
+            fields.long("createdAt"),
+            fields.long("updatedAt"),
+        )
     }
 
     private fun applyThreadHistory(entity: ResolvedSyncEntity) {
-        val fields = entity.values()
         if (entity.tombstone != null) {
+            val identity = entity.key.entityId.value.parts(4)
             db.readingHistoryQueries.deleteByThreadOrigin(
-                fields.long("threadId"),
-                fields.require("threadType"),
-                fields.long("authorId"),
-                fields.require("historyOrigin"),
+                identity[0].toLong(),
+                identity[1],
+                identity[2].toLong(),
+                identity[3],
             )
             return
         }
+        val fields = entity.values()
         db.readingHistoryQueries.upsert(
             threadId = fields.long("threadId"),
             threadType = fields.require("threadType"),
@@ -331,41 +376,41 @@ internal class DatabaseSyncDomainMaterializer(
     }
 
     private fun applyImageHistory(entity: ResolvedSyncEntity) {
-        val fields = entity.values()
         if (entity.tombstone != null) {
-            db.imageReadingHistoryQueries.deleteByPostId(fields.long("postId"))
-        } else {
-            db.imageReadingHistoryQueries.upsert(
-                fields.long("postId"),
-                fields.long("threadId"),
-                fields.long("pageIndex"),
-                fields.long("totalPages"),
-                fields["firstVisibleItemIndex"]?.toLongOrNull(),
-                fields["firstVisibleItemOffset"]?.toLongOrNull(),
-                fields.long("lastVisitTime"),
-            )
+            db.imageReadingHistoryQueries.deleteByPostId(entity.key.entityId.value.toLong())
+            return
         }
+        val fields = entity.values()
+        db.imageReadingHistoryQueries.upsert(
+            fields.long("postId"),
+            fields.long("threadId"),
+            fields.long("pageIndex"),
+            fields.long("totalPages"),
+            fields["firstVisibleItemIndex"]?.toLongOrNull(),
+            fields["firstVisibleItemOffset"]?.toLongOrNull(),
+            fields.long("lastVisitTime"),
+        )
     }
 
     private fun applyTagHistory(entity: ResolvedSyncEntity) {
-        val fields = entity.values()
         if (entity.tombstone != null) {
-            db.mangaTagReadingHistoryQueries.deleteByTagId(fields.long("tagId"))
-        } else {
-            db.mangaTagReadingHistoryQueries.upsert(
-                fields.long("tagId"),
-                fields.require("tagName"),
-                fields.long("tagPage"),
-                fields.long("threadId"),
-                fields.require("threadTitle"),
-                fields.long("threadImagePageIndex"),
-                fields.long("threadImageTotalPages"),
-                fields["firstVisibleItemIndex"]?.toLongOrNull(),
-                fields["firstVisibleItemOffset"]?.toLongOrNull(),
-                fields.long("lastVisitTime"),
-                fields["coverUrl"],
-            )
+            db.mangaTagReadingHistoryQueries.deleteByTagId(entity.key.entityId.value.toLong())
+            return
         }
+        val fields = entity.values()
+        db.mangaTagReadingHistoryQueries.upsert(
+            fields.long("tagId"),
+            fields.require("tagName"),
+            fields.long("tagPage"),
+            fields.long("threadId"),
+            fields.require("threadTitle"),
+            fields.long("threadImagePageIndex"),
+            fields.long("threadImageTotalPages"),
+            fields["firstVisibleItemIndex"]?.toLongOrNull(),
+            fields["firstVisibleItemOffset"]?.toLongOrNull(),
+            fields.long("lastVisitTime"),
+            fields["coverUrl"],
+        )
     }
 
     private fun applyReadingTime(entity: ResolvedSyncEntity) {
@@ -465,4 +510,11 @@ internal class DatabaseSyncDomainMaterializer(
 
     private fun Map<String, String?>.boolLong(key: String): Long =
         if (require(key).toBooleanStrict()) 1L else 0L
+
+    private fun String.parts(expectedSize: Int): List<String> =
+        split('|').also {
+            require(it.size == expectedSize && it.none(String::isBlank)) {
+                "Invalid materialized entity identity"
+            }
+        }
 }

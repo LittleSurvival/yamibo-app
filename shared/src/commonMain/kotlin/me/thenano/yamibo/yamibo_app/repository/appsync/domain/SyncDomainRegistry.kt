@@ -4,6 +4,8 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDomainId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperation
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationKind
 import me.thenano.yamibo.yamibo_app.repository.backup.favoriteUpdateEventIdentity
+import me.thenano.yamibo.yamibo_app.repository.rss.normalizeRssSearchKeyword
+import me.thenano.yamibo.yamibo_app.repository.rss.rssSearchSubscriptionSyncId
 
 internal enum class SyncConflictPolicy {
     FieldRegister,
@@ -83,6 +85,7 @@ internal class SyncDomainRegistry(
         val REQUIRED_DOMAIN_IDS = setOf(
             "settings",
             "favorite.item",
+            "rss.search-subscription",
             "favorite.category",
             "favorite.collection",
             "detail-note",
@@ -108,6 +111,7 @@ internal class SyncDomainRegistry(
                         "lastFavoriteStatusUpdateAt",
                     ),
                 ),
+                rssSearchSubscriptionDomain(),
                 fieldDomain(
                     "favorite.category",
                     setOf("name", "sortOrder", "createdAt", "updatedAt"),
@@ -174,6 +178,57 @@ internal class SyncDomainRegistry(
             ),
             monotonicNumericFields = monotonicFields,
         )
+
+        private fun rssSearchSubscriptionDomain(): SyncDomainContract {
+            val putFields = setOf(
+                "title", "query", "forumId", "forumName", "enabled", "createdAt", "updatedAt",
+            )
+            val patchFields = setOf("title", "enabled", "updatedAt")
+            return SyncDomainContract(
+                id = SyncDomainId("rss.search-subscription"),
+                conflictPolicy = SyncConflictPolicy.RemoveWinsEntity,
+                allowedKinds = setOf(
+                    SyncOperationKind.Put,
+                    SyncOperationKind.Patch,
+                    SyncOperationKind.Delete,
+                ),
+                requiredFieldsByKind = mapOf(
+                    SyncOperationKind.Put to putFields,
+                    SyncOperationKind.Patch to setOf("updatedAt"),
+                ),
+                allowedFieldsByKind = mapOf(
+                    SyncOperationKind.Put to putFields,
+                    SyncOperationKind.Patch to patchFields,
+                    SyncOperationKind.Delete to emptySet(),
+                ),
+                semanticValidator = { operation ->
+                    runCatching {
+                        when (operation.kind) {
+                            SyncOperationKind.Put -> {
+                                val query = requireNotNull(operation.fields["query"])
+                                require(normalizeRssSearchKeyword(query).isNotBlank())
+                                require(!operation.fields["title"].isNullOrBlank())
+                                val forumId = operation.fields["forumId"]?.toLong()
+                                require(
+                                    operation.entityId.value ==
+                                        rssSearchSubscriptionSyncId(query, forumId),
+                                )
+                                requireNotNull(operation.fields["enabled"]).toBooleanStrict()
+                                require(requireNotNull(operation.fields["createdAt"]).toLong() >= 0)
+                                require(requireNotNull(operation.fields["updatedAt"]).toLong() >= 0)
+                            }
+                            SyncOperationKind.Patch -> {
+                                operation.fields["title"]?.let { require(it.isNotBlank()) }
+                                operation.fields["enabled"]?.toBooleanStrict()
+                                require(requireNotNull(operation.fields["updatedAt"]).toLong() >= 0)
+                            }
+                            SyncOperationKind.Delete -> Unit
+                            else -> error("Unsupported RSS subscription operation")
+                        }
+                    }.exceptionOrNull()?.let { "Invalid RSS subscription: ${it.message}" }
+                },
+            )
+        }
 
         private fun relationDomain(
             value: String,

@@ -2,6 +2,7 @@ package me.thenano.yamibo.yamibo_app.repository.appsync
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.OperationChangeAction
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.OperationChangeDirection
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.OperationChangeSummary
@@ -47,10 +48,62 @@ class OperationChangeSummaryTest {
         )
     }
 
+    @Test
+    fun rssEnabledPatchUsesToggleAction() {
+        val uploaded = operation(
+            device = "local",
+            kind = SyncOperationKind.Patch,
+            value = "false",
+            domain = "rss.search-subscription",
+            fields = mapOf("enabled" to "false", "updatedAt" to "10"),
+        )
+        val state = OperationReducer().reduce(operations = listOf(uploaded)).entities
+
+        assertEquals(
+            listOf(
+                OperationChangeSummary(
+                    direction = OperationChangeDirection.Uploaded,
+                    domainId = "rss.search-subscription",
+                    action = OperationChangeAction.Disabled,
+                    count = 1,
+                ),
+            ),
+            summarizeWinningOperations(emptyList(), listOf(uploaded), state),
+        )
+    }
+
+    @Test
+    fun favoriteUpdateDetailsAreBoundedAndExcludeInternalIds() {
+        val operations = (1..7).map { index ->
+            operation(
+                device = "device-$index",
+                kind = SyncOperationKind.Put,
+                value = "true",
+                domain = "favorite.update-fid-filter",
+                entity = "fid:$index",
+                fields = mapOf(
+                    "fid" to index.toString(),
+                    "enabled" to "true",
+                ),
+            )
+        }
+        val state = OperationReducer().reduce(operations = operations).entities
+
+        val summary = summarizeWinningOperations(operations, emptyList(), state).single()
+
+        assertEquals(7, summary.count)
+        assertEquals((1..5).map { "FID $it" }, summary.details)
+        assertEquals(2, summary.remainingDetailCount)
+        assertFalse(summary.details.any { "fid:" in it })
+    }
+
     private fun operation(
         device: String,
         kind: SyncOperationKind,
         value: String,
+        domain: String = "settings",
+        entity: String = "feature",
+        fields: Map<String, String?> = mapOf("type" to "bool", "value" to value),
         causalContext: SyncCausalContext = SyncCausalContext(),
     ): SyncOperation {
         val deviceId = SyncDeviceId(device)
@@ -62,10 +115,10 @@ class OperationChangeSummaryTest {
             deviceEpoch = epoch,
             sequence = sequence,
             accountBinding = SyncAccountBinding("account"),
-            domainId = SyncDomainId("settings"),
-            entityId = SyncEntityId("feature"),
+            domainId = SyncDomainId(domain),
+            entityId = SyncEntityId(entity),
             kind = kind,
-            fields = mapOf("type" to "bool", "value" to value),
+            fields = fields,
             causalContext = causalContext,
             createdAtEpochMillis = 10,
             origin = SyncOperationOrigin.UserAction,

@@ -24,6 +24,7 @@ class BackupRepositoryImplTest {
         assertEquals(1, local.readingState.tagCatalogHistory.size)
         assertEquals(1, local.readingState.rssSearchHistory.size)
         assertEquals(1, local.readingState.rssCatalogHistory.size)
+        assertEquals(2, local.favorites.rssSubscriptions.size)
         assertEquals(1, local.readingState.chapterState.size)
         assertEquals(1, local.favoriteUpdates.events.size)
         assertEquals(1, local.favoriteUpdates.fidFilters.size)
@@ -49,6 +50,7 @@ class BackupRepositoryImplTest {
         assertEquals(1, fixture.db.tagCatalogReadingHistoryQueries.getAll().executeAsList().size)
         assertEquals(1, fixture.db.rssSearchReadingHistoryQueries.getAll().executeAsList().size)
         assertEquals(1, fixture.db.rssCatalogReadingHistoryQueries.getAll().executeAsList().size)
+        assertEquals(2, fixture.db.rssSearchSubscriptionQueries.getAll().executeAsList().size)
         assertEquals(1, fixture.db.localChapterStateQueries.getAll().executeAsList().size)
         assertEquals(1, fixture.db.favoriteUpdateEventQueries.getAll().executeAsList().size)
         assertEquals(1, fixture.db.favoriteUpdateFidFilterQueries.getAll().executeAsList().size)
@@ -217,8 +219,42 @@ class BackupRepositoryImplTest {
             lastVisitTime = 100,
             coverUrl = null,
         )
+        db.rssSearchSubscriptionQueries.insertSubscription(
+            title = "app",
+            query = "app",
+            forumId = null,
+            forumName = null,
+            enabled = 1,
+            createdAt = 10,
+            updatedAt = 100,
+            lastRefreshStartedAt = null,
+            lastRefreshFinishedAt = null,
+            lastRefreshStatus = null,
+            lastRefreshMessage = null,
+            lastSearchId = null,
+            lastTotalCount = 0,
+        )
+        val rssSearchSubscriptionId =
+            db.rssSearchSubscriptionQueries.lastInsertedId().executeAsOne()
+        db.rssSearchSubscriptionQueries.insertSubscription(
+            title = "catalog",
+            query = "app",
+            forumId = 1,
+            forumName = "管理版",
+            enabled = 1,
+            createdAt = 10,
+            updatedAt = 100,
+            lastRefreshStartedAt = null,
+            lastRefreshFinishedAt = null,
+            lastRefreshStatus = null,
+            lastRefreshMessage = null,
+            lastSearchId = null,
+            lastTotalCount = 0,
+        )
+        val rssCatalogSubscriptionId =
+            db.rssSearchSubscriptionQueries.lastInsertedId().executeAsOne()
         db.rssSearchReadingHistoryQueries.upsert(
-            subscriptionId = 30,
+            subscriptionId = rssSearchSubscriptionId,
             subscriptionTitle = "app",
             subscriptionQuery = "app",
             subscriptionPage = 1,
@@ -232,7 +268,7 @@ class BackupRepositoryImplTest {
             coverUrl = null,
         )
         db.rssCatalogReadingHistoryQueries.upsert(
-            subscriptionId = 40,
+            subscriptionId = rssCatalogSubscriptionId,
             subscriptionTitle = "catalog",
             subscriptionQuery = "app",
             subscriptionPage = 1,
@@ -291,6 +327,11 @@ class BackupRepositoryImplTest {
         db.tagCatalogReadingHistoryQueries.deleteAll()
         db.rssSearchReadingHistoryQueries.deleteAll()
         db.rssCatalogReadingHistoryQueries.deleteAll()
+        db.rssSearchSubscriptionQueries.getAll().executeAsList().forEach {
+            db.rssSearchPageCacheQueries.deleteBySubscription(it.id)
+            db.rssSearchSubscriptionResultQueries.deleteBySubscription(it.id)
+            db.rssSearchSubscriptionQueries.deleteById(it.id)
+        }
         db.localChapterStateQueries.deleteAll()
         db.readingTimeStatQueries.deleteAll()
         db.favoriteUpdateEventQueries.deleteAll()

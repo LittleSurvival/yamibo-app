@@ -64,6 +64,60 @@ class ManualSyncOverrideCoordinatorTest {
         assertTrue(store.pendingOperations().isEmpty())
     }
 
+    @Test
+    fun favoriteUpdateFilterChangeInvalidatesPreviewWithoutLocalMutation() = runBlocking {
+        val store = activeStore()
+        val localOperation = fidFilterOperation(enabled = false, deviceValue = "local-device")
+        val domain = FakeDomainState(
+            OperationReducer().reduce(operations = listOf(localOperation)).entities,
+        )
+        val remote = FakeRemote(fidFilterOperation(enabled = true, deviceValue = "remote-device"))
+        val coordinator = ManualSyncOverrideCoordinator(
+            store = store,
+            remote = remote,
+            domainState = domain,
+            nowMillis = { 1_000L },
+        )
+        val preview = assertIs<ManualSyncPreviewResult.Ready>(
+            coordinator.preview(account, ManualSyncOverrideDirection.ForcePull),
+        ).preview
+        assertEquals(1, preview.differences.single().enabled)
+        assertEquals(listOf("FID 7"), preview.differences.single().details)
+        assertEquals(0, preview.differences.single().remainingDetailCount)
+
+        remote.operation = fidFilterOperation(enabled = false, deviceValue = "remote-device-2")
+        val result = coordinator.apply(account, preview)
+
+        assertIs<ManualSyncApplyResult.StalePreview>(result)
+        assertEquals("false", domain.field("enabled"))
+        assertTrue(store.pendingOperations().isEmpty())
+    }
+
+    @Test
+    fun failedAuthoritativeReloadDoesNotMutateFavoriteUpdateState() = runBlocking {
+        val store = activeStore()
+        val localOperation = fidFilterOperation(enabled = false, deviceValue = "local-device")
+        val domain = FakeDomainState(
+            OperationReducer().reduce(operations = listOf(localOperation)).entities,
+        )
+        val remote = FakeRemote(fidFilterOperation(enabled = true, deviceValue = "remote-device"))
+        val coordinator = ManualSyncOverrideCoordinator(
+            store = store,
+            remote = remote,
+            domainState = domain,
+            nowMillis = { 1_000L },
+        )
+        val preview = assertIs<ManualSyncPreviewResult.Ready>(
+            coordinator.preview(account, ManualSyncOverrideDirection.ForcePull),
+        ).preview
+
+        remote.loadFailure = "offline"
+        assertIs<ManualSyncApplyResult.Failed>(coordinator.apply(account, preview))
+
+        assertEquals("false", domain.field("enabled"))
+        assertTrue(store.pendingOperations().isEmpty())
+    }
+
     private fun activeStore(): SqlDelightAppSyncOperationStore {
         val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
         Database.Schema.create(driver)
@@ -92,6 +146,25 @@ class ManualSyncOverrideCoordinatorTest {
         )
     }
 
+    private fun fidFilterOperation(enabled: Boolean, deviceValue: String): SyncOperation {
+        val device = SyncDeviceId(deviceValue)
+        val epoch = SyncDeviceEpoch("epoch")
+        val sequence = SyncSequence(1)
+        return SyncOperation(
+            operationId = SyncOperation.idFor(device, epoch, sequence),
+            deviceId = device,
+            deviceEpoch = epoch,
+            sequence = sequence,
+            accountBinding = account,
+            domainId = SyncDomainId("favorite.update-fid-filter"),
+            entityId = SyncEntityId("fid:7"),
+            kind = SyncOperationKind.Put,
+            fields = mapOf("fid" to "7", "enabled" to enabled.toString()),
+            createdAtEpochMillis = 10,
+            origin = SyncOperationOrigin.UserAction,
+        )
+    }
+
     private class FakeDomainState(
         private var state: Map<SyncEntityKey, ResolvedSyncEntity>,
     ) : SyncDomainStateAdapter {
@@ -103,33 +176,39 @@ class ManualSyncOverrideCoordinatorTest {
             state = entities.associateBy { it.key }
         }
         fun value(): String? = state.values.single().fields["value"]?.value
+        fun field(name: String): String? = state.values.single().fields[name]?.value
     }
 
     private class FakeRemote(
         var operation: SyncOperation,
     ) : AppSyncJournalRemote {
+        var loadFailure: String? = null
+
         override suspend fun loadJournals(
             accountBinding: SyncAccountBinding,
             forceDiscovery: Boolean,
-        ): AppSyncJournalLoadResult = AppSyncJournalLoadResult.Success(
-            journals = listOf(
-                LoadedAppSyncJournal(
-                    remoteId = "1",
-                    fingerprint = operation.operationId.value,
-                    payload = AppSyncJournalPayload(
-                        accountBinding = accountBinding,
-                        deviceId = operation.deviceId,
-                        deviceEpoch = operation.deviceEpoch,
-                        writerNonce = SyncWriterNonce("writer"),
-                        firstSequence = operation.sequence.value,
-                        lastSequence = operation.sequence.value,
-                        operations = listOf(operation),
-                        observed = SyncCausalContext(),
-                        heartbeatAtEpochMillis = 10,
+        ): AppSyncJournalLoadResult {
+            loadFailure?.let { return AppSyncJournalLoadResult.RetryableFailure(it) }
+            return AppSyncJournalLoadResult.Success(
+                journals = listOf(
+                    LoadedAppSyncJournal(
+                        remoteId = "1",
+                        fingerprint = operation.operationId.value,
+                        payload = AppSyncJournalPayload(
+                            accountBinding = accountBinding,
+                            deviceId = operation.deviceId,
+                            deviceEpoch = operation.deviceEpoch,
+                            writerNonce = SyncWriterNonce("writer"),
+                            firstSequence = operation.sequence.value,
+                            lastSequence = operation.sequence.value,
+                            operations = listOf(operation),
+                            observed = SyncCausalContext(),
+                            heartbeatAtEpochMillis = 10,
+                        ),
                     ),
                 ),
-            ),
-        )
+            )
+        }
 
         override suspend fun publishOwnJournal(
             payload: AppSyncJournalPayload,

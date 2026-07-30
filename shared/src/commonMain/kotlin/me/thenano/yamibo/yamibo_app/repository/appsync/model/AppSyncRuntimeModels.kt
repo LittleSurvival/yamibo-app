@@ -30,6 +30,7 @@ enum class AppSyncOperationLifecycle {
     Quarantined,
     Compacted,
     DiscardedByForcePull,
+    DiscardedByRebootstrap,
     ;
 
     companion object

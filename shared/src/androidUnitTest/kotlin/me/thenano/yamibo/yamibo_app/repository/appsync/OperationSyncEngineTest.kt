@@ -36,7 +36,12 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationOr
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncJournalPayload
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointPayload
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.ParsedAppSyncCheckpointEnvelope
+import me.thenano.yamibo.yamibo_app.repository.appsync.rollout.AppSyncRolloutEvidenceReport
+import me.thenano.yamibo.yamibo_app.repository.appsync.rollout.RolloutDemandEvidence
+import me.thenano.yamibo.yamibo_app.repository.appsync.rollout.RolloutDemandOutcome
+import me.thenano.yamibo.yamibo_app.repository.appsync.rollout.RolloutFixedPointObservation
 import me.thenano.yamibo.yamibo_app.repository.backup.YamiboBackupFile
+import me.thenano.yamibo.yamibo_app.repository.rss.rssSearchSubscriptionSyncId
 import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncOperationStore
 import me.thenano.yamibo.yamibo_app.store.appsync.LocalSyncOperationDraft
 
@@ -107,6 +112,23 @@ class OperationSyncEngineTest {
         assertEquals(SyncOperationOrigin.Migration, operation.origin)
         assertEquals("dark", fixture.domain.value("settings", "theme", "value"))
         assertEquals(AppSyncInstallationState.Active, fixture.store.installation()?.state)
+    }
+
+    @Test
+    fun bootstrapWithoutCheckpointReplacesStaleResolvedStateBeforeLocalMigration() = runBlocking {
+        val fixture = fixture(migrationDrafts = listOf(migrationSetting("dark")))
+        fixture.store.initialize("generation")
+        fixture.domain.apply(
+            OperationReducer().reduce(
+                operations = listOf(standaloneSettingOperation("stale")),
+            ),
+        )
+
+        assertIs<AppSyncBootstrapResult.Ready>(fixture.bootstrap.bootstrap(account))
+
+        assertEquals("dark", fixture.domain.value("settings", "theme", "value"))
+        assertEquals(1, fixture.store.pendingOperations().size)
+        assertEquals(SyncOperationOrigin.Migration, fixture.store.pendingOperations().single().origin)
     }
 
     @Test
@@ -234,6 +256,53 @@ class OperationSyncEngineTest {
         val installation = requireNotNull(fixture.store.installation())
         assertEquals(
             listOf("checkpoint-from-peer"),
+            fixture.remote.ownCheckpointAcknowledgementIds(installation),
+        )
+    }
+
+    @Test
+    fun activeDeviceAdoptsCanonicalCheckpointStateBeforeAcknowledgingIt() = runBlocking {
+        val fixture = fixture()
+        activate(fixture)
+        fixture.domain.apply(
+            OperationReducer().reduce(
+                operations = listOf(
+                    standaloneSettingOperation("stale", deviceValue = "stale-device"),
+                ),
+            ),
+        )
+        val canonical = standaloneSettingOperation("dark", deviceValue = "canonical-device")
+        val canonicalState = OperationReducer().reduce(operations = listOf(canonical))
+            .entities.values.single()
+        fixture.remote.checkpoints += LoadedAppSyncCheckpoint(
+            remoteId = "93",
+            envelope = ParsedAppSyncCheckpointEnvelope(
+                payload = AppSyncCheckpointPayload(
+                    checkpointId = "canonical-checkpoint",
+                    accountBinding = account,
+                    coverage = SyncCausalContext().advance(
+                        canonical.replicaKey,
+                        canonical.sequence,
+                    ),
+                    encodedSnapshot = "fixture",
+                    resolvedEntities = listOf(canonicalState),
+                    tombstones = emptyList(),
+                    createdAtEpochMillis = 100,
+                ),
+                snapshot = YamiboBackupFile(appVersionCode = 1, createdAt = 100),
+                fingerprint = "canonical-checkpoint-fingerprint",
+            ),
+        )
+
+        assertIs<OperationSyncResult.Converged>(
+            fixture.engine.synchronize(account, formHash),
+        )
+
+        assertEquals("dark", fixture.domain.value("settings", "theme", "value"))
+        assertTrue(fixture.store.causalContext().includes(canonical))
+        val installation = requireNotNull(fixture.store.installation())
+        assertEquals(
+            listOf("canonical-checkpoint"),
             fixture.remote.ownCheckpointAcknowledgementIds(installation),
         )
     }
@@ -650,10 +719,50 @@ class OperationSyncEngineTest {
     fun oneHundredEligibleDemandsConvergeWithinTwoWindowsWithoutAckLoss() = runBlocking {
         val fixture = fixture()
         activate(fixture)
-        var converged = 0
+        val evidence = mutableListOf<RolloutDemandEvidence>()
+        val domains = listOf(
+            DomainMutation("settings", { "theme" }) { index ->
+                mapOf("value" to "value-$index")
+            },
+            DomainMutation("favorite.item", { "thread:$it" }) { index ->
+                mapOf("title" to "title-$index")
+            },
+            DomainMutation(
+                domain = "rss.search-subscription",
+                entityId = { rssSearchSubscriptionSyncId("query-$it", null) },
+                kind = SyncOperationKind.Put,
+                fields = { index ->
+                    mapOf(
+                        "title" to "query-$index",
+                        "query" to "query-$index",
+                        "forumId" to null,
+                        "forumName" to null,
+                        "enabled" to "true",
+                        "createdAt" to index.toString(),
+                        "updatedAt" to index.toString(),
+                    )
+                },
+            ),
+            DomainMutation("reading.thread", { "thread:$it" }) { index ->
+                mapOf("position" to index.toString())
+            },
+            DomainMutation("favorite.update-event", { "event:$it" }) { index ->
+                mapOf("readAt" to (1_000 + index).toString())
+            },
+            DomainMutation("favorite.update-fid-filter", { "fid:$it" }) { index ->
+                mapOf("fid" to index.toString(), "enabled" to (index % 2 == 0).toString())
+            },
+            DomainMutation("favorite.update-category-filter", { "category:category-$it" }) { index ->
+                mapOf(
+                    "categorySyncId" to "category-$index",
+                    "enabled" to (index % 2 == 0).toString(),
+                )
+            },
+        )
 
         repeat(100) { index ->
-            appendSetting(fixture, "value-$index")
+            val mutation = domains[index % domains.size]
+            appendMutation(fixture, mutation, index)
             fixture.remote.acceptThenReturnUnknown = index % 10 == 0
             val first = fixture.engine.synchronize(account, formHash)
             fixture.remote.acceptThenReturnUnknown = false
@@ -662,11 +771,38 @@ class OperationSyncEngineTest {
             } else {
                 fixture.engine.synchronize(account, formHash)
             }
-            if (final is OperationSyncResult.Converged) converged += 1
+            evidence += RolloutDemandEvidence(
+                demandId = "controlled-$index",
+                eligible = true,
+                outcome = if (final is OperationSyncResult.Converged) {
+                    RolloutDemandOutcome.Converged
+                } else {
+                    RolloutDemandOutcome.Failed
+                },
+                attempts = if (first is OperationSyncResult.Converged) 1 else 2,
+                coveredDomains = setOf(mutation.domain),
+                fixedPoint = if (final is OperationSyncResult.Converged) {
+                    RolloutFixedPointObservation(
+                        pendingNonQuarantinedCount = fixture.store.pendingOperations().size,
+                        fetchedValidUnappliedCount = 0,
+                        projectionMismatchCount = 0,
+                        acknowledgedOperationLossCount = 0,
+                    )
+                } else {
+                    null
+                },
+            )
         }
 
         val operations = fixture.store.allOutboxOperations()
-        assertEquals(100, converged)
+        val report = AppSyncRolloutEvidenceReport.create(
+            generatedAtEpochMillis = fixture.clock,
+            demands = evidence,
+        )
+        assertEquals(100, report.convergedDemandCount)
+        assertEquals(10, report.retryCount)
+        assertEquals(domains.map { it.domain }.toSet(), evidence.flatMap { it.coveredDomains }.toSet())
+        assertTrue(report.passesRetirementGate)
         assertEquals(100, operations.size)
         assertEquals(100, operations.map { it.first.operationId }.distinct().size)
         assertTrue(operations.all { it.second == AppSyncOperationLifecycle.Acknowledged })
@@ -718,6 +854,31 @@ class OperationSyncEngineTest {
             entityGeneration = 1,
             kind = SyncOperationKind.Patch,
             fields = mapOf("value" to value),
+            causalContext = fixture.store.causalContext(),
+            createdAtEpochMillis = fixture.clock++,
+            origin = SyncOperationOrigin.UserAction,
+        )
+        fixture.domain.apply(
+            OperationReducer().reduce(
+                current = fixture.domain.currentState(),
+                operations = listOf(operation),
+            ),
+        )
+        return operation.operationId.value
+    }
+
+    private fun appendMutation(
+        fixture: Fixture,
+        mutation: DomainMutation,
+        index: Int,
+    ): String {
+        val operation = fixture.store.appendLocalOperation(
+            accountBinding = account,
+            domainId = SyncDomainId(mutation.domain),
+            entityId = SyncEntityId(mutation.entityId(index)),
+            entityGeneration = 1,
+            kind = mutation.kind,
+            fields = mutation.fields(index),
             causalContext = fixture.store.causalContext(),
             createdAtEpochMillis = fixture.clock++,
             origin = SyncOperationOrigin.UserAction,
@@ -803,6 +964,13 @@ class OperationSyncEngineTest {
         lateinit var engine: OperationSyncEngine
         lateinit var bootstrap: BootstrapCoordinator
     }
+
+    private data class DomainMutation(
+        val domain: String,
+        val entityId: (Int) -> String,
+        val kind: SyncOperationKind = SyncOperationKind.Patch,
+        val fields: (Int) -> Map<String, String?>,
+    )
 
     private class FakeDomainState : SyncDomainStateAdapter {
         private var entities = emptyMap<SyncEntityKey, ResolvedSyncEntity>()

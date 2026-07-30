@@ -142,6 +142,34 @@ class CloudSyncUiStateTest {
         )
     }
 
+    @Test
+    fun favoriteUpdateDetailsRemainBoundedAndVisibleWithRemainingCount() {
+        val state = status(
+            phase = AppSyncServicePhase.Active,
+            changes = listOf(
+                AppSyncChangeSummary(
+                    AppSyncChangeDirection.Received,
+                    "favorite.update-event",
+                    AppSyncChangeAction.Added,
+                    7,
+                    details = listOf("更新一", "更新二", "更新三", "更新四", "更新五"),
+                    remainingDetailCount = 2,
+                ),
+            ),
+        ).toUiState(backgroundSchedulerAvailable = true)
+
+        assertEquals(
+            CloudSyncChangeDetail(
+                direction = "從雲端套用",
+                module = "最近更新",
+                summary = "新增 7",
+                details = listOf("更新一", "更新二", "更新三", "更新四", "更新五"),
+                remainingDetailCount = 2,
+            ),
+            state.changes.single(),
+        )
+    }
+
     private fun status(
         phase: AppSyncServicePhase,
         message: String = "ready",

@@ -12,6 +12,11 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationId
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.ResolvedSyncEntity
 import me.thenano.yamibo.yamibo_app.repository.backup.CloudBackupPayloadCodec
 import me.thenano.yamibo.yamibo_app.repository.backup.YamiboBackupFile
+import okio.Buffer
+import okio.ByteString.Companion.decodeBase64
+import okio.GzipSink
+import okio.GzipSource
+import okio.buffer
 
 @Serializable
 internal data class AppSyncCheckpointTombstone(
@@ -95,11 +100,12 @@ internal class AppSyncCheckpointEnvelopeCodec(
         validatePayload(payload)?.let { throw IllegalArgumentException(it) }
         val payloadJson = json.encodeToString(AppSyncCheckpointPayload.serializer(), payload)
         val fingerprint = stableAppSyncFingerprint(payloadJson)
+        val encodedPayload = compress(payloadJson)
         return buildString {
             appendLine("[${AppSyncJournalDefaults.CHECKPOINT_MARKER}:BEGIN]")
-            appendLine("schema=${AppSyncJournalDefaults.JOURNAL_SCHEMA_VERSION}")
+            appendLine("schema=${AppSyncJournalDefaults.COMPRESSED_ENVELOPE_SCHEMA_VERSION}")
             appendLine("fingerprint=$fingerprint")
-            appendLine("payload=$payloadJson")
+            appendLine("payload=$encodedPayload")
             append("[${AppSyncJournalDefaults.CHECKPOINT_MARKER}:END]")
         }
     }
@@ -127,13 +133,27 @@ internal class AppSyncCheckpointEnvelopeCodec(
         val body = text.substring(beginIndex + begin.length, endIndex).trim()
         val schema = SCHEMA.find(body)?.groupValues?.get(1)?.toIntOrNull()
             ?: return invalid("Checkpoint schema is missing", true)
-        if (schema != AppSyncJournalDefaults.JOURNAL_SCHEMA_VERSION) {
+        if (
+            schema != AppSyncJournalDefaults.JOURNAL_SCHEMA_VERSION &&
+            schema != AppSyncJournalDefaults.COMPRESSED_ENVELOPE_SCHEMA_VERSION
+        ) {
             return invalid("Unsupported checkpoint schema: $schema", true)
         }
         val fingerprint = FINGERPRINT.find(body)?.groupValues?.get(1)
             ?: return invalid("Checkpoint fingerprint is missing", true)
-        val payloadText = PAYLOAD.find(body)?.groupValues?.get(1)?.trim()
+        val encodedPayload = PAYLOAD.find(body)?.groupValues?.get(1)?.trim()
             ?: return invalid("Checkpoint payload is missing", true)
+        val payloadText = if (schema == AppSyncJournalDefaults.JOURNAL_SCHEMA_VERSION) {
+            encodedPayload
+        } else {
+            decompress(encodedPayload).getOrElse {
+                return invalid(
+                    "Checkpoint compressed payload is invalid: " +
+                        (it.message ?: it::class.simpleName),
+                    true,
+                )
+            }
+        }
         val payload = try {
             json.decodeFromString(AppSyncCheckpointPayload.serializer(), payloadText)
         } catch (error: Throwable) {
@@ -239,9 +259,62 @@ internal class AppSyncCheckpointEnvelopeCodec(
     private fun invalid(reason: String, markerPresent: Boolean) =
         AppSyncCheckpointValidation.Invalid(reason, markerPresent)
 
+    private fun compress(value: String): String {
+        val bytes = value.encodeToByteArray()
+        require(bytes.size <= MAX_DECOMPRESSED_BYTES) {
+            "Checkpoint JSON exceeds $MAX_DECOMPRESSED_BYTES bytes"
+        }
+        val output = Buffer()
+        val sink = GzipSink(output).buffer()
+        try {
+            sink.write(bytes)
+        } finally {
+            sink.close()
+        }
+        require(output.size <= MAX_COMPRESSED_BYTES) {
+            "Compressed checkpoint exceeds $MAX_COMPRESSED_BYTES bytes"
+        }
+        return COMPRESSED_PAYLOAD_PREFIX + output.readByteString().base64()
+    }
+
+    private fun decompress(value: String): Result<String> = runCatching {
+        require(value.startsWith(COMPRESSED_PAYLOAD_PREFIX)) {
+            "Compressed checkpoint framing prefix is missing"
+        }
+        val compressed = requireNotNull(
+            value.removePrefix(COMPRESSED_PAYLOAD_PREFIX).decodeBase64(),
+        ) {
+            "Checkpoint Base64 payload is invalid"
+        }
+        require(compressed.size <= MAX_COMPRESSED_BYTES) {
+            "Compressed checkpoint exceeds $MAX_COMPRESSED_BYTES bytes"
+        }
+        val source = GzipSource(Buffer().write(compressed)).buffer()
+        val output = Buffer()
+        try {
+            while (true) {
+                val remaining = MAX_DECOMPRESSED_BYTES.toLong() - output.size
+                require(remaining >= 0) {
+                    "Decoded checkpoint exceeds $MAX_DECOMPRESSED_BYTES bytes"
+                }
+                val read = source.read(output, minOf(8_192L, remaining + 1L))
+                if (read == -1L) break
+                require(output.size <= MAX_DECOMPRESSED_BYTES) {
+                    "Decoded checkpoint exceeds $MAX_DECOMPRESSED_BYTES bytes"
+                }
+            }
+        } finally {
+            source.close()
+        }
+        output.readByteArray().decodeToString(throwOnInvalidSequence = true)
+    }
+
     private companion object {
+        const val COMPRESSED_PAYLOAD_PREFIX = "gzip-base64:"
+        const val MAX_COMPRESSED_BYTES = 12 * 1024 * 1024
+        const val MAX_DECOMPRESSED_BYTES = 64 * 1024 * 1024
         val SCHEMA = Regex("""(?:^|\s)schema=(\d+)(?=\s|$)""")
         val FINGERPRINT = Regex("""(?:^|\s)fingerprint=([0-9a-fA-F]+)(?=\s|$)""")
-        val PAYLOAD = Regex("""(?:^|\s)payload=(\{.*\})\s*$""", RegexOption.DOT_MATCHES_ALL)
+        val PAYLOAD = Regex("""(?:^|\s)payload=(.*)\s*$""", RegexOption.DOT_MATCHES_ALL)
     }
 }

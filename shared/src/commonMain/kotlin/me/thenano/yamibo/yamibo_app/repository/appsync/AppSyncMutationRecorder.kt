@@ -19,6 +19,22 @@ internal class AppSyncMutationRecorder(
     private val domainState: SqlDelightSyncDomainStateAdapter,
     private val nowMillis: () -> Long,
 ) {
+    fun currentGeneration(domain: String, entityId: String): Long {
+        val latest = domainState.currentState()
+            .values
+            .filter {
+                it.key.domainId.value == domain &&
+                    it.key.entityId.value == entityId
+            }
+            .maxByOrNull { it.key.generation }
+            ?: return 1
+        return if (latest.tombstone != null || latest.relationPresent == false) {
+            latest.key.generation + 1
+        } else {
+            latest.key.generation
+        }
+    }
+
     fun record(
         domain: String,
         entityId: String,
