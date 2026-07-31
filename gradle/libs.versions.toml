@@ -17,7 +17,7 @@ coil3 = "3.4.0"
 securityCrypto = "1.1.0"
 yamiboApi = "1.1.21"
 androidx-work = "2.11.0"
-sqldelight = "2.2.1"
+sqldelight = "2.3.2"
 okio = "3.17.0"
 opencc4j = "1.14.0"
 

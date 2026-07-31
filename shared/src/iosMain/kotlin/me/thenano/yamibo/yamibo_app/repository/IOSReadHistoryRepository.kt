@@ -10,11 +10,11 @@ import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.db.DatabaseFactory
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
 import me.thenano.yamibo.yamibo_app.repository.rss.rssSearchSubscriptionSyncId
-import me.thenano.yamibo.yamiboapp.MangaTagReadingHistory
-import me.thenano.yamibo.yamiboapp.ReadingHistory
-import me.thenano.yamibo.yamiboapp.RssCatalogReadingHistory
-import me.thenano.yamibo.yamiboapp.RssSearchReadingHistory
-import me.thenano.yamibo.yamiboapp.TagCatalogReadingHistory
+import me.thenano.yamibo.yamibo_app.MangaTagReadingHistory
+import me.thenano.yamibo.yamibo_app.ReadingHistory
+import me.thenano.yamibo.yamibo_app.RssCatalogReadingHistory
+import me.thenano.yamibo.yamibo_app.RssSearchReadingHistory
+import me.thenano.yamibo.yamibo_app.TagCatalogReadingHistory
 
 class IOSReadHistoryRepository(
     private val db: Database,

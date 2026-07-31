@@ -175,10 +175,16 @@ class MainActivity : ComponentActivity() {
             val novelReaderSettingsRepository = remember { NovelReaderSettingsRepository(settingsStore) }
             val mangaReaderSettingsRepository = remember { MangaReaderSettingsRepository(settingsStore) }
             val imageReaderModeOverrideRepository = remember { SettingsImageReaderModeOverrideRepository(settingsStore) }
-            remember(appSyncService, appSettingsRepository, novelReaderSettingsRepository, mangaReaderSettingsRepository) {
+            DisposableEffect(
+                appSyncService,
+                appSettingsRepository,
+                novelReaderSettingsRepository,
+                mangaReaderSettingsRepository,
+            ) {
                 appSyncService.registerSyncableSettings(
                     listOf(appSettingsRepository, novelReaderSettingsRepository, mangaReaderSettingsRepository),
                 )
+                onDispose { }
             }
             @SuppressLint("RememberReturnType")
             val fontRepository = remember {
@@ -257,12 +263,14 @@ class MainActivity : ComponentActivity() {
                     appVersionCode = AppVersion.VersionCode.toInt(),
                 )
             }
-            remember(appSyncService, backupRepository) {
+            DisposableEffect(appSyncService, backupRepository) {
                 appSyncService.registerLocalSnapshotSource(backupRepository)
+                onDispose { }
             }
             val appSyncBackgroundScheduler = remember {
                 AndroidAppSyncBackgroundScheduler(context)
             }
+            @SuppressLint("RememberReturnType")
             val appSyncLifecycleController = remember(
                 appSyncService,
                 appSyncBackgroundScheduler,

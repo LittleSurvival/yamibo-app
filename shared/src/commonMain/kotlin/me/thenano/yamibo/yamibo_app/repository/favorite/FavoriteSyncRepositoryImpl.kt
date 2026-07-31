@@ -29,7 +29,7 @@ import me.thenano.yamibo.yamibo_app.repository.ThreadRepository
 import me.thenano.yamibo.yamibo_app.repository.contentcover.findThreadCoverCandidate
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
 import me.thenano.yamibo.yamibo_app.util.time.epochMillisOrNull
-import me.thenano.yamibo.yamiboapp.FavoriteSyncTask
+import me.thenano.yamibo.yamibo_app.FavoriteSyncTask
 import kotlin.random.Random
 
 class FavoriteSyncRepositoryImpl(
@@ -881,7 +881,7 @@ class FavoriteSyncRepositoryImpl(
         }
     }
 
-    private fun me.thenano.yamibo.yamiboapp.LocalFavoriteItem.asThreadIdOrNull(): ThreadId? {
+    private fun me.thenano.yamibo.yamibo_app.LocalFavoriteItem.asThreadIdOrNull(): ThreadId? {
         return when (FavoriteStoreRepository.FavoriteTargetType.fromStorage(targetType)) {
             FavoriteStoreRepository.FavoriteTargetType.ThreadNormal,
             FavoriteStoreRepository.FavoriteTargetType.ThreadNovel -> ThreadId(targetId.toInt())

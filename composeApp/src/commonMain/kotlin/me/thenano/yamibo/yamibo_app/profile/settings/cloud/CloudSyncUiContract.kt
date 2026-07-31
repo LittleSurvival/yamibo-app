@@ -364,12 +364,13 @@ internal class AppSyncCloudUiController(
         forcePreviewLoading = true
         publishState()
         scope.launch {
-            when (val result = service.applyForceOverride(preview.toService())) {
-                is AppSyncForceApplyResult.Applied -> forceError = null
+            forceError = when (val result = service.applyForceOverride(preview.toService())) {
+                is AppSyncForceApplyResult.Applied -> null
                 AppSyncForceApplyResult.StalePreview ->
-                    forceError = CloudSyncForceError.StalePreview
+                    CloudSyncForceError.StalePreview
+
                 is AppSyncForceApplyResult.Failed ->
-                    forceError = result.toUiError()
+                    result.toUiError()
             }
             forcePreviewLoading = false
             publishState()

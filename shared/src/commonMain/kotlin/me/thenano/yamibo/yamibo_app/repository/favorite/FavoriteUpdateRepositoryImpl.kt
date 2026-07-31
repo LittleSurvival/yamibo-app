@@ -24,7 +24,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationKi
 import me.thenano.yamibo.yamibo_app.repository.backup.favoriteUpdateEventIdentity
 import me.thenano.yamibo.yamibo_app.store.appsync.LocalSyncOperationDraft
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
-import me.thenano.yamibo.yamiboapp.*
+import me.thenano.yamibo.yamibo_app.*
 import kotlin.math.max
 import kotlin.random.Random
 import kotlin.time.Duration.Companion.milliseconds

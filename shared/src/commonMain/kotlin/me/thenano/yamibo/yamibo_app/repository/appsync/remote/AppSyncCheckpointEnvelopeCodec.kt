@@ -127,7 +127,7 @@ internal class AppSyncCheckpointEnvelopeCodec(
         val end = "[$marker:END]"
         val beginIndex = text.indexOf(begin)
         val endIndex = text.indexOf(end, beginIndex.coerceAtLeast(0))
-        if (beginIndex < 0 || endIndex <= beginIndex) {
+        if (beginIndex !in 0..<endIndex) {
             return invalid("Checkpoint envelope boundary is incomplete", true)
         }
         val body = text.substring(beginIndex + begin.length, endIndex).trim()
@@ -315,6 +315,6 @@ internal class AppSyncCheckpointEnvelopeCodec(
         const val MAX_DECOMPRESSED_BYTES = 64 * 1024 * 1024
         val SCHEMA = Regex("""(?:^|\s)schema=(\d+)(?=\s|$)""")
         val FINGERPRINT = Regex("""(?:^|\s)fingerprint=([0-9a-fA-F]+)(?=\s|$)""")
-        val PAYLOAD = Regex("""(?:^|\s)payload=(.*)\s*$""", RegexOption.DOT_MATCHES_ALL)
+        val PAYLOAD = Regex("""(?:^|\s)payload=([\s\S]*)\s*$""")
     }
 }

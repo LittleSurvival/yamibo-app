@@ -514,7 +514,7 @@ internal class DatabaseSyncDomainMaterializer(
 
     private fun rssSubscription(syncId: String) =
         db.rssSearchSubscriptionQueries.getAll().executeAsList().firstOrNull {
-            me.thenano.yamibo.yamibo_app.repository.rss.rssSearchSubscriptionSyncId(
+            rssSearchSubscriptionSyncId(
                 it.query,
                 it.forumId,
             ) == syncId

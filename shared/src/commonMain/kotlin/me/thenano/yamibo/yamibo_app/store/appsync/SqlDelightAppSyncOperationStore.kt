@@ -33,7 +33,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationOr
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncReplicaKey
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncSequence
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncWriterNonce
-import me.thenano.yamibo.yamiboapp.AppSyncOutbox
+import me.thenano.yamibo.yamibo_app.AppSyncOutbox
 
 internal class SqlDelightAppSyncOperationStore(
     private val db: Database,

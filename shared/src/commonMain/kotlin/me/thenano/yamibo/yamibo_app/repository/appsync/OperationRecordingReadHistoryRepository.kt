@@ -300,20 +300,6 @@ internal class OperationRecordingReadHistoryRepository(
             runBlocking { mutation() }
         }
     }
-
-    private fun recordBatch(
-        drafts: List<LocalSyncOperationDraft>,
-        mutation: suspend () -> Unit,
-    ) {
-        if (drafts.isEmpty()) {
-            runBlocking { mutation() }
-        } else {
-            recorder.recordBatch(drafts) {
-                runBlocking { mutation() }
-            }
-        }
-    }
-
     private fun recordAuthorizedDeleteBatch(
         drafts: List<LocalSyncOperationDraft>,
         scopeKey: String,

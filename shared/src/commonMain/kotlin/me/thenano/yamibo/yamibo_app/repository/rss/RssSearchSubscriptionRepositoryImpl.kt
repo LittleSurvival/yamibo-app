@@ -19,7 +19,7 @@ import me.thenano.yamibo.yamibo_app.repository.RssSearchSubscriptionRepository
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncMutationRecorder
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationKind
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
-import me.thenano.yamibo.yamiboapp.RssSearchSubscription
+import me.thenano.yamibo.yamibo_app.RssSearchSubscription
 
 class RssSearchSubscriptionRepositoryImpl private constructor(
     private val db: Database,

@@ -12,7 +12,7 @@ internal interface SyncDomainMaterializer {
 }
 
 internal class SqlDelightSyncDomainStateAdapter(
-    private val db: Database,
+    db: Database,
     private val materializer: SyncDomainMaterializer,
     private val reducer: OperationReducer = OperationReducer(),
     private val json: Json = Json {
@@ -40,7 +40,7 @@ internal class SqlDelightSyncDomainStateAdapter(
 
     override fun applyWithinTransaction(result: OperationReductionResult) {
         val ordered = result.entities.values.sortedWith(
-            compareBy<ResolvedSyncEntity>(
+            compareBy(
                 { MATERIALIZATION_ORDER[it.key.domainId.value] ?: Int.MAX_VALUE },
                 { it.key.entityId.value },
             ),

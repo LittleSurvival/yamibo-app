@@ -52,6 +52,7 @@ private fun summarize(
     winnerIds: Set<SyncOperationId>,
 ): List<OperationChangeSummary> =
     operations
+        .asSequence()
         .distinctBy { it.operationId }
         .filter { it.operationId in winnerIds }
         .groupBy { Triple(direction, it.domainId.value, it.changeAction()) }
@@ -74,6 +75,7 @@ private fun summarize(
             )
         }
         .sortedWith(compareBy({ it.direction }, { it.domainId }, { it.action }))
+        .toList()
 
 private fun SyncOperation.safeDisplayDetail(): String? = when (domainId.value) {
     "favorite.update-event" ->

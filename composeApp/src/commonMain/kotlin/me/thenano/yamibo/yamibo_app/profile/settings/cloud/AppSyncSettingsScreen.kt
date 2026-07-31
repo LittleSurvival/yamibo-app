@@ -61,6 +61,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncJournalRetirementM
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncServicePhase
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncStatusMessage
 import me.thenano.yamibo.yamibo_app.util.time.FixedScheduleInterval
+import kotlin.time.Duration.Companion.milliseconds
 
 @Composable
 internal fun AppSyncSettingsScreen(
@@ -685,7 +686,7 @@ private fun DeleteCloudDataDialog(
         if (secondStep) {
             remainingSeconds = 5
             while (remainingSeconds > 0) {
-                delay(1_000)
+                delay(1_000.milliseconds)
                 remainingSeconds -= 1
             }
         }
@@ -746,7 +747,7 @@ private fun ForceOverrideDialog(
     LaunchedEffect(preview.token) {
         remainingSeconds = 10
         while (remainingSeconds > 0) {
-            delay(1_000)
+            delay(1_000.milliseconds)
             remainingSeconds -= 1
         }
     }
@@ -970,9 +971,3 @@ private fun statusColor(status: CloudSyncStatus): Color = when (status) {
     CloudSyncStatus.Missing -> YamiboTheme.colors.brownPrimary
     CloudSyncStatus.Unavailable -> YamiboTheme.colors.redAccent
 }
-
-@Composable
-private fun operationText(
-    operation: CloudSyncOperation,
-    target: CloudSyncOperation,
-): String? = if (operation == target) i18n("處理中...") else null

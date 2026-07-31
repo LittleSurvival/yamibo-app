@@ -29,9 +29,9 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDomainId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncEntityId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationKind
 import me.thenano.yamibo.yamibo_app.store.appsync.LocalSyncOperationDraft
-import me.thenano.yamibo.yamiboapp.LocalFavoriteCategory
-import me.thenano.yamibo.yamiboapp.LocalFavoriteCollection
-import me.thenano.yamibo.yamiboapp.LocalFavoriteItem
+import me.thenano.yamibo.yamibo_app.LocalFavoriteCategory
+import me.thenano.yamibo.yamibo_app.LocalFavoriteCollection
+import me.thenano.yamibo.yamibo_app.LocalFavoriteItem
 
 class FavoriteStoreRepositoryImpl internal constructor(
     private val db: Database,

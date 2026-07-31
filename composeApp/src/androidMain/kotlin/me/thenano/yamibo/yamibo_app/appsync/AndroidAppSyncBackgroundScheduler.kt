@@ -9,8 +9,7 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
-import kotlin.time.Duration.Companion.seconds
-import kotlin.time.toJavaDuration
+import java.util.concurrent.TimeUnit
 import me.thenano.yamibo.yamibo_app.util.time.FixedScheduleInterval
 
 class AndroidAppSyncBackgroundScheduler(context: Context) : AppSyncBackgroundScheduler {
@@ -22,7 +21,10 @@ class AndroidAppSyncBackgroundScheduler(context: Context) : AppSyncBackgroundSch
             workManager.cancelUniqueWork(LIFECYCLE_WORK)
             return
         }
-        val request = PeriodicWorkRequestBuilder<AppSyncWorker>(interval.duration.toJavaDuration())
+        val request = PeriodicWorkRequestBuilder<AppSyncWorker>(
+            interval.duration.inWholeMilliseconds,
+            TimeUnit.MILLISECONDS,
+        )
             .setConstraints(constraints())
             .addTag(WORK_TAG)
             .build()
@@ -36,7 +38,7 @@ class AndroidAppSyncBackgroundScheduler(context: Context) : AppSyncBackgroundSch
     override fun runNow() {
         val request = OneTimeWorkRequestBuilder<AppSyncWorker>()
             .setConstraints(constraints())
-            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30.seconds.toJavaDuration())
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .addTag(WORK_TAG)
             .build()
         workManager.enqueueUniqueWork(LIFECYCLE_WORK, ExistingWorkPolicy.KEEP, request)

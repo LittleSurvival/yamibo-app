@@ -148,18 +148,18 @@ data class SyncOperation(
 
 internal object SyncIdentityGenerator {
     fun deviceId(random: Random = Random.Default): SyncDeviceId =
-        SyncDeviceId(randomHex(random, 16))
+        SyncDeviceId(randomHex(random))
 
     fun deviceEpoch(random: Random = Random.Default): SyncDeviceEpoch =
-        SyncDeviceEpoch(randomHex(random, 16))
+        SyncDeviceEpoch(randomHex(random))
 
     fun writerNonce(random: Random = Random.Default): SyncWriterNonce =
-        SyncWriterNonce(randomHex(random, 16))
+        SyncWriterNonce(randomHex(random))
 
     fun stableEntityId(random: Random = Random.Default): SyncEntityId =
-        SyncEntityId(randomHex(random, 16))
+        SyncEntityId(randomHex(random))
 
-    private fun randomHex(random: Random, byteCount: Int): String =
+    private fun randomHex(random: Random, byteCount: Int = 16): String =
         ByteArray(byteCount).also(random::nextBytes).joinToString(separator = "") { byte ->
             (byte.toInt() and 0xff).toString(16).padStart(2, '0')
         }

@@ -69,15 +69,15 @@ internal class YamiboAppSyncJournalRemote(
             }
         }
         val verifiedIds = linkedSetOf<BlogId>()
-        for (summary in pages.flatMap { it.blogs }) {
+        for ((title1, bId) in pages.flatMap { it.blogs }) {
             val title = normalizeListTitle(
-                summary.title,
+                title1,
                 AppSyncCloudConfigDefaults.BLOG_CLASS_NAME,
             )
             val candidate = StoredAppSyncRemoteBlog(
-                remoteKey = "delete-candidate:${summary.bId.value}",
+                remoteKey = "delete-candidate:${bId.value}",
                 kind = AppSyncRemoteBlogKind.Journal,
-                blogId = summary.bId,
+                blogId = bId,
                 classId = syncClass.id,
                 fingerprint = null,
                 validatedAtEpochMillis = 0,
@@ -86,7 +86,7 @@ internal class YamiboAppSyncJournalRemote(
             when {
                 title.startsWith(AppSyncJournalDefaults.JOURNAL_TITLE_PREFIX) -> {
                     when (val result = loadJournal(candidate, accountBinding)) {
-                        is JournalCandidateResult.Valid -> verifiedIds += summary.bId
+                        is JournalCandidateResult.Valid -> verifiedIds += bId
                         is JournalCandidateResult.Retryable ->
                             return AppSyncCloudResetResult.RetryableFailure(result.reason)
                         else -> Unit
@@ -94,7 +94,7 @@ internal class YamiboAppSyncJournalRemote(
                 }
                 title == APP_SYNC_INDEX_TITLE -> {
                     when (val result = loadIndex(candidate, accountBinding)) {
-                        is IndexCandidateResult.Valid -> verifiedIds += summary.bId
+                        is IndexCandidateResult.Valid -> verifiedIds += bId
                         is IndexCandidateResult.Retryable ->
                             return AppSyncCloudResetResult.RetryableFailure(result.reason)
                         else -> Unit
@@ -102,7 +102,7 @@ internal class YamiboAppSyncJournalRemote(
                 }
                 title.startsWith(AppSyncJournalDefaults.CHECKPOINT_TITLE_PREFIX) -> {
                     when (val result = loadCheckpoint(candidate, accountBinding)) {
-                        is CheckpointCandidateResult.Valid -> verifiedIds += summary.bId
+                        is CheckpointCandidateResult.Valid -> verifiedIds += bId
                         is CheckpointCandidateResult.Retryable ->
                             return AppSyncCloudResetResult.RetryableFailure(result.reason)
                         else -> Unit
@@ -519,11 +519,11 @@ internal class YamiboAppSyncJournalRemote(
         val toDelete = cached.filterNot { it.remoteKey in retainedRemoteKeys }
 
         var deleted = 0
-        for (checkpointBlog in toDelete) {
+        for ((remoteKey, _, blogId) in toDelete) {
             when (
                 val result = provider.deleteBlog(
                     AppSyncBlogDeleteRequest(
-                        blogId = checkpointBlog.blogId,
+                        blogId = blogId,
                         formHash = formHash,
                     ),
                 )
@@ -532,7 +532,7 @@ internal class YamiboAppSyncJournalRemote(
                 AppSyncCloudResult.NotFound,
                 -> {
                     deleted += 1
-                    store.remove(checkpointBlog.remoteKey)
+                    store.remove(remoteKey)
                 }
                 else -> return result.toCheckpointRetentionFailure()
             }
@@ -789,21 +789,21 @@ internal class YamiboAppSyncJournalRemote(
             }
             .maxWithOrNull(compareBy({ it.timeInfo.epoch }, { it.bId.value }))
             ?.bId
-        for (summary in summaries) {
+        for ((title, bId, _, _, _, timeInfo) in summaries) {
             val normalizedTitle = normalizeListTitle(
-                summary.title,
+                title,
                 AppSyncCloudConfigDefaults.BLOG_CLASS_NAME,
             )
             when {
                 normalizedTitle.startsWith(AppSyncJournalDefaults.JOURNAL_TITLE_PREFIX) -> {
                     val candidate = StoredAppSyncRemoteBlog(
-                        remoteKey = "candidate:${summary.bId.value}",
+                        remoteKey = "candidate:${bId.value}",
                         kind = AppSyncRemoteBlogKind.Journal,
-                        blogId = summary.bId,
+                        blogId = bId,
                         classId = classId,
                         fingerprint = null,
                         validatedAtEpochMillis = 0,
-                        contentUpdatedAtEpochMillis = summary.timeInfo.epoch * 1_000L,
+                        contentUpdatedAtEpochMillis = timeInfo.epoch * 1_000L,
                     )
                     when (val result = loadJournal(candidate, accountBinding)) {
                         is JournalCandidateResult.Valid -> {
@@ -820,15 +820,15 @@ internal class YamiboAppSyncJournalRemote(
                     }
                 }
                 normalizedTitle == APP_SYNC_INDEX_TITLE -> {
-                    if (summary.bId != latestIndexBlogId) continue
+                    if (bId != latestIndexBlogId) continue
                     val index = StoredAppSyncRemoteBlog(
                         remoteKey = INDEX_REMOTE_KEY,
                         kind = AppSyncRemoteBlogKind.Index,
-                        blogId = summary.bId,
+                        blogId = bId,
                         classId = classId,
                         fingerprint = null,
                         validatedAtEpochMillis = 0,
-                        contentUpdatedAtEpochMillis = summary.timeInfo.epoch * 1_000L,
+                        contentUpdatedAtEpochMillis = timeInfo.epoch * 1_000L,
                     )
                     when (val result = preloadedIndex ?: loadIndex(index, accountBinding)) {
                         is IndexCandidateResult.Valid -> {
@@ -852,13 +852,13 @@ internal class YamiboAppSyncJournalRemote(
                 }
                 normalizedTitle.startsWith(AppSyncJournalDefaults.CHECKPOINT_TITLE_PREFIX) -> {
                     val candidate = StoredAppSyncRemoteBlog(
-                        remoteKey = "checkpoint-candidate:${summary.bId.value}",
+                        remoteKey = "checkpoint-candidate:${bId.value}",
                         kind = AppSyncRemoteBlogKind.Checkpoint,
-                        blogId = summary.bId,
+                        blogId = bId,
                         classId = classId,
                         fingerprint = null,
                         validatedAtEpochMillis = 0,
-                        contentUpdatedAtEpochMillis = summary.timeInfo.epoch * 1_000L,
+                        contentUpdatedAtEpochMillis = timeInfo.epoch * 1_000L,
                     )
                     when (val result = loadCheckpoint(candidate, accountBinding)) {
                         is CheckpointCandidateResult.Valid -> {

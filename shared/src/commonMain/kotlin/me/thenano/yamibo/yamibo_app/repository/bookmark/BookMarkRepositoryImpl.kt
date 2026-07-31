@@ -5,7 +5,7 @@ import me.thenano.yamibo.yamibo_app.repository.BookMarkRepository
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncMutationRecorder
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationKind
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
-import me.thenano.yamibo.yamiboapp.LocalBookMark
+import me.thenano.yamibo.yamibo_app.LocalBookMark
 
 class BookMarkRepositoryImpl internal constructor(
     db: Database,

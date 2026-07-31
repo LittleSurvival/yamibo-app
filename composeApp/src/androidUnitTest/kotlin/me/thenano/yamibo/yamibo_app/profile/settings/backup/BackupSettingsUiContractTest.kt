@@ -48,7 +48,7 @@ class BackupSettingsUiContractTest {
         val source = backupScreenSource()
 
         assertTrue(source.contains("if (summary.skippedRecords > 0)"))
-        assertTrue(source.contains("} else {\n        base\n    }"))
+        assertTrue(Regex("""}\s*else\s*\{\s*base\s*}""").containsMatchIn(source))
     }
 
     private fun backupScreenSource(): String = repoRoot()

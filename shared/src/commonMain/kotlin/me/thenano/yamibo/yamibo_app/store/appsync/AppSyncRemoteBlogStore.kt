@@ -77,7 +77,7 @@ internal class SqlDelightAppSyncRemoteBlogStore(
         )
     }
 
-    private fun me.thenano.yamibo.yamiboapp.AppSyncRemoteBlog.toStored() =
+    private fun me.thenano.yamibo.yamibo_app.AppSyncRemoteBlog.toStored() =
         StoredAppSyncRemoteBlog(
             remoteKey = remoteKey,
             kind = AppSyncRemoteBlogKind.entries.first { it.name.equals(kind, ignoreCase = true) },

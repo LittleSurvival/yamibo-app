@@ -2,13 +2,7 @@ package me.thenano.yamibo.yamibo_app.repository.appsync.engine
 
 import me.thenano.yamibo.yamibo_app.repository.appsync.domain.stableAppSyncFingerprint
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncBulkDeleteAuthorization
-import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncAccountBinding
-import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncCausalContext
-import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDomainId
-import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncIdentityGenerator
-import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperation
-import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationKind
-import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationOrigin
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.*
 import me.thenano.yamibo.yamibo_app.store.appsync.AppSyncOperationStore
 import me.thenano.yamibo.yamibo_app.store.appsync.LocalSyncOperationDraft
 
@@ -163,7 +157,7 @@ internal class ManualSyncOverrideCoordinator(
             is AppSyncJournalLoadResult.TerminalFailure -> return CloudLoad.Failed(result.reason)
         }
         val checkpoint = cloud.checkpoints.maxWithOrNull(
-            compareBy<LoadedAppSyncCheckpoint>(
+            compareBy(
                 { it.envelope.payload.coverage.asStableMap().values.sum() },
                 { it.envelope.payload.createdAtEpochMillis },
                 { it.envelope.payload.checkpointId },
@@ -423,7 +417,7 @@ internal class ManualSyncOverrideCoordinator(
 
     private fun latestByIdentity(
         state: Map<SyncEntityKey, ResolvedSyncEntity>,
-    ): Map<Pair<SyncDomainId, me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncEntityId>, ResolvedSyncEntity> =
+    ): Map<Pair<SyncDomainId, SyncEntityId>, ResolvedSyncEntity> =
         state.values
             .groupBy { it.key.domainId to it.key.entityId }
             .mapValues { (_, entities) -> entities.maxBy { it.key.generation } }
@@ -433,7 +427,7 @@ internal class ManualSyncOverrideCoordinator(
             val state: Map<SyncEntityKey, ResolvedSyncEntity>,
             val reduction: OperationReductionResult,
             val coverage: SyncCausalContext,
-            val operationIds: Set<me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationId>,
+            val operationIds: Set<SyncOperationId>,
             val remoteFingerprint: String,
         ) : CloudLoad
 

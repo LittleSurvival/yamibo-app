@@ -1,7 +1,6 @@
 package me.thenano.yamibo.yamibo_app.repository.appsync.rollout
 
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 @Serializable

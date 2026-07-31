@@ -96,7 +96,7 @@ internal class AppSyncIndexEnvelopeCodec(
         val end = "[${AppSyncJournalDefaults.INDEX_MARKER}:END]"
         val start = text.indexOf(begin)
         val finish = text.indexOf(end, start.coerceAtLeast(0))
-        if (start < 0 || finish <= start) {
+        if (start !in 0..<finish) {
             return AppSyncIndexValidation.Invalid("Index envelope boundary is incomplete", true)
         }
         val body = text.substring(start + begin.length, finish).trim()
@@ -145,6 +145,6 @@ internal class AppSyncIndexEnvelopeCodec(
         const val MAX_RETIREMENT_REFERENCES = 128
         val SCHEMA = Regex("""(?:^|\s)schema=(\d+)(?=\s|$)""")
         val FINGERPRINT = Regex("""(?:^|\s)fingerprint=([0-9a-fA-F]+)(?=\s|$)""")
-        val PAYLOAD = Regex("""(?:^|\s)payload=(\{.*\})\s*$""", RegexOption.DOT_MATCHES_ALL)
+        val PAYLOAD = Regex("""(?:^|\s)payload=(\{[\s\S]*\})\s*$""")
     }
 }

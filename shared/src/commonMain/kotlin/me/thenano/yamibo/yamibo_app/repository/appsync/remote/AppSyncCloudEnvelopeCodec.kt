@@ -133,6 +133,6 @@ class AppSyncCloudEnvelopeCodec(
         private val FINGERPRINT_REGEX =
             Regex("""(?:^|\s)fingerprint=([0-9a-fA-F]+)(?=\s|$)""")
         private val PAYLOAD_REGEX =
-            Regex("""(?:^|\s)payload=(\{.*\})\s*$""", setOf(RegexOption.DOT_MATCHES_ALL))
+            Regex("""(?:^|\s)payload=(\{[\s\S]*\})\s*$""")
     }
 }

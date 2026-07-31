@@ -76,7 +76,7 @@ internal class BootstrapCoordinator(
             }
         }
         val checkpoint = cloud.checkpoints.maxWithOrNull(
-            compareBy<LoadedAppSyncCheckpoint>(
+            compareBy(
                 { it.envelope.payload.coverage.asStableMap().values.sum() },
                 { it.envelope.payload.createdAtEpochMillis },
                 { it.envelope.payload.checkpointId },
