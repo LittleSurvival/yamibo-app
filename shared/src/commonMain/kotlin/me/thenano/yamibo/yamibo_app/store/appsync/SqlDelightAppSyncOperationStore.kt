@@ -3,8 +3,10 @@ package me.thenano.yamibo.yamibo_app.store.appsync
 import kotlinx.serialization.json.Json
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.OperationReductionResult
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.ResolvedSyncEntity
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncInstallation
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncBulkDeleteAuthorization
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncBootstrapRollbackSnapshot
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncInstallationState
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncOperationLifecycle
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRunLease
@@ -245,6 +247,82 @@ internal class SqlDelightAppSyncOperationStore(
         afterOperationsCreated = localMutation,
     )
 
+    override fun captureBootstrapMigration(
+        accountBinding: SyncAccountBinding,
+        drafts: List<LocalSyncOperationDraft>,
+        createdAtEpochMillis: Long,
+    ): List<SyncOperation> {
+        var created = emptyList<SyncOperation>()
+        db.transaction {
+            val before = requireInstallation()
+            require(before.accountBinding == null) {
+                "Bootstrap migration can only be captured by an unbound installation"
+            }
+            queries.updateInstallationIdentity(
+                accountBinding = accountBinding.value,
+                deviceId = SyncIdentityGenerator.deviceId().value,
+                deviceEpoch = SyncIdentityGenerator.deviceEpoch().value,
+                writerNonce = SyncIdentityGenerator.writerNonce().value,
+                nextSequence = 1L,
+                state = AppSyncInstallationState.Bootstrapping.toDb(),
+            )
+            val installation = requireInstallation()
+            created = drafts.mapIndexed { index, draft ->
+                val sequence = SyncSequence(installation.nextSequence + index)
+                SyncOperation(
+                    operationId = SyncOperation.idFor(
+                        installation.deviceId,
+                        installation.deviceEpoch,
+                        sequence,
+                    ),
+                    deviceId = installation.deviceId,
+                    deviceEpoch = installation.deviceEpoch,
+                    sequence = sequence,
+                    accountBinding = accountBinding,
+                    domainId = draft.domainId,
+                    entityId = draft.entityId,
+                    entityGeneration = draft.entityGeneration,
+                    kind = draft.kind,
+                    fields = draft.fields,
+                    causalContext = SyncCausalContext(),
+                    createdAtEpochMillis = createdAtEpochMillis,
+                    origin = SyncOperationOrigin.Migration,
+                    bulkDeleteAuthorizationId = draft.bulkDeleteAuthorizationId,
+                )
+            }
+            created.forEach {
+                insertOutbox(it, AppSyncOperationLifecycle.PendingLocal)
+                queries.advanceNextSequence()
+            }
+        }
+        return created
+    }
+
+    override fun saveBootstrapRollbackSnapshot(snapshot: AppSyncBootstrapRollbackSnapshot) {
+        require(snapshot.databaseGeneration.isNotBlank()) {
+            "Rollback snapshot database generation cannot be blank"
+        }
+        require(snapshot.encodedSnapshot.isNotBlank()) {
+            "Rollback snapshot payload cannot be blank"
+        }
+        queries.saveBootstrapRollbackSnapshot(
+            accountBinding = snapshot.accountBinding.value,
+            databaseGeneration = snapshot.databaseGeneration,
+            encodedSnapshot = snapshot.encodedSnapshot,
+            createdAtEpochMillis = snapshot.createdAtEpochMillis,
+        )
+    }
+
+    override fun latestBootstrapRollbackSnapshot(): AppSyncBootstrapRollbackSnapshot? =
+        queries.getBootstrapRollbackSnapshot().executeAsOneOrNull()?.let { row ->
+            AppSyncBootstrapRollbackSnapshot(
+                accountBinding = SyncAccountBinding(row.accountBinding),
+                databaseGeneration = row.databaseGeneration,
+                encodedSnapshot = row.encodedSnapshot,
+                createdAtEpochMillis = row.createdAtEpochMillis,
+            )
+        }
+
     override fun appendLocalCommand(
         accountBinding: SyncAccountBinding,
         causalContext: SyncCausalContext,
@@ -372,6 +450,87 @@ internal class SqlDelightAppSyncOperationStore(
                 queries.upsertCausalWatermark(replicaKey, sequence)
             }
             recordReductionMetadata(result, appliedAtEpochMillis)
+            queries.updateInstallationState(AppSyncInstallationState.Active.toDb())
+        }
+    }
+
+    override fun completeBootstrap(
+        accountBinding: SyncAccountBinding,
+        result: OperationReductionResult,
+        coverage: SyncCausalContext,
+        cloudOperationIds: Set<SyncOperationId>,
+        appliedAtEpochMillis: Long,
+        rotateDeviceEpoch: Boolean,
+        checkpoint: AppSyncVerifiedCheckpoint?,
+        domainMutation: (OperationReductionResult) -> Unit,
+    ) {
+        db.transaction {
+            val current = requireInstallation()
+            require(
+                rotateDeviceEpoch ||
+                    current.accountBinding == null ||
+                    current.accountBinding == accountBinding,
+            ) {
+                "Bootstrap account does not match installation binding"
+            }
+            val acknowledged = allOutboxOperations()
+                .asSequence()
+                .filter { (_, lifecycle) ->
+                    lifecycle == AppSyncOperationLifecycle.PendingLocal ||
+                        lifecycle == AppSyncOperationLifecycle.PublishedUnverified
+                }
+                .map { it.first.operationId }
+                .filter(cloudOperationIds::contains)
+                .toSet()
+            if (acknowledged.isNotEmpty()) {
+                queries.markOperationsAcknowledged(
+                    acknowledgedAtEpochMillis = appliedAtEpochMillis,
+                    operationId = acknowledged.map { it.value },
+                )
+            }
+            domainMutation(result)
+            queries.clearCausalWatermarks()
+            coverage.asStableMap().forEach { (replicaKey, sequence) ->
+                queries.upsertCausalWatermark(replicaKey, sequence)
+            }
+            recordReductionMetadata(result, appliedAtEpochMillis)
+            checkpoint?.let {
+                queries.upsertCheckpoint(
+                    checkpointId = it.checkpointId,
+                    blogId = it.blogId,
+                    causalContextJson = json.encodeToString(
+                        SyncCausalContext.serializer(),
+                        it.coverage,
+                    ),
+                    payloadFingerprint = it.payloadFingerprint,
+                    state = "VERIFIED",
+                    createdAtEpochMillis = it.createdAtEpochMillis,
+                    verifiedAtEpochMillis = it.verifiedAtEpochMillis,
+                )
+            }
+            if (rotateDeviceEpoch) {
+                queries.markReplicaOperationsDiscardedByRebootstrap(
+                    deviceId = current.deviceId.value,
+                    deviceEpoch = current.deviceEpoch.value,
+                )
+                queries.updateInstallationIdentity(
+                    accountBinding = accountBinding.value,
+                    deviceId = SyncIdentityGenerator.deviceId().value,
+                    deviceEpoch = SyncIdentityGenerator.deviceEpoch().value,
+                    writerNonce = SyncIdentityGenerator.writerNonce().value,
+                    nextSequence = 1L,
+                    state = AppSyncInstallationState.Active.toDb(),
+                )
+            } else {
+                queries.updateInstallationIdentity(
+                    accountBinding = accountBinding.value,
+                    deviceId = current.deviceId.value,
+                    deviceEpoch = current.deviceEpoch.value,
+                    writerNonce = current.writerNonce.value,
+                    nextSequence = current.nextSequence,
+                    state = AppSyncInstallationState.Active.toDb(),
+                )
+            }
         }
     }
 
@@ -654,6 +813,15 @@ internal class SqlDelightAppSyncOperationStore(
                 retryAfterSchemaVersion = null,
             )
         }
+        advanceCausalWatermarks(
+            result.entities.values.flatMap { entity ->
+                buildList {
+                    addAll(entity.fields.values.map { it.operation })
+                    entity.relationOperation?.let(::add)
+                    entity.tombstone?.let(::add)
+                }
+            },
+        )
     }
 
     override fun causalContext(): SyncCausalContext =
@@ -671,6 +839,35 @@ internal class SqlDelightAppSyncOperationStore(
                 )
             }
         }
+
+    override fun reconcileResolvedStateCoverage() {
+        advanceCausalWatermarks(
+            queries.getResolvedEntities().executeAsList().flatMap { row ->
+                val entity = json.decodeFromString(
+                    ResolvedSyncEntity.serializer(),
+                    row.encodedState,
+                )
+                buildList {
+                    addAll(entity.fields.values.map { it.operation })
+                    entity.relationOperation?.let(::add)
+                    entity.tombstone?.let(::add)
+                }
+            },
+        )
+    }
+
+    private fun advanceCausalWatermarks(operations: Iterable<SyncOperation>) {
+        operations.distinctBy { it.operationId }.forEach { operation ->
+            val replica = operation.replicaKey
+            val current = queries.getCausalWatermark(replica.stableKey)
+                .executeAsOneOrNull()
+                ?.sequence
+                ?: 0L
+            if (operation.sequence.value > current) {
+                queries.upsertCausalWatermark(replica.stableKey, operation.sequence.value)
+            }
+        }
+    }
 
     override fun acquireLease(
         ownerId: String,

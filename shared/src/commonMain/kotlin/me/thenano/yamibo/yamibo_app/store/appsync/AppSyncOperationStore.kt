@@ -7,6 +7,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncOperationLif
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRunLease
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncBulkDeleteAuthorization
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncVerifiedCheckpoint
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncBootstrapRollbackSnapshot
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncReplicaObservation
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncJournalRetirementIntent
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncJournalRetirementStage
@@ -67,6 +68,15 @@ internal interface AppSyncOperationStore {
         localMutation: (List<SyncOperation>) -> Unit = {},
     ): List<SyncOperation>
 
+    fun captureBootstrapMigration(
+        accountBinding: SyncAccountBinding,
+        drafts: List<LocalSyncOperationDraft>,
+        createdAtEpochMillis: Long,
+    ): List<SyncOperation>
+
+    fun saveBootstrapRollbackSnapshot(snapshot: AppSyncBootstrapRollbackSnapshot)
+    fun latestBootstrapRollbackSnapshot(): AppSyncBootstrapRollbackSnapshot?
+
     fun appendLocalCommand(
         accountBinding: SyncAccountBinding,
         causalContext: SyncCausalContext,
@@ -86,6 +96,16 @@ internal interface AppSyncOperationStore {
         coverage: SyncCausalContext,
         cloudOperationIds: Set<SyncOperationId>,
         appliedAtEpochMillis: Long,
+        domainMutation: (OperationReductionResult) -> Unit,
+    )
+    fun completeBootstrap(
+        accountBinding: SyncAccountBinding,
+        result: OperationReductionResult,
+        coverage: SyncCausalContext,
+        cloudOperationIds: Set<SyncOperationId>,
+        appliedAtEpochMillis: Long,
+        rotateDeviceEpoch: Boolean,
+        checkpoint: AppSyncVerifiedCheckpoint?,
         domainMutation: (OperationReductionResult) -> Unit,
     )
     fun isApplied(operationId: SyncOperationId): Boolean
@@ -141,6 +161,7 @@ internal interface AppSyncOperationStore {
     ): Boolean = false
     fun pinnedRetirementCheckpointIds(): Set<String> = emptySet()
     fun causalContext(): SyncCausalContext
+    fun reconcileResolvedStateCoverage() = Unit
 
     fun acquireLease(
         ownerId: String,

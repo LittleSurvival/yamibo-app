@@ -257,6 +257,19 @@ SELECT * FROM AppSyncCheckpoint
 WHERE state = 'VERIFIED'
 ORDER BY verifiedAtEpochMillis DESC, checkpointId DESC;
 
+saveBootstrapRollbackSnapshot:
+INSERT OR REPLACE INTO AppSyncBootstrapRollback(
+    singletonId,
+    accountBinding,
+    databaseGeneration,
+    encodedSnapshot,
+    createdAtEpochMillis
+) VALUES (1, ?, ?, ?, ?);
+
+getBootstrapRollbackSnapshot:
+SELECT * FROM AppSyncBootstrapRollback
+WHERE singletonId = 1;
+
 deleteCheckpoint:
 DELETE FROM AppSyncCheckpoint
 WHERE checkpointId = ?;

@@ -818,6 +818,7 @@ RSS收藏,RSS favorites,RSS收藏,RSS收藏
 雲端同步,Cloud sync,雲端同步,云端同步
 {} 秒後可確認,Confirm in {} seconds,{} 秒後可確認,{} 秒后可确认
 同步核心尚未連接,Sync core is not connected,同步核心尚未連接,同步核心尚未连接
+同步核心尚未啟用,Sync core is not enabled,同步核心尚未啟用,同步核心尚未启用
 介面已就緒，雲端同步功能將由新架構提供,"The interface is ready; cloud sync will be provided by the new architecture",介面已就緒，雲端同步功能將由新架構提供,界面已就绪，云端同步功能将由新架构提供
 背景同步尚未提供,Background sync is not available yet,背景同步尚未提供,后台同步尚未提供
 雲端備份,Cloud backup,雲端備份,云端备份
@@ -847,3 +848,83 @@ RSS收藏,RSS favorites,RSS收藏,RSS收藏
 還原完成：收藏 {}，設定 {}，歷史進度 {}，更新紀錄 {},"Restore complete: {} favorites, {} settings, {} history/progress records, {} update records",還原完成：收藏 {}，設定 {}，歷史進度 {}，更新紀錄 {},还原完成：收藏 {}，设置 {}，历史进度 {}，更新记录 {}
 略過無法對應的輔助紀錄 {},Skipped {} unmatched auxiliary records,略過無法對應的輔助紀錄 {},略过无法对应的辅助记录 {}
 下載內容會存放在本地資料備份指定的資料夾。,Downloaded content is stored in the folder selected under Local data backup.,下載內容會存放在本地資料備份指定的資料夾。,下载内容会存放在本地数据备份指定的文件夹。
+Journal 清理,Journal cleanup,Journal 清理,Journal 清理
+Journal 清理程序等待下一次重新驗證：{},Journal cleanup is waiting for the next verification: {},Journal 清理程序等待下一次重新驗證：{},Journal 清理程序等待下一次重新验证：{}
+上傳至雲端,Upload to cloud,上傳至雲端,上传至云端
+已收斂,Converged,已收斂,已收敛
+已有同步工作執行中,A sync is already running,已有同步工作執行中,已有同步任务执行中
+已有同步或 Journal 維護工作執行中,A sync or Journal maintenance task is already running,已有同步或 Journal 維護工作執行中,已有同步或 Journal 维护任务执行中
+已完成一個非活躍 Journal 的安全清理,Safely cleaned up one inactive Journal,已完成一個非活躍 Journal 的安全清理,已完成一个非活跃 Journal 的安全清理
+已啟用,Enabled,已啟用,已启用
+已排定 App 啟動同步,App startup sync scheduled,已排定 App 啟動同步,已安排 App 启动同步
+已排定自動同步,Automatic sync scheduled,已排定自動同步,已安排自动同步
+已排定離開前台同步,Foreground exit sync scheduled,已排定離開前台同步,已安排离开前台同步
+已清除 {} 筆雲端同步資料；本機資料已排入安全重建,Deleted {} cloud sync records; local data is queued for safe rebuilding,已清除 {} 筆雲端同步資料；本機資料已排入安全重建,已清除 {} 条云端同步数据；本地数据已排入安全重建
+已清除 {} 筆雲端連結紀錄；下次同步會重新驗證最新索引,Deleted {} cached cloud links; the latest index will be verified on the next sync,已清除 {} 筆雲端連結紀錄；下次同步會重新驗證最新索引,已清除 {} 条云端链接记录；下次同步会重新验证最新索引
+已關閉,Disabled,已關閉,已关闭
+已驗證 {} 個 Journal，尚無可清理項目,Verified {} Journals; none are ready for cleanup,已驗證 {} 個 Journal，尚無可清理項目,已验证 {} 个 Journal，暂无可清理项目
+分類更新範圍,Category update scope,分類更新範圍,分类更新范围
+文章閱讀進度,Thread reading progress,文章閱讀進度,文章阅读进度
+本機或雲端資料已變更，請重新檢視差異後再確認,Local or cloud data changed; review the differences again before confirming,本機或雲端資料已變更，請重新檢視差異後再確認,本地或云端数据已变更，请重新查看差异后再确认
+正在同步操作紀錄,Syncing operation records,正在同步操作紀錄,正在同步操作记录
+正在安全載入雲端紀錄，本階段不會上傳本機資料,Safely loading cloud records; local data will not be uploaded during this phase,正在安全載入雲端紀錄，本階段不會上傳本機資料,正在安全加载云端记录，本阶段不会上传本地数据
+正在執行強制上傳並驗證雲端結果,Force uploading and verifying the cloud result,正在執行強制上傳並驗證雲端結果,正在执行强制上传并验证云端结果
+正在載入並套用已驗證的雲端狀態,Loading and applying the verified cloud state,正在載入並套用已驗證的雲端狀態,正在加载并应用已验证的云端状态
+正在驗證並清除雲端同步資料,Verifying and deleting cloud sync data,正在驗證並清除雲端同步資料,正在验证并清除云端同步数据
+同步中,Syncing,同步中,同步中
+同步完成：接收 {}、確認 {},Sync complete: received {}; acknowledged {},同步完成：接收 {}、確認 {},同步完成：接收 {}、确认 {}
+同步狀態,Sync status,同步狀態,同步状态
+同步就緒,Sync ready,同步就緒,同步就绪
+同步發生未預期錯誤，已保留待同步操作並排定重試,An unexpected sync error occurred; pending operations were preserved and a retry was scheduled,同步發生未預期錯誤，已保留待同步操作並排定重試,同步发生意外错误，已保留待同步操作并安排重试
+同步資料已隔離；手動同步不會修改本機資料,Sync data is quarantined; manual sync will not modify local data,同步資料已隔離；手動同步不會修改本機資料,同步数据已隔离；手动同步不会修改本地数据
+同步資料已隔離；重新檢查不會修改本機資料,Sync data is quarantined; rechecking will not modify local data,同步資料已隔離；重新檢查不會修改本機資料,同步数据已隔离；重新检查不会修改本地数据
+安全載入完成，套用 {} 筆操作,Safe load complete; applied {} operations,安全載入完成，套用 {} 筆操作,安全加载完成，应用了 {} 条操作
+收藏分類,Favorite category,收藏分類,收藏分类
+收藏分類歸屬,Favorite category assignment,收藏分類歸屬,收藏分类归属
+收藏集合,Favorite collection,收藏集合,收藏集合
+收藏集合歸屬,Favorite collection assignment,收藏集合歸屬,收藏集合归属
+收藏項目,Favorite item,收藏項目,收藏项目
+有資料需要檢查,Data needs review,有資料需要檢查,有数据需要检查
+此平台尚未提供背景同步,Background sync is not available on this platform,此平台尚未提供背景同步,此平台尚未提供后台同步
+自動同步已關閉,Automatic sync is disabled,自動同步已關閉,自动同步已关闭
+自動同步排程設定已更新,Automatic sync schedule updated,自動同步排程設定已更新,自动同步计划设置已更新
+更新 {},Updated {},更新 {},更新 {}
+供應端暫停,Provider paused,供應端暫停,服务端暂停
+尚未啟用,Not enabled,尚未啟用,尚未启用
+忽略 {},Dismissed {},忽略 {},忽略 {}
+版塊更新範圍,Forum update scope,版塊更新範圍,版块更新范围
+待上傳操作,Pending uploads,待上傳操作,待上传操作
+書籤,Bookmark,書籤,书签
+執行中,Running,執行中,执行中
+強制載入完成：已套用 {} 項差異,Force pull complete: applied {} differences,強制載入完成：已套用 {} 項差異,强制加载完成：已应用 {} 项差异
+從雲端套用,Applied from cloud,從雲端套用,从云端应用
+最近更新,Recent updates,最近更新,最近更新
+登入狀態已過期，請先刷新登入狀態,Login has expired; refresh your login status first,登入狀態已過期，請先刷新登入狀態,登录状态已过期，请先刷新登录状态
+登入狀態已過期；重新整理登入後會先載入仍存活的雲端資料,Login has expired; after refreshing it the app will first load any surviving cloud data,登入狀態已過期；重新整理登入後會先載入仍存活的雲端資料,登录状态已过期；刷新登录后会先加载仍存在的云端数据
+登入狀態不足，Journal 清理已暫停,Login is unavailable; Journal cleanup is paused,登入狀態不足，Journal 清理已暫停,登录状态不可用，Journal 清理已暂停
+登入狀態需要刷新,Login needs to be refreshed,登入狀態需要刷新,登录状态需要刷新
+登入暫停,Paused for login,登入暫停,因登录暂停
+發現 {} 個安全清理候選；目前為只觀察模式,Found {} safe cleanup candidates; currently in observation-only mode,發現 {} 個安全清理候選；目前為只觀察模式,发现 {} 个安全清理候选；目前为仅观察模式
+等待安全載入,Waiting for safe load,等待安全載入,等待安全加载
+等待重試,Waiting to retry,等待重試,等待重试
+開啟 {},Enabled {},開啟 {},开启 {}
+雲端清除未完整確認：{}；下次會先安全載入再繼續,Cloud deletion was not fully confirmed: {}; the next run will safely load data before continuing,雲端清除未完整確認：{}；下次會先安全載入再繼續,云端清除未完整确认：{}；下次会先安全加载再继续
+雲端暫時無法使用,Cloud is temporarily unavailable,雲端暫時無法使用,云端暂时无法使用
+新同步核心仍在驗證中，尚未開放雲端寫入,The new sync core is still being validated; cloud writes are not enabled yet,新同步核心仍在驗證中，尚未開放雲端寫入,新同步核心仍在验证中，尚未开放云端写入
+新增 {},Added {},新增 {},新增 {}
+詳細備註,Detail notes,詳細備註,详细备注
+隔離,Quarantined,隔離,隔离
+背景同步已停止，請開啟雲端同步頁面檢查資料,"Background sync has stopped. Open the cloud sync page to review the data.",背景同步已停止，請開啟雲端同步頁面檢查資料,后台同步已停止，请打开云同步页面检查数据
+雲端同步需要檢查,Cloud sync needs review,雲端同步需要檢查,云同步需要检查
+雲端同步警告,Cloud sync alerts,雲端同步警告,云同步警告
+顯示需要使用者處理的雲端同步問題,Shows cloud sync issues that need your attention,顯示需要使用者處理的雲端同步問題,显示需要用户处理的云同步问题
+圖片閱讀進度,Image reading progress,圖片閱讀進度,图片阅读进度
+需要安全載入,Safe load required,需要安全載入,需要安全加载
+標為已讀 {},Marked {} as read,標為已讀 {},标记 {} 条为已读
+標籤漫畫進度,Tagged manga progress,標籤漫畫進度,标签漫画进度
+標籤目錄進度,Tag catalog progress,標籤目錄進度,标签目录进度
+RSS 搜尋進度,RSS search progress,RSS 搜尋進度,RSS 搜索进度
+RSS 目錄進度,RSS catalog progress,RSS 目錄進度,RSS 目录进度
+安全載入完成，套用 {} 筆操作；保留 {} 筆無法解析來源的舊 RSS 閱讀紀錄於本機,"Safe load completed with {} operation(s); {} unresolved legacy RSS reading record(s) remain local",安全載入完成，套用 {} 筆操作；保留 {} 筆無法解析來源的舊 RSS 閱讀紀錄於本機,安全加载完成，应用 {} 条操作；{} 条无法解析来源的旧 RSS 阅读记录保留在本地
+閱讀時間,Reading time,閱讀時間,阅读时间
+關閉 {},Disabled {},關閉 {},关闭 {}

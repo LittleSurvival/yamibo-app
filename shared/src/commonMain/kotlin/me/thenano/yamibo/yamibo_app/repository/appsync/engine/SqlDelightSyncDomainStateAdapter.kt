@@ -113,7 +113,10 @@ internal class SqlDelightSyncDomainStateAdapter(
             "reading.thread" to 80,
             "reading.image" to 81,
             "reading.tag-manga" to 82,
-            "reading.time" to 83,
+            "reading.tag-catalog" to 83,
+            "reading.rss-search" to 84,
+            "reading.rss-catalog" to 85,
+            "reading.time" to 86,
         )
     }
 }

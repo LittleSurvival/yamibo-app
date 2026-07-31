@@ -97,6 +97,45 @@ class OperationChangeSummaryTest {
         assertFalse(summary.details.any { "fid:" in it })
     }
 
+    @Test
+    fun rssHistorySummaryUsesReadableContentInsteadOfStableIdentity() {
+        val uploaded = operation(
+            device = "local",
+            kind = SyncOperationKind.Put,
+            value = "unused",
+            domain = "reading.rss-catalog",
+            entity = "rss:canonical-subscription",
+            fields = mapOf(
+                "subscriptionSyncId" to "rss:canonical-subscription",
+                "subscriptionTitle" to "訂閱名稱",
+                "subscriptionQuery" to "query",
+                "subscriptionPage" to "1",
+                "threadId" to "1",
+                "threadTitle" to "帖子標題",
+                "threadPage" to "1",
+                "postId" to "2",
+                "postTitle" to "回覆標題",
+                "authorId" to null,
+                "anchorPostId" to "2",
+                "anchorPostRatio" to null,
+                "anchorBlockId" to null,
+                "anchorBlockType" to null,
+                "anchorBlockRatio" to null,
+                "viewportHeight" to null,
+                "firstVisibleItemIndex" to null,
+                "firstVisibleItemOffset" to null,
+                "lastVisitTime" to "10",
+                "coverUrl" to null,
+            ),
+        )
+        val state = OperationReducer().reduce(operations = listOf(uploaded)).entities
+
+        val summary = summarizeWinningOperations(emptyList(), listOf(uploaded), state).single()
+
+        assertEquals(listOf("帖子標題"), summary.details)
+        assertFalse(summary.details.any { "canonical-subscription" in it })
+    }
+
     private fun operation(
         device: String,
         kind: SyncOperationKind,

@@ -13,8 +13,11 @@ import kotlin.test.assertTrue
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.OperationReducer
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.DatabaseSyncDomainMaterializer
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.ResolvedSyncEntity
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.SqlDelightSyncDomainStateAdapter
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.SyncDomainMaterializer
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncInstallationState
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncBootstrapRollbackSnapshot
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncOperationLifecycle
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncVerifiedCheckpoint
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncJournalRetirementIntent
@@ -43,6 +46,26 @@ import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 import me.thenano.yamibo.yamibo_app.util.time.FixedScheduleInterval
 
 class SqlDelightAppSyncOperationStoreTest {
+    @Test
+    fun bootstrapRollbackSnapshotSurvivesStoreRestartWithProvenance() {
+        val db = inMemoryDatabase()
+        val snapshot = AppSyncBootstrapRollbackSnapshot(
+            accountBinding = SyncAccountBinding("account"),
+            databaseGeneration = "generation",
+            encodedSnapshot = "yamibo-app-sync:gzip-base64:1:payload",
+            createdAtEpochMillis = 123,
+        )
+        SqlDelightAppSyncOperationStore(db).also {
+            it.initialize("generation")
+            it.saveBootstrapRollbackSnapshot(snapshot)
+        }
+
+        assertEquals(
+            snapshot,
+            SqlDelightAppSyncOperationStore(db).latestBootstrapRollbackSnapshot(),
+        )
+    }
+
     @Test
     fun replicaObservationAndRetirementIntentSurviveStoreRestart() {
         val db = inMemoryDatabase()
@@ -314,6 +337,33 @@ class SqlDelightAppSyncOperationStoreTest {
     }
 
     @Test
+    fun resolvedCheckpointWinnerRepairsMissingCausalCoverage() {
+        val db = inMemoryDatabase()
+        val store = activeStore(db)
+        val remote = remoteOperation()
+        val reduction = OperationReducer().reduce(operations = listOf(remote))
+        val adapter = SqlDelightSyncDomainStateAdapter(
+            db = db,
+            materializer = object : SyncDomainMaterializer {
+                override fun apply(entity: ResolvedSyncEntity) = Unit
+                override fun reconcileProjections() = Unit
+            },
+            nowMillis = { 200 },
+        )
+
+        store.replaceWithVerifiedCloudState(
+            result = reduction.copy(appliedOperations = emptyList()),
+            coverage = SyncCausalContext(),
+            cloudOperationIds = emptySet(),
+            appliedAtEpochMillis = 200,
+            domainMutation = { adapter.adoptCheckpointWithinTransaction(it.entities.values) },
+        )
+
+        assertEquals(remote.sequence.value, store.causalContext()[remote.replicaKey])
+        assertFalse(store.isApplied(remote.operationId))
+    }
+
+    @Test
     fun expiredLeaseCanBeRecoveredButLiveLeaseCannotBeStolen() {
         val store = activeStore(inMemoryDatabase())
 
@@ -551,6 +601,7 @@ class SqlDelightAppSyncOperationStoreTest {
     fun forcePullReplacementDiscardsUnpublishedOperationsAndAdoptsCloudCoverage() {
         val db = inMemoryDatabase()
         val store = activeStore(db)
+        store.updateState(AppSyncInstallationState.Quarantined)
         val local = appendSetting(store)
         val remote = remoteOperation()
         val reduction = OperationReducer().reduce(operations = listOf(remote))
@@ -571,6 +622,7 @@ class SqlDelightAppSyncOperationStoreTest {
         )
         assertTrue(store.isApplied(remote.operationId))
         assertEquals(coverage.asStableMap(), store.causalContext().asStableMap())
+        assertEquals(AppSyncInstallationState.Active, store.installation()?.state)
     }
 
     @Test

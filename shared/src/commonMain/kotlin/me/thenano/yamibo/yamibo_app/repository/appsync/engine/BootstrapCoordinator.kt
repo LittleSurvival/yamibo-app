@@ -1,22 +1,40 @@
 package me.thenano.yamibo.yamibo_app.repository.appsync.engine
 
+import kotlinx.coroutines.CancellationException
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncInstallationState
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncBootstrapRollbackSnapshot
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncOperationLifecycle
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncVerifiedCheckpoint
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncAccountBinding
-import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncReplicaKey
-import me.thenano.yamibo.yamibo_app.repository.appsync.remote.resolvedPublishedThroughSequence
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncCausalContext
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationOrigin
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncReplicaKey
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.resolvedPublishedThroughSequence
 import me.thenano.yamibo.yamibo_app.store.appsync.AppSyncOperationStore
 import me.thenano.yamibo.yamibo_app.store.appsync.LocalSyncOperationDraft
 
 internal sealed interface AppSyncBootstrapResult {
     data class Ready(
+        val mode: AppSyncBootstrapMode,
         val appliedOperationCount: Int,
         val changes: List<OperationChangeSummary>,
+        val skippedOrphanRssHistoryCount: Int = 0,
     ) : AppSyncBootstrapResult
     data class RetryableFailure(val reason: String) : AppSyncBootstrapResult
     data class Paused(val reason: String) : AppSyncBootstrapResult
 }
+
+internal enum class AppSyncBootstrapMode {
+    Seed,
+    Join,
+    Active,
+}
+
+internal data class CapturedBootstrapSnapshot(
+    val migrationDrafts: List<LocalSyncOperationDraft>,
+    val encodedRollbackSnapshot: String,
+    val skippedOrphanRssHistoryCount: Int = 0,
+)
 
 internal class BootstrapCoordinator(
     private val store: AppSyncOperationStore,
@@ -25,7 +43,9 @@ internal class BootstrapCoordinator(
     private val reducer: OperationReducer = OperationReducer(),
     private val nowMillis: () -> Long,
     private val inactiveAfterMillis: Long = 90L * 24 * 60 * 60 * 1_000,
-    private val captureLocalMigrationDrafts: () -> List<LocalSyncOperationDraft> = { emptyList() },
+    private val captureLocalSnapshot: () -> CapturedBootstrapSnapshot = {
+        CapturedBootstrapSnapshot(emptyList(), "empty")
+    },
 ) {
     suspend fun bootstrap(
         accountBinding: SyncAccountBinding,
@@ -41,17 +61,6 @@ internal class BootstrapCoordinator(
             store.updateState(AppSyncInstallationState.RebootstrapRequired)
         }
         store.updateState(AppSyncInstallationState.Bootstrapping)
-        val localMigrationDrafts = if (installation.accountBinding == null) {
-            try {
-                captureLocalMigrationDrafts()
-            } catch (error: Throwable) {
-                return AppSyncBootstrapResult.Paused(
-                    "Local migration capture failed: ${error.message ?: error::class.simpleName}",
-                )
-            }
-        } else {
-            emptyList()
-        }
 
         val cloud = when (val result = remote.loadJournals(accountBinding, forceDiscovery)) {
             is AppSyncJournalLoadResult.Success -> result
@@ -66,14 +75,13 @@ internal class BootstrapCoordinator(
                 return AppSyncBootstrapResult.Paused(result.reason)
             }
         }
-        val checkpoint = cloud.checkpoints
-            .maxWithOrNull(
-                compareBy<LoadedAppSyncCheckpoint>(
-                    { it.envelope.payload.coverage.asStableMap().values.sum() },
-                    { it.envelope.payload.createdAtEpochMillis },
-                    { it.envelope.payload.checkpointId },
-                ),
-            )
+        val checkpoint = cloud.checkpoints.maxWithOrNull(
+            compareBy<LoadedAppSyncCheckpoint>(
+                { it.envelope.payload.coverage.asStableMap().values.sum() },
+                { it.envelope.payload.createdAtEpochMillis },
+                { it.envelope.payload.checkpointId },
+            ),
+        )
         if (inactive && checkpoint == null) {
             store.updateState(AppSyncInstallationState.PausedProvider)
             return AppSyncBootstrapResult.Paused(
@@ -101,95 +109,154 @@ internal class BootstrapCoordinator(
                 )
             }
         }
+
         val checkpointCoverage = checkpoint?.envelope?.payload?.coverage ?: SyncCausalContext()
         val initialState = checkpoint?.envelope?.payload?.resolvedEntities
             ?.associateBy { it.key }
             ?: emptyMap()
-
-        val operations = cloud.journals
+        val cloudOperations = cloud.journals
             .asSequence()
             .flatMap { it.payload.operations.asSequence() }
             .filterNot(checkpointCoverage::includes)
-            .filterNot { store.isApplied(it.operationId) }
             .distinctBy { it.operationId }
             .toList()
-        val reduction = reducer.reduce(initialState, operations)
+        val cloudReduction = reducer.reduce(initialState, cloudOperations)
+        if (cloudReduction.quarantined.isNotEmpty()) {
+            store.updateState(AppSyncInstallationState.Quarantined)
+            return AppSyncBootstrapResult.Paused(
+                "Bootstrap contains ${cloudReduction.quarantined.size} quarantined operation(s)",
+            )
+        }
+        val requiresAdmission = installation.accountBinding == null ||
+            accountChanged || inactive ||
+            installation.state == AppSyncInstallationState.RebootstrapRequired
+        val cloudEstablished = checkpoint != null || cloudOperations.isNotEmpty()
+        val mode = when {
+            !requiresAdmission -> AppSyncBootstrapMode.Active
+            installation.accountBinding == null && !cloudEstablished -> AppSyncBootstrapMode.Seed
+            else -> AppSyncBootstrapMode.Join
+        }
+        val capturedSnapshot = if (mode == AppSyncBootstrapMode.Active) {
+            null
+        } else {
+            try {
+                captureLocalSnapshot()
+            } catch (error: Throwable) {
+                if (error is CancellationException) throw error
+                return AppSyncBootstrapResult.Paused(
+                    "Local bootstrap snapshot failed: ${error.message ?: error::class.simpleName}",
+                )
+            }
+        }
+        if (mode == AppSyncBootstrapMode.Seed) {
+            try {
+                store.captureBootstrapMigration(
+                    accountBinding = accountBinding,
+                    drafts = requireNotNull(capturedSnapshot).migrationDrafts,
+                    createdAtEpochMillis = nowMillis(),
+                )
+            } catch (error: Throwable) {
+                if (error is CancellationException) throw error
+                return AppSyncBootstrapResult.Paused(
+                    "Local migration persistence failed: ${error.message ?: error::class.simpleName}",
+                )
+            }
+        } else if (mode == AppSyncBootstrapMode.Join) {
+            try {
+                store.saveBootstrapRollbackSnapshot(
+                    AppSyncBootstrapRollbackSnapshot(
+                        accountBinding = accountBinding,
+                        databaseGeneration = installation.databaseGeneration,
+                        encodedSnapshot = requireNotNull(capturedSnapshot).encodedRollbackSnapshot,
+                        createdAtEpochMillis = nowMillis(),
+                    ),
+                )
+            } catch (error: Throwable) {
+                if (error is CancellationException) throw error
+                return AppSyncBootstrapResult.Paused(
+                    "Local rollback snapshot failed: ${error.message ?: error::class.simpleName}",
+                )
+            }
+        }
+
+        val currentInstallation = requireNotNull(store.installation())
+        val pendingLocalOperations = if (mode == AppSyncBootstrapMode.Join) {
+            emptyList()
+        } else {
+            store.allOutboxOperations()
+                .asSequence()
+                .filter { (operation, lifecycle) ->
+                    operation.accountBinding == accountBinding &&
+                        operation.deviceId == currentInstallation.deviceId &&
+                        operation.deviceEpoch == currentInstallation.deviceEpoch &&
+                        lifecycle in setOf(
+                            AppSyncOperationLifecycle.PendingLocal,
+                            AppSyncOperationLifecycle.PublishedUnverified,
+                        )
+                }
+                .map { it.first }
+                .filter {
+                    mode == AppSyncBootstrapMode.Active ||
+                        it.origin == SyncOperationOrigin.Migration
+                }
+                .toList()
+        }
+        val combinedOperations = cloudOperations + pendingLocalOperations
+        val reduction = reducer.reduce(initialState, combinedOperations)
         if (reduction.quarantined.isNotEmpty()) {
             store.updateState(AppSyncInstallationState.Quarantined)
             return AppSyncBootstrapResult.Paused(
                 "Bootstrap contains ${reduction.quarantined.size} quarantined operation(s)",
             )
         }
-        if (checkpoint != null) {
-            val envelope = checkpoint.envelope
-            store.adoptCheckpoint(
+        val coverage = combinedOperations.fold(checkpointCoverage) { current, operation ->
+            current.advance(operation.replicaKey, operation.sequence)
+        }
+        val cloudOperationIds = cloud.journals
+            .asSequence()
+            .flatMap { it.payload.operations.asSequence() }
+            .mapTo(linkedSetOf()) { it.operationId }
+        val appliedAt = nowMillis()
+        val checkpointRecord = checkpoint?.let { loaded ->
+            val envelope = loaded.envelope
+            AppSyncVerifiedCheckpoint(
                 checkpointId = envelope.payload.checkpointId,
-                blogId = checkpoint.remoteId.toLongOrNull(),
+                blogId = loaded.remoteId.toLongOrNull(),
                 coverage = envelope.payload.coverage,
                 payloadFingerprint = envelope.fingerprint,
                 createdAtEpochMillis = envelope.payload.createdAtEpochMillis,
-                verifiedAtEpochMillis = nowMillis(),
-                laterReduction = reduction,
+                verifiedAtEpochMillis = appliedAt,
+            )
+        }
+        try {
+            store.completeBootstrap(
+                accountBinding = accountBinding,
+                result = reduction,
+                coverage = coverage,
+                cloudOperationIds = cloudOperationIds,
+                appliedAtEpochMillis = appliedAt,
+                rotateDeviceEpoch = mode == AppSyncBootstrapMode.Join,
+                checkpoint = checkpointRecord,
                 domainMutation = {
                     domainState.adoptCheckpointWithinTransaction(it.entities.values)
                 },
             )
-        } else {
-            val cloudCoverage = operations.fold(checkpointCoverage) { coverage, operation ->
-                coverage.advance(operation.replicaKey, operation.sequence)
-            }
-            val cloudOperationIds = cloud.journals
-                .asSequence()
-                .flatMap { it.payload.operations.asSequence() }
-                .mapTo(linkedSetOf()) { it.operationId }
-            store.replaceWithVerifiedCloudState(
-                result = reduction,
-                coverage = cloudCoverage,
-                cloudOperationIds = cloudOperationIds,
-                appliedAtEpochMillis = nowMillis(),
-                domainMutation = {
-                    domainState.adoptCheckpointWithinTransaction(it.entities.values)
-                },
+        } catch (error: Throwable) {
+            if (error is CancellationException) throw error
+            return AppSyncBootstrapResult.RetryableFailure(
+                "Bootstrap transaction failed: ${error.message ?: error::class.simpleName}",
             )
         }
         domainState.reconcileProjections()
-
-        if (inactive || accountChanged || installation.accountBinding == null) {
-            store.rotateDeviceEpoch(accountBinding, AppSyncInstallationState.Active)
-        } else {
-            store.bindAccount(accountBinding, AppSyncInstallationState.Active)
-        }
-        val cloudEntityIdentities = domainState.currentState().keys
-            .mapTo(hashSetOf()) { it.domainId to it.entityId }
-        val admissibleLocalMigrations = localMigrationDrafts.filter { draft ->
-            draft.domainId to draft.entityId !in cloudEntityIdentities
-        }
-        if (admissibleLocalMigrations.isNotEmpty()) {
-            store.appendLocalOperations(
-                accountBinding = accountBinding,
-                drafts = admissibleLocalMigrations,
-                causalContext = store.causalContext(),
-                createdAtEpochMillis = nowMillis(),
-                origin = SyncOperationOrigin.Migration,
-            ) { migrationOperations ->
-                val migrationReduction = reducer.reduce(
-                    domainState.currentState(),
-                    migrationOperations,
-                )
-                check(migrationReduction.quarantined.isEmpty()) {
-                    "Local migration produced quarantined operations"
-                }
-                domainState.applyWithinTransaction(migrationReduction)
-            }
-            domainState.reconcileProjections()
-        }
         return AppSyncBootstrapResult.Ready(
+            mode = mode,
             appliedOperationCount = reduction.appliedOperations.size,
             changes = summarizeWinningOperations(
                 received = reduction.appliedOperations,
                 uploaded = emptyList(),
                 state = domainState.currentState(),
             ),
+            skippedOrphanRssHistoryCount = capturedSnapshot?.skippedOrphanRssHistoryCount ?: 0,
         )
     }
 }

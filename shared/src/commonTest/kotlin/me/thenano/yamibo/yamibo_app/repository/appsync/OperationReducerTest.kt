@@ -110,6 +110,42 @@ class OperationReducerTest {
     }
 
     @Test
+    fun concurrentHistoryClearWinsOverProgressUpdate() {
+        val original = operation(
+            device = "origin",
+            sequence = 1,
+            domain = "reading.tag-catalog",
+            entity = "42",
+            kind = SyncOperationKind.Put,
+            fields = tagCatalogHistoryFields(lastVisitTime = 10),
+        )
+        val observedOriginal = SyncCausalContext().advance(original.replicaKey, original.sequence)
+        val progress = operation(
+            device = "progress",
+            sequence = 1,
+            domain = "reading.tag-catalog",
+            entity = "42",
+            kind = SyncOperationKind.Patch,
+            fields = mapOf("tagId" to "42", "lastVisitTime" to "20"),
+            context = observedOriginal,
+        )
+        val clear = operation(
+            device = "clear",
+            sequence = 1,
+            domain = "reading.tag-catalog",
+            entity = "42",
+            kind = SyncOperationKind.Delete,
+            fields = emptyMap(),
+            context = observedOriginal,
+        )
+
+        val entity = reducer.reduce(operations = listOf(original, progress, clear)).entities.values.single()
+
+        assertEquals(clear.operationId, entity.tombstone?.operationId)
+        assertTrue(entity.fields.isEmpty())
+    }
+
+    @Test
     fun duplicateOperationIsAppliedOnce() {
         val operation = operation(device = "a", sequence = 1, fields = mapOf("value" to "x"))
 
@@ -265,6 +301,28 @@ class OperationReducerTest {
             },
         )
     }
+
+    private fun tagCatalogHistoryFields(lastVisitTime: Long) = mapOf(
+        "tagId" to "42",
+        "tagName" to "tag",
+        "tagPage" to "1",
+        "threadId" to "2",
+        "threadTitle" to "thread",
+        "threadPage" to "1",
+        "postId" to "3",
+        "postTitle" to "post",
+        "authorId" to null,
+        "anchorPostId" to "3",
+        "anchorPostRatio" to null,
+        "anchorBlockId" to null,
+        "anchorBlockType" to null,
+        "anchorBlockRatio" to null,
+        "viewportHeight" to null,
+        "firstVisibleItemIndex" to null,
+        "firstVisibleItemOffset" to null,
+        "lastVisitTime" to lastVisitTime.toString(),
+        "coverUrl" to null,
+    )
 
     private fun relationFields() = mapOf(
         "targetType" to "thread",

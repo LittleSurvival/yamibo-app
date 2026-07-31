@@ -90,6 +90,96 @@ internal class OperationRecordingReadHistoryRepository(
         }
     }
 
+    override suspend fun saveTagCatalogThreadHistory(
+        history: ReadHistoryRepository.TagCatalogReadingHistory,
+    ) {
+        val existing = delegate.getTagCatalogThreadHistoryPosition(history.tagId)
+        record(
+            "reading.tag-catalog",
+            history.tagId.value.toString(),
+            if (existing == null) SyncOperationKind.Put else SyncOperationKind.Patch,
+            history.fields(),
+        ) {
+            delegate.saveTagCatalogThreadHistory(history)
+        }
+    }
+
+    override suspend fun deleteTagCatalogThreadHistory(
+        tagId: io.github.littlesurvival.dto.value.TagId,
+    ) {
+        val existing = delegate.getTagCatalogThreadHistoryPosition(tagId) ?: return
+        record(
+            "reading.tag-catalog",
+            tagId.value.toString(),
+            SyncOperationKind.Delete,
+            existing.fields(),
+        ) {
+            delegate.deleteTagCatalogThreadHistory(tagId)
+        }
+    }
+
+    override suspend fun saveRssSearchReaderModeHistory(
+        history: ReadHistoryRepository.RssSearchReadingHistory,
+    ) {
+        val syncId = delegate.getRssSubscriptionSyncId(history.subscriptionId)
+        if (syncId == null) {
+            delegate.saveRssSearchReaderModeHistory(history)
+            return
+        }
+        val existing = delegate.getRssSearchReaderModeHistoryPosition(history.subscriptionId)
+        record(
+            "reading.rss-search",
+            syncId,
+            if (existing == null) SyncOperationKind.Put else SyncOperationKind.Patch,
+            history.fields(syncId),
+        ) {
+            delegate.saveRssSearchReaderModeHistory(history)
+        }
+    }
+
+    override suspend fun deleteRssSearchHistory(subscriptionId: Long) {
+        val existing = delegate.getRssSearchReaderModeHistoryPosition(subscriptionId) ?: return
+        val syncId = delegate.getRssSubscriptionSyncId(subscriptionId)
+        if (syncId == null) {
+            delegate.deleteRssSearchHistory(subscriptionId)
+            return
+        }
+        record("reading.rss-search", syncId, SyncOperationKind.Delete, existing.fields(syncId)) {
+            delegate.deleteRssSearchHistory(subscriptionId)
+        }
+    }
+
+    override suspend fun saveRssCatalogThreadHistory(
+        history: ReadHistoryRepository.RssCatalogReadingHistory,
+    ) {
+        val syncId = delegate.getRssSubscriptionSyncId(history.subscriptionId)
+        if (syncId == null) {
+            delegate.saveRssCatalogThreadHistory(history)
+            return
+        }
+        val existing = delegate.getRssCatalogThreadHistoryPosition(history.subscriptionId)
+        record(
+            "reading.rss-catalog",
+            syncId,
+            if (existing == null) SyncOperationKind.Put else SyncOperationKind.Patch,
+            history.fields(syncId),
+        ) {
+            delegate.saveRssCatalogThreadHistory(history)
+        }
+    }
+
+    override suspend fun deleteRssCatalogThreadHistory(subscriptionId: Long) {
+        val existing = delegate.getRssCatalogThreadHistoryPosition(subscriptionId) ?: return
+        val syncId = delegate.getRssSubscriptionSyncId(subscriptionId)
+        if (syncId == null) {
+            delegate.deleteRssCatalogThreadHistory(subscriptionId)
+            return
+        }
+        record("reading.rss-catalog", syncId, SyncOperationKind.Delete, existing.fields(syncId)) {
+            delegate.deleteRssCatalogThreadHistory(subscriptionId)
+        }
+    }
+
     override suspend fun deleteCombinedHistoryBatch(items: List<ReadHistoryRepository.AnyReadingHistory>) {
         val drafts = items.mapNotNull { item ->
             when (item) {
@@ -102,7 +192,28 @@ internal class OperationRecordingReadHistoryRepository(
                         SyncOperationKind.Delete,
                         item.fields(),
                     )
-                else -> null
+                is ReadHistoryRepository.ImageReadingHistory ->
+                    draft(
+                        "reading.image",
+                        item.postId.value.toString(),
+                        SyncOperationKind.Delete,
+                        item.fields(),
+                    )
+                is ReadHistoryRepository.TagCatalogReadingHistory ->
+                    draft(
+                        "reading.tag-catalog",
+                        item.tagId.value.toString(),
+                        SyncOperationKind.Delete,
+                        item.fields(),
+                    )
+                is ReadHistoryRepository.RssSearchReadingHistory ->
+                    delegate.getRssSubscriptionSyncId(item.subscriptionId)?.let { syncId ->
+                        draft("reading.rss-search", syncId, SyncOperationKind.Delete, item.fields(syncId))
+                    }
+                is ReadHistoryRepository.RssCatalogReadingHistory ->
+                    delegate.getRssSubscriptionSyncId(item.subscriptionId)?.let { syncId ->
+                        draft("reading.rss-catalog", syncId, SyncOperationKind.Delete, item.fields(syncId))
+                    }
             }
         }.distinctBy { "${it.domainId.value}|${it.entityId.value}" }
         recordAuthorizedDeleteBatch(drafts, "reading-history:selected-combined") {
@@ -112,16 +223,37 @@ internal class OperationRecordingReadHistoryRepository(
 
     override suspend fun deleteAllCombinedHistory() {
         val threads = loadAllThreadHistory()
-        val tags = loadAllTagHistory()
+        val images = delegate.getAllImageHistoryForSync()
+        val mangaTags = delegate.getAllTagMangaHistoryForSync()
+        val tagCatalogs = delegate.getAllTagCatalogHistoryForSync()
+        val rssSearch = delegate.getAllRssSearchHistoryForSync()
+        val rssCatalog = delegate.getAllRssCatalogHistoryForSync()
         val drafts = threads.map {
             draft("reading.thread", threadEntityId(it), SyncOperationKind.Delete, it.fields())
-        } + tags.map {
+        } + images.map {
+            draft("reading.image", it.postId.value.toString(), SyncOperationKind.Delete, it.fields())
+        } + mangaTags.map {
             draft(
                 "reading.tag-manga",
                 it.tagId.value.toString(),
                 SyncOperationKind.Delete,
                 it.fields(),
             )
+        } + tagCatalogs.map {
+            draft(
+                "reading.tag-catalog",
+                it.tagId.value.toString(),
+                SyncOperationKind.Delete,
+                it.fields(),
+            )
+        } + rssSearch.mapNotNull {
+            delegate.getRssSubscriptionSyncId(it.subscriptionId)?.let { syncId ->
+                draft("reading.rss-search", syncId, SyncOperationKind.Delete, it.fields(syncId))
+            }
+        } + rssCatalog.mapNotNull {
+            delegate.getRssSubscriptionSyncId(it.subscriptionId)?.let { syncId ->
+                draft("reading.rss-catalog", syncId, SyncOperationKind.Delete, it.fields(syncId))
+            }
         }
         recordAuthorizedDeleteBatch(drafts, "reading-history:all-combined") {
             delegate.deleteAllCombinedHistory()
@@ -151,14 +283,6 @@ internal class OperationRecordingReadHistoryRepository(
         return if (count == 0) emptyList() else delegate.getHistoryPage(1, count)
     }
 
-    private suspend fun loadAllTagHistory(): List<ReadHistoryRepository.TagMangaReadingHistory> {
-        val count = delegate.getCombinedHistoryCount().coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-        return if (count == 0) emptyList() else {
-            delegate.getCombinedHistoryPage(1, count)
-                .filterIsInstance<ReadHistoryRepository.TagMangaReadingHistory>()
-        }
-    }
-
     private fun record(
         domain: String,
         entityId: String,
@@ -166,7 +290,13 @@ internal class OperationRecordingReadHistoryRepository(
         fields: Map<String, String?>,
         mutation: suspend () -> Unit,
     ) {
-        recorder.record(domain, entityId, kind, fields) {
+        recorder.record(
+            domain = domain,
+            entityId = entityId,
+            kind = kind,
+            fields = fields,
+            entityGeneration = recorder.currentGeneration(domain, entityId),
+        ) {
             runBlocking { mutation() }
         }
     }
@@ -206,6 +336,7 @@ internal class OperationRecordingReadHistoryRepository(
     ) = LocalSyncOperationDraft(
         domainId = SyncDomainId(domain),
         entityId = SyncEntityId(entityId),
+        entityGeneration = recorder.currentGeneration(domain, entityId),
         kind = kind,
         fields = fields,
     )
@@ -257,6 +388,66 @@ internal class OperationRecordingReadHistoryRepository(
         "threadTitle" to threadTitle,
         "threadImagePageIndex" to threadImagePageIndex.toString(),
         "threadImageTotalPages" to threadImageTotalPages.toString(),
+        "firstVisibleItemIndex" to firstVisibleItemIndex?.toString(),
+        "firstVisibleItemOffset" to firstVisibleItemOffset?.toString(),
+        "lastVisitTime" to lastVisitTime.toString(),
+        "coverUrl" to coverUrl,
+    )
+
+    private fun ReadHistoryRepository.TagCatalogReadingHistory.fields() = mapOf(
+        "tagId" to tagId.value.toString(),
+        "tagName" to tagName,
+        "tagPage" to tagPage.toString(),
+        "threadId" to threadId.value.toString(),
+        "threadTitle" to threadTitle,
+        "threadPage" to threadPage.toString(),
+        "postId" to postId.value.toString(),
+        "postTitle" to postTitle,
+        "authorId" to authorId?.value?.toString(),
+        "anchorPostId" to anchorPostId.toString(),
+        "anchorPostRatio" to anchorPostRatio?.toString(),
+        "anchorBlockId" to anchorBlockId,
+        "anchorBlockType" to anchorBlockType,
+        "anchorBlockRatio" to anchorBlockRatio?.toString(),
+        "viewportHeight" to viewportHeight?.toString(),
+        "firstVisibleItemIndex" to firstVisibleItemIndex?.toString(),
+        "firstVisibleItemOffset" to firstVisibleItemOffset?.toString(),
+        "lastVisitTime" to lastVisitTime.toString(),
+        "coverUrl" to coverUrl,
+    )
+
+    private fun ReadHistoryRepository.RssSearchReadingHistory.fields(syncId: String) = mapOf(
+        "subscriptionSyncId" to syncId,
+        "subscriptionTitle" to subscriptionTitle,
+        "subscriptionQuery" to subscriptionQuery,
+        "subscriptionPage" to subscriptionPage.toString(),
+        "threadId" to threadId.value.toString(),
+        "threadTitle" to threadTitle,
+        "threadImagePageIndex" to threadImagePageIndex.toString(),
+        "threadImageTotalPages" to threadImageTotalPages.toString(),
+        "firstVisibleItemIndex" to firstVisibleItemIndex?.toString(),
+        "firstVisibleItemOffset" to firstVisibleItemOffset?.toString(),
+        "lastVisitTime" to lastVisitTime.toString(),
+        "coverUrl" to coverUrl,
+    )
+
+    private fun ReadHistoryRepository.RssCatalogReadingHistory.fields(syncId: String) = mapOf(
+        "subscriptionSyncId" to syncId,
+        "subscriptionTitle" to subscriptionTitle,
+        "subscriptionQuery" to subscriptionQuery,
+        "subscriptionPage" to subscriptionPage.toString(),
+        "threadId" to threadId.value.toString(),
+        "threadTitle" to threadTitle,
+        "threadPage" to threadPage.toString(),
+        "postId" to postId.value.toString(),
+        "postTitle" to postTitle,
+        "authorId" to authorId?.value?.toString(),
+        "anchorPostId" to anchorPostId.toString(),
+        "anchorPostRatio" to anchorPostRatio?.toString(),
+        "anchorBlockId" to anchorBlockId,
+        "anchorBlockType" to anchorBlockType,
+        "anchorBlockRatio" to anchorBlockRatio?.toString(),
+        "viewportHeight" to viewportHeight?.toString(),
         "firstVisibleItemIndex" to firstVisibleItemIndex?.toString(),
         "firstVisibleItemOffset" to firstVisibleItemOffset?.toString(),
         "lastVisitTime" to lastVisitTime.toString(),

@@ -245,8 +245,7 @@ class BackupRepositoryImpl(
                         coverUrl = it.coverUrl,
                     )
                 },
-                tagCatalogHistory = if (scope == PortableSnapshotScope.LocalBackup) {
-                    tagCatalogHistoryQueries.getAll().executeAsList().map {
+                tagCatalogHistory = tagCatalogHistoryQueries.getAll().executeAsList().map {
                     BackupTagCatalogReadingHistory(
                         tagId = it.tagId,
                         tagName = it.tagName,
@@ -268,12 +267,8 @@ class BackupRepositoryImpl(
                         lastVisitTime = it.lastVisitTime,
                         coverUrl = it.coverUrl,
                     )
-                    }
-                } else {
-                    emptyList()
                 },
-                rssSearchHistory = if (scope == PortableSnapshotScope.LocalBackup) {
-                    rssSearchHistoryQueries.getAll().executeAsList().map {
+                rssSearchHistory = rssSearchHistoryQueries.getAll().executeAsList().map {
                     BackupRssSearchReadingHistory(
                         subscriptionId = it.subscriptionId,
                         subscriptionTitle = it.subscriptionTitle,
@@ -288,12 +283,8 @@ class BackupRepositoryImpl(
                         lastVisitTime = it.lastVisitTime,
                         coverUrl = it.coverUrl,
                     )
-                    }
-                } else {
-                    emptyList()
                 },
-                rssCatalogHistory = if (scope == PortableSnapshotScope.LocalBackup) {
-                    rssCatalogHistoryQueries.getAll().executeAsList().map {
+                rssCatalogHistory = rssCatalogHistoryQueries.getAll().executeAsList().map {
                     BackupRssCatalogReadingHistory(
                         subscriptionId = it.subscriptionId,
                         subscriptionTitle = it.subscriptionTitle,
@@ -316,9 +307,6 @@ class BackupRepositoryImpl(
                         lastVisitTime = it.lastVisitTime,
                         coverUrl = it.coverUrl,
                     )
-                    }
-                } else {
-                    emptyList()
                 },
                 chapterState = if (scope == PortableSnapshotScope.LocalBackup) {
                     chapterStateQueries.getAll().executeAsList().map {

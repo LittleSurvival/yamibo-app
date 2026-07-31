@@ -1,7 +1,7 @@
 # 雲端同步資料模型與流程
 
 本文說明 Yamibo App 雲端同步使用的三種雲端 Blog：Index、Journal
-與 Checkpoint，以及它們在正常同步、首次載入、完整探索、壓縮與故障復原時的角色。
+與 Checkpoint，以及它們在正常同步、Seed、Join、完整探索、壓縮與故障復原時的角色。
 
 ## 設計目標
 
@@ -157,6 +157,29 @@ favorite.item/xyz       -> Delete
 favorite.update/123     -> Patch(read = true)
 ```
 
+### 同步 domain 與閱讀資料 identity
+
+閱讀相關資料分成獨立 domain，不使用一個混合列表作為同步來源：
+
+| Domain | Stable entity identity | Clear-all 是否清除 |
+|---|---|---|
+| `reading.thread` | thread type、ThreadId、author identity | 是 |
+| `reading.image` | PostId | 是 |
+| `reading.tag-manga` | 全域 TagId | 是 |
+| `reading.tag-catalog` | 全域 TagId | 是 |
+| `reading.rss-search` | parent RSS subscription canonical sync ID | 是 |
+| `reading.rss-catalog` | parent RSS subscription canonical sync ID | 是 |
+| `reading.time` | date key | 否 |
+
+Tag Manga 與 Tag catalog 即使使用相同 TagId，也因 domain 不同而是不同 entity。RSS
+history 不得把 device-local subscription database ID 寫入雲端；Android 與 iOS repository
+會先由 subscription 的 query/forum identity 解析 canonical sync ID。舊 RSS history 若找不到
+parent subscription，保留在本機但不產生 Seed migration operation，避免污染其他設備；
+bootstrap 結果會回報略過筆數，雲端同步狀態以 i18n 明文提示使用者。
+
+Tag catalog、RSS search 與 RSS catalog 都包含於 local backup 與 AppSync portable snapshot；
+下載檔案、頁面 cache、chapter cache/state 等 device-local 資料仍不進 AppSync。
+
 ### Journal metadata
 
 Journal 除了 operations，也保存：
@@ -168,6 +191,22 @@ Journal 除了 operations，也保存：
 
 這些 metadata 用於判斷設備活躍狀態、Checkpoint acknowledgement，以及 Journal
 是否可安全退休。
+
+### Causal coverage 不變量
+
+本機持久化的 causal watermark 必須涵蓋目前 resolved state 引用的每一筆 operation，
+包括 field winner、relation operation 與 tombstone。使用者已在本機看見或採用的 winner，
+不得因 Checkpoint coverage 缺漏而在下一次本機修改時被誤判為 concurrent operation。
+
+因此系統會在兩個時機補齊 coverage：
+
+- 每次保存 reduction metadata 時，從 resolved entities 引用的 operation 推進 watermark。
+- AppSync 啟動時，重新掃描持久化的 resolved state 並修復舊資料缺少的 watermark。
+
+例如裝置 B 已採用裝置 A 的 `settings/theme = SYSTEM`，即使舊 Checkpoint 漏記 A 的
+sequence，B 後續改成 `DARK` 時仍必須帶上涵蓋該 winner 的 causal context。其他裝置
+reduce 時會把 `DARK` 判定為明確較新的修改，而不是用 operation ID tie-break 處理一場
+不存在的並行衝突。
 
 ### Single-writer 原則
 
@@ -271,27 +310,74 @@ flowchart TD
 因此正常同步不執行無條件第二輪 full pull。晚到的 remote operation 由下一次
 scheduled、lifecycle 或 manual sync 吸收。
 
-## 首次安裝或資料庫重建
+## Bootstrap：Seed、Join 與 Active
 
 ```mermaid
 flowchart TD
-    A["偵測新安裝 / DB generation 改變"] --> B["進入 BootstrapRequired"]
-    B --> C["Pull-only 完整驗證雲端資料"]
-    C --> D{"雲端載入成功？"}
-    D -- "否" --> E["保持本機資料不變並等待重試"]
-    D -- "是" --> F["選擇 verified Checkpoint"]
-    F --> G["套用 Checkpoint 與其後 Journal operations"]
-    G --> H["建立新 device epoch / writer nonce"]
-    H --> I["將既有本機資料轉成明確 migration operations"]
-    I --> J["進入 Active，之後才允許 publish"]
+    A["開始同步"] --> B{"同帳號 Active installation？"}
+    B -- "是" --> C["Active：保留 pending UserAction 並正常 reduce"]
+    B -- "否" --> D["載入並驗證 discovery、Index、Journal、Checkpoint"]
+    D --> E{"證據完整且有效？"}
+    E -- "否" --> F["Retry / Pause；本機與 outbox 不變"]
+    E -- "是，雲端 verified empty" --> G["Seed：擷取本機 portable snapshot"]
+    G --> H["transaction：binding、new epoch、sequence、Migration outbox"]
+    E -- "是，雲端已建立" --> I["Join：先保存 pre-join rollback snapshot"]
+    I --> J["transaction：採用 cloud projection、coverage、checkpoint、new epoch、Active"]
+    H --> K["進入 Active，後續正常 publish"]
+    J --> K
 ```
+
+### Seed
+
+只有在 discovery 與所有必要 page 均成功解析、驗證，且沒有有效 Checkpoint 或 Journal
+operation 時，才視為 verified empty。Seed 此時才擷取本機 snapshot，將既有設定、收藏、
+更新紀錄及支援的閱讀資料轉成 origin=`Migration` 的 durable operations。binding、replica
+identity、sequence allocation 與 migration outbox 在同一 transaction 完成；中斷後重用
+既有 operations，不重新產生相同 migration。
+
+### Join
+
+只要有一個有效 Checkpoint 或 validated Journal operation，新的、重設的或需要 rebootstrap
+的 installation 走 Join。Join 以雲端為 authoritative：本機 legacy 值不做 semantic overlap
+比較、不進 outbox，也不覆蓋雲端。系統先將完整 pre-join portable snapshot 壓縮保存到
+`AppSyncBootstrapRollback`，附帶 account binding、database generation 與建立時間；再以單一
+transaction 採用 cloud projection、causal coverage、checkpoint metadata、新 replica epoch
+與 `Active` state。
+
+若 materialization 或 transaction 失敗，projection、causal metadata、outbox lifecycle 與
+installation identity 一起 rollback。已保存的 rollback snapshot供診斷與未來復原使用，
+目前沒有使用者操作 UI。
+
+### Active
+
+同帳號、同 database generation 的 Active installation 不再執行 legacy admission 比較。
+pending `UserAction` operations 保留並與 cloud operations 進 deterministic reducer。兩台設備
+同時修改同一設定時，只解析該 entity 的確定性 winner，不得因此隔離整個 installation 或
+停止其他 module。
 
 關鍵限制：
 
-- Bootstrap 完成前不得上傳本機資料。
+- admission 決策完成前不得建立或上傳 migration operations。
 - 雲端載入失敗不得清除、覆蓋或刪除本機設定。
 - 幾乎空白的新設備不得被視為「最新完整狀態」。
-- 本機舊資料只有在成功採用雲端狀態後，才轉成有 identity 的 migration operations。
+- Join 的 legacy local data 只能進 rollback snapshot，不能轉成 migration operations。
+- Force Pull 或 Force Push 成功時，資料 transaction 與 durable `Active` transition 必須一致。
+
+## 閱讀歷史刪除與重建
+
+所有 public save/delete mutation 由 recording repository 擁有；遠端 materialization 直接使用
+non-recording SQL/repository path，避免收到 operation 後又產生新的 local operation。
+
+- 單筆與選擇刪除依具體 subtype 產生該 domain 的 Delete tombstone。
+- Clear-all 直接完整讀取六張同步 history backing tables，再取得 bulk-delete authorization。
+- Delete operations 與六張 history table 的本機刪除在同一 transaction commit。
+- 任一枚舉、RSS identity 解析、authorization 或 transaction 失敗時，不清任何 history，
+  也不留下部分 outbox。
+- Clear-all 不清除 `reading.time` 閱讀時間統計。
+- 已觀察 tombstone 後再次閱讀同一目標，會用更高 entity generation 建立 Put；舊 tombstone
+  不會讓該項目永久無法同步。
+- concurrent delete 與舊 generation progress update 採 remove-wins；明確的後續新 generation
+  read 才能重建。
 
 ## 完整探索與 Yamibo 刪除延遲
 
@@ -369,11 +455,14 @@ flowchart TD
 | 未登入 / FormHash 過期 | 暫停同步，提示使用者重新整理登入狀態 |
 | Yamibo maintenance | 顯示「Yamibo 正在維護，將稍後自動重試」 |
 | Network / timeout | 保留 pending operations，排定重試 |
+| Journal load/publish terminal provider failure | 保留 pending operations，持久化 `PausedProvider`；不得回報 `Quarantined` |
 | Index 無效 | 不修改本機資料，重新探索 verified links |
 | 單一 Journal 毀損 | 隔離該版本，其他有效 Journal 繼續處理 |
 | Unsupported schema | 暫停受影響路徑並顯示詳細原因 |
 | Writer nonce collision | 不覆寫 Journal，要求 rebootstrap / 新 epoch |
 | Checkpoint storage pressure | 停止不安全刪除，不丟棄未被覆蓋操作 |
+| Valid concurrent entity conflict | deterministic reduce；不得進 installation-wide quarantine |
+| Invalid operation/schema/sequence invariant | 進入 Quarantined，停止一般同步並等待人工復原 |
 
 任何 cloud load、parse 或 validation failure 都不得：
 
@@ -382,6 +471,20 @@ flowchart TD
 - 刪除本機設定。
 - 自動 force push。
 - 自動 force pull。
+
+### Quarantined 邊界
+
+`Quarantined` 只保留給 malformed operation、無法成立的 replica/sequence/identity invariant，
+或已驗證 payload 的結構性毀損。`refresh`、立即同步與背景排程遇到此狀態都不 pull、apply
+或 publish。它不會自動選擇 Force Pull/Push。
+
+背景任務若由其他狀態首次進入 durable `Quarantined`，Android 會發出高重要性系統通知；
+iOS 在使用者已授權通知時發出本機通知。既有 `Quarantined` 的重複排程不會重複提醒。
+通知只使用可翻譯的使用者文案，詳細隔離原因保留在雲端同步頁面。
+
+使用者可另外開啟 Force preview，重新 authoritative load 並查看本機/雲端差異；只有完成
+倒數與二次確認後才執行 Force Pull 或 Force Push。preview token 若因本機或雲端在確認前
+變更會失效。成功資料 transition 與 durable `Active` state 一起保存；失敗仍維持隔離。
 
 ## Request 成本
 
@@ -419,8 +522,33 @@ deleted list entries。
 3. Operation ID 去重與 domain apply 必須在一致的 transaction 邊界內。
 4. Checkpoint 沒有完整 acknowledgement 前，不得 prune operation。
 5. 雲端讀取失敗時，不得修改或刪除本機設定。
-6. 新設備完成 pull-only bootstrap 前，不得 publish。
+6. 新設備完成 verified Seed/Join admission 前，不得 publish。
 7. DELETE 成功不依賴 Yamibo reader 立即 NotFound。
 8. 一般同步不執行無條件 full discovery 或 pull-again。
 9. No-op compaction 不得觸發 Journal/Index POST。
 10. Force push、force pull 與清除雲端資料只能由使用者明確確認。
+11. Join 不得發布 joining device 的 legacy local state，且套用前必須保存 rollback snapshot。
+12. Clear-all 閱讀歷史必須產生六種 history tombstones，但不得清除閱讀時間統計。
+13. 無法解析 stable parent 的舊 RSS history 保留本機且不得使用 local ID 上傳。
+14. Quarantined 阻止一般前景與背景同步；合法並行值衝突不得觸發 Quarantined。
+
+## 目前驗證範圍與限制
+
+本輪變更已由自動化測試驗證：
+
+- verified-empty Seed、established-cloud divergent Join、Active pending operation 與 cloud load
+  failure 路徑。
+- Join 不產生 legacy migration operation，rollback snapshot 可跨 store restart 讀回。
+- Force Pull/Push 從 Quarantined 成功後 durable state 為 Active。
+- Android production recording repository 對六種 history 的新增、選擇刪除、clear-all、
+  delete/recreate generation 與失敗前不變性。
+- 兩個獨立 SQLDelight database 的 A/B 等價 integration；RSS local subscription ID 不同時仍
+  依 canonical sync ID materialize 並在刪除後收斂。
+- AppSync snapshot inclusion、change-summary 顯示、SQLDelight migration、Compose cloud-sync
+  state test，以及 shared/Compose iOS simulator compilation。
+
+這些測試證明 deterministic 行為與 transaction invariant，但不等同真實 Yamibo 網路的
+長期 rollout 指標。尚未取得大量實際設備下的成功率、request count、網站 eventual
+consistency retry 與 90 天 retirement telemetry，因此不得以此文件宣稱已達成 99% 或
+99.99% 的 production reliability。舊 reader/rollback compatibility 也不得在 rollout
+證據完成前移除。

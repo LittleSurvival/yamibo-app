@@ -4,6 +4,7 @@ import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.github.littlesurvival.dto.value.FormHash
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
@@ -12,6 +13,8 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncBootstrapResult
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncBootstrapMode
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.CapturedBootstrapSnapshot
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalLoadResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalPublishResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalRemote
@@ -75,7 +78,7 @@ class OperationSyncEngineTest {
     }
 
     @Test
-    fun failedCloudLoadDoesNotApplyOrPublishCapturedLocalMigration() = runBlocking {
+    fun failedCloudLoadDoesNotCaptureApplyOrPublishLocalMigration() = runBlocking {
         val remote = FakeJournalRemote().also {
             it.loadFailure = AppSyncJournalLoadResult.RetryableFailure("offline")
         }
@@ -91,7 +94,7 @@ class OperationSyncEngineTest {
     @Test
     fun migrationCaptureFailureCannotPublishOrModifyCloudState() = runBlocking {
         val fixture = fixture(
-            captureLocalMigrationDrafts = { error("local database read failed") },
+            captureLocalSnapshot = { error("local database read failed") },
         )
         fixture.store.initialize("generation")
 
@@ -102,7 +105,7 @@ class OperationSyncEngineTest {
     }
 
     @Test
-    fun localMigrationIsCreatedOnlyAfterSuccessfulCloudLoad() = runBlocking {
+    fun localMigrationRemainsPendingAfterSuccessfulCloudLoad() = runBlocking {
         val fixture = fixture(migrationDrafts = listOf(migrationSetting("dark")))
         fixture.store.initialize("generation")
 
@@ -386,7 +389,7 @@ class OperationSyncEngineTest {
     }
 
     @Test
-    fun resetBootstrapKeepsCloudValueAndImportsOnlyMissingLocalEntities() = runBlocking {
+    fun establishedCloudJoinIgnoresDivergentLegacyLocalStateAndKeepsRollback() = runBlocking {
         val remote = FakeJournalRemote()
         val cloudOperation = standaloneSettingOperation("dark")
         remote.seed(
@@ -418,14 +421,128 @@ class OperationSyncEngineTest {
             ),
         )
         fixture.store.initialize("new-database-generation")
+        fixture.domain.apply(
+            OperationReducer().reduce(
+                operations = listOf(
+                    standaloneSettingOperation("system", deviceValue = "legacy-local"),
+                ),
+            ),
+        )
+
+        val result = assertIs<AppSyncBootstrapResult.Ready>(fixture.bootstrap.bootstrap(account))
+
+        assertEquals(AppSyncBootstrapMode.Join, result.mode)
+        assertEquals("dark", fixture.domain.value("settings", "theme", "value"))
+        assertEquals(null, fixture.domain.value("settings", "local-only", "value"))
+        assertTrue(fixture.store.pendingOperations().isEmpty())
+        assertEquals("rollback", fixture.store.latestBootstrapRollbackSnapshot()?.encodedSnapshot)
+        assertEquals(AppSyncInstallationState.Active, fixture.store.installation()?.state)
+        assertEquals(0, remote.publishCount)
+    }
+
+    @Test
+    fun retryAfterCloudLoadFailureDoesNotRecaptureMigrationOperations() = runBlocking {
+        val remote = FakeJournalRemote().also {
+            it.loadFailure = AppSyncJournalLoadResult.RetryableFailure("offline")
+        }
+        var captureCount = 0
+        val fixture = fixture(
+            remote = remote,
+            captureLocalSnapshot = {
+                captureCount++
+                CapturedBootstrapSnapshot(listOf(migrationSetting("dark")), "rollback")
+            },
+        )
+        fixture.store.initialize("generation")
+
+        assertIs<AppSyncBootstrapResult.RetryableFailure>(fixture.bootstrap.bootstrap(account))
+        remote.loadFailure = null
+        assertIs<AppSyncBootstrapResult.Ready>(fixture.bootstrap.bootstrap(account))
+
+        assertEquals(1, captureCount)
+        assertEquals(1, fixture.store.pendingOperations().size)
+        assertEquals("dark", fixture.domain.value("settings", "theme", "value"))
+    }
+
+    @Test
+    fun failedBootstrapTransactionRollsBackProjectionAndInstallationActivation() {
+        val database = Database(
+            JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).also(Database.Schema::create),
+        )
+        val store = SqlDelightAppSyncOperationStore(database)
+        store.initialize("generation")
+        store.captureBootstrapMigration(
+            accountBinding = account,
+            drafts = listOf(migrationSetting("dark")),
+            createdAtEpochMillis = 1_000,
+        )
+
+        assertFailsWith<IllegalStateException> {
+            store.completeBootstrap(
+                accountBinding = account,
+                result = OperationReducer().reduce(operations = emptyList()),
+                coverage = SyncCausalContext(),
+                cloudOperationIds = emptySet(),
+                appliedAtEpochMillis = 1_001,
+                rotateDeviceEpoch = false,
+                checkpoint = null,
+            ) {
+                database.appSyncOperationQueries.upsertResolvedEntity(
+                    entityKey = "settings|theme|1",
+                    domainId = "settings",
+                    entityId = "theme",
+                    entityGeneration = 1,
+                    encodedState = "fixture",
+                    updatedAtEpochMillis = 1_001,
+                )
+                error("materialization failed")
+            }
+        }
+
+        assertTrue(database.appSyncOperationQueries.getResolvedEntities().executeAsList().isEmpty())
+        assertEquals(AppSyncInstallationState.Bootstrapping, store.installation()?.state)
+        assertEquals(1, store.pendingOperations().size)
+    }
+
+    @Test
+    fun establishedCloudJoinDoesNotUploadNonOverlappingLegacyLocalEntities() = runBlocking {
+        val remote = FakeJournalRemote()
+        val cloudOperation = standaloneSettingOperation("dark")
+        remote.seed(journalPayload(cloudOperation))
+        val fixture = fixture(
+            remote,
+            migrationDrafts = listOf(
+                LocalSyncOperationDraft(
+                    domainId = SyncDomainId("settings"),
+                    entityId = SyncEntityId("local-only"),
+                    kind = SyncOperationKind.Put,
+                    fields = mapOf("type" to "string", "value" to "kept"),
+                ),
+            ),
+        )
+        fixture.store.initialize("new-database-generation")
 
         assertIs<AppSyncBootstrapResult.Ready>(fixture.bootstrap.bootstrap(account))
 
         assertEquals("dark", fixture.domain.value("settings", "theme", "value"))
-        assertEquals("kept", fixture.domain.value("settings", "local-only", "value"))
-        val pending = fixture.store.pendingOperations()
-        assertEquals(listOf("local-only"), pending.map { it.entityId.value })
-        assertEquals(0, remote.publishCount)
+        assertEquals(null, fixture.domain.value("settings", "local-only", "value"))
+        assertTrue(fixture.store.pendingOperations().isEmpty())
+    }
+
+    @Test
+    fun sameAccountRebootstrapKeepsPendingUserOperationsInProjection() = runBlocking {
+        val fixture = fixture()
+        activate(fixture)
+        appendSetting(fixture, "dark")
+
+        assertIs<AppSyncBootstrapResult.Ready>(fixture.bootstrap.bootstrap(account))
+
+        assertEquals("dark", fixture.domain.value("settings", "theme", "value"))
+        assertEquals(1, fixture.store.pendingOperations().size)
+        assertEquals(
+            SyncOperationOrigin.UserAction,
+            fixture.store.pendingOperations().single().origin,
+        )
     }
 
     @Test
@@ -612,7 +729,7 @@ class OperationSyncEngineTest {
     }
 
     @Test
-    fun terminalCloudValidationFailureQuarantinesWithoutPublishing() = runBlocking {
+    fun terminalCloudValidationFailurePausesProviderWithoutPublishing() = runBlocking {
         val fixture = fixture()
         activate(fixture)
         appendSetting(fixture, "dark")
@@ -620,12 +737,16 @@ class OperationSyncEngineTest {
             "journal fingerprint mismatch",
         )
 
-        assertIs<OperationSyncResult.Quarantined>(
+        assertIs<OperationSyncResult.PausedProvider>(
             fixture.engine.synchronize(account, formHash),
         )
 
         assertEquals(0, fixture.remote.publishCount)
         assertEquals(1, fixture.store.pendingOperations().size)
+        assertEquals(
+            AppSyncInstallationState.PausedProvider,
+            fixture.store.installation()?.state,
+        )
     }
 
     @Test
@@ -910,7 +1031,9 @@ class OperationSyncEngineTest {
     private fun fixture(
         remote: FakeJournalRemote = FakeJournalRemote(),
         migrationDrafts: List<LocalSyncOperationDraft> = emptyList(),
-        captureLocalMigrationDrafts: () -> List<LocalSyncOperationDraft> = { migrationDrafts },
+        captureLocalSnapshot: () -> CapturedBootstrapSnapshot = {
+            CapturedBootstrapSnapshot(migrationDrafts, "rollback")
+        },
     ): Fixture {
         val database = Database(
             JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).also(Database.Schema::create),
@@ -931,7 +1054,7 @@ class OperationSyncEngineTest {
             remote = remote,
             domainState = domain,
             nowMillis = { fixture.clock++ },
-            captureLocalMigrationDrafts = captureLocalMigrationDrafts,
+            captureLocalSnapshot = captureLocalSnapshot,
         )
         return fixture
     }
@@ -969,6 +1092,42 @@ class OperationSyncEngineTest {
             origin = SyncOperationOrigin.UserAction,
         )
     }
+
+    @Test
+    fun terminalPublishFailurePausesProviderAndKeepsPendingWork() = runBlocking {
+        val fixture = fixture()
+        activate(fixture)
+        val operationId = appendSetting(fixture, "dark")
+        fixture.remote.publishFailure = AppSyncJournalPublishResult.TerminalFailure(
+            "provider rejected journal payload",
+        )
+
+        assertIs<OperationSyncResult.PausedProvider>(
+            fixture.engine.synchronize(account, formHash),
+        )
+
+        assertEquals(operationId, fixture.store.pendingOperations().single().operationId.value)
+        assertEquals(
+            AppSyncInstallationState.PausedProvider,
+            fixture.store.installation()?.state,
+        )
+    }
+
+    private fun journalPayload(
+        operation: me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperation,
+    ) = AppSyncJournalPayload(
+        accountBinding = account,
+        deviceId = operation.deviceId,
+        deviceEpoch = operation.deviceEpoch,
+        writerNonce = me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncWriterNonce(
+            "writer-${operation.deviceId.value}",
+        ),
+        firstSequence = operation.sequence.value,
+        lastSequence = operation.sequence.value,
+        operations = listOf(operation),
+        observed = SyncCausalContext().advance(operation.replicaKey, operation.sequence),
+        heartbeatAtEpochMillis = 100,
+    )
 
     private class Fixture(
         val store: SqlDelightAppSyncOperationStore,
@@ -1016,6 +1175,7 @@ class OperationSyncEngineTest {
         var throwOnLoad = false
         var throwOnPublish = false
         var loadFailure: AppSyncJournalLoadResult? = null
+        var publishFailure: AppSyncJournalPublishResult? = null
         var loadGate: CompletableDeferred<Unit>? = null
         var loadStarted: CompletableDeferred<Unit>? = null
         val checkpoints = mutableListOf<LoadedAppSyncCheckpoint>()
@@ -1044,6 +1204,7 @@ class OperationSyncEngineTest {
             formHash: FormHash,
         ): AppSyncJournalPublishResult {
             if (throwOnPublish) error("interrupted journal rewrite")
+            publishFailure?.let { return it }
             val key = "${payload.deviceId.value}:${payload.deviceEpoch.value}"
             val current = journals[key]
             if (expectedFingerprint != current?.fingerprint) {

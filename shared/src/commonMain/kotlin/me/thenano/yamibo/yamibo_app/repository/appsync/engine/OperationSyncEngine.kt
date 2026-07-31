@@ -174,11 +174,11 @@ internal sealed interface OperationSyncResult {
         val reason: String,
     ) : OperationSyncResult
 
-    data class RebootstrapRequired(
+    data class PausedProvider(
         val reason: String,
     ) : OperationSyncResult
 
-    data class Quarantined(
+    data class RebootstrapRequired(
         val reason: String,
     ) : OperationSyncResult
 
@@ -284,7 +284,7 @@ internal class OperationSyncEngine(
                     return OperationSyncResult.RetryScheduled(result.reason)
                 is AppSyncJournalLoadResult.TerminalFailure -> {
                     store.updateState(AppSyncInstallationState.PausedProvider)
-                    return OperationSyncResult.Quarantined(result.reason)
+                    return OperationSyncResult.PausedProvider(result.reason)
                 }
             }
             val loaded = cloud.journals
@@ -418,7 +418,7 @@ internal class OperationSyncEngine(
                     }
                     is AppSyncJournalPublishResult.TerminalFailure -> {
                         store.updateState(AppSyncInstallationState.PausedProvider)
-                        return OperationSyncResult.Quarantined(published.reason)
+                        return OperationSyncResult.PausedProvider(published.reason)
                     }
                 }
             }

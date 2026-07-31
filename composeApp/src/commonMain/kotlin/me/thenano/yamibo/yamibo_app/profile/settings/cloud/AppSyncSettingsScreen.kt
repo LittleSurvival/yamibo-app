@@ -55,6 +55,11 @@ import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.i18n.localizedLabel
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.profile.settings.components.SettingsChipRow
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncChangeAction
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncChangeDirection
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncJournalRetirementMessage
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncServicePhase
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncStatusMessage
 import me.thenano.yamibo.yamibo_app.util.time.FixedScheduleInterval
 
 @Composable
@@ -263,9 +268,9 @@ private fun ManualOverrideSection(
             testTag = "app_sync_force_pull",
             onClick = { onRequestForce(CloudSyncForceDirection.Pull) },
         )
-        state.forceError?.let {
+        state.forceError?.let { error ->
             Text(
-                text = i18n(it),
+                text = cloudSyncForceErrorText(error),
                 color = colors.redAccent,
                 fontSize = 12.sp,
                 modifier = Modifier.testTag("app_sync_force_error"),
@@ -313,13 +318,17 @@ private fun CloudStatusRow(
                 color = colors.textDark.copy(alpha = 0.58f),
             )
             Text(
-                text = if (busy) i18n("處理中...") else i18n(state.statusHeadline),
+                text = if (busy) {
+                    i18n("處理中...")
+                } else {
+                    cloudSyncStatusHeadline(state.phase)
+                },
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Medium,
                 color = colors.textStrong,
             )
             Text(
-                text = i18n(state.statusSupport),
+                text = appSyncStatusMessageText(state.statusMessage),
                 fontSize = 12.sp,
                 color = colors.textDark.copy(alpha = 0.62f),
                 maxLines = 1,
@@ -353,7 +362,7 @@ private fun CloudSyncInlineNotice(notice: CloudSyncNotice) {
         CloudSyncNoticeSeverity.Error -> colors.redAccent
     }
     Text(
-        text = notice.message,
+        text = appSyncStatusMessageText(notice.message),
         color = color,
         fontSize = 12.sp,
         modifier = Modifier
@@ -394,7 +403,7 @@ private fun AutomaticSyncSection(
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    text = i18n(state.automaticStatus),
+                    text = state.automaticStatus.localizedLabel(),
                     color = colors.textDark.copy(alpha = 0.68f),
                     fontSize = 13.sp,
                 )
@@ -539,13 +548,13 @@ private fun SyncDetailsSection(
                 details.forEach { detail ->
                     Row(modifier = Modifier.fillMaxWidth()) {
                         Text(
-                            text = i18n(detail.label),
+                            text = detail.label.localizedLabel(),
                             color = colors.textDark.copy(alpha = 0.58f),
                             fontSize = 12.sp,
                             modifier = Modifier.weight(0.32f),
                         )
                         Text(
-                            text = i18n(detail.value),
+                            text = cloudSyncDetailValueText(detail.value),
                             color = colors.textStrong,
                             fontSize = 12.sp,
                             modifier = Modifier.weight(0.68f),
@@ -557,14 +566,20 @@ private fun SyncDetailsSection(
                     changes.forEach { change ->
                         Row(modifier = Modifier.fillMaxWidth()) {
                             Text(
-                                text = i18n(change.direction),
+                                text = cloudSyncDirectionText(change.direction),
                                 color = colors.textDark.copy(alpha = 0.58f),
                                 fontSize = 12.sp,
                                 modifier = Modifier.weight(0.32f),
                             )
                             Text(
                                 text = buildString {
-                                    append(i18n("{}：{}", change.module, change.summary))
+                                    append(
+                                        i18n(
+                                            "{}：{}",
+                                            change.module.localizedLabel(),
+                                            cloudSyncActionText(change.action, change.count),
+                                        ),
+                                    )
                                     if (change.details.isNotEmpty()) {
                                         appendLine()
                                         append(change.details.joinToString("、"))
@@ -764,14 +779,14 @@ private fun ForceOverrideDialog(
                     preview.differences.forEach { difference ->
                         Row(modifier = Modifier.fillMaxWidth()) {
                             Text(
-                                text = i18n(difference.module),
+                                text = difference.module.localizedLabel(),
                                 color = colors.textStrong,
                                 fontSize = 12.sp,
                                 modifier = Modifier.weight(0.38f),
                             )
                             Text(
                                 text = buildString {
-                                    append(i18n(difference.summary))
+                                    append(cloudSyncForceDifferenceText(difference))
                                     if (difference.details.isNotEmpty()) {
                                         appendLine()
                                         append(difference.details.joinToString("、"))
@@ -814,6 +829,139 @@ private fun ForceOverrideDialog(
 
 internal fun forceConfirmationEnabled(remainingSeconds: Int): Boolean =
     remainingSeconds <= 0
+
+private fun cloudSyncStatusHeadline(phase: AppSyncServicePhase?): String = when (phase) {
+    null -> i18n("同步核心尚未連接")
+    AppSyncServicePhase.Disabled -> i18n("尚未啟用")
+    AppSyncServicePhase.BootstrapRequired -> i18n("需要安全載入")
+    AppSyncServicePhase.Running -> i18n("同步中")
+    AppSyncServicePhase.Active -> i18n("同步就緒")
+    AppSyncServicePhase.PausedAuth -> i18n("登入狀態需要刷新")
+    AppSyncServicePhase.PausedProvider -> i18n("雲端暫時無法使用")
+    AppSyncServicePhase.Quarantined -> i18n("有資料需要檢查")
+    AppSyncServicePhase.RetryPending -> i18n("等待重試")
+}
+
+private fun appSyncStatusMessageText(message: AppSyncStatusMessage): String = when (message) {
+    AppSyncStatusMessage.NotStarted -> i18n("尚未開始同步")
+    AppSyncStatusMessage.CoreNotAvailable -> i18n("新同步核心仍在驗證中，尚未開放雲端寫入")
+    AppSyncStatusMessage.QuarantinedRefresh ->
+        i18n("同步資料已隔離；重新檢查不會修改本機資料")
+    AppSyncStatusMessage.QuarantinedManualSync ->
+        i18n("同步資料已隔離；手動同步不會修改本機資料")
+    AppSyncStatusMessage.UnexpectedFailure ->
+        i18n("同步發生未預期錯誤，已保留待同步操作並排定重試")
+    AppSyncStatusMessage.AutomaticSyncScheduled -> i18n("已排定自動同步")
+    AppSyncStatusMessage.AutomaticSyncDisabled -> i18n("自動同步已關閉")
+    AppSyncStatusMessage.ScheduleUpdated -> i18n("自動同步排程設定已更新")
+    AppSyncStatusMessage.AppStartupSyncScheduled -> i18n("已排定 App 啟動同步")
+    AppSyncStatusMessage.ForegroundExitSyncScheduled -> i18n("已排定離開前台同步")
+    AppSyncStatusMessage.ClearingCloudData -> i18n("正在驗證並清除雲端同步資料")
+    is AppSyncStatusMessage.CloudDataCleared ->
+        i18n("已清除 {} 筆雲端同步資料；本機資料已排入安全重建", message.count)
+    AppSyncStatusMessage.CloudResetAuthExpired ->
+        i18n("登入狀態已過期；重新整理登入後會先載入仍存活的雲端資料")
+    is AppSyncStatusMessage.CloudResetIncomplete ->
+        i18n("雲端清除未完整確認：{}；下次會先安全載入再繼續", message.reason)
+    is AppSyncStatusMessage.CloudLinkCacheCleared ->
+        i18n("已清除 {} 筆雲端連結紀錄；下次同步會重新驗證最新索引", message.count)
+    AppSyncStatusMessage.ForcePushRunning -> i18n("正在執行強制上傳並驗證雲端結果")
+    AppSyncStatusMessage.ForcePullRunning -> i18n("正在載入並套用已驗證的雲端狀態")
+    is AppSyncStatusMessage.ForcePullCompleted ->
+        i18n("強制載入完成：已套用 {} 項差異", message.count)
+    AppSyncStatusMessage.ForcePreviewStale ->
+        i18n("本機或雲端資料已變更，請重新檢視差異後再確認")
+    AppSyncStatusMessage.SafeLoadRunning ->
+        i18n("正在安全載入雲端紀錄，本階段不會上傳本機資料")
+    is AppSyncStatusMessage.SafeLoadCompleted ->
+        i18n("安全載入完成，套用 {} 筆操作", message.count)
+    is AppSyncStatusMessage.SafeLoadCompletedWithSkippedRssHistory ->
+        i18n(
+            "安全載入完成，套用 {} 筆操作；保留 {} 筆無法解析來源的舊 RSS 閱讀紀錄於本機",
+            message.appliedCount,
+            message.skippedCount,
+        )
+    AppSyncStatusMessage.SyncRunning -> i18n("正在同步操作紀錄")
+    is AppSyncStatusMessage.SyncCompleted ->
+        i18n(
+            "同步完成：接收 {}、確認 {}",
+            message.receivedCount,
+            message.acknowledgedCount,
+        )
+    AppSyncStatusMessage.SyncAlreadyRunning -> i18n("已有同步工作執行中")
+    AppSyncStatusMessage.AuthenticationExpired -> i18n("登入狀態已過期，請先刷新登入狀態")
+    is AppSyncStatusMessage.External -> message.value
+}
+
+private fun cloudSyncDetailValueText(value: CloudSyncDetailValue): String = when (value) {
+    is CloudSyncDetailValue.Phase -> cloudSyncPhaseText(value.value)
+    is CloudSyncDetailValue.Timestamp -> value.value
+    is CloudSyncDetailValue.Automatic -> value.value.localizedLabel()
+    is CloudSyncDetailValue.Count -> value.value.toString()
+    is CloudSyncDetailValue.Journal -> appSyncJournalRetirementText(value.value)
+    is CloudSyncDetailValue.StatusMessage -> appSyncStatusMessageText(value.value)
+    CloudSyncDetailValue.NoRecord -> i18n("尚無紀錄")
+}
+
+private fun cloudSyncPhaseText(phase: AppSyncServicePhase): String = when (phase) {
+    AppSyncServicePhase.Disabled -> i18n("停用")
+    AppSyncServicePhase.BootstrapRequired -> i18n("等待安全載入")
+    AppSyncServicePhase.Running -> i18n("執行中")
+    AppSyncServicePhase.Active -> i18n("已收斂")
+    AppSyncServicePhase.PausedAuth -> i18n("登入暫停")
+    AppSyncServicePhase.PausedProvider -> i18n("供應端暫停")
+    AppSyncServicePhase.Quarantined -> i18n("隔離")
+    AppSyncServicePhase.RetryPending -> i18n("等待重試")
+}
+
+private fun appSyncJournalRetirementText(message: AppSyncJournalRetirementMessage): String =
+    when (message) {
+        is AppSyncJournalRetirementMessage.Observed ->
+            i18n("已驗證 {} 個 Journal，尚無可清理項目", message.journalCount)
+        is AppSyncJournalRetirementMessage.Candidate ->
+            i18n("發現 {} 個安全清理候選；目前為只觀察模式", message.count)
+        is AppSyncJournalRetirementMessage.Pending ->
+            i18n("Journal 清理程序等待下一次重新驗證：{}", message.stage)
+        AppSyncJournalRetirementMessage.Completed ->
+            i18n("已完成一個非活躍 Journal 的安全清理")
+        AppSyncJournalRetirementMessage.PausedAuth ->
+            i18n("登入狀態不足，Journal 清理已暫停")
+        AppSyncJournalRetirementMessage.AlreadyRunning ->
+            i18n("已有同步或 Journal 維護工作執行中")
+        is AppSyncJournalRetirementMessage.External -> message.value
+    }
+
+private fun cloudSyncDirectionText(direction: AppSyncChangeDirection): String = when (direction) {
+    AppSyncChangeDirection.Received -> i18n("從雲端套用")
+    AppSyncChangeDirection.Uploaded -> i18n("上傳至雲端")
+}
+
+private fun cloudSyncActionText(action: AppSyncChangeAction, count: Int): String = when (action) {
+    AppSyncChangeAction.Added -> i18n("新增 {}", count)
+    AppSyncChangeAction.Updated -> i18n("更新 {}", count)
+    AppSyncChangeAction.Deleted -> i18n("刪除 {}", count)
+    AppSyncChangeAction.Enabled -> i18n("開啟 {}", count)
+    AppSyncChangeAction.Disabled -> i18n("關閉 {}", count)
+    AppSyncChangeAction.Read -> i18n("標為已讀 {}", count)
+    AppSyncChangeAction.Dismissed -> i18n("忽略 {}", count)
+}
+
+private fun cloudSyncForceDifferenceText(difference: CloudSyncForceDifference): String =
+    buildList {
+        if (difference.added > 0) add(i18n("新增 {}", difference.added))
+        if (difference.updated > 0) add(i18n("更新 {}", difference.updated))
+        if (difference.deleted > 0) add(i18n("刪除 {}", difference.deleted))
+        if (difference.enabled > 0) add(i18n("開啟 {}", difference.enabled))
+        if (difference.disabled > 0) add(i18n("關閉 {}", difference.disabled))
+    }.joinToString(i18n("、"))
+
+private fun cloudSyncForceErrorText(error: CloudSyncForceError): String = when (error) {
+    CloudSyncForceError.StalePreview ->
+        i18n("本機或雲端資料已變更，請重新檢視差異後再確認")
+    CloudSyncForceError.CoreUnavailable -> i18n("同步核心尚未啟用")
+    CloudSyncForceError.AuthenticationExpired -> i18n("登入狀態已過期，請先刷新登入狀態")
+    is CloudSyncForceError.External -> error.value
+}
 
 @Composable
 private fun statusColor(status: CloudSyncStatus): Color = when (status) {

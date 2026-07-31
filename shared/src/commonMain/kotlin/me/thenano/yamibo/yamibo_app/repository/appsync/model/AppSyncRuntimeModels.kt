@@ -78,6 +78,13 @@ internal data class AppSyncVerifiedCheckpoint(
     val verifiedAtEpochMillis: Long,
 )
 
+internal data class AppSyncBootstrapRollbackSnapshot(
+    val accountBinding: SyncAccountBinding,
+    val databaseGeneration: String,
+    val encodedSnapshot: String,
+    val createdAtEpochMillis: Long,
+)
+
 internal data class AppSyncReplicaObservation(
     val accountBinding: SyncAccountBinding,
     val replicaKey: String,

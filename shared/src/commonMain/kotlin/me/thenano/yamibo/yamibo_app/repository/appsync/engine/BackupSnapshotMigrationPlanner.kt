@@ -6,8 +6,16 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationKi
 import me.thenano.yamibo.yamibo_app.repository.backup.YamiboBackupFile
 import me.thenano.yamibo.yamibo_app.store.appsync.LocalSyncOperationDraft
 
+internal data class BackupSnapshotMigrationPlan(
+    val drafts: List<LocalSyncOperationDraft>,
+    val skippedOrphanRssHistoryCount: Int,
+)
+
 internal class BackupSnapshotMigrationPlanner {
-    fun plan(snapshot: YamiboBackupFile): List<LocalSyncOperationDraft> {
+    fun plan(snapshot: YamiboBackupFile): List<LocalSyncOperationDraft> =
+        planWithDiagnostics(snapshot).drafts
+
+    fun planWithDiagnostics(snapshot: YamiboBackupFile): BackupSnapshotMigrationPlan {
         val categories = snapshot.favorites.categories.associateBy { it.localId }
         val categorySyncIds = categories.mapValues { (_, category) ->
             requireNotNull(category.syncId) { "Favorite category is missing a stable sync id" }
@@ -17,7 +25,10 @@ internal class BackupSnapshotMigrationPlanner {
             requireNotNull(collection.syncId) { "Favorite collection is missing a stable sync id" }
         }
         val items = snapshot.favorites.items.associateBy { it.localId }
-        return buildList {
+        val rssSubscriptionSyncIds = snapshot.favorites.rssSubscriptions
+            .associate { it.localId to it.syncId }
+        var skippedOrphanRssHistoryCount = 0
+        val drafts = buildList {
             snapshot.settings.forEach {
                 add(put("settings", it.key, mapOf("type" to it.type.serialName(), "value" to it.value)))
             }
@@ -204,6 +215,95 @@ internal class BackupSnapshotMigrationPlanner {
                     ),
                 )
             }
+            snapshot.readingState.tagCatalogHistory.forEach {
+                add(
+                    put(
+                        "reading.tag-catalog",
+                        it.tagId.toString(),
+                        mapOf(
+                            "tagId" to it.tagId.toString(),
+                            "tagName" to it.tagName,
+                            "tagPage" to it.tagPage.toString(),
+                            "threadId" to it.threadId.toString(),
+                            "threadTitle" to it.threadTitle,
+                            "threadPage" to it.threadPage.toString(),
+                            "postId" to it.postId.toString(),
+                            "postTitle" to it.postTitle,
+                            "authorId" to it.authorId?.toString(),
+                            "anchorPostId" to it.anchorPostId.toString(),
+                            "anchorPostRatio" to it.anchorPostRatio?.toString(),
+                            "anchorBlockId" to it.anchorBlockId,
+                            "anchorBlockType" to it.anchorBlockType,
+                            "anchorBlockRatio" to it.anchorBlockRatio?.toString(),
+                            "viewportHeight" to it.viewportHeight?.toString(),
+                            "firstVisibleItemIndex" to it.firstVisibleItemIndex?.toString(),
+                            "firstVisibleItemOffset" to it.firstVisibleItemOffset?.toString(),
+                            "lastVisitTime" to it.lastVisitTime.toString(),
+                            "coverUrl" to it.coverUrl,
+                        ),
+                    ),
+                )
+            }
+            snapshot.readingState.rssSearchHistory.forEach {
+                val syncId = rssSubscriptionSyncIds[it.subscriptionId] ?: run {
+                    skippedOrphanRssHistoryCount++
+                    return@forEach
+                }
+                add(
+                    put(
+                        "reading.rss-search",
+                        syncId,
+                        mapOf(
+                            "subscriptionSyncId" to syncId,
+                            "subscriptionTitle" to it.subscriptionTitle,
+                            "subscriptionQuery" to it.subscriptionQuery,
+                            "subscriptionPage" to it.subscriptionPage.toString(),
+                            "threadId" to it.threadId.toString(),
+                            "threadTitle" to it.threadTitle,
+                            "threadImagePageIndex" to it.threadImagePageIndex.toString(),
+                            "threadImageTotalPages" to it.threadImageTotalPages.toString(),
+                            "firstVisibleItemIndex" to it.firstVisibleItemIndex?.toString(),
+                            "firstVisibleItemOffset" to it.firstVisibleItemOffset?.toString(),
+                            "lastVisitTime" to it.lastVisitTime.toString(),
+                            "coverUrl" to it.coverUrl,
+                        ),
+                    ),
+                )
+            }
+            snapshot.readingState.rssCatalogHistory.forEach {
+                val syncId = rssSubscriptionSyncIds[it.subscriptionId] ?: run {
+                    skippedOrphanRssHistoryCount++
+                    return@forEach
+                }
+                add(
+                    put(
+                        "reading.rss-catalog",
+                        syncId,
+                        mapOf(
+                            "subscriptionSyncId" to syncId,
+                            "subscriptionTitle" to it.subscriptionTitle,
+                            "subscriptionQuery" to it.subscriptionQuery,
+                            "subscriptionPage" to it.subscriptionPage.toString(),
+                            "threadId" to it.threadId.toString(),
+                            "threadTitle" to it.threadTitle,
+                            "threadPage" to it.threadPage.toString(),
+                            "postId" to it.postId.toString(),
+                            "postTitle" to it.postTitle,
+                            "authorId" to it.authorId?.toString(),
+                            "anchorPostId" to it.anchorPostId.toString(),
+                            "anchorPostRatio" to it.anchorPostRatio?.toString(),
+                            "anchorBlockId" to it.anchorBlockId,
+                            "anchorBlockType" to it.anchorBlockType,
+                            "anchorBlockRatio" to it.anchorBlockRatio?.toString(),
+                            "viewportHeight" to it.viewportHeight?.toString(),
+                            "firstVisibleItemIndex" to it.firstVisibleItemIndex?.toString(),
+                            "firstVisibleItemOffset" to it.firstVisibleItemOffset?.toString(),
+                            "lastVisitTime" to it.lastVisitTime.toString(),
+                            "coverUrl" to it.coverUrl,
+                        ),
+                    ),
+                )
+            }
             snapshot.readingState.readingTimeStats.forEach {
                 add(
                     put(
@@ -266,6 +366,7 @@ internal class BackupSnapshotMigrationPlanner {
                 )
             }
         }
+        return BackupSnapshotMigrationPlan(drafts, skippedOrphanRssHistoryCount)
     }
 
     private fun me.thenano.yamibo.yamibo_app.repository.backup.BackupFavoriteItem.entityId() =

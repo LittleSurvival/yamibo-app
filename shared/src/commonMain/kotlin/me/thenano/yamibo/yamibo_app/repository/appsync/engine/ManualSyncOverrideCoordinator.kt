@@ -138,8 +138,11 @@ internal class ManualSyncOverrideCoordinator(
                                 "Force push generated invalid operations"
                             }
                             domainState.applyWithinTransaction(reduction)
+                            store.bindAccount(accountBinding, me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncInstallationState.Active)
                         }
                         domainState.reconcileProjections()
+                    } else {
+                        store.bindAccount(accountBinding, me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncInstallationState.Active)
                     }
                     ManualSyncApplyResult.Applied(authorized.size)
                 }
@@ -374,6 +377,12 @@ internal class ManualSyncOverrideCoordinator(
                 field("forumName") ?: field("fid")?.let { "FID $it" } ?: "未命名版塊篩選"
             "favorite.update-category-filter" -> "分類更新篩選"
             "rss.search-subscription" -> field("title") ?: field("query")
+            "reading.tag-manga",
+            "reading.tag-catalog",
+            -> field("threadTitle") ?: field("tagName")
+            "reading.rss-search",
+            "reading.rss-catalog",
+            -> field("threadTitle") ?: field("postTitle") ?: field("subscriptionTitle")
             "favorite.item",
             "favorite.category",
             "favorite.collection",

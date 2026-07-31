@@ -14,6 +14,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncPeriodicIntervals
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncScheduleSettings
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncJournalRetirementState
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncJournalRetirementStatus
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncStatusMessage
 import me.thenano.yamibo.yamibo_app.util.time.FixedScheduleInterval
 
 class CloudSyncUiStateTest {
@@ -44,11 +45,18 @@ class CloudSyncUiStateTest {
         ).toUiState(backgroundSchedulerAvailable = true)
 
         assertEquals(CloudSyncStatus.Unavailable, state.status)
-        assertEquals("登入狀態需要刷新", state.statusHeadline)
+        assertEquals(AppSyncServicePhase.PausedAuth, state.phase)
         val notice = assertNotNull(state.notice)
-        assertEquals("Cached FormHash expired", notice.message)
+        assertEquals(AppSyncStatusMessage.External("Cached FormHash expired"), notice.message)
         assertEquals(CloudSyncNoticeSeverity.Warning, notice.severity)
-        assertTrue(state.details.any { it.label == "最近結果" && it.value.contains("FormHash") })
+        assertTrue(
+            state.details.any {
+                it.label == CloudSyncDetailLabel.LatestResult &&
+                    it.value == CloudSyncDetailValue.StatusMessage(
+                        AppSyncStatusMessage.External("Cached FormHash expired"),
+                    )
+            },
+        )
     }
 
     @Test
@@ -62,38 +70,67 @@ class CloudSyncUiStateTest {
         val unavailable = active.toUiState(backgroundSchedulerAvailable = false)
 
         assertTrue(available.automaticAvailable)
-        assertEquals("已啟用", available.automaticStatus)
+        assertEquals(CloudSyncAutomaticStatus.Enabled, available.automaticStatus)
         assertFalse(unavailable.automaticAvailable)
-        assertEquals("此平台尚未提供背景同步", unavailable.automaticStatus)
+        assertEquals(CloudSyncAutomaticStatus.Unsupported, unavailable.automaticStatus)
     }
 
     @Test
     fun retryAndQuarantineRemainVisibleAfterRunCompletes() {
         listOf(
-            AppSyncServicePhase.RetryPending to "等待重試",
-            AppSyncServicePhase.Quarantined to "有資料需要檢查",
-        ).forEach { (phase, headline) ->
+            AppSyncServicePhase.RetryPending,
+            AppSyncServicePhase.Quarantined,
+        ).forEach { phase ->
             val state = status(phase = phase, message = "typed failure")
                 .toUiState(backgroundSchedulerAvailable = true)
 
             assertEquals(CloudSyncOperation.Idle, state.operation)
-            assertEquals(headline, state.statusHeadline)
-            assertEquals("typed failure", state.statusSupport)
+            assertEquals(phase, state.phase)
+            assertEquals(AppSyncStatusMessage.External("typed failure"), state.statusMessage)
             assertNotNull(state.notice)
         }
     }
 
     @Test
-    fun providerMaintenanceCodeIsRenderedAsUserFacingText() {
+    fun providerMaintenanceMessageRemainsUntranslatedDiagnosticText() {
         val state = status(
             phase = AppSyncServicePhase.RetryPending,
             message = "maintenance",
         ).toUiState(backgroundSchedulerAvailable = true)
 
-        val expected = "Yamibo 正在維護，將稍後自動重試"
-        assertEquals(expected, state.statusSupport)
+        val expected = AppSyncStatusMessage.External("maintenance")
+        assertEquals(expected, state.statusMessage)
         assertEquals(expected, assertNotNull(state.notice).message)
-        assertEquals(expected, state.details.single { it.label == "最近結果" }.value)
+        assertEquals(
+            CloudSyncDetailValue.StatusMessage(expected),
+            state.details.single { it.label == CloudSyncDetailLabel.LatestResult }.value,
+        )
+    }
+
+    @Test
+    fun knownModuleIdsResolveWithoutStringToStringLabelMapping() {
+        CloudSyncModuleKind.entries
+            .filterNot { it == CloudSyncModuleKind.Unknown }
+            .forEach { kind ->
+                assertEquals(kind, CloudSyncModuleKind.fromDomainId(requireNotNull(kind.domainId)))
+            }
+        assertEquals(
+            CloudSyncModuleKind.Unknown,
+            CloudSyncModuleKind.fromDomainId("future.domain"),
+        )
+    }
+
+    @Test
+    fun newlySynchronizedHistoryModulesNeverExposeInternalDomainIds() {
+        val expected = mapOf(
+            "reading.tag-catalog" to CloudSyncModuleKind.ReadingTagCatalog,
+            "reading.rss-search" to CloudSyncModuleKind.ReadingRssSearch,
+            "reading.rss-catalog" to CloudSyncModuleKind.ReadingRssCatalog,
+        )
+
+        expected.forEach { (domainId, kind) ->
+            assertEquals(kind, CloudSyncModuleKind.fromDomainId(domainId))
+        }
     }
 
     @Test
@@ -103,7 +140,8 @@ class CloudSyncUiStateTest {
 
         assertEquals(
             "1970/01/01 08:00",
-            state.details.single { it.label == "最後驗證" }.value,
+            (state.details.single { it.label == CloudSyncDetailLabel.LastVerified }.value as
+                CloudSyncDetailValue.Timestamp).value,
         )
     }
 
@@ -129,8 +167,18 @@ class CloudSyncUiStateTest {
 
         assertEquals(
             listOf(
-                CloudSyncChangeDetail("從雲端套用", "設定", "開啟 2"),
-                CloudSyncChangeDetail("上傳至雲端", "收藏項目", "刪除 1"),
+                CloudSyncChangeDetail(
+                    AppSyncChangeDirection.Received,
+                    module(CloudSyncModuleKind.Settings, "settings"),
+                    AppSyncChangeAction.Enabled,
+                    2,
+                ),
+                CloudSyncChangeDetail(
+                    AppSyncChangeDirection.Uploaded,
+                    module(CloudSyncModuleKind.FavoriteItem, "favorite.item"),
+                    AppSyncChangeAction.Deleted,
+                    1,
+                ),
             ),
             state.changes,
         )
@@ -171,9 +219,27 @@ class CloudSyncUiStateTest {
 
         assertEquals(
             listOf(
-                CloudSyncChangeDetail("從雲端套用", "最近更新", "標為已讀 2"),
-                CloudSyncChangeDetail("上傳至雲端", "最近更新", "忽略 1"),
-                CloudSyncChangeDetail("上傳至雲端", "分類更新範圍", "關閉 1"),
+                CloudSyncChangeDetail(
+                    AppSyncChangeDirection.Received,
+                    module(CloudSyncModuleKind.FavoriteUpdateEvent, "favorite.update-event"),
+                    AppSyncChangeAction.Read,
+                    2,
+                ),
+                CloudSyncChangeDetail(
+                    AppSyncChangeDirection.Uploaded,
+                    module(CloudSyncModuleKind.FavoriteUpdateEvent, "favorite.update-event"),
+                    AppSyncChangeAction.Dismissed,
+                    1,
+                ),
+                CloudSyncChangeDetail(
+                    AppSyncChangeDirection.Uploaded,
+                    module(
+                        CloudSyncModuleKind.FavoriteUpdateCategoryFilter,
+                        "favorite.update-category-filter",
+                    ),
+                    AppSyncChangeAction.Disabled,
+                    1,
+                ),
             ),
             state.changes,
         )
@@ -197,9 +263,13 @@ class CloudSyncUiStateTest {
 
         assertEquals(
             CloudSyncChangeDetail(
-                direction = "從雲端套用",
-                module = "最近更新",
-                summary = "新增 7",
+                direction = AppSyncChangeDirection.Received,
+                module = module(
+                    CloudSyncModuleKind.FavoriteUpdateEvent,
+                    "favorite.update-event",
+                ),
+                action = AppSyncChangeAction.Added,
+                count = 7,
                 details = listOf("更新一", "更新二", "更新三", "更新四", "更新五"),
                 remainingDetailCount = 2,
             ),
@@ -216,10 +286,14 @@ class CloudSyncUiStateTest {
             ),
         ).toUiState(backgroundSchedulerAvailable = true)
 
-        val detail = state.details.single { it.label == "Journal 清理" }
-        assertEquals("等待 checkpoint 完整覆蓋與所有活躍 replica 確認", detail.value)
-        assertFalse(detail.value.contains("blogId"))
-        assertFalse(detail.value.contains("fingerprint"))
+        val detail = state.details.single { it.label == CloudSyncDetailLabel.JournalCleanup }
+        val raw = (detail.value as CloudSyncDetailValue.Journal).value
+        assertEquals(
+            me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncJournalRetirementMessage.External(
+                "等待 checkpoint 完整覆蓋與所有活躍 replica 確認",
+            ),
+            raw,
+        )
     }
 
     private fun status(
@@ -235,4 +309,7 @@ class CloudSyncUiStateTest {
         lastVerifiedAtEpochMillis = 123,
         changeSummaries = changes,
     )
+
+    private fun module(kind: CloudSyncModuleKind, domainId: String) =
+        CloudSyncModule(kind, domainId)
 }

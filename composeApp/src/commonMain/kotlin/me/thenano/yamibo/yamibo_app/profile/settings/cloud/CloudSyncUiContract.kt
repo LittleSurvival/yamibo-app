@@ -9,13 +9,17 @@ import kotlinx.coroutines.launch
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncService
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncServicePhase
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncServiceStatus
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncStatusMessage
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncJournalRetirementMessage
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncChangeAction
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncChangeDirection
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncForceApplyResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncForceDirection
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncForceFailureKind
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncForcePreview
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncForcePreviewResult
 import me.thenano.yamibo.yamibo_app.appsync.AppSyncBackgroundScheduler
+import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.util.time.formatDateTime
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncPeriodicIntervals
 import me.thenano.yamibo.yamibo_app.util.time.FixedScheduleInterval
@@ -44,19 +48,121 @@ internal enum class CloudSyncNoticeSeverity {
 }
 
 internal data class CloudSyncNotice(
-    val message: String,
+    val message: AppSyncStatusMessage,
     val severity: CloudSyncNoticeSeverity,
 )
 
+internal enum class CloudSyncDetailLabel {
+    SyncStatus,
+    LastVerified,
+    AutomaticSync,
+    PendingUploads,
+    JournalCleanup,
+    LatestResult,
+    ;
+
+    fun localizedLabel(): String = when (this) {
+        SyncStatus -> i18n("同步狀態")
+        LastVerified -> i18n("最後驗證")
+        AutomaticSync -> i18n("自動同步")
+        PendingUploads -> i18n("待上傳操作")
+        JournalCleanup -> i18n("Journal 清理")
+        LatestResult -> i18n("最近結果")
+    }
+}
+
+internal sealed interface CloudSyncDetailValue {
+    data class Phase(val value: AppSyncServicePhase) : CloudSyncDetailValue
+    data class Timestamp(val value: String) : CloudSyncDetailValue
+    data class Automatic(val value: CloudSyncAutomaticStatus) : CloudSyncDetailValue
+    data class Count(val value: Int) : CloudSyncDetailValue
+    data class Journal(val value: AppSyncJournalRetirementMessage) : CloudSyncDetailValue
+    data class StatusMessage(val value: AppSyncStatusMessage) : CloudSyncDetailValue
+    data object NoRecord : CloudSyncDetailValue
+}
+
 internal data class CloudSyncDetail(
-    val label: String,
-    val value: String,
+    val label: CloudSyncDetailLabel,
+    val value: CloudSyncDetailValue,
 )
 
+internal enum class CloudSyncAutomaticStatus {
+    Unsupported,
+    Enabled,
+    Disabled,
+    ;
+
+    fun localizedLabel(): String = when (this) {
+        Unsupported -> i18n("此平台尚未提供背景同步")
+        Enabled -> i18n("已啟用")
+        Disabled -> i18n("已關閉")
+    }
+}
+
+internal enum class CloudSyncModuleKind(val domainId: String?) {
+    Settings("settings"),
+    FavoriteItem("favorite.item"),
+    RssSubscription("rss.search-subscription"),
+    FavoriteCategory("favorite.category"),
+    FavoriteCollection("favorite.collection"),
+    FavoriteItemCategory("favorite.item-category"),
+    FavoriteItemCollection("favorite.item-collection"),
+    DetailNote("detail-note"),
+    Bookmark("bookmark"),
+    ReadingThread("reading.thread"),
+    ReadingImage("reading.image"),
+    ReadingTagManga("reading.tag-manga"),
+    ReadingTagCatalog("reading.tag-catalog"),
+    ReadingRssSearch("reading.rss-search"),
+    ReadingRssCatalog("reading.rss-catalog"),
+    ReadingTime("reading.time"),
+    FavoriteUpdateEvent("favorite.update-event"),
+    FavoriteUpdateFidFilter("favorite.update-fid-filter"),
+    FavoriteUpdateCategoryFilter("favorite.update-category-filter"),
+    Unknown(null),
+    ;
+
+    companion object {
+        fun fromDomainId(domainId: String): CloudSyncModuleKind =
+            entries.firstOrNull { it.domainId == domainId } ?: Unknown
+    }
+
+    fun localizedLabel(unknownDomainId: String): String = when (this) {
+        Settings -> i18n("設定")
+        FavoriteItem -> i18n("收藏項目")
+        RssSubscription -> i18n("RSS 訂閱")
+        FavoriteCategory -> i18n("收藏分類")
+        FavoriteCollection -> i18n("收藏集合")
+        FavoriteItemCategory -> i18n("收藏分類歸屬")
+        FavoriteItemCollection -> i18n("收藏集合歸屬")
+        DetailNote -> i18n("詳細備註")
+        Bookmark -> i18n("書籤")
+        ReadingThread -> i18n("文章閱讀進度")
+        ReadingImage -> i18n("圖片閱讀進度")
+        ReadingTagManga -> i18n("標籤漫畫進度")
+        ReadingTagCatalog -> i18n("標籤目錄進度")
+        ReadingRssSearch -> i18n("RSS 搜尋進度")
+        ReadingRssCatalog -> i18n("RSS 目錄進度")
+        ReadingTime -> i18n("閱讀時間")
+        FavoriteUpdateEvent -> i18n("最近更新")
+        FavoriteUpdateFidFilter -> i18n("版塊更新範圍")
+        FavoriteUpdateCategoryFilter -> i18n("分類更新範圍")
+        Unknown -> unknownDomainId
+    }
+}
+
+internal data class CloudSyncModule(
+    val kind: CloudSyncModuleKind,
+    val domainId: String,
+) {
+    fun localizedLabel(): String = kind.localizedLabel(domainId)
+}
+
 internal data class CloudSyncChangeDetail(
-    val direction: String,
-    val module: String,
-    val summary: String,
+    val direction: AppSyncChangeDirection,
+    val module: CloudSyncModule,
+    val action: AppSyncChangeAction,
+    val count: Int,
     val details: List<String> = emptyList(),
     val remainingDetailCount: Int = 0,
 )
@@ -68,8 +174,7 @@ internal enum class CloudSyncForceDirection {
 
 internal data class CloudSyncForceDifference(
     val domainId: String,
-    val module: String,
-    val summary: String,
+    val module: CloudSyncModule,
     val added: Int,
     val updated: Int,
     val deleted: Int,
@@ -85,14 +190,21 @@ internal data class CloudSyncForcePreview(
     val differences: List<CloudSyncForceDifference>,
 )
 
+internal sealed interface CloudSyncForceError {
+    data object StalePreview : CloudSyncForceError
+    data object CoreUnavailable : CloudSyncForceError
+    data object AuthenticationExpired : CloudSyncForceError
+    data class External(val value: String) : CloudSyncForceError
+}
+
 internal data class CloudSyncUiState(
     val status: CloudSyncStatus = CloudSyncStatus.Unavailable,
-    val statusHeadline: String = "同步核心尚未連接",
-    val statusSupport: String = "介面已就緒，雲端同步功能將由新架構提供",
+    val phase: AppSyncServicePhase? = null,
+    val statusMessage: AppSyncStatusMessage = AppSyncStatusMessage.CoreNotAvailable,
     val operation: CloudSyncOperation = CloudSyncOperation.Idle,
     val automaticEnabled: Boolean = false,
     val automaticAvailable: Boolean = false,
-    val automaticStatus: String = "背景同步尚未提供",
+    val automaticStatus: CloudSyncAutomaticStatus = CloudSyncAutomaticStatus.Unsupported,
     val syncOnAppStart: Boolean = false,
     val syncOnForegroundExit: Boolean = false,
     val periodicInterval: FixedScheduleInterval = FixedScheduleInterval.Hours6,
@@ -103,13 +215,19 @@ internal data class CloudSyncUiState(
     val changes: List<CloudSyncChangeDetail> = emptyList(),
     val forcePreview: CloudSyncForcePreview? = null,
     val forcePreviewLoading: Boolean = false,
-    val forceError: String? = null,
+    val forceError: CloudSyncForceError? = null,
     val details: List<CloudSyncDetail> = listOf(
-        CloudSyncDetail("雲端備份", "尚未連接"),
-        CloudSyncDetail("最後驗證", "尚無紀錄"),
-        CloudSyncDetail("自動同步", "尚未提供"),
-        CloudSyncDetail("本機變更", "尚未檢查"),
-        CloudSyncDetail("最近結果", "尚無紀錄"),
+        CloudSyncDetail(
+            CloudSyncDetailLabel.SyncStatus,
+            CloudSyncDetailValue.StatusMessage(AppSyncStatusMessage.CoreNotAvailable),
+        ),
+        CloudSyncDetail(CloudSyncDetailLabel.LastVerified, CloudSyncDetailValue.NoRecord),
+        CloudSyncDetail(
+            CloudSyncDetailLabel.AutomaticSync,
+            CloudSyncDetailValue.Automatic(CloudSyncAutomaticStatus.Unsupported),
+        ),
+        CloudSyncDetail(CloudSyncDetailLabel.PendingUploads, CloudSyncDetailValue.Count(0)),
+        CloudSyncDetail(CloudSyncDetailLabel.LatestResult, CloudSyncDetailValue.NoRecord),
     ),
 ) {
     val isBusy: Boolean
@@ -156,7 +274,7 @@ internal class AppSyncCloudUiController(
     private var serviceState = service.currentStatus()
     private var forcePreview: CloudSyncForcePreview? = null
     private var forcePreviewLoading = false
-    private var forceError: String? = null
+    private var forceError: CloudSyncForceError? = null
     private val mutableState = MutableStateFlow(
         serviceState.toUiState(backgroundSchedulerAvailable = scheduler != null),
     )
@@ -231,7 +349,7 @@ internal class AppSyncCloudUiController(
                 }
                 is AppSyncForcePreviewResult.Failed -> {
                     forcePreview = null
-                    forceError = result.reason
+                    forceError = result.toUiError()
                 }
             }
             forcePreviewLoading = false
@@ -249,8 +367,9 @@ internal class AppSyncCloudUiController(
             when (val result = service.applyForceOverride(preview.toService())) {
                 is AppSyncForceApplyResult.Applied -> forceError = null
                 AppSyncForceApplyResult.StalePreview ->
-                    forceError = "本機或雲端資料已變更，請重新檢視差異後再確認"
-                is AppSyncForceApplyResult.Failed -> forceError = result.reason
+                    forceError = CloudSyncForceError.StalePreview
+                is AppSyncForceApplyResult.Failed ->
+                    forceError = result.toUiError()
             }
             forcePreviewLoading = false
             publishState()
@@ -292,14 +411,7 @@ private fun AppSyncForcePreview.toUi() = CloudSyncForcePreview(
     differences = differences.map { difference ->
         CloudSyncForceDifference(
             domainId = difference.domainId,
-            module = moduleLabel(difference.domainId),
-            summary = buildList {
-                if (difference.added > 0) add("新增 ${difference.added}")
-                if (difference.updated > 0) add("更新 ${difference.updated}")
-                if (difference.deleted > 0) add("刪除 ${difference.deleted}")
-                if (difference.enabled > 0) add("開啟 ${difference.enabled}")
-                if (difference.disabled > 0) add("關閉 ${difference.disabled}")
-            }.joinToString("、"),
+            module = cloudSyncModule(difference.domainId),
             added = difference.added,
             updated = difference.updated,
             deleted = difference.deleted,
@@ -335,7 +447,6 @@ private fun CloudSyncForcePreview.toService() = AppSyncForcePreview(
 internal fun AppSyncServiceStatus.toUiState(
     backgroundSchedulerAvailable: Boolean,
 ): CloudSyncUiState {
-    val displayMessage = message.toCloudSyncDisplayMessage()
     val busy = phase == AppSyncServicePhase.Running
     val available = phase == AppSyncServicePhase.Active
     val needsAttention = phase in setOf(
@@ -351,17 +462,8 @@ internal fun AppSyncServiceStatus.toUiState(
             phase == AppSyncServicePhase.BootstrapRequired -> CloudSyncStatus.Missing
             else -> CloudSyncStatus.Unavailable
         },
-        statusHeadline = when (phase) {
-            AppSyncServicePhase.Disabled -> "尚未啟用"
-            AppSyncServicePhase.BootstrapRequired -> "需要安全載入"
-            AppSyncServicePhase.Running -> "同步中"
-            AppSyncServicePhase.Active -> "同步就緒"
-            AppSyncServicePhase.PausedAuth -> "登入狀態需要刷新"
-            AppSyncServicePhase.PausedProvider -> "雲端暫時無法使用"
-            AppSyncServicePhase.Quarantined -> "有資料需要檢查"
-            AppSyncServicePhase.RetryPending -> "等待重試"
-        },
-        statusSupport = displayMessage,
+        phase = phase,
+        statusMessage = presentationMessage,
         operation = if (busy) CloudSyncOperation.Syncing else CloudSyncOperation.Idle,
         automaticEnabled = automaticEnabled,
         automaticAvailable = backgroundSchedulerAvailable &&
@@ -371,9 +473,9 @@ internal fun AppSyncServiceStatus.toUiState(
                 AppSyncServicePhase.RetryPending,
             ),
         automaticStatus = when {
-            !backgroundSchedulerAvailable -> "此平台尚未提供背景同步"
-            automaticEnabled -> "已啟用"
-            else -> "已關閉"
+            !backgroundSchedulerAvailable -> CloudSyncAutomaticStatus.Unsupported
+            automaticEnabled -> CloudSyncAutomaticStatus.Enabled
+            else -> CloudSyncAutomaticStatus.Disabled
         },
         syncOnAppStart = scheduleSettings.syncOnAppStart,
         syncOnForegroundExit = scheduleSettings.syncOnForegroundExit,
@@ -381,42 +483,65 @@ internal fun AppSyncServiceStatus.toUiState(
         actionsAvailable = !busy,
         cloudDataExists = available || lastVerifiedAtEpochMillis != null,
         notice = if (needsAttention) {
-            CloudSyncNotice(displayMessage, CloudSyncNoticeSeverity.Warning)
+            CloudSyncNotice(presentationMessage, CloudSyncNoticeSeverity.Warning)
         } else {
             null
         },
         details = buildList {
-            add(CloudSyncDetail("同步狀態", statusLabel(phase)))
             add(
                 CloudSyncDetail(
-                    "最後驗證",
-                    lastVerifiedAtEpochMillis?.let(::formatDateTime) ?: "尚無紀錄",
+                    CloudSyncDetailLabel.SyncStatus,
+                    CloudSyncDetailValue.Phase(phase),
                 ),
             )
             add(
                 CloudSyncDetail(
-                    "自動同步",
-                    when {
-                        !backgroundSchedulerAvailable -> "此平台尚未提供背景同步"
-                        automaticEnabled -> "已啟用"
-                        else -> "已關閉"
-                    },
+                    CloudSyncDetailLabel.LastVerified,
+                    lastVerifiedAtEpochMillis
+                        ?.let(::formatDateTime)
+                        ?.let(CloudSyncDetailValue::Timestamp)
+                        ?: CloudSyncDetailValue.NoRecord,
                 ),
             )
-            add(CloudSyncDetail("待上傳操作", pendingOperationCount.toString()))
+            add(
+                CloudSyncDetail(
+                    CloudSyncDetailLabel.AutomaticSync,
+                    CloudSyncDetailValue.Automatic(
+                        when {
+                            !backgroundSchedulerAvailable -> CloudSyncAutomaticStatus.Unsupported
+                            automaticEnabled -> CloudSyncAutomaticStatus.Enabled
+                            else -> CloudSyncAutomaticStatus.Disabled
+                        },
+                    ),
+                ),
+            )
+            add(
+                CloudSyncDetail(
+                    CloudSyncDetailLabel.PendingUploads,
+                    CloudSyncDetailValue.Count(pendingOperationCount),
+                ),
+            )
             journalRetirementStatus?.let {
-                add(CloudSyncDetail("Journal 清理", it.message))
+                add(
+                    CloudSyncDetail(
+                        CloudSyncDetailLabel.JournalCleanup,
+                        CloudSyncDetailValue.Journal(it.presentationMessage),
+                    ),
+                )
             }
-            add(CloudSyncDetail("最近結果", displayMessage))
+            add(
+                CloudSyncDetail(
+                    CloudSyncDetailLabel.LatestResult,
+                    CloudSyncDetailValue.StatusMessage(presentationMessage),
+                ),
+            )
         },
         changes = changeSummaries.map {
             CloudSyncChangeDetail(
-                direction = when (it.direction) {
-                    AppSyncChangeDirection.Received -> "從雲端套用"
-                    AppSyncChangeDirection.Uploaded -> "上傳至雲端"
-                },
-                module = moduleLabel(it.domainId),
-                summary = "${actionLabel(it.action)} ${it.count}",
+                direction = it.direction,
+                module = cloudSyncModule(it.domainId),
+                action = it.action,
+                count = it.count,
                 details = it.details,
                 remainingDetailCount = it.remainingDetailCount,
             )
@@ -424,51 +549,20 @@ internal fun AppSyncServiceStatus.toUiState(
     )
 }
 
-private fun String.toCloudSyncDisplayMessage(): String = when (trim().lowercase()) {
-    "maintenance" -> "Yamibo 正在維護，將稍後自動重試"
-    "not found" -> "找不到雲端同步資料，將重新探索"
-    "not logged in" -> "登入狀態已失效，請重新整理登入狀態"
-    "form expired" -> "登入憑證已過期，請重新整理登入狀態"
-    else -> this
-}
+private fun cloudSyncModule(domainId: String): CloudSyncModule = CloudSyncModule(
+    kind = CloudSyncModuleKind.fromDomainId(domainId),
+    domainId = domainId,
+)
 
-private fun moduleLabel(domainId: String): String = when (domainId) {
-    "settings" -> "設定"
-    "favorite.item" -> "收藏項目"
-    "rss.search-subscription" -> "RSS 訂閱"
-    "favorite.category" -> "收藏分類"
-    "favorite.collection" -> "收藏集合"
-    "favorite.item-category" -> "收藏分類歸屬"
-    "favorite.item-collection" -> "收藏集合歸屬"
-    "detail-note" -> "詳細備註"
-    "bookmark" -> "書籤"
-    "reading.thread" -> "文章閱讀進度"
-    "reading.image" -> "圖片閱讀進度"
-    "reading.tag-manga" -> "標籤漫畫進度"
-    "reading.time" -> "閱讀時間"
-    "favorite.update-event" -> "最近更新"
-    "favorite.update-fid-filter" -> "版塊更新範圍"
-    "favorite.update-category-filter" -> "分類更新範圍"
-    else -> domainId
-}
+private fun AppSyncForcePreviewResult.Failed.toUiError(): CloudSyncForceError =
+    forceError(kind, reason)
 
-private fun actionLabel(action: AppSyncChangeAction): String = when (action) {
-    AppSyncChangeAction.Added -> "新增"
-    AppSyncChangeAction.Updated -> "更新"
-    AppSyncChangeAction.Deleted -> "刪除"
-    AppSyncChangeAction.Enabled -> "開啟"
-    AppSyncChangeAction.Disabled -> "關閉"
-    AppSyncChangeAction.Read -> "標為已讀"
-    AppSyncChangeAction.Dismissed -> "忽略"
-}
+private fun AppSyncForceApplyResult.Failed.toUiError(): CloudSyncForceError =
+    forceError(kind, reason)
 
-private fun statusLabel(phase: AppSyncServicePhase): String = when (phase) {
-    AppSyncServicePhase.Disabled -> "停用"
-    AppSyncServicePhase.BootstrapRequired -> "等待安全載入"
-    AppSyncServicePhase.Running -> "執行中"
-    AppSyncServicePhase.Active -> "已收斂"
-    AppSyncServicePhase.PausedAuth -> "登入暫停"
-    AppSyncServicePhase.PausedProvider -> "供應端暫停"
-    AppSyncServicePhase.Quarantined -> "隔離"
-    AppSyncServicePhase.RetryPending -> "等待重試"
-}
+private fun forceError(kind: AppSyncForceFailureKind, reason: String): CloudSyncForceError =
+    when (kind) {
+        AppSyncForceFailureKind.CoreUnavailable -> CloudSyncForceError.CoreUnavailable
+        AppSyncForceFailureKind.AuthenticationExpired -> CloudSyncForceError.AuthenticationExpired
+        AppSyncForceFailureKind.External -> CloudSyncForceError.External(reason)
+    }

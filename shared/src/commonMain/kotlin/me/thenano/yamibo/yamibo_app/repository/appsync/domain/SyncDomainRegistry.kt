@@ -93,6 +93,9 @@ internal class SyncDomainRegistry(
             "reading.thread",
             "reading.image",
             "reading.tag-manga",
+            "reading.tag-catalog",
+            "reading.rss-search",
+            "reading.rss-catalog",
             "reading.time",
             "favorite.item-category",
             "favorite.item-collection",
@@ -136,6 +139,37 @@ internal class SyncDomainRegistry(
                 progressDomain("reading.thread"),
                 progressDomain("reading.image"),
                 progressDomain("reading.tag-manga"),
+                historyDomain(
+                    "reading.tag-catalog",
+                    "tagId",
+                    setOf(
+                        "tagId", "tagName", "tagPage", "threadId", "threadTitle", "threadPage",
+                        "postId", "postTitle", "authorId", "anchorPostId", "anchorPostRatio",
+                        "anchorBlockId", "anchorBlockType", "anchorBlockRatio", "viewportHeight",
+                        "firstVisibleItemIndex", "firstVisibleItemOffset", "lastVisitTime", "coverUrl",
+                    ),
+                ),
+                historyDomain(
+                    "reading.rss-search",
+                    "subscriptionSyncId",
+                    setOf(
+                        "subscriptionSyncId", "subscriptionTitle", "subscriptionQuery",
+                        "subscriptionPage", "threadId", "threadTitle", "threadImagePageIndex",
+                        "threadImageTotalPages", "firstVisibleItemIndex", "firstVisibleItemOffset",
+                        "lastVisitTime", "coverUrl",
+                    ),
+                ),
+                historyDomain(
+                    "reading.rss-catalog",
+                    "subscriptionSyncId",
+                    setOf(
+                        "subscriptionSyncId", "subscriptionTitle", "subscriptionQuery",
+                        "subscriptionPage", "threadId", "threadTitle", "threadPage", "postId",
+                        "postTitle", "authorId", "anchorPostId", "anchorPostRatio", "anchorBlockId",
+                        "anchorBlockType", "anchorBlockRatio", "viewportHeight",
+                        "firstVisibleItemIndex", "firstVisibleItemOffset", "lastVisitTime", "coverUrl",
+                    ),
+                ),
                 progressDomain("reading.time", monotonicFields = setOf("durationMillis")),
                 relationDomain(
                     "favorite.item-category",
@@ -177,6 +211,30 @@ internal class SyncDomainRegistry(
                 SyncOperationKind.Delete,
             ),
             monotonicNumericFields = monotonicFields,
+        )
+
+        private fun historyDomain(
+            value: String,
+            identityField: String,
+            putFields: Set<String>,
+        ) = SyncDomainContract(
+            id = SyncDomainId(value),
+            conflictPolicy = SyncConflictPolicy.MonotonicProgress,
+            allowedKinds = setOf(
+                SyncOperationKind.Put,
+                SyncOperationKind.Patch,
+                SyncOperationKind.Delete,
+            ),
+            requiredFieldsByKind = mapOf(SyncOperationKind.Put to putFields),
+            semanticValidator = { operation ->
+                runCatching {
+                    if (operation.kind != SyncOperationKind.Delete) {
+                        val identity = requireNotNull(operation.fields[identityField])
+                        require(identity == operation.entityId.value)
+                        require(requireNotNull(operation.fields["lastVisitTime"]).toLong() >= 0L)
+                    }
+                }.exceptionOrNull()?.let { "Invalid $value history: ${it.message}" }
+            },
         )
 
         private fun rssSearchSubscriptionDomain(): SyncDomainContract {

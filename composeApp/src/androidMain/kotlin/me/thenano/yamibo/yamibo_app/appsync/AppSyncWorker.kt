@@ -55,7 +55,11 @@ class AppSyncWorker(
             ),
         )
         val pendingGeneration = service.pendingAutomaticTriggerGeneration()
+        val previousPhase = service.currentStatus().phase
         val phase = service.synchronizeNow(trigger = "background_workmanager").phase
+        if (shouldNotifyBackgroundQuarantine(previousPhase, phase)) {
+            AndroidAppSyncNotificationRepository(applicationContext).showQuarantined()
+        }
         if (pendingGeneration != null && phase.isDurableAutomaticTriggerOutcome()) {
             service.accountAutomaticTrigger(pendingGeneration)
         }

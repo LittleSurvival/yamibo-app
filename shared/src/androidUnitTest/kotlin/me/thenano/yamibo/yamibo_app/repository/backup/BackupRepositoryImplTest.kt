@@ -30,6 +30,10 @@ class BackupRepositoryImplTest {
         assertEquals(1, local.favoriteUpdates.fidFilters.size)
         assertEquals(1, local.favoriteUpdates.categoryFilters.size)
         assertEquals(local.favoriteUpdates, appSync.favoriteUpdates)
+        assertEquals(local.readingState.tagCatalogHistory, appSync.readingState.tagCatalogHistory)
+        assertEquals(local.readingState.rssSearchHistory, appSync.readingState.rssSearchHistory)
+        assertEquals(local.readingState.rssCatalogHistory, appSync.readingState.rssCatalogHistory)
+        assertTrue(appSync.readingState.chapterState.isEmpty())
         assertTrue("FavoriteUpdateRun" !in PortableDomainManifest.included(PortableSnapshotScope.LocalBackup))
         assertTrue("FavoriteUpdateTrackedTarget" !in PortableDomainManifest.included(PortableSnapshotScope.LocalBackup))
     }

@@ -88,6 +88,14 @@ private fun SyncOperation.safeDisplayDetail(): String? = when (domainId.value) {
     "favorite.update-category-filter" -> "分類更新篩選"
     "rss.search-subscription" ->
         fields["title"].nonBlank() ?: fields["query"].nonBlank()
+    "reading.tag-manga",
+    "reading.tag-catalog",
+    -> fields["threadTitle"].nonBlank() ?: fields["tagName"].nonBlank()
+    "reading.rss-search",
+    "reading.rss-catalog",
+    -> fields["threadTitle"].nonBlank()
+        ?: fields["postTitle"].nonBlank()
+        ?: fields["subscriptionTitle"].nonBlank()
     "favorite.item",
     "favorite.category",
     "favorite.collection",

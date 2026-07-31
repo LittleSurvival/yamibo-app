@@ -25,6 +25,9 @@ internal class DatabaseSyncDomainMaterializer(
             "reading.thread" -> applyThreadHistory(entity)
             "reading.image" -> applyImageHistory(entity)
             "reading.tag-manga" -> applyTagHistory(entity)
+            "reading.tag-catalog" -> applyTagCatalogHistory(entity)
+            "reading.rss-search" -> applyRssSearchHistory(entity)
+            "reading.rss-catalog" -> applyRssCatalogHistory(entity)
             "reading.time" -> applyReadingTime(entity)
             else -> error("No materializer for ${entity.key.domainId.value}")
         }
@@ -84,6 +87,9 @@ internal class DatabaseSyncDomainMaterializer(
         db.readingHistoryQueries.deleteAll()
         db.imageReadingHistoryQueries.deleteAll()
         db.mangaTagReadingHistoryQueries.deleteAll()
+        db.tagCatalogReadingHistoryQueries.deleteAll()
+        db.rssSearchReadingHistoryQueries.deleteAll()
+        db.rssCatalogReadingHistoryQueries.deleteAll()
         db.readingTimeStatQueries.deleteAll()
         val now = 0L
         db.favoriteUpdateFidFilterQueries.getAll().executeAsList().forEach {
@@ -412,6 +418,107 @@ internal class DatabaseSyncDomainMaterializer(
             fields["coverUrl"],
         )
     }
+
+    private fun applyTagCatalogHistory(entity: ResolvedSyncEntity) {
+        if (entity.tombstone != null) {
+            db.tagCatalogReadingHistoryQueries.deleteByTagId(entity.key.entityId.value.toLong())
+            return
+        }
+        val fields = entity.values()
+        db.tagCatalogReadingHistoryQueries.upsert(
+            fields.long("tagId"),
+            fields.require("tagName"),
+            fields.long("tagPage"),
+            fields.long("threadId"),
+            fields.require("threadTitle"),
+            fields.long("threadPage"),
+            fields.long("postId"),
+            fields.require("postTitle"),
+            fields["authorId"]?.toLongOrNull(),
+            fields.long("anchorPostId"),
+            fields["anchorPostRatio"]?.toDoubleOrNull(),
+            fields["anchorBlockId"],
+            fields["anchorBlockType"],
+            fields["anchorBlockRatio"]?.toDoubleOrNull(),
+            fields["viewportHeight"]?.toLongOrNull(),
+            fields["firstVisibleItemIndex"]?.toLongOrNull(),
+            fields["firstVisibleItemOffset"]?.toLongOrNull(),
+            fields.long("lastVisitTime"),
+            fields["coverUrl"],
+        )
+    }
+
+    private fun applyRssSearchHistory(entity: ResolvedSyncEntity) {
+        val subscription = rssSubscription(entity.key.entityId.value)
+        if (entity.tombstone != null) {
+            subscription?.let {
+                db.rssSearchReadingHistoryQueries.deleteBySubscriptionId(it.id)
+            }
+            return
+        }
+        val parent = requireNotNull(subscription) {
+            "RSS search history references an unknown subscription"
+        }
+        val fields = entity.values()
+        db.rssSearchReadingHistoryQueries.upsert(
+            parent.id,
+            fields.require("subscriptionTitle"),
+            fields.require("subscriptionQuery"),
+            fields.long("subscriptionPage"),
+            fields.long("threadId"),
+            fields.require("threadTitle"),
+            fields.long("threadImagePageIndex"),
+            fields.long("threadImageTotalPages"),
+            fields["firstVisibleItemIndex"]?.toLongOrNull(),
+            fields["firstVisibleItemOffset"]?.toLongOrNull(),
+            fields.long("lastVisitTime"),
+            fields["coverUrl"],
+        )
+    }
+
+    private fun applyRssCatalogHistory(entity: ResolvedSyncEntity) {
+        val subscription = rssSubscription(entity.key.entityId.value)
+        if (entity.tombstone != null) {
+            subscription?.let {
+                db.rssCatalogReadingHistoryQueries.deleteBySubscriptionId(it.id)
+            }
+            return
+        }
+        val parent = requireNotNull(subscription) {
+            "RSS catalog history references an unknown subscription"
+        }
+        val fields = entity.values()
+        db.rssCatalogReadingHistoryQueries.upsert(
+            parent.id,
+            fields.require("subscriptionTitle"),
+            fields.require("subscriptionQuery"),
+            fields.long("subscriptionPage"),
+            fields.long("threadId"),
+            fields.require("threadTitle"),
+            fields.long("threadPage"),
+            fields.long("postId"),
+            fields.require("postTitle"),
+            fields["authorId"]?.toLongOrNull(),
+            fields.long("anchorPostId"),
+            fields["anchorPostRatio"]?.toDoubleOrNull(),
+            fields["anchorBlockId"],
+            fields["anchorBlockType"],
+            fields["anchorBlockRatio"]?.toDoubleOrNull(),
+            fields["viewportHeight"]?.toLongOrNull(),
+            fields["firstVisibleItemIndex"]?.toLongOrNull(),
+            fields["firstVisibleItemOffset"]?.toLongOrNull(),
+            fields.long("lastVisitTime"),
+            fields["coverUrl"],
+        )
+    }
+
+    private fun rssSubscription(syncId: String) =
+        db.rssSearchSubscriptionQueries.getAll().executeAsList().firstOrNull {
+            me.thenano.yamibo.yamibo_app.repository.rss.rssSearchSubscriptionSyncId(
+                it.query,
+                it.forumId,
+            ) == syncId
+        }
 
     private fun applyReadingTime(entity: ResolvedSyncEntity) {
         val fields = entity.values()

@@ -118,6 +118,31 @@ class ManualSyncOverrideCoordinatorTest {
         assertTrue(store.pendingOperations().isEmpty())
     }
 
+    @Test
+    fun successfulForcePushPersistsActiveStateAndPendingOverride() = runBlocking {
+        val store = activeStore().also {
+            it.updateState(AppSyncInstallationState.Quarantined)
+        }
+        val localOperation = settingOperation("local", "local-device")
+        val domain = FakeDomainState(
+            OperationReducer().reduce(operations = listOf(localOperation)).entities,
+        )
+        val coordinator = ManualSyncOverrideCoordinator(
+            store = store,
+            remote = FakeRemote(settingOperation("cloud", "remote-device")),
+            domainState = domain,
+            nowMillis = { 100 },
+        )
+        val preview = assertIs<ManualSyncPreviewResult.Ready>(
+            coordinator.preview(account, ManualSyncOverrideDirection.ForcePush),
+        ).preview
+
+        assertIs<ManualSyncApplyResult.Applied>(coordinator.apply(account, preview))
+
+        assertEquals(AppSyncInstallationState.Active, store.installation()?.state)
+        assertTrue(store.pendingOperations().isNotEmpty())
+    }
+
     private fun activeStore(): SqlDelightAppSyncOperationStore {
         val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
         Database.Schema.create(driver)

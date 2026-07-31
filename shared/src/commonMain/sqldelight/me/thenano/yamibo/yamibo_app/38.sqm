@@ -1,0 +1,7 @@
+CREATE TABLE AppSyncBootstrapRollback (
+    singletonId INTEGER NOT NULL PRIMARY KEY CHECK (singletonId = 1),
+    accountBinding TEXT NOT NULL,
+    databaseGeneration TEXT NOT NULL,
+    encodedSnapshot TEXT NOT NULL,
+    createdAtEpochMillis INTEGER NOT NULL
+);

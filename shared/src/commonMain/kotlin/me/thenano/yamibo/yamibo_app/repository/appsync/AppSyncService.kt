@@ -19,6 +19,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.domain.stableAppSyncFinge
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncBootstrapResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.BackupSnapshotMigrationPlanner
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.BootstrapCoordinator
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.CapturedBootstrapSnapshot
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.CheckpointCoordinator
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.CheckpointCreationResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.DatabaseSyncDomainMaterializer
@@ -43,6 +44,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.remote.YamiboAppSyncJourn
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCloudResetResult
 import me.thenano.yamibo.yamibo_app.repository.bookmark.BookMarkRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.backup.BackupRepositoryImpl
+import me.thenano.yamibo.yamibo_app.repository.backup.CloudBackupPayloadCodec
 import me.thenano.yamibo.yamibo_app.repository.detailnote.DetailNoteRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.favorite.FavoriteStoreRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.favorite.FavoriteUpdateRepositoryImpl
@@ -75,16 +77,65 @@ data class AppSyncServiceStatus(
     val pendingOperationCount: Int,
     val lastVerifiedAtEpochMillis: Long?,
     val message: String,
+    val presentationMessage: AppSyncStatusMessage = AppSyncStatusMessage.External(message),
     val changeSummaries: List<AppSyncChangeSummary> = emptyList(),
     val scheduleSettings: AppSyncScheduleSettings = AppSyncScheduleSettings(),
     val pendingTriggerGeneration: Long? = null,
     val journalRetirementStatus: AppSyncJournalRetirementStatus? = null,
 )
 
+sealed interface AppSyncStatusMessage {
+    data object NotStarted : AppSyncStatusMessage
+    data object CoreNotAvailable : AppSyncStatusMessage
+    data object QuarantinedRefresh : AppSyncStatusMessage
+    data object QuarantinedManualSync : AppSyncStatusMessage
+    data object UnexpectedFailure : AppSyncStatusMessage
+    data object AutomaticSyncScheduled : AppSyncStatusMessage
+    data object AutomaticSyncDisabled : AppSyncStatusMessage
+    data object ScheduleUpdated : AppSyncStatusMessage
+    data object AppStartupSyncScheduled : AppSyncStatusMessage
+    data object ForegroundExitSyncScheduled : AppSyncStatusMessage
+    data object ClearingCloudData : AppSyncStatusMessage
+    data class CloudDataCleared(val count: Int) : AppSyncStatusMessage
+    data object CloudResetAuthExpired : AppSyncStatusMessage
+    data class CloudResetIncomplete(val reason: String) : AppSyncStatusMessage
+    data class CloudLinkCacheCleared(val count: Int) : AppSyncStatusMessage
+    data object ForcePushRunning : AppSyncStatusMessage
+    data object ForcePullRunning : AppSyncStatusMessage
+    data class ForcePullCompleted(val count: Int) : AppSyncStatusMessage
+    data object ForcePreviewStale : AppSyncStatusMessage
+    data object SafeLoadRunning : AppSyncStatusMessage
+    data class SafeLoadCompleted(val count: Int) : AppSyncStatusMessage
+    data class SafeLoadCompletedWithSkippedRssHistory(
+        val appliedCount: Int,
+        val skippedCount: Int,
+    ) : AppSyncStatusMessage
+    data object SyncRunning : AppSyncStatusMessage
+    data class SyncCompleted(
+        val receivedCount: Int,
+        val acknowledgedCount: Int,
+    ) : AppSyncStatusMessage
+    data object SyncAlreadyRunning : AppSyncStatusMessage
+    data object AuthenticationExpired : AppSyncStatusMessage
+    data class External(val value: String) : AppSyncStatusMessage
+}
+
 data class AppSyncJournalRetirementStatus(
     val state: AppSyncJournalRetirementState,
     val message: String,
+    val presentationMessage: AppSyncJournalRetirementMessage =
+        AppSyncJournalRetirementMessage.External(message),
 )
+
+sealed interface AppSyncJournalRetirementMessage {
+    data class Observed(val journalCount: Int) : AppSyncJournalRetirementMessage
+    data class Candidate(val count: Int) : AppSyncJournalRetirementMessage
+    data class Pending(val stage: String) : AppSyncJournalRetirementMessage
+    data object Completed : AppSyncJournalRetirementMessage
+    data object PausedAuth : AppSyncJournalRetirementMessage
+    data object AlreadyRunning : AppSyncJournalRetirementMessage
+    data class External(val value: String) : AppSyncJournalRetirementMessage
+}
 
 enum class AppSyncJournalRetirementState {
     Observed,
@@ -144,13 +195,25 @@ data class AppSyncForcePreview(
 
 sealed interface AppSyncForcePreviewResult {
     data class Ready(val preview: AppSyncForcePreview) : AppSyncForcePreviewResult
-    data class Failed(val reason: String) : AppSyncForcePreviewResult
+    data class Failed(
+        val reason: String,
+        val kind: AppSyncForceFailureKind = AppSyncForceFailureKind.External,
+    ) : AppSyncForcePreviewResult
 }
 
 sealed interface AppSyncForceApplyResult {
     data class Applied(val status: AppSyncServiceStatus) : AppSyncForceApplyResult
     data object StalePreview : AppSyncForceApplyResult
-    data class Failed(val reason: String) : AppSyncForceApplyResult
+    data class Failed(
+        val reason: String,
+        val kind: AppSyncForceFailureKind = AppSyncForceFailureKind.External,
+    ) : AppSyncForceApplyResult
+}
+
+enum class AppSyncForceFailureKind {
+    CoreUnavailable,
+    AuthenticationExpired,
+    External,
 }
 
 internal data class PendingReliabilityDemand(
@@ -217,16 +280,23 @@ class AppSyncService(
     )
     private var localSnapshotSource: BackupRepositoryImpl? = null
     private val migrationPlanner = BackupSnapshotMigrationPlanner()
+    private val rollbackSnapshotCodec = CloudBackupPayloadCodec()
     private val bootstrap = BootstrapCoordinator(
         store,
         remote,
         domainState,
         nowMillis = nowMillis,
-        captureLocalMigrationDrafts = {
+        captureLocalSnapshot = {
             val source = checkNotNull(localSnapshotSource) {
                 "Backup snapshot source is not configured"
             }
-            migrationPlanner.plan(source.createAppSyncSnapshot())
+            val snapshot = source.createAppSyncSnapshot()
+            val migration = migrationPlanner.planWithDiagnostics(snapshot)
+            CapturedBootstrapSnapshot(
+                migrationDrafts = migration.drafts,
+                encodedRollbackSnapshot = rollbackSnapshotCodec.encode(snapshot).getOrThrow(),
+                skippedOrphanRssHistoryCount = migration.skippedOrphanRssHistoryCount,
+            )
         },
     )
     private val engine = OperationSyncEngine(
@@ -280,11 +350,16 @@ class AppSyncService(
         backfillStableContainerIds(db)
         backfillFavoriteUpdateSyncState(db)
         if (featureEnabled) {
+            store.reconcileResolvedStateCoverage()
             domainState.reconcileProjections()
         }
         mutableStatus = MutableStateFlow(
             if (featureEnabled) {
-                statusFor(installation.state, "尚未開始同步")
+                statusFor(
+                    installation.state,
+                    "尚未開始同步",
+                    AppSyncStatusMessage.NotStarted,
+                )
             } else {
                 disabledStatus(installation.automaticEnabled)
             },
@@ -383,10 +458,11 @@ class AppSyncService(
         return when {
             installation == null || installation.accountBinding != binding ->
                 bootstrap(binding, forceDiscovery = true)
-            installation.state == AppSyncInstallationState.Quarantined ->
+            installation.state.blocksRegularSync() ->
                 statusFor(
                     AppSyncInstallationState.Quarantined,
                     "同步資料已隔離；重新檢查不會修改本機資料",
+                    AppSyncStatusMessage.QuarantinedRefresh,
                 )
             installation.state.requiresBootstrapForSync() ->
                 bootstrap(binding, forceDiscovery = true)
@@ -411,12 +487,13 @@ class AppSyncService(
                 if (bootstrapped.phase != AppSyncServicePhase.Active) {
                     return finishReliabilityDemand(demand, bootstrapped)
                 }
-            } else if (installation.state == AppSyncInstallationState.Quarantined) {
+            } else if (installation.state.blocksRegularSync()) {
                 return finishReliabilityDemand(
                     demand,
                     statusFor(
                         AppSyncInstallationState.Quarantined,
                         "同步資料已隔離；手動同步不會修改本機資料",
+                        AppSyncStatusMessage.QuarantinedManualSync,
                     ),
                 )
             } else if (installation.state.requiresBootstrapForSync()) {
@@ -434,6 +511,7 @@ class AppSyncService(
             val status = statusFor(
                 requireNotNull(store.installation()).state,
                 "同步發生未預期錯誤，已保留待同步操作並排定重試",
+                AppSyncStatusMessage.UnexpectedFailure,
                 AppSyncServicePhase.RetryPending,
             )
             mutableStatus.value = status
@@ -451,6 +529,11 @@ class AppSyncService(
         mutableStatus.value = statusFor(
             installation.state,
             if (enabled) "已排定自動同步" else "自動同步已關閉",
+            if (enabled) {
+                AppSyncStatusMessage.AutomaticSyncScheduled
+            } else {
+                AppSyncStatusMessage.AutomaticSyncDisabled
+            },
             changeSummaries = mutableStatus.value.changeSummaries,
         )
     }
@@ -465,6 +548,7 @@ class AppSyncService(
         mutableStatus.value = statusFor(
             installation.state,
             "自動同步排程設定已更新",
+            AppSyncStatusMessage.ScheduleUpdated,
             changeSummaries = mutableStatus.value.changeSummaries,
         )
     }
@@ -479,6 +563,12 @@ class AppSyncService(
                 when (trigger) {
                     AppSyncAutomaticTrigger.AppStartup -> "已排定 App 啟動同步"
                     AppSyncAutomaticTrigger.ForegroundExit -> "已排定離開前台同步"
+                },
+                when (trigger) {
+                    AppSyncAutomaticTrigger.AppStartup ->
+                        AppSyncStatusMessage.AppStartupSyncScheduled
+                    AppSyncAutomaticTrigger.ForegroundExit ->
+                        AppSyncStatusMessage.ForegroundExitSyncScheduled
                 },
                 changeSummaries = mutableStatus.value.changeSummaries,
             )
@@ -498,6 +588,7 @@ class AppSyncService(
         mutableStatus.value = statusFor(
             installation.state,
             mutableStatus.value.message,
+            mutableStatus.value.presentationMessage,
             changeSummaries = mutableStatus.value.changeSummaries,
         )
     }
@@ -515,6 +606,7 @@ class AppSyncService(
         mutableStatus.value = mutableStatus.value.copy(
             phase = AppSyncServicePhase.Running,
             message = "正在驗證並清除雲端同步資料",
+            presentationMessage = AppSyncStatusMessage.ClearingCloudData,
         )
         val status = when (val result = remote.deleteAllVerifiedSyncData(binding, formHash)) {
             is AppSyncCloudResetResult.Verified -> {
@@ -522,6 +614,9 @@ class AppSyncService(
                 if (bootstrapped.phase == AppSyncServicePhase.Active) {
                     bootstrapped.copy(
                         message = "已清除 ${result.deletedBlogCount} 筆雲端同步資料；本機資料已排入安全重建",
+                        presentationMessage = AppSyncStatusMessage.CloudDataCleared(
+                            result.deletedBlogCount,
+                        ),
                     )
                 } else {
                     bootstrapped
@@ -532,11 +627,13 @@ class AppSyncService(
                 statusFor(
                     AppSyncInstallationState.PausedAuth,
                     "登入狀態已過期；重新整理登入後會先載入仍存活的雲端資料",
+                    AppSyncStatusMessage.CloudResetAuthExpired,
                 )
             }
             is AppSyncCloudResetResult.RetryableFailure -> statusFor(
                 AppSyncInstallationState.Unbound,
                 "雲端清除未完整確認：${result.reason}；下次會先安全載入再繼續",
+                AppSyncStatusMessage.CloudResetIncomplete(result.reason),
                 AppSyncServicePhase.RetryPending,
             )
             is AppSyncCloudResetResult.TerminalFailure -> {
@@ -559,6 +656,7 @@ class AppSyncService(
         return statusFor(
             installation.state,
             "已清除 $cleared 筆雲端連結紀錄；下次同步會重新驗證最新索引",
+            AppSyncStatusMessage.CloudLinkCacheCleared(cleared),
             changeSummaries = mutableStatus.value.changeSummaries,
         ).also { mutableStatus.value = it }
     }
@@ -566,9 +664,17 @@ class AppSyncService(
     suspend fun previewForceOverride(
         direction: AppSyncForceDirection,
     ): AppSyncForcePreviewResult {
-        if (!featureEnabled) return AppSyncForcePreviewResult.Failed("同步核心尚未啟用")
+        if (!featureEnabled) {
+            return AppSyncForcePreviewResult.Failed(
+                "同步核心尚未啟用",
+                AppSyncForceFailureKind.CoreUnavailable,
+            )
+        }
         val binding = currentAccountBinding()
-            ?: return AppSyncForcePreviewResult.Failed("登入狀態已過期，請先刷新登入狀態")
+            ?: return AppSyncForcePreviewResult.Failed(
+                "登入狀態已過期，請先刷新登入狀態",
+                AppSyncForceFailureKind.AuthenticationExpired,
+            )
         val internalDirection = direction.toInternal()
         return when (val result = manualOverride.preview(binding, internalDirection)) {
             is ManualSyncPreviewResult.Ready -> AppSyncForcePreviewResult.Ready(
@@ -581,13 +687,24 @@ class AppSyncService(
     suspend fun applyForceOverride(
         preview: AppSyncForcePreview,
     ): AppSyncForceApplyResult {
-        if (!featureEnabled) return AppSyncForceApplyResult.Failed("同步核心尚未啟用")
+        if (!featureEnabled) {
+            return AppSyncForceApplyResult.Failed(
+                "同步核心尚未啟用",
+                AppSyncForceFailureKind.CoreUnavailable,
+            )
+        }
         val binding = currentAccountBinding()
-            ?: return AppSyncForceApplyResult.Failed("登入狀態已過期，請先刷新登入狀態")
+            ?: return AppSyncForceApplyResult.Failed(
+                "登入狀態已過期，請先刷新登入狀態",
+                AppSyncForceFailureKind.AuthenticationExpired,
+            )
         if (preview.direction == AppSyncForceDirection.Push &&
             authRepository.currentUser()?.formHash == null
         ) {
-            return AppSyncForceApplyResult.Failed("登入狀態已過期，請先刷新登入狀態")
+            return AppSyncForceApplyResult.Failed(
+                "登入狀態已過期，請先刷新登入狀態",
+                AppSyncForceFailureKind.AuthenticationExpired,
+            )
         }
         mutableStatus.value = mutableStatus.value.copy(
             phase = AppSyncServicePhase.Running,
@@ -595,6 +712,11 @@ class AppSyncService(
                 "正在執行強制上傳並驗證雲端結果"
             } else {
                 "正在載入並套用已驗證的雲端狀態"
+            },
+            presentationMessage = if (preview.direction == AppSyncForceDirection.Push) {
+                AppSyncStatusMessage.ForcePushRunning
+            } else {
+                AppSyncStatusMessage.ForcePullRunning
             },
         )
         return when (val result = manualOverride.apply(binding, preview.toInternal())) {
@@ -609,6 +731,7 @@ class AppSyncService(
                     statusFor(
                         AppSyncInstallationState.Active,
                         "強制載入完成：已套用 ${result.operationCount} 項差異",
+                        AppSyncStatusMessage.ForcePullCompleted(result.operationCount),
                         changeSummaries = preview.differences.flatMap { difference ->
                             difference.toChangeSummaries(AppSyncChangeDirection.Received)
                         },
@@ -619,11 +742,15 @@ class AppSyncService(
             ManualSyncApplyResult.StalePreview -> {
                 mutableStatus.value = currentStatus().copy(
                     message = "本機或雲端資料已變更，請重新檢視差異後再確認",
+                    presentationMessage = AppSyncStatusMessage.ForcePreviewStale,
                 )
                 AppSyncForceApplyResult.StalePreview
             }
             is ManualSyncApplyResult.Failed -> {
-                mutableStatus.value = currentStatus().copy(message = result.reason)
+                mutableStatus.value = currentStatus().copy(
+                    message = result.reason,
+                    presentationMessage = AppSyncStatusMessage.External(result.reason),
+                )
                 AppSyncForceApplyResult.Failed(result.reason)
             }
         }
@@ -632,7 +759,11 @@ class AppSyncService(
     fun currentStatus(): AppSyncServiceStatus {
         if (!featureEnabled) return disabledStatus()
         val installation = requireNotNull(store.installation())
-        return statusFor(installation.state, mutableStatus.value.message)
+        return statusFor(
+            installation.state,
+            mutableStatus.value.message,
+            mutableStatus.value.presentationMessage,
+        )
             .copy(
                 changeSummaries = mutableStatus.value.changeSummaries,
                 journalRetirementStatus = mutableStatus.value.journalRetirementStatus,
@@ -647,17 +778,34 @@ class AppSyncService(
         mutableStatus.value = mutableStatus.value.copy(
             phase = AppSyncServicePhase.Running,
             message = "正在安全載入雲端紀錄，本階段不會上傳本機資料",
+            presentationMessage = AppSyncStatusMessage.SafeLoadRunning,
         )
         return when (val result = bootstrap.bootstrap(binding, forceDiscovery)) {
-            is AppSyncBootstrapResult.Ready -> statusFor(
-                AppSyncInstallationState.Active,
-                "安全載入完成，套用 ${result.appliedOperationCount} 筆操作",
-                changeSummaries = result.changes.map(OperationChangeSummary::toPublic),
-            )
+            is AppSyncBootstrapResult.Ready -> {
+                val skipped = result.skippedOrphanRssHistoryCount
+                statusFor(
+                    AppSyncInstallationState.Active,
+                    if (skipped == 0) {
+                        "安全載入完成，套用 ${result.appliedOperationCount} 筆操作"
+                    } else {
+                        "安全載入完成，套用 ${result.appliedOperationCount} 筆操作；" +
+                            "保留 $skipped 筆無法解析來源的舊 RSS 閱讀紀錄於本機"
+                    },
+                    if (skipped == 0) {
+                        AppSyncStatusMessage.SafeLoadCompleted(result.appliedOperationCount)
+                    } else {
+                        AppSyncStatusMessage.SafeLoadCompletedWithSkippedRssHistory(
+                            result.appliedOperationCount,
+                            skipped,
+                        )
+                    },
+                    changeSummaries = result.changes.map(OperationChangeSummary::toPublic),
+                )
+            }
             is AppSyncBootstrapResult.RetryableFailure -> statusFor(
                 AppSyncInstallationState.Bootstrapping,
                 result.reason,
-                AppSyncServicePhase.RetryPending,
+                phaseOverride = AppSyncServicePhase.RetryPending,
             )
             is AppSyncBootstrapResult.Paused -> {
                 val state = requireNotNull(store.installation()).state
@@ -676,6 +824,7 @@ class AppSyncService(
         mutableStatus.value = mutableStatus.value.copy(
             phase = AppSyncServicePhase.Running,
             message = "正在同步操作紀錄",
+            presentationMessage = AppSyncStatusMessage.SyncRunning,
         )
         val result = engine.synchronize(
             accountBinding = binding,
@@ -718,19 +867,23 @@ class AppSyncService(
             is CheckpointCreationResult.RetryableFailure -> statusFor(
                 requireNotNull(store.installation()).state,
                 checkpointResult.reason,
-                AppSyncServicePhase.RetryPending,
+                phaseOverride = AppSyncServicePhase.RetryPending,
             )
             else -> when (result) {
                 is OperationSyncResult.Converged -> statusFor(
                     AppSyncInstallationState.Active,
                     "同步完成：接收 ${result.appliedRemoteCount}、確認 ${result.acknowledgedLocalCount}",
+                    AppSyncStatusMessage.SyncCompleted(
+                        receivedCount = result.appliedRemoteCount,
+                        acknowledgedCount = result.acknowledgedLocalCount,
+                    ),
                     changeSummaries = result.changes.map(OperationChangeSummary::toPublic),
                     journalRetirementStatus = retirementStatus,
                 )
                 is OperationSyncResult.PausedAuth ->
                     statusFor(AppSyncInstallationState.PausedAuth, result.reason)
-                is OperationSyncResult.Quarantined ->
-                    statusFor(AppSyncInstallationState.Quarantined, result.reason)
+                is OperationSyncResult.PausedProvider ->
+                    statusFor(AppSyncInstallationState.PausedProvider, result.reason)
                 is OperationSyncResult.StoragePressure ->
                     statusFor(AppSyncInstallationState.PausedProvider, result.reason)
                 is OperationSyncResult.RebootstrapRequired ->
@@ -738,11 +891,12 @@ class AppSyncService(
                 is OperationSyncResult.RetryScheduled -> statusFor(
                     requireNotNull(store.installation()).state,
                     result.reason,
-                    AppSyncServicePhase.RetryPending,
+                    phaseOverride = AppSyncServicePhase.RetryPending,
                 )
                 OperationSyncResult.AlreadyRunning -> statusFor(
                     requireNotNull(store.installation()).state,
                     "已有同步工作執行中",
+                    AppSyncStatusMessage.SyncAlreadyRunning,
                     AppSyncServicePhase.RetryPending,
                 )
             }
@@ -861,6 +1015,7 @@ class AppSyncService(
         return statusFor(
             AppSyncInstallationState.PausedAuth,
             "登入狀態已過期，請先刷新登入狀態",
+            AppSyncStatusMessage.AuthenticationExpired,
         ).also { mutableStatus.value = it }
     }
 
@@ -872,6 +1027,7 @@ class AppSyncService(
         pendingOperationCount = store.pendingOperations().size,
         lastVerifiedAtEpochMillis = store.installation()?.lastVerifiedHeartbeatAt,
         message = "新同步核心仍在驗證中，尚未開放雲端寫入",
+        presentationMessage = AppSyncStatusMessage.CoreNotAvailable,
         scheduleSettings = store.installation()?.scheduleSettings ?: AppSyncScheduleSettings(),
         pendingTriggerGeneration = store.installation()?.let {
             it.requestedTriggerGeneration.takeIf { generation ->
@@ -883,6 +1039,7 @@ class AppSyncService(
     private fun statusFor(
         state: AppSyncInstallationState,
         message: String,
+        presentationMessage: AppSyncStatusMessage = AppSyncStatusMessage.External(message),
         phaseOverride: AppSyncServicePhase? = null,
         changeSummaries: List<AppSyncChangeSummary> = emptyList(),
         journalRetirementStatus: AppSyncJournalRetirementStatus? = null,
@@ -904,6 +1061,7 @@ class AppSyncService(
             pendingOperationCount = store.pendingOperations().size,
             lastVerifiedAtEpochMillis = installation.lastVerifiedHeartbeatAt,
             message = message,
+            presentationMessage = presentationMessage,
             changeSummaries = changeSummaries,
             scheduleSettings = installation.scheduleSettings,
             pendingTriggerGeneration = installation.requestedTriggerGeneration.takeIf {
@@ -1045,11 +1203,13 @@ private fun AppSyncJournalRetirementMaintenanceResult.toPublicStatus():
         AppSyncJournalRetirementStatus(
             AppSyncJournalRetirementState.Observed,
             "已驗證 $journalCount 個 journal，尚無可退休項目",
+            AppSyncJournalRetirementMessage.Observed(journalCount),
         )
     is AppSyncJournalRetirementMaintenanceResult.Candidate ->
         AppSyncJournalRetirementStatus(
             AppSyncJournalRetirementState.Candidate,
             "發現 $count 個安全退休候選；目前為只觀察模式",
+            AppSyncJournalRetirementMessage.Candidate(count),
         )
     is AppSyncJournalRetirementMaintenanceResult.Blocked ->
         AppSyncJournalRetirementStatus(
@@ -1060,16 +1220,19 @@ private fun AppSyncJournalRetirementMaintenanceResult.toPublicStatus():
         AppSyncJournalRetirementStatus(
             AppSyncJournalRetirementState.Pending,
             "journal 退休程序等待下一次重新驗證：${stage.name}",
+            AppSyncJournalRetirementMessage.Pending(stage.name),
         )
     AppSyncJournalRetirementMaintenanceResult.Completed ->
         AppSyncJournalRetirementStatus(
             AppSyncJournalRetirementState.Completed,
             "已完成一個 inactive journal 的安全退休",
+            AppSyncJournalRetirementMessage.Completed,
         )
     AppSyncJournalRetirementMaintenanceResult.PausedAuth ->
         AppSyncJournalRetirementStatus(
             AppSyncJournalRetirementState.PausedAuth,
             "登入狀態不足，journal 退休已暫停",
+            AppSyncJournalRetirementMessage.PausedAuth,
         )
     is AppSyncJournalRetirementMaintenanceResult.RetryableFailure ->
         AppSyncJournalRetirementStatus(
@@ -1085,8 +1248,12 @@ private fun AppSyncJournalRetirementMaintenanceResult.toPublicStatus():
         AppSyncJournalRetirementStatus(
             AppSyncJournalRetirementState.Pending,
             "已有同步或 journal 維護工作執行中",
+            AppSyncJournalRetirementMessage.AlreadyRunning,
         )
 }
+
+internal fun AppSyncInstallationState.blocksRegularSync(): Boolean =
+    this == AppSyncInstallationState.Quarantined
 
 internal fun reliabilityOutcomeFor(phase: AppSyncServicePhase): String = when (phase) {
     AppSyncServicePhase.Active -> "CONVERGED"

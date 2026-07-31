@@ -20,4 +20,11 @@ class AppSyncServiceStateTest {
         assertFalse(AppSyncInstallationState.Active.requiresBootstrapForSync())
         assertFalse(AppSyncInstallationState.Quarantined.requiresBootstrapForSync())
     }
+
+    @Test
+    fun quarantineAloneBlocksRegularForegroundAndBackgroundSyncRouting() {
+        AppSyncInstallationState.entries.forEach { state ->
+            assertTrue(state.blocksRegularSync() == (state == AppSyncInstallationState.Quarantined))
+        }
+    }
 }
