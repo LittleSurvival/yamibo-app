@@ -4298,7 +4298,6 @@ internal fun ThreadReaderScreen(
                     listState = listState,
                     readerEntries = readerEntries,
                     pageByPid = pageByPid,
-                    pageIndexBounds = pageIndexBounds,
                     totalPages = totalPages,
                     initialPage = initialPage,
                     slideBarModifier = Modifier
@@ -5029,92 +5028,64 @@ private fun ThreadReaderProgressOverlay(
     listState: LazyListState,
     readerEntries: List<ReaderListEntry>,
     pageByPid: Map<Long, Int>,
-    pageIndexBounds: Map<Int, IntRange>,
     totalPages: Int,
     initialPage: Int,
     slideBarModifier: Modifier,
     hintModifier: Modifier,
 ) {
-    val progress by remember(listState, readerEntries, pageByPid, pageIndexBounds, totalPages, initialPage) {
-        derivedStateOf {
-            calculateReaderPageProgress(
-                listState = listState,
-                readerEntries = readerEntries,
-                pageByPid = pageByPid,
-                pageIndexBounds = pageIndexBounds,
+    if (!visible) return
+
+    val slots = remember(readerEntries, pageByPid, initialPage) {
+        buildReaderPageProgressSlots(
+            readerEntries.map { entry ->
+                ReaderPageProgressEntryRef(
+                    key = entry.key,
+                    forumPage = pageByPid[entry.post.pid.value.toLong()] ?: initialPage,
+                )
+            }
+        )
+    }
+    val stabilizer = remember { ReaderPageProgressStabilizer() }
+    var currentProgress by remember { mutableStateOf<ReaderPageProgress?>(null) }
+    LaunchedEffect(listState, slots, totalPages) {
+        snapshotFlow {
+            val layoutInfo = listState.layoutInfo
+            val direction = when {
+                listState.isScrollInProgress && listState.lastScrolledBackward ->
+                    ReaderPageProgressDirection.Backward
+                listState.isScrollInProgress && listState.lastScrolledForward ->
+                    ReaderPageProgressDirection.Forward
+                else -> ReaderPageProgressDirection.Idle
+            }
+            calculateReaderPageProgressSample(
+                slots = slots,
+                visibleItems = layoutInfo.visibleItemsInfo.map { item ->
+                    ReaderPageProgressVisibleItem(
+                        index = item.index,
+                        offset = item.offset,
+                        size = item.size,
+                    )
+                },
+                viewportStart = layoutInfo.viewportStartOffset,
+                viewportEnd = layoutInfo.viewportEndOffset,
                 totalPages = totalPages,
-                initialPage = initialPage,
-            )
+                firstVisibleItemIndex = listState.firstVisibleItemIndex,
+                firstVisibleItemScrollOffset = listState.firstVisibleItemScrollOffset,
+            ) to direction
+        }.collect { (sample, direction) ->
+            currentProgress = stabilizer.update(sample, direction)
         }
     }
-    val currentProgress = progress
-    if (!visible || currentProgress == null) return
+    val progress = currentProgress ?: return
 
     ReaderPageProgressSlideBar(
-        progress = currentProgress,
+        progress = progress,
         modifier = slideBarModifier,
     )
     ReaderPageProgressHint(
-        progress = currentProgress,
+        progress = progress,
         visible = showHint,
         modifier = hintModifier,
-    )
-}
-
-private fun calculateReaderPageProgress(
-    listState: LazyListState,
-    readerEntries: List<ReaderListEntry>,
-    pageByPid: Map<Long, Int>,
-    pageIndexBounds: Map<Int, IntRange>,
-    totalPages: Int,
-    initialPage: Int,
-): ReaderPageProgress? {
-    val layoutInfo = listState.layoutInfo
-    val visibleItems = layoutInfo.visibleItemsInfo
-    if (readerEntries.isEmpty() || visibleItems.isEmpty()) return null
-
-    val viewportCenter = (layoutInfo.viewportStartOffset + layoutInfo.viewportEndOffset) / 2
-    val centeredItem = visibleItems
-        .mapNotNull { item ->
-            readerEntries.getOrNull(item.index)
-                ?.takeIf { it.isScrollAnchor }
-                ?.let { item to it }
-        }
-        .minByOrNull { (item, _) ->
-            when {
-                viewportCenter < item.offset -> item.offset - viewportCenter
-                viewportCenter > item.offset + item.size -> viewportCenter - (item.offset + item.size)
-                else -> 0
-            }
-        }
-        ?: visibleItems
-            .mapNotNull { item -> readerEntries.getOrNull(item.index)?.let { item to it } }
-            .minByOrNull { (item, _) ->
-                when {
-                    viewportCenter < item.offset -> item.offset - viewportCenter
-                    viewportCenter > item.offset + item.size -> viewportCenter - (item.offset + item.size)
-                    else -> 0
-                }
-            }
-        ?: return null
-
-    val item = centeredItem.first
-    val entry = centeredItem.second
-    val postPage = pageByPid[entry.post.pid.value.toLong()] ?: initialPage
-    val postBounds = pageIndexBounds[postPage] ?: return ReaderPageProgress(
-        page = postPage,
-        totalPages = totalPages,
-        fraction = 0f,
-    )
-    val pagePostCount = (postBounds.last - postBounds.first + 1).coerceAtLeast(1)
-    val relativePostIndex = (entry.postIndex - postBounds.first).coerceIn(0, pagePostCount - 1)
-    val itemRatio = ((viewportCenter - item.offset).toFloat() / item.size.coerceAtLeast(1).toFloat())
-        .coerceIn(0f, 1f)
-
-    return ReaderPageProgress(
-        page = postPage,
-        totalPages = totalPages,
-        fraction = ((relativePostIndex + itemRatio) / pagePostCount.toFloat()).coerceIn(0f, 1f),
     )
 }
 
