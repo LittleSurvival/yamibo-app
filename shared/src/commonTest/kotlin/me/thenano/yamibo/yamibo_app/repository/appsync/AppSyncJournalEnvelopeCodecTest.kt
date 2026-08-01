@@ -47,11 +47,11 @@ class AppSyncJournalEnvelopeCodecTest {
             explicitNulls = true
         }.encodeToString(AppSyncJournalPayload.serializer(), payload)
         val encoded = """
-            [YAMIBO_APP_SYNC_JOURNAL:ymb-sync-9f4c2a7:BEGIN]
+            [YAMIBO_APP_SYNC_JOURNAL:v1:BEGIN]
             schema=1
             fingerprint=${stableAppSyncFingerprint(json)}
             payload=$json
-            [YAMIBO_APP_SYNC_JOURNAL:ymb-sync-9f4c2a7:END]
+            [YAMIBO_APP_SYNC_JOURNAL:v1:END]
         """.trimIndent()
 
         val validated = assertIs<AppSyncJournalValidation.Valid>(codec.validate(encoded))

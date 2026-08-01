@@ -15,6 +15,24 @@
 - Checkpoint 限制操作歷史的長期成長，並保留安全復原基準。
 - 雲端載入、解析或驗證失敗時，不得修改或刪除本機設定。
 
+## 正式版 Namespace
+
+正式版使用版本化的 `v1` namespace。Blog title 與 class name 只負責 discovery
+與人工辨識；真正的資料身份仍由內容 marker、schema、account binding 與 fingerprint
+共同驗證。
+
+| 類型 | 正式版識別名稱 |
+|---|---|
+| Blog class | `Yamibo App Sync` |
+| Config | `Yamibo App Sync Config - DO NOT EDIT - v1` |
+| Index | `Yamibo App Sync Index - DO NOT EDIT - v1` |
+| Journal | `Yamibo App Sync Journal - DO NOT EDIT - v1 - <replica>` |
+| Checkpoint | `Yamibo App Sync Checkpoint - DO NOT EDIT - v1 - <checkpoint>` |
+
+開發期間使用的 `ymb-sync-9f4c2a7` namespace 不會被正式版自動採用，也不會被
+正式版的同步資料清理流程當成 `v1` 資料刪除。若未來需要匯入舊資料，必須另行提供
+明確且經驗證的 migration 流程。
+
 ## 雲端 Blog 組成
 
 | 類型 | 主要用途 | 一般數量 | 是否為資料真相 |

@@ -20,11 +20,11 @@ import okio.buffer
 internal object AppSyncJournalDefaults {
     const val JOURNAL_SCHEMA_VERSION = 1
     const val COMPRESSED_ENVELOPE_SCHEMA_VERSION = 2
-    const val JOURNAL_MARKER = "YAMIBO_APP_SYNC_JOURNAL:ymb-sync-9f4c2a7"
-    const val INDEX_MARKER = "YAMIBO_APP_SYNC_INDEX:ymb-sync-9f4c2a7"
-    const val CHECKPOINT_MARKER = "YAMIBO_APP_SYNC_CHECKPOINT:ymb-sync-9f4c2a7"
-    const val JOURNAL_TITLE_PREFIX = "Yamibo App Sync Journal - DO NOT EDIT - "
-    const val CHECKPOINT_TITLE_PREFIX = "Yamibo App Sync Checkpoint - DO NOT EDIT - "
+    const val JOURNAL_MARKER = "YAMIBO_APP_SYNC_JOURNAL:v1"
+    const val INDEX_MARKER = "YAMIBO_APP_SYNC_INDEX:v1"
+    const val CHECKPOINT_MARKER = "YAMIBO_APP_SYNC_CHECKPOINT:v1"
+    const val JOURNAL_TITLE_PREFIX = "Yamibo App Sync Journal - DO NOT EDIT - v1 - "
+    const val CHECKPOINT_TITLE_PREFIX = "Yamibo App Sync Checkpoint - DO NOT EDIT - v1 - "
 
     fun journalTitle(deviceId: SyncDeviceId, epoch: SyncDeviceEpoch): String =
         "$JOURNAL_TITLE_PREFIX${deviceId.value.take(12)}-${epoch.value.take(12)}"

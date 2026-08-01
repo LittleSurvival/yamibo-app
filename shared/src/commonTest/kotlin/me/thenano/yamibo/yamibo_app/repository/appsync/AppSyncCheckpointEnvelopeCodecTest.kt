@@ -54,11 +54,11 @@ class AppSyncCheckpointEnvelopeCodecTest {
             payload,
         )
         val encoded = """
-            [YAMIBO_APP_SYNC_CHECKPOINT:ymb-sync-9f4c2a7:BEGIN]
+            [YAMIBO_APP_SYNC_CHECKPOINT:v1:BEGIN]
             schema=1
             fingerprint=${stableAppSyncFingerprint(json)}
             payload=$json
-            [YAMIBO_APP_SYNC_CHECKPOINT:ymb-sync-9f4c2a7:END]
+            [YAMIBO_APP_SYNC_CHECKPOINT:v1:END]
         """.trimIndent()
 
         val result = assertIs<AppSyncCheckpointValidation.Valid>(codec.validate(encoded))

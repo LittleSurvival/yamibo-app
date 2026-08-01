@@ -7,7 +7,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.domain.stableAppSyncFinge
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncAccountBinding
 
 internal const val APP_SYNC_INDEX_TITLE =
-    "Yamibo App Sync Index - DO NOT EDIT - ymb-sync-9f4c2a7"
+    "Yamibo App Sync Index - DO NOT EDIT - v1"
 
 @Serializable
 internal data class AppSyncIndexJournalReference(

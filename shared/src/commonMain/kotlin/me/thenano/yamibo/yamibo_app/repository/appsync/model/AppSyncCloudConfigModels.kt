@@ -4,9 +4,9 @@ import io.github.littlesurvival.dto.value.BlogClassId
 import io.github.littlesurvival.dto.value.BlogId
 
 object AppSyncCloudConfigDefaults {
-    const val BLOG_NAME = "Yamibo App Sync Config - DO NOT EDIT - ymb-sync-9f4c2a7"
-    const val BLOG_CLASS_NAME = "Yamibo Sync 9f4c2a7"
-    const val MARKER = "YAMIBO_APP_SYNC_CONFIG:ymb-sync-9f4c2a7"
+    const val BLOG_NAME = "Yamibo App Sync Config - DO NOT EDIT - v1"
+    const val BLOG_CLASS_NAME = "Yamibo App Sync"
+    const val MARKER = "YAMIBO_APP_SYNC_CONFIG:v1"
     const val ENVELOPE_SCHEMA_VERSION = 1
 }
 

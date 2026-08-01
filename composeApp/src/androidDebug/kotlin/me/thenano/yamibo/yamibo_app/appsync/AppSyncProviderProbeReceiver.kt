@@ -132,8 +132,8 @@ class AppSyncProviderProbeReceiver : BroadcastReceiver() {
         const val REQUEST_TIMEOUT_MILLIS = 60_000L
         const val MAX_PAGES = 20
         const val MAX_AUTHORITATIVE_READS = 10
-        const val JOURNAL_TITLE_PREFIX = "Yamibo App Sync Journal - DO NOT EDIT - "
-        const val INDEX_TITLE = "Yamibo App Sync Index - DO NOT EDIT - ymb-sync-9f4c2a7"
-        const val CHECKPOINT_TITLE_PREFIX = "Yamibo App Sync Checkpoint - DO NOT EDIT - "
+        const val JOURNAL_TITLE_PREFIX = "Yamibo App Sync Journal - DO NOT EDIT - v1 - "
+        const val INDEX_TITLE = "Yamibo App Sync Index - DO NOT EDIT - v1"
+        const val CHECKPOINT_TITLE_PREFIX = "Yamibo App Sync Checkpoint - DO NOT EDIT - v1 - "
     }
 }
