@@ -24,6 +24,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
@@ -91,6 +92,8 @@ import me.thenano.yamibo.yamibo_app.thread.reader.components.tag.ITagListScreen
 import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.*
 import me.thenano.yamibo.yamibo_app.thread.reader.debug.DebugRecomposeProbe
 import me.thenano.yamibo.yamibo_app.thread.reader.debug.debugPerfLog
+import me.thenano.yamibo.yamibo_app.thread.reader.debug.isThreadReaderPerfDebugEnabled
+import me.thenano.yamibo.yamibo_app.thread.reader.debug.isThreadReaderReferencePlanningEnabled
 import me.thenano.yamibo.yamibo_app.util.buildImageRequest
 import me.thenano.yamibo.yamibo_app.util.normalizeImageUrl
 import me.thenano.yamibo.yamibo_app.util.shareText
@@ -100,6 +103,7 @@ import me.thenano.yamibo.yamibo_app.util.time.epochMillisOrNull
 import me.thenano.yamibo.yamibo_app.webview.action.IActionWebView
 import kotlin.math.abs
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.TimeSource
 
 internal sealed interface ReaderState {
     data object Loading : ReaderState
@@ -421,6 +425,18 @@ private fun HtmlBlock.readerTextLength(): Int = when (this) {
     else -> 0
 }
 
+private fun HtmlBlock.singlePageImageUrls(): Sequence<String> = when (this) {
+    is HtmlBlock.Image -> sequenceOf(url)
+    is HtmlBlock.Quote -> contentBlocks.asSequence().flatMap(HtmlBlock::singlePageImageUrls)
+    is HtmlBlock.Collapse -> contentBlocks.asSequence().flatMap(HtmlBlock::singlePageImageUrls)
+    is HtmlBlock.Locked -> contentBlocks.asSequence().flatMap(HtmlBlock::singlePageImageUrls)
+    is HtmlBlock.Table -> rows.asSequence()
+        .flatMap { row -> row.cells.asSequence() }
+        .flatMap { cell -> cell.blocks.asSequence() }
+        .flatMap(HtmlBlock::singlePageImageUrls)
+    else -> emptySequence()
+}
+
 private fun groupReaderBlocks(blocks: List<HtmlBlock>): List<List<HtmlBlock>> {
     val groups = mutableListOf<List<HtmlBlock>>()
     val current = mutableListOf<HtmlBlock>()
@@ -553,7 +569,14 @@ internal fun ThreadReaderScreen(
     val platformContext = LocalPlatformContext.current
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
     val textMeasurer = rememberTextMeasurer()
+    val perfDebugEnabled = isThreadReaderPerfDebugEnabled()
+    val referencePlanningEnabled = isThreadReaderReferencePlanningEnabled()
+    val singlePagePlanningMetrics = remember(tid, perfDebugEnabled) {
+        if (perfDebugEnabled) ThreadReaderPlanningMetrics() else null
+    }
+    val singlePagePlanningCache = remember(tid) { ThreadReaderSinglePagePlanningCache() }
     val progressCoordinator = remember(tid, chapterStateRepository, scope) {
         ReaderProgressCoordinator(
             repository = chapterStateRepository,
@@ -1250,6 +1273,7 @@ internal fun ThreadReaderScreen(
     val singlePageImagePainterCache = remember(tid) { createReaderImagePainterCache(maxEntries = 24) }
     var singlePageMeasuredHeightVersion by remember { mutableIntStateOf(0) }
     val candidateSinglePageLayoutResult = remember(
+        isSinglePageMode,
         readerEntries,
         pageByPid,
         initialPage,
@@ -1262,11 +1286,20 @@ internal fun ThreadReaderScreen(
         activeImageGeometrySnapshot,
         readerViewportWidthPx,
         textMeasurer,
+        density,
+        layoutDirection,
         singlePageMeasuredHeightVersion,
         isNovelThread,
         showRegularFirstPostTagBanner,
         showNovelFirstPostTagBanner,
     ) {
+        if (!isSinglePageMode) {
+            return@remember ThreadReaderSinglePageLayoutResult(
+                entries = emptyList(),
+                footerMeasurementSpecs = emptyList(),
+            )
+        }
+
         val viewportHeightPx = singlePageContentHeightPx.coerceAtLeast(1)
         val estimatedLineHeightPx = (readerFontSize * readerLineSpacing * density.density * 1.52f).toInt().coerceAtLeast(28)
         val fontSizeScale = (16f / readerFontSize.toFloat().coerceAtLeast(1f)).coerceIn(0.6f, 1.25f)
@@ -1279,6 +1312,35 @@ internal fun ThreadReaderScreen(
             fontSize = readerFontSize.sp,
             lineHeight = (readerFontSize * readerLineSpacing).sp,
         )
+        val planningStarted = if (singlePagePlanningMetrics != null) TimeSource.Monotonic.markNow() else null
+        val generationReplaced = singlePagePlanningCache.ensureGeneration(
+            SinglePagePlanningGenerationKey(
+                viewportWidthPx = readerViewportWidthPx,
+                readableHeightPx = viewportHeightPx,
+                verticalPaddingPx = pageVerticalPaddingPx,
+                density = density.density,
+                fontScale = density.fontScale,
+                layoutDirection = layoutDirection.name,
+                contentWidthFraction = readerContentWidthFraction,
+                fontSize = readerFontSize,
+                lineSpacing = readerLineSpacing,
+                readerFontId = readerFontId,
+                textMeasurerIdentity = textMeasurer.hashCode(),
+                localeEngineId = "platform-default-v1",
+                paginationStrategy = if (referencePlanningEnabled) {
+                    ThreadReaderPaginationStrategy.Reference
+                } else {
+                    ThreadReaderPaginationStrategy.Optimized
+                },
+                convertedContentVersion = convertedContentVersion,
+                isNovelThread = isNovelThread,
+                showRegularFirstPostTagBanner = showRegularFirstPostTagBanner,
+                showNovelFirstPostTagBanner = showNovelFirstPostTagBanner,
+            )
+        )
+        if (generationReplaced) {
+            debugPerfLog("single_page_planning_generation|replaced=true")
+        }
         val packedPostIds = mutableSetOf<Long>()
         val footerMeasurementSpecs = mutableListOf<SinglePageFooterMeasurementSpec>()
         val entries = buildList {
@@ -1301,45 +1363,80 @@ internal fun ThreadReaderScreen(
                 val postId = entry.post.pid.value.toLong()
                 if (!packedPostIds.add(postId)) return@forEachIndexed
 
-                val renderBlocks = normalizeHtmlBlocks(
-                    HtmlParser.parseHtml(convertedContentByPid[postId] ?: entry.post.contentHtml)
-                )
-                val plannedPages = if (renderBlocks.isEmpty()) {
-                    listOf(
-                        ThreadReaderPlannedPage(
-                            postId = postId,
-                            pageIndexInPost = 0,
-                            totalPagesInPost = 1,
-                            estimatedHeightPx = viewportHeightPx,
-                            anchorRange = ThreadReaderAnchorRange(postId, entry.anchorBlockId, null, null),
-                            slices = emptyList(),
+                val convertedContent = convertedContentByPid[postId] ?: entry.post.contentHtml
+                val renderBlocks = singlePagePlanningCache.normalizedBlocks(
+                    key = SinglePageNormalizedBlocksKey(postId, convertedContent),
+                    metrics = singlePagePlanningMetrics,
+                ) {
+                    normalizeHtmlBlocks(HtmlParser.parseHtml(convertedContent))
+                }
+                val imageGeometry = renderBlocks.asSequence()
+                    .flatMap(HtmlBlock::singlePageImageUrls)
+                    .map { imageUrl ->
+                        val normalizedUrl = normalizeImageUrl(imageUrl)
+                        normalizedUrl to activeImageGeometrySnapshot[normalizedUrl]
+                    }
+                    .distinct()
+                    .sortedBy { it.first }
+                    .toList()
+                val footerMeasurements = singlePageMeasuredHeightCache.asSequence()
+                    .filter { (key, _) -> key.startsWith("footer|post=$postId|") }
+                    .map { (key, height) -> key to height }
+                    .sortedBy { it.first }
+                    .toList()
+                val plannedPages = singlePagePlanningCache.postPlan(
+                    key = SinglePagePostPlanKey(
+                        postId = postId,
+                        convertedContent = convertedContent,
+                        emptyContentAnchorBlockId = entry.anchorBlockId,
+                        imageGeometry = imageGeometry,
+                        footerMeasurements = footerMeasurements,
+                    ),
+                    metrics = singlePagePlanningMetrics,
+                ) {
+                    if (renderBlocks.isEmpty()) {
+                        listOf(
+                            ThreadReaderPlannedPage(
+                                postId = postId,
+                                pageIndexInPost = 0,
+                                totalPagesInPost = 1,
+                                estimatedHeightPx = viewportHeightPx,
+                                anchorRange = ThreadReaderAnchorRange(postId, entry.anchorBlockId, null, null),
+                                slices = emptyList(),
+                            )
                         )
-                    )
-                } else {
-                    planFixedHeightReaderPages(
-                        ThreadReaderPaginationInput(
-                            postId = postId,
-                            blocks = renderBlocks,
-                            viewportHeightPx = viewportHeightPx,
-                            estimatedCharsPerLine = estimatedCharsPerLine,
-                            estimatedLineHeightPx = estimatedLineHeightPx,
-                            verticalPaddingPx = pageVerticalPaddingPx,
-                            contentWidthPx = measuredTextWidthPx,
-                            imageHeightFor = { null },
-                            imageHeightToWidthRatioFor = { block ->
-                                activeImageGeometrySnapshot[normalizeImageUrl(block.url)]
+                    } else {
+                        planFixedHeightReaderPages(
+                            input = ThreadReaderPaginationInput(
+                                postId = postId,
+                                blocks = renderBlocks,
+                                viewportHeightPx = viewportHeightPx,
+                                estimatedCharsPerLine = estimatedCharsPerLine,
+                                estimatedLineHeightPx = estimatedLineHeightPx,
+                                verticalPaddingPx = pageVerticalPaddingPx,
+                                contentWidthPx = measuredTextWidthPx,
+                                imageHeightFor = { null },
+                                imageHeightToWidthRatioFor = { block ->
+                                    activeImageGeometrySnapshot[normalizeImageUrl(block.url)]
+                                },
+                                textHeightFor = { block, start, end ->
+                                    val text = block.annotatedString.subSequence(start, end)
+                                    val measuredHeight = textMeasurer.measure(
+                                        text = text,
+                                        style = measuredTextStyle.copy(textAlign = block.textAlign),
+                                        constraints = Constraints(maxWidth = measuredTextWidthPx),
+                                    ).size.height
+                                    (measuredHeight * 104 + 99) / 100 + with(density) { 8.dp.roundToPx() }
+                                },
+                            ),
+                            strategy = if (referencePlanningEnabled) {
+                                ThreadReaderPaginationStrategy.Reference
+                            } else {
+                                ThreadReaderPaginationStrategy.Optimized
                             },
-                            textHeightFor = { block, start, end ->
-                                val text = block.annotatedString.subSequence(start, end)
-                                val measuredHeight = textMeasurer.measure(
-                                    text = text,
-                                    style = measuredTextStyle.copy(textAlign = block.textAlign),
-                                    constraints = Constraints(maxWidth = measuredTextWidthPx),
-                                ).size.height
-                                (measuredHeight * 104 + 99) / 100 + with(density) { 8.dp.roundToPx() }
-                            },
+                            metrics = singlePagePlanningMetrics,
                         )
-                    )
+                    }
                 }
                 val postPage = pageByPid[postId] ?: initialPage
                 val showTagAction = entry.post.hasSinglePageTagNavigation(
@@ -1505,10 +1602,26 @@ internal fun ThreadReaderScreen(
                 }
             }
         }
-        ThreadReaderSinglePageLayoutResult(
+        val result = ThreadReaderSinglePageLayoutResult(
             entries = entries,
             footerMeasurementSpecs = footerMeasurementSpecs.distinctBy { it.key },
         )
+        singlePagePlanningMetrics?.snapshot()?.let { snapshot ->
+            debugPerfLog(
+                "single_page_planning|strategy=${if (referencePlanningEnabled) "reference" else "optimized"}" +
+                    "|durationMs=${planningStarted?.elapsedNow()?.inWholeMilliseconds ?: 0}" +
+                    "|normalizedBuilds=${snapshot.normalizedBlockBuilds}" +
+                    "|normalizedHits=${snapshot.normalizedBlockCacheHits}" +
+                    "|safeBreaks=${snapshot.safeBreakPreparations}" +
+                    "|candidateLists=${snapshot.candidateMaterializations}" +
+                    "|textProbes=${snapshot.textHeightProbes}" +
+                    "|textProbeHits=${snapshot.textHeightProbeCacheHits}" +
+                    "|postPlans=${snapshot.postPlanBuilds}" +
+                    "|postPlanHits=${snapshot.postPlanCacheHits}" +
+                    "|entries=${result.entries.size}",
+            )
+        }
+        result
     }
     val candidateSinglePageEntries = candidateSinglePageLayoutResult.entries
     val singlePageEntries = singlePageSession?.layoutResult?.entries.orEmpty()
