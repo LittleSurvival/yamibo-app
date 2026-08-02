@@ -82,7 +82,7 @@ abstract class GenerateI18nResourcesTask : DefaultTask() {
 
         val allCalls = scanSources(settings.scanDirs, apiName)
         val calls = allCalls.distinctBy { it.source }.sortedBy { it.source }
-        val glossaryRows = readGlossary(settings.glossaryFiles)
+        val glossaryRows = readGlossary(settings.translationFiles)
         validateMissingTerms(allCalls, glossaryRows, settings.failOnMissingTerm)
 
         val entries = calls.map { call ->
@@ -118,9 +118,11 @@ abstract class GenerateI18nResourcesTask : DefaultTask() {
 
         return Settings(
             scanDirs = dirsProp("scanDirs", scanDirs.get()).map { root.resolve(it).normalize() },
-            glossaryFiles = listOfNotNull(
-                fileProp("glossary", glossary.orNull?.asFile),
-                fileProp("baseTranslations", baseTranslations.orNull?.asFile),
+            translationFiles = listOfNotNull(
+                fileProp("glossary", glossary.orNull?.asFile)
+                    ?.let { TranslationFile(it, isBaseTranslation = false) },
+                fileProp("baseTranslations", baseTranslations.orNull?.asFile)
+                    ?.let { TranslationFile(it, isBaseTranslation = true) },
             ),
             composeAssetResourcesDir = composeAssetResourcesDir.orNull?.asFile,
             outputComposeResources = prop("outputComposeResources")
@@ -162,8 +164,9 @@ abstract class GenerateI18nResourcesTask : DefaultTask() {
             }
     }
 
-    private fun readGlossary(files: List<File>): List<GlossaryRow> =
-        files.filter { it.isFile }.flatMap { file ->
+    private fun readGlossary(files: List<TranslationFile>): List<GlossaryRow> =
+        files.filter { it.file.isFile }.flatMap { translationFile ->
+            val file = translationFile.file
             val rows = parseCsv(file.readText(Charsets.UTF_8))
             if (rows.isEmpty()) return@flatMap emptyList()
             val header = rows.first().map { it.trim().lowercase() }
@@ -176,7 +179,11 @@ abstract class GenerateI18nResourcesTask : DefaultTask() {
                 }
                 val source = sourceIndex?.let { row.getOrNull(it).orEmpty() }
                     ?: values.values.firstOrNull { it.isNotBlank() }.orEmpty()
-                if (source.isBlank() && values.values.all { it.isBlank() }) null else GlossaryRow(source, values)
+                if (source.isBlank() && values.values.all { it.isBlank() }) {
+                    null
+                } else {
+                    GlossaryRow(source, values, translationFile.isBaseTranslation)
+                }
             }
         }
 
@@ -185,7 +192,27 @@ abstract class GenerateI18nResourcesTask : DefaultTask() {
         language: String,
         glossaryRows: List<GlossaryRow>,
     ): String {
-        glossaryRows.firstOrNull { it.matches(source) }?.values?.get(language)?.takeIf { it.isNotBlank() }?.let { return it }
+        val matchingRows = glossaryRows.filter { it.matches(source) }
+        val glossaryRow = matchingRows.firstOrNull { !it.isBaseTranslation }
+        val baseRow = matchingRows.firstOrNull { it.isBaseTranslation }
+
+        if (language == "zh-cn") {
+            val glossarySimplified = glossaryRow?.values?.get(language).orEmpty()
+            val glossaryTraditional = glossaryRow?.values?.get("zh-tw").orEmpty()
+            val baseSimplified = baseRow?.values?.get(language).orEmpty()
+            val baseTraditional = baseRow?.values?.get("zh-tw").orEmpty()
+            if (
+                glossarySimplified.isNotBlank() &&
+                glossarySimplified == glossaryTraditional &&
+                baseSimplified.isNotBlank() &&
+                baseSimplified != baseTraditional
+            ) {
+                return baseSimplified
+            }
+        }
+
+        glossaryRow?.values?.get(language)?.takeIf { it.isNotBlank() }?.let { return it }
+        baseRow?.values?.get(language)?.takeIf { it.isNotBlank() }?.let { return it }
 
         var converted = source
         glossaryRows
@@ -485,7 +512,7 @@ abstract class GenerateI18nResourcesTask : DefaultTask() {
 
     private data class Settings(
         val scanDirs: List<File>,
-        val glossaryFiles: List<File>,
+        val translationFiles: List<TranslationFile>,
         val composeAssetResourcesDir: File?,
         val outputComposeResources: File,
         val outputKotlin: File,
@@ -501,7 +528,12 @@ abstract class GenerateI18nResourcesTask : DefaultTask() {
     )
 
     private data class I18nCall(val file: File, val line: Int, val column: Int, val source: String)
-    private data class GlossaryRow(val source: String, val values: Map<String, String>)
+    private data class TranslationFile(val file: File, val isBaseTranslation: Boolean)
+    private data class GlossaryRow(
+        val source: String,
+        val values: Map<String, String>,
+        val isBaseTranslation: Boolean,
+    )
     private data class I18nEntry(
         val call: I18nCall,
         val key: String,
