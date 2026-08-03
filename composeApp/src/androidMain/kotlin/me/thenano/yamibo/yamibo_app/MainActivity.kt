@@ -16,6 +16,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import io.github.littlesurvival.YamiboClient
 import kotlinx.coroutines.CoroutineScope
@@ -40,6 +41,7 @@ import me.thenano.yamibo.yamibo_app.navigation.rememberRestorableNavigator
 import me.thenano.yamibo.yamibo_app.profile.settings.access.AndroidBackgroundAccessRepository
 import me.thenano.yamibo.yamibo_app.profile.settings.backup.AndroidBackupScheduler
 import me.thenano.yamibo.yamibo_app.profile.settings.sign.AndroidSignReminderScheduler
+import me.thenano.yamibo.yamibo_app.profile.settings.sign.SignReminderWorker
 import me.thenano.yamibo.yamibo_app.repository.*
 import me.thenano.yamibo.yamibo_app.repository.appupdate.DefaultAppUpdateRepository
 import me.thenano.yamibo.yamibo_app.repository.backup.BackupRepositoryImpl
@@ -86,6 +88,7 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(intent: android.content.Intent?) {
         if (intent?.getBooleanExtra(EXTRA_FROM_NOTIFICATION_SIGN_IN, false) == true) {
+            NotificationManagerCompat.from(this).cancel(SignReminderWorker.NOTIFICATION_ID)
             showSignWebViewTrigger.value = true
             intent.putExtra(EXTRA_FROM_NOTIFICATION_SIGN_IN, false)
         }
