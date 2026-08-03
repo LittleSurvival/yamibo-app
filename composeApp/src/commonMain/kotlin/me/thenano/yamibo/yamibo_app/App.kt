@@ -43,6 +43,8 @@ import me.thenano.yamibo.yamibo_app.confirmation.AppConfirmationResult
 import me.thenano.yamibo.yamibo_app.feedback.AppFeedbackController
 import me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration
 import me.thenano.yamibo.yamibo_app.feedback.AppFeedbackResult
+import me.thenano.yamibo.yamibo_app.event.AppEventBus
+import me.thenano.yamibo.yamibo_app.event.events.SignStatusChangedEvent
 import me.thenano.yamibo.yamibo_app.home.HomePageScreen
 import me.thenano.yamibo.yamibo_app.i18n.AppLocaleProvider
 import me.thenano.yamibo.yamibo_app.i18n.i18n
@@ -600,6 +602,7 @@ private fun navigateToSignWebViewOrProfile(
                             appTaskManager.launch(AppTaskKey("sign:manual-complete")) {
                                 authRepository.syncCookieFromWebView()
                                 signRepository.markTodaySigned()
+                                AppEventBus.emit(SignStatusChangedEvent)
                                 signRepository.fetchPageInfo()
                                 feedbackController.post(i18n("簽到成功"))
                             }
@@ -617,7 +620,11 @@ private fun navigateToSignWebViewOrProfile(
                         onCfCleared = {
                             appTaskManager.launch(AppTaskKey("sign:auto")) {
                                 feedbackController.post(i18n("開始自動簽到..."))
-                                feedbackController.post(signRepository.runAutoSign(allowRepair).signActionFeedbackMessage())
+                                val result = signRepository.runAutoSign(allowRepair)
+                                if (result is io.github.littlesurvival.core.YamiboResult.Success) {
+                                    AppEventBus.emit(SignStatusChangedEvent)
+                                }
+                                feedbackController.post(result.signActionFeedbackMessage())
                             }
                         },
                         onMaintenanceObserved = {

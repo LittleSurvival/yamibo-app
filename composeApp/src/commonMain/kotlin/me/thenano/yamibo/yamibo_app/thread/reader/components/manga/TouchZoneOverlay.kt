@@ -18,10 +18,16 @@ import androidx.compose.ui.unit.sp
 import me.thenano.yamibo.yamibo_app.repository.settings.TouchZoneLayout
 
 /** Describes the action area for a touch zone region */
-enum class TouchAction(val label: String) {
-    PREV(i18n("上一頁")),
-    NEXT(i18n("下一頁")),
-    MENU(i18n("選單"))
+enum class TouchAction {
+    PREV,
+    NEXT,
+    MENU,
+}
+
+private fun TouchAction.localizedLabel(): String = when (this) {
+    TouchAction.PREV -> i18n("上一頁")
+    TouchAction.NEXT -> i18n("下一頁")
+    TouchAction.MENU -> i18n("選單")
 }
 
 /**
@@ -33,6 +39,8 @@ enum class TouchAction(val label: String) {
 fun TouchZoneOverlay(
     visible: Boolean,
     layout: TouchZoneLayout,
+    reverseTouchZones: Boolean,
+    isRtl: Boolean,
     modifier: Modifier = Modifier
 ) {
     AnimatedVisibility(
@@ -42,13 +50,43 @@ fun TouchZoneOverlay(
         modifier = modifier.fillMaxSize()
     ) {
         when (layout) {
-            TouchZoneLayout.L_SHAPE -> LShapeZoneLayout()
-            TouchZoneLayout.KINDLE -> KindleZoneLayout()
-            TouchZoneLayout.EDGE -> EdgeZoneLayout()
-            TouchZoneLayout.LEFT_RIGHT -> LeftRightZoneLayout()
+            TouchZoneLayout.L_SHAPE -> LShapeZoneLayout(reverseTouchZones, isRtl)
+            TouchZoneLayout.KINDLE -> KindleZoneLayout(reverseTouchZones, isRtl)
+            TouchZoneLayout.EDGE -> EdgeZoneLayout(reverseTouchZones, isRtl)
+            TouchZoneLayout.LEFT_RIGHT -> LeftRightZoneLayout(reverseTouchZones, isRtl)
             TouchZoneLayout.DISABLED -> { /* No overlay */ }
         }
     }
+}
+
+/** Resolve the final action used by Manga Reader runtime and preview. */
+fun getEffectiveMangaTouchAction(
+    layout: TouchZoneLayout,
+    xFraction: Float,
+    yFraction: Float,
+    reverseTouchZones: Boolean,
+    isRtl: Boolean,
+): TouchAction? = transformMangaTouchAction(
+    action = getTouchAction(layout, xFraction, yFraction),
+    reverseTouchZones = reverseTouchZones,
+    isRtl = isRtl,
+)
+
+fun transformMangaTouchAction(
+    action: TouchAction?,
+    reverseTouchZones: Boolean,
+    isRtl: Boolean,
+): TouchAction? {
+    var result = action
+    if (reverseTouchZones) result = result.swapPreviousAndNext()
+    if (isRtl) result = result.swapPreviousAndNext()
+    return result
+}
+
+private fun TouchAction?.swapPreviousAndNext(): TouchAction? = when (this) {
+    TouchAction.PREV -> TouchAction.NEXT
+    TouchAction.NEXT -> TouchAction.PREV
+    TouchAction.MENU, null -> this
 }
 
 /** Determine touch action based on layout and tap position (fraction: 0..1) */
@@ -98,64 +136,70 @@ fun getTouchAction(layout: TouchZoneLayout, xFraction: Float, yFraction: Float):
 
 /** Kindle : Top 35% = menu, bottom-left 33% = prev, bottom-right 67% = next */
 @Composable
-private fun KindleZoneLayout() {
+private fun KindleZoneLayout(reverseTouchZones: Boolean, isRtl: Boolean) {
     Column(modifier = Modifier.fillMaxSize()) {
-        ZoneCell(TouchAction.MENU, Modifier.fillMaxWidth().weight(0.35f))
+        ZoneCell(TouchAction.MENU, reverseTouchZones, isRtl, Modifier.fillMaxWidth().weight(0.35f))
         Row(modifier = Modifier.weight(0.65f).fillMaxWidth()) {
-            ZoneCell(TouchAction.PREV, Modifier.weight(1f).fillMaxHeight())
-            ZoneCell(TouchAction.NEXT, Modifier.weight(2f).fillMaxHeight())
+            ZoneCell(TouchAction.PREV, reverseTouchZones, isRtl, Modifier.weight(1f).fillMaxHeight())
+            ZoneCell(TouchAction.NEXT, reverseTouchZones, isRtl, Modifier.weight(2f).fillMaxHeight())
         }
     }
 }
 
 /** L Shape : Top strip + left column = prev, bottom strip + right column = next, center = menu */
 @Composable
-private fun LShapeZoneLayout() {
+private fun LShapeZoneLayout(reverseTouchZones: Boolean, isRtl: Boolean) {
     Column(modifier = Modifier.fillMaxSize()) {
         // Top strip: full width PREV
-        ZoneCell(TouchAction.PREV, Modifier.fillMaxWidth().weight(0.2f))
+        ZoneCell(TouchAction.PREV, reverseTouchZones, isRtl, Modifier.fillMaxWidth().weight(0.2f))
         // Middle: left PREV | center MENU | right NEXT
         Row(modifier = Modifier.weight(0.6f).fillMaxWidth()) {
-            ZoneCell(TouchAction.PREV, Modifier.weight(0.3f).fillMaxHeight())
-            ZoneCell(TouchAction.MENU, Modifier.weight(0.4f).fillMaxHeight())
-            ZoneCell(TouchAction.NEXT, Modifier.weight(0.3f).fillMaxHeight())
+            ZoneCell(TouchAction.PREV, reverseTouchZones, isRtl, Modifier.weight(0.3f).fillMaxHeight())
+            ZoneCell(TouchAction.MENU, reverseTouchZones, isRtl, Modifier.weight(0.4f).fillMaxHeight())
+            ZoneCell(TouchAction.NEXT, reverseTouchZones, isRtl, Modifier.weight(0.3f).fillMaxHeight())
         }
         // Bottom: left PREV | right NEXT
         Row(modifier = Modifier.weight(0.2f).fillMaxWidth()) {
-            ZoneCell(TouchAction.PREV, Modifier.weight(0.3f).fillMaxHeight())
-            ZoneCell(TouchAction.NEXT, Modifier.weight(0.7f).fillMaxHeight())
+            ZoneCell(TouchAction.PREV, reverseTouchZones, isRtl, Modifier.weight(0.3f).fillMaxHeight())
+            ZoneCell(TouchAction.NEXT, reverseTouchZones, isRtl, Modifier.weight(0.7f).fillMaxHeight())
         }
     }
 }
 
 /** Edge : Left/right edges = next, bottom strip = prev, center = menu */
 @Composable
-private fun EdgeZoneLayout() {
+private fun EdgeZoneLayout(reverseTouchZones: Boolean, isRtl: Boolean) {
     Box(modifier = Modifier.fillMaxSize()) {
         // Center = MENU (base layer)
-        ZoneCell(TouchAction.MENU, Modifier.fillMaxSize())
+        ZoneCell(TouchAction.MENU, reverseTouchZones, isRtl, Modifier.fillMaxSize())
         // Left edge = NEXT
-        ZoneCell(TouchAction.NEXT, Modifier.fillMaxHeight().fillMaxWidth(0.15f).align(Alignment.CenterStart))
+        ZoneCell(TouchAction.NEXT, reverseTouchZones, isRtl, Modifier.fillMaxHeight().fillMaxWidth(0.15f).align(Alignment.CenterStart))
         // Right edge = NEXT
-        ZoneCell(TouchAction.NEXT, Modifier.fillMaxHeight().fillMaxWidth(0.15f).align(Alignment.CenterEnd))
+        ZoneCell(TouchAction.NEXT, reverseTouchZones, isRtl, Modifier.fillMaxHeight().fillMaxWidth(0.15f).align(Alignment.CenterEnd))
         // Bottom strip = PREV
-        ZoneCell(TouchAction.PREV, Modifier.fillMaxWidth().fillMaxHeight(0.15f).align(Alignment.BottomCenter))
+        ZoneCell(TouchAction.PREV, reverseTouchZones, isRtl, Modifier.fillMaxWidth().fillMaxHeight(0.15f).align(Alignment.BottomCenter))
     }
 }
 
 /** Left-Right : Left 25% = prev, center 50% = menu, right 25% = next */
 @Composable
-private fun LeftRightZoneLayout() {
+private fun LeftRightZoneLayout(reverseTouchZones: Boolean, isRtl: Boolean) {
     Row(modifier = Modifier.fillMaxSize()) {
-        ZoneCell(TouchAction.PREV, Modifier.weight(0.25f).fillMaxHeight())
-        ZoneCell(TouchAction.MENU, Modifier.weight(0.50f).fillMaxHeight())
-        ZoneCell(TouchAction.NEXT, Modifier.weight(0.25f).fillMaxHeight())
+        ZoneCell(TouchAction.PREV, reverseTouchZones, isRtl, Modifier.weight(0.25f).fillMaxHeight())
+        ZoneCell(TouchAction.MENU, reverseTouchZones, isRtl, Modifier.weight(0.50f).fillMaxHeight())
+        ZoneCell(TouchAction.NEXT, reverseTouchZones, isRtl, Modifier.weight(0.25f).fillMaxHeight())
     }
 }
 
 @Composable
-private fun ZoneCell(action: TouchAction, modifier: Modifier = Modifier) {
-    val color = when (action) {
+private fun ZoneCell(
+    action: TouchAction,
+    reverseTouchZones: Boolean,
+    isRtl: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val effectiveAction = transformMangaTouchAction(action, reverseTouchZones, isRtl) ?: action
+    val color = when (effectiveAction) {
         TouchAction.PREV -> Color(0x44FF9800)
         TouchAction.NEXT -> Color(0x4400BCD4)
         TouchAction.MENU -> Color(0x449C27B0)
@@ -165,7 +209,7 @@ private fun ZoneCell(action: TouchAction, modifier: Modifier = Modifier) {
         contentAlignment = Alignment.Center
     ) {
         Text(
-            text = action.label,
+            text = effectiveAction.localizedLabel(),
             color = Color.White,
             fontSize = 16.sp,
             fontWeight = FontWeight.Bold,
@@ -173,4 +217,3 @@ private fun ZoneCell(action: TouchAction, modifier: Modifier = Modifier) {
         )
     }
 }
-

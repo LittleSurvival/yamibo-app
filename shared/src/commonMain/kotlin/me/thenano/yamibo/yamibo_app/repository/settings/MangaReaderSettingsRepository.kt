@@ -32,5 +32,10 @@ class MangaReaderSettingsRepository(store: SettingsStore) : SettingsRegistry(sto
         name = "touch_zone",
         default = TouchZoneLayout.L_SHAPE
     )
+
+    val reverseTouchZones by boolSetting(
+        name = "reverse_touch_zones",
+        default = false,
+    )
 }
 

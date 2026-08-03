@@ -22,6 +22,9 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationKi
 import me.thenano.yamibo.yamibo_app.repository.bookmark.BookMarkRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.detailnote.DetailNoteRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.favorite.FavoriteStoreRepositoryImpl
+import me.thenano.yamibo.yamibo_app.repository.settings.MangaReaderSettingsRepository
+import me.thenano.yamibo.yamibo_app.repository.settings.NovelReaderSettingsRepository
+import me.thenano.yamibo.yamibo_app.repository.settings.TouchZoneLayout
 import io.github.littlesurvival.dto.value.TagId
 import io.github.littlesurvival.dto.value.PostId
 import io.github.littlesurvival.dto.value.ThreadId
@@ -76,6 +79,46 @@ class AppSyncLocalMutationRoutingTest {
             "local-pending-bootstrap-migration",
             db.appSyncOperationQueries.getSyncSettingValue("theme").executeAsOne().winnerOperationId,
         )
+    }
+
+    @Test
+    fun mangaAndThreadTouchSettingsSyncAsIndependentEntities() {
+        val source = activeFixture()
+        val sourceSettings = MapSettingsStore()
+        val recordingStore = OperationRecordingSettingsStore(source.db, sourceSettings, source.recorder)
+        val sourceManga = MangaReaderSettingsRepository(recordingStore)
+        val sourceThread = NovelReaderSettingsRepository(recordingStore)
+
+        sourceManga.touchZone.setValue(TouchZoneLayout.EDGE)
+        sourceManga.reverseTouchZones.setValue(true)
+        sourceThread.threadTouchZone.setValue(TouchZoneLayout.KINDLE)
+        sourceThread.threadReverseTouchZones.setValue(false)
+
+        val expectedKeys = setOf(
+            sourceManga.touchZone.storageKey,
+            sourceManga.reverseTouchZones.storageKey,
+            sourceThread.threadTouchZone.storageKey,
+            sourceThread.threadReverseTouchZones.storageKey,
+        )
+        val operations = source.store.pendingOperations()
+        assertEquals(expectedKeys, operations.mapTo(linkedSetOf()) { it.entityId.value })
+        assertTrue(operations.all { it.domainId.value == "settings" })
+
+        val targetDb = inMemoryDatabase()
+        val targetSettings = MapSettingsStore()
+        val targetDomain = SqlDelightSyncDomainStateAdapter(
+            db = targetDb,
+            materializer = DatabaseSyncDomainMaterializer(targetDb, targetSettings),
+            nowMillis = { 200 },
+        )
+        targetDomain.apply(OperationReducer().reduce(operations = operations))
+
+        val targetManga = MangaReaderSettingsRepository(targetSettings)
+        val targetThread = NovelReaderSettingsRepository(targetSettings)
+        assertEquals(TouchZoneLayout.EDGE, targetManga.touchZone.getValue())
+        assertTrue(targetManga.reverseTouchZones.getValue())
+        assertEquals(TouchZoneLayout.KINDLE, targetThread.threadTouchZone.getValue())
+        assertFalse(targetThread.threadReverseTouchZones.getValue())
     }
 
     @Test

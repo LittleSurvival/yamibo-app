@@ -32,6 +32,7 @@ import me.thenano.yamibo.yamibo_app.repository.settings.ReaderChineseConversionO
 import me.thenano.yamibo.yamibo_app.repository.settings.ReaderScrollButtonDisplayMode
 import me.thenano.yamibo.yamibo_app.repository.settings.ReaderScrollButtonJumpTarget
 import me.thenano.yamibo.yamibo_app.repository.settings.ThreadReaderMode
+import me.thenano.yamibo.yamibo_app.repository.settings.TouchZoneLayout
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl.HtmlRenderer
 import me.thenano.yamibo.yamibo_app.util.state
@@ -173,6 +174,19 @@ fun ThreadReaderModeSetting() {
         options = ThreadReaderMode.entries.map { it to it.localizedLabel() },
         selectedValue = readerMode,
         onSelect = { novelSettingsRepo.threadReaderMode.setValue(it) },
+        modifier = Modifier.padding(horizontal = 4.dp),
+    )
+}
+
+@Composable
+fun ThreadReaderTouchZoneSetting() {
+    val novelSettingsRepo = LocalNovelReaderSettingsRepository.current
+    val touchZone = novelSettingsRepo.threadTouchZone.state()
+
+    SettingsChipRow(
+        options = TouchZoneLayout.entries.map { it to it.localizedLabel() },
+        selectedValue = touchZone,
+        onSelect = { novelSettingsRepo.threadTouchZone.setValue(it) },
         modifier = Modifier.padding(horizontal = 4.dp),
     )
 }

@@ -156,6 +156,15 @@ private fun LanguageContent() {
 
 @Composable
 private fun NovelReaderContent() {
+    SectionLabel(i18n("閱讀模式"))
+    ThreadReaderModeSetting()
+    Spacer(Modifier.height(24.dp))
+
+    SectionLabel(i18n("觸控分區"))
+    ThreadReaderTouchZoneSetting()
+    ThreadReaderReverseTouchZonesSetting()
+    Spacer(Modifier.height(24.dp))
+
     SectionLabel(i18n("預覽"))
     NovelReaderPreviewSetting()
     Spacer(Modifier.height(24.dp))
@@ -204,6 +213,7 @@ private fun MangaReaderContent() {
 
     SectionLabel(i18n("觸控分區"))
     MangaTouchZoneSetting()
+    MangaReverseTouchZonesSetting()
 }
 
 @Composable

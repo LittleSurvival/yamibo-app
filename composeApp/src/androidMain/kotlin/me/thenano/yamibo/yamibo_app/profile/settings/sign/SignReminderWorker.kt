@@ -62,7 +62,7 @@ class SignReminderWorker(
         }
 
         val isTest = inputData.getBoolean(KEY_IS_TEST, false)
-        if (!isTest && signRepository.isSignedToday()) {
+        if (!shouldPostSignReminder(isTest, signRepository.getKnownSignedToday())) {
             return Result.success()
         }
 
@@ -130,3 +130,8 @@ class SignReminderWorker(
         private const val REQUEST_CODE_MUTE = 1042
     }
 }
+
+internal fun shouldPostSignReminder(
+    isTest: Boolean,
+    knownSignedToday: Boolean?,
+): Boolean = isTest || knownSignedToday != true

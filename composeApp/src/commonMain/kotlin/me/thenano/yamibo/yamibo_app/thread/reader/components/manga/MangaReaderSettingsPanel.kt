@@ -27,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
+import me.thenano.yamibo.yamibo_app.profile.settings.bound.MangaReverseTouchZonesSetting
 import me.thenano.yamibo.yamibo_app.repository.settings.EffectiveReadingModeSource
 import me.thenano.yamibo.yamibo_app.repository.settings.ReadingMode
 import me.thenano.yamibo.yamibo_app.repository.settings.TouchZoneLayout
@@ -45,6 +46,7 @@ fun MangaReaderSettingsPanel(
     onReadingModeChange: (ReadingMode) -> Unit,
     onThreadModeOverrideEnabledChange: (Boolean) -> Unit,
     onTouchZoneLayoutChange: (TouchZoneLayout) -> Unit,
+    onReverseTouchZonesChanged: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val colors = YamiboTheme.colors
@@ -123,6 +125,11 @@ fun MangaReaderSettingsPanel(
                     selectedOption = currentTouchZoneLayout,
                     labelExtractor = { it.localizedLabel() },
                     onSelect = onTouchZoneLayoutChange
+                )
+
+                MangaReverseTouchZonesSetting(
+                    dark = true,
+                    onValueChanged = onReverseTouchZonesChanged,
                 )
 
                 Spacer(Modifier.height(16.dp))

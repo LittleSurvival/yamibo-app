@@ -8,6 +8,9 @@ import androidx.compose.runtime.remember
 
 internal expect fun isThreadReaderPerfDebugEnabled(): Boolean
 
+/** Debug-only reference planner switch; production defaults to the optimized planner. */
+internal expect fun isThreadReaderReferencePlanningEnabled(): Boolean
+
 internal expect fun emitThreadReaderPerfLogLine(line: String)
 
 @Composable
