@@ -1,6 +1,9 @@
 package me.thenano.yamibo.yamibo_app.thread.reader.components.thread
 
 import me.thenano.yamibo.yamibo_app.repository.settings.ThreadReaderMode
+import me.thenano.yamibo.yamibo_app.repository.settings.TouchZoneLayout
+import me.thenano.yamibo.yamibo_app.thread.reader.components.manga.TouchAction
+import me.thenano.yamibo.yamibo_app.thread.reader.components.manga.getTouchAction
 import me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl.HtmlBlock
 import kotlin.math.roundToInt
 
@@ -8,6 +11,31 @@ internal enum class SinglePageTapAction {
     Prev,
     Next,
     Menu,
+}
+
+internal fun resolveThreadReaderTapAction(
+    layout: TouchZoneLayout,
+    xFraction: Float,
+    yFraction: Float,
+    reverseTouchZones: Boolean,
+): SinglePageTapAction? {
+    val action = if (layout == TouchZoneLayout.DISABLED) {
+        SinglePageTapAction.Menu
+    } else {
+        when (getTouchAction(layout, xFraction, yFraction)) {
+            TouchAction.PREV -> SinglePageTapAction.Prev
+            TouchAction.NEXT -> SinglePageTapAction.Next
+            TouchAction.MENU -> SinglePageTapAction.Menu
+            null -> null
+        }
+    }
+    return if (reverseTouchZones) action.reversePreviousAndNext() else action
+}
+
+private fun SinglePageTapAction?.reversePreviousAndNext(): SinglePageTapAction? = when (this) {
+    SinglePageTapAction.Prev -> SinglePageTapAction.Next
+    SinglePageTapAction.Next -> SinglePageTapAction.Prev
+    SinglePageTapAction.Menu, null -> this
 }
 
 internal interface TextBoundarySegmenter {

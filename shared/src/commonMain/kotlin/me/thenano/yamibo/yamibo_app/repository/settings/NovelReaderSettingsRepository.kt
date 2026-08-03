@@ -80,6 +80,17 @@ class NovelReaderSettingsRepository(store: SettingsStore) : SettingsRegistry(sto
         default = ThreadReaderMode.SCROLL_CONTINUOUS,
     )
 
+    val threadTouchZone by enumSetting(
+        name = "thread_touch_zone",
+        description = "novel_reader_thread_touch_zone",
+        default = TouchZoneLayout.L_SHAPE,
+    )
+
+    val threadReverseTouchZones by boolSetting(
+        name = "thread_reverse_touch_zones",
+        default = false,
+    )
+
     val scrollButtonDisplayMode by enumSetting(
         name = "scroll_button_display_mode",
         description = "novel_reader_scroll_button_display_mode",

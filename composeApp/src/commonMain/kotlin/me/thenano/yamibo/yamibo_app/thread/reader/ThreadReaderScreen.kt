@@ -71,15 +71,12 @@ import me.thenano.yamibo.yamibo_app.repository.inapplinknavigation.InAppLinkCont
 import me.thenano.yamibo.yamibo_app.repository.settings.ReaderScrollButtonDisplayMode
 import me.thenano.yamibo.yamibo_app.repository.settings.ReaderScrollButtonJumpTarget
 import me.thenano.yamibo.yamibo_app.repository.settings.ThreadReaderMode
-import me.thenano.yamibo.yamibo_app.repository.settings.TouchZoneLayout
 import me.thenano.yamibo.yamibo_app.thread.detail.novel.components.ThreadErrorContent
 import me.thenano.yamibo.yamibo_app.thread.detail.novel.components.ThreadLoadingSkeleton
 import me.thenano.yamibo.yamibo_app.thread.image.*
 import me.thenano.yamibo.yamibo_app.thread.reader.components.CommentBanner
 import me.thenano.yamibo.yamibo_app.thread.reader.components.ReaderCatalogPanel
 import me.thenano.yamibo.yamibo_app.thread.reader.components.ReaderOverlayMenu
-import me.thenano.yamibo.yamibo_app.thread.reader.components.manga.TouchAction
-import me.thenano.yamibo.yamibo_app.thread.reader.components.manga.getTouchAction
 import me.thenano.yamibo.yamibo_app.thread.reader.components.novel.NovelReaderSettingsPanel
 import me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.*
 import me.thenano.yamibo.yamibo_app.thread.reader.components.post.PostFooterRenderOptions
@@ -618,7 +615,8 @@ internal fun ThreadReaderScreen(
     val scrollButtonJumpTarget = novelSettingsRepository.scrollButtonJumpTarget.state()
     val showPageProgressHint = novelSettingsRepository.showPageProgressHint.state()
     val threadReaderMode = novelSettingsRepository.threadReaderMode.state()
-    val touchZoneLayout = LocalMangaReaderSettingsRepository.current.touchZone.state()
+    val touchZoneLayout = novelSettingsRepository.threadTouchZone.state()
+    val reverseTouchZones = novelSettingsRepository.threadReverseTouchZones.state()
     val isSinglePageMode = threadReaderMode != ThreadReaderMode.SCROLL_CONTINUOUS
     val readerSystemTopPadding = if (keepSystemBarsBackground) {
         WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
@@ -3566,26 +3564,19 @@ internal fun ThreadReaderScreen(
                             isSinglePageMode,
                             threadReaderMode,
                             touchZoneLayout,
+                            reverseTouchZones,
                             singlePageEntries,
                             singlePageTurnAnimating
                         ) {
                             detectTapGestures { position ->
                                 if (isSinglePageMode && singlePageEntries.isNotEmpty()) {
                                     if (singlePageTurnAnimating) return@detectTapGestures
-                                    val action = if (touchZoneLayout == TouchZoneLayout.DISABLED) {
-                                        SinglePageTapAction.Menu
-                                    } else {
-                                        when (getTouchAction(
-                                            touchZoneLayout,
-                                            xFraction = position.x / size.width.toFloat().coerceAtLeast(1f),
-                                            yFraction = position.y / size.height.toFloat().coerceAtLeast(1f),
-                                        )) {
-                                            TouchAction.PREV -> SinglePageTapAction.Prev
-                                            TouchAction.NEXT -> SinglePageTapAction.Next
-                                            TouchAction.MENU -> SinglePageTapAction.Menu
-                                            null -> null
-                                        }
-                                    }
+                                    val action = resolveThreadReaderTapAction(
+                                        layout = touchZoneLayout,
+                                        xFraction = position.x / size.width.toFloat().coerceAtLeast(1f),
+                                        yFraction = position.y / size.height.toFloat().coerceAtLeast(1f),
+                                        reverseTouchZones = reverseTouchZones,
+                                    )
                                     val delta = singlePageDeltaForTouchAction(threadReaderMode, action)
                                     if (delta == 0) {
                                         showMenu = !showMenu
