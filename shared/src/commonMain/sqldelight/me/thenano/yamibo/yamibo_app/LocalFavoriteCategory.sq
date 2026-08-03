@@ -29,6 +29,16 @@ SELECT * FROM LocalFavoriteCategory
 WHERE id = ?
 LIMIT 1;
 
+getBySyncId:
+SELECT * FROM LocalFavoriteCategory
+WHERE syncId = ?
+LIMIT 1;
+
+setSyncId:
+UPDATE LocalFavoriteCategory
+SET syncId = ?
+WHERE id = ? AND syncId IS NULL;
+
 countAll:
 SELECT COUNT(*) FROM LocalFavoriteCategory;
 

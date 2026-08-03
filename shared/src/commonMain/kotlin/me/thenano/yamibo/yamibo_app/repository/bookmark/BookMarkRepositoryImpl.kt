@@ -2,11 +2,14 @@
 
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.repository.BookMarkRepository
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncMutationRecorder
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationKind
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
-import me.thenano.yamibo.yamiboapp.LocalBookMark
+import me.thenano.yamibo.yamibo_app.LocalBookMark
 
-class BookMarkRepositoryImpl(
+class BookMarkRepositoryImpl internal constructor(
     db: Database,
+    private val mutationRecorder: AppSyncMutationRecorder? = null,
 ) : BookMarkRepository {
     private val queries = db.localBookMarkQueries
 
@@ -54,11 +57,14 @@ class BookMarkRepositoryImpl(
         parentId: Long,
         targetId: Long,
     ) {
-        queries.deleteByTarget(targetType.name, parentId, targetId)
+        val existing = queries.getByTarget(targetType.name, parentId, targetId)
+            .executeAsOneOrNull()
+            ?: return
+        deleteExisting(existing)
     }
 
     override suspend fun clearParent(targetType: BookMarkRepository.TargetType, parentId: Long) {
-        queries.deleteByParent(targetType.name, parentId)
+        queries.getByParent(targetType.name, parentId).executeAsList().forEach(::deleteExisting)
     }
 
     private fun upsertState(
@@ -73,18 +79,100 @@ class BookMarkRepositoryImpl(
         val now = currentTimeMillis()
         val nextBookmarked = bookmarked ?: ((existing?.bookmarked ?: 0L) != 0L)
         val nextRead = read ?: ((existing?.read ?: 0L) != 0L)
-        queries.upsert(
+        val nextTitle = title.ifBlank { existing?.title.orEmpty() }
+        val createdAt = existing?.createdAt ?: now
+        val fields = fields(
             targetType = targetType.name,
             parentId = parentId,
             targetId = targetId,
-            title = title.ifBlank { existing?.title.orEmpty() },
-            bookmarked = if (nextBookmarked) 1L else 0L,
-            read = if (nextRead) 1L else 0L,
-            createdAt = existing?.createdAt ?: now,
+            title = nextTitle,
+            bookmarked = nextBookmarked,
+            read = nextRead,
+            createdAt = createdAt,
             updatedAt = now,
         )
-        queries.deleteIfEmpty(targetType.name, parentId, targetId)
+        val delete = !nextBookmarked && !nextRead
+        if (delete && existing == null) return
+        mutate(
+            entityId = entityId(targetType.name, parentId, targetId),
+            kind = when {
+                delete -> SyncOperationKind.Delete
+                existing == null -> SyncOperationKind.Put
+                else -> SyncOperationKind.Patch
+            },
+            fields = fields,
+        ) {
+            if (delete) {
+                queries.deleteByTarget(targetType.name, parentId, targetId)
+            } else {
+                queries.upsert(
+                    targetType = targetType.name,
+                    parentId = parentId,
+                    targetId = targetId,
+                    title = nextTitle,
+                    bookmarked = if (nextBookmarked) 1L else 0L,
+                    read = if (nextRead) 1L else 0L,
+                    createdAt = createdAt,
+                    updatedAt = now,
+                )
+            }
+        }
     }
+
+    private fun deleteExisting(existing: LocalBookMark) {
+        mutate(
+            entityId = entityId(existing.targetType, existing.parentId, existing.targetId),
+            kind = SyncOperationKind.Delete,
+            fields = fields(
+                targetType = existing.targetType,
+                parentId = existing.parentId,
+                targetId = existing.targetId,
+                title = existing.title,
+                bookmarked = existing.bookmarked != 0L,
+                read = existing.read != 0L,
+                createdAt = existing.createdAt,
+                updatedAt = currentTimeMillis(),
+            ),
+        ) {
+            queries.deleteByTarget(existing.targetType, existing.parentId, existing.targetId)
+        }
+    }
+
+    private fun mutate(
+        entityId: String,
+        kind: SyncOperationKind,
+        fields: Map<String, String?>,
+        mutation: () -> Unit,
+    ) {
+        if (mutationRecorder == null) {
+            mutation()
+        } else {
+            mutationRecorder.record(DOMAIN, entityId, kind, fields) { mutation() }
+        }
+    }
+
+    private fun fields(
+        targetType: String,
+        parentId: Long,
+        targetId: Long,
+        title: String,
+        bookmarked: Boolean,
+        read: Boolean,
+        createdAt: Long,
+        updatedAt: Long,
+    ) = mapOf(
+        "targetType" to targetType,
+        "parentId" to parentId.toString(),
+        "targetId" to targetId.toString(),
+        "title" to title,
+        "bookmarked" to bookmarked.toString(),
+        "read" to read.toString(),
+        "createdAt" to createdAt.toString(),
+        "updatedAt" to updatedAt.toString(),
+    )
+
+    private fun entityId(targetType: String, parentId: Long, targetId: Long): String =
+        "$targetType|$parentId|$targetId"
 
     private fun LocalBookMark.toEntry(): BookMarkRepository.Entry {
         return BookMarkRepository.Entry(
@@ -97,5 +185,9 @@ class BookMarkRepositoryImpl(
             createdAt = createdAt,
             updatedAt = updatedAt,
         )
+    }
+
+    private companion object {
+        const val DOMAIN = "bookmark"
     }
 }

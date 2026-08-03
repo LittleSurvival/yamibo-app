@@ -11,7 +11,7 @@ import kotlinx.coroutines.withContext
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.repository.ChapterStateRepository
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
-import me.thenano.yamibo.yamiboapp.LocalChapterState
+import me.thenano.yamibo.yamibo_app.LocalChapterState
 
 class ChapterStateRepositoryImpl(
     private val db: Database,

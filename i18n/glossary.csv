@@ -829,6 +829,8 @@ WebView 打開,WebView open,WebView 打開,WebView 打開
 是,Yes,是,是
 昨天,yesterday,昨天,昨天
 {} 小時,{} hours,{} 小時,{} 小时
+{} 天,{} days,{} 天,{} 天
+{} 週,{} weeks,{} 週,{} 周
 {} - Ta的日志,{} - Blogs,{} - Ta的日志,{} - Ta的日志
 {}的資料,{} profile,{}的資料,{}的资料
 {} - Ta的主題,{} - Threads,{} - Ta的主題,{} - Ta的主题
@@ -848,3 +850,6 @@ RSS搜尋目錄,RSS search directory,RSS搜尋目錄,RSS搜尋目錄
 RSS搜尋目錄(#{}),RSS search directory (#{}),RSS搜尋目錄(#{}),RSS搜尋目錄(#{})
 帖子頁數,Post pages,帖子頁數,帖子页数
 標籤漫畫章節數,Tag manga chapters,標籤漫畫章節數,标签漫画章节数
+App 啟動時同步,Sync on app start,App 啟動時同步,App 启动时同步
+離開前台時同步,Sync when leaving foreground,離開前台時同步,离开前台时同步
+背景同步週期,Background sync interval,背景同步週期,后台同步周期

@@ -9,19 +9,22 @@ import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.db.DatabaseFactory
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
-import me.thenano.yamibo.yamiboapp.MangaTagReadingHistory
-import me.thenano.yamibo.yamiboapp.ReadingHistory
-import me.thenano.yamibo.yamiboapp.RssCatalogReadingHistory
-import me.thenano.yamibo.yamiboapp.RssSearchReadingHistory
-import me.thenano.yamibo.yamiboapp.TagCatalogReadingHistory
+import me.thenano.yamibo.yamibo_app.repository.rss.rssSearchSubscriptionSyncId
+import me.thenano.yamibo.yamibo_app.MangaTagReadingHistory
+import me.thenano.yamibo.yamibo_app.ReadingHistory
+import me.thenano.yamibo.yamibo_app.RssCatalogReadingHistory
+import me.thenano.yamibo.yamibo_app.RssSearchReadingHistory
+import me.thenano.yamibo.yamibo_app.TagCatalogReadingHistory
 
-class IOSReadHistoryRepository(dbFactory: DatabaseFactory) : ReadHistoryRepository {
+class IOSReadHistoryRepository(
+    private val db: Database,
+) : ReadHistoryRepository {
+    constructor(dbFactory: DatabaseFactory) : this(Database(dbFactory.createDriver()))
     private companion object {
         const val COMBINED_HISTORY_BATCH_SIZE = 500L
         const val MAX_HISTORY_ITEMS = 2000L
     }
 
-    private val db = Database(dbFactory.createDriver())
     private val queries = db.readingHistoryQueries
     private val readingTimeQueries = db.readingTimeStatQueries
 
@@ -530,12 +533,14 @@ class IOSReadHistoryRepository(dbFactory: DatabaseFactory) : ReadHistoryReposito
     }
 
     override suspend fun deleteCombinedHistoryBatch(items: List<ReadHistoryRepository.AnyReadingHistory>) {
-        val tagIds = items.filterIsInstance<ReadHistoryRepository.TagMangaReadingHistory>().map { it.tagId.value.toLong() }
-            .plus(items.filterIsInstance<ReadHistoryRepository.TagCatalogReadingHistory>().map { it.tagId.value.toLong() })
-            .distinct()
-        val rssIds = items.filterIsInstance<ReadHistoryRepository.RssSearchReadingHistory>().map { it.subscriptionId }
-            .plus(items.filterIsInstance<ReadHistoryRepository.RssCatalogReadingHistory>().map { it.subscriptionId })
-            .distinct()
+        val mangaTagIds = items.filterIsInstance<ReadHistoryRepository.TagMangaReadingHistory>()
+            .map { it.tagId.value.toLong() }.distinct()
+        val tagCatalogIds = items.filterIsInstance<ReadHistoryRepository.TagCatalogReadingHistory>()
+            .map { it.tagId.value.toLong() }.distinct()
+        val rssSearchIds = items.filterIsInstance<ReadHistoryRepository.RssSearchReadingHistory>()
+            .map { it.subscriptionId }.distinct()
+        val rssCatalogIds = items.filterIsInstance<ReadHistoryRepository.RssCatalogReadingHistory>()
+            .map { it.subscriptionId }.distinct()
 
         items.filterIsInstance<ReadHistoryRepository.ThreadReadingHistory>().forEach { item ->
             queries.deleteByThreadKey(
@@ -544,23 +549,52 @@ class IOSReadHistoryRepository(dbFactory: DatabaseFactory) : ReadHistoryReposito
                 authorId = item.authorId?.value?.toLong() ?: 0L
             )
         }
-        if (tagIds.isNotEmpty()) {
-            mangaTagQueries.deleteByTagIds(tagIds)
-            tagCatalogQueries.deleteByTagIds(tagIds)
+        items.filterIsInstance<ReadHistoryRepository.ImageReadingHistory>().forEach {
+            imageQueries.deleteByPostId(it.postId.value.toLong())
         }
-        if (rssIds.isNotEmpty()) {
-            rssSearchQueries.deleteBySubscriptionIds(rssIds)
-            rssCatalogQueries.deleteBySubscriptionIds(rssIds)
-        }
+        if (mangaTagIds.isNotEmpty()) mangaTagQueries.deleteByTagIds(mangaTagIds)
+        if (tagCatalogIds.isNotEmpty()) tagCatalogQueries.deleteByTagIds(tagCatalogIds)
+        if (rssSearchIds.isNotEmpty()) rssSearchQueries.deleteBySubscriptionIds(rssSearchIds)
+        if (rssCatalogIds.isNotEmpty()) rssCatalogQueries.deleteBySubscriptionIds(rssCatalogIds)
     }
 
     override suspend fun deleteAllCombinedHistory() {
         queries.deleteAll()
+        imageQueries.deleteAll()
         mangaTagQueries.deleteAll()
         tagCatalogQueries.deleteAll()
         rssSearchQueries.deleteAll()
         rssCatalogQueries.deleteAll()
     }
+
+    override suspend fun getAllImageHistoryForSync() = imageQueries.getAll().executeAsList().map {
+        ReadHistoryRepository.ImageReadingHistory(
+            postId = PostId(it.postId.toInt()),
+            threadId = ThreadId(it.threadId.toInt()),
+            pageIndex = it.pageIndex.toInt(),
+            totalPages = it.totalPages.toInt(),
+            firstVisibleItemIndex = it.firstVisibleItemIndex?.toInt(),
+            firstVisibleItemOffset = it.firstVisibleItemOffset?.toInt(),
+            lastVisitTime = it.lastVisitTime,
+        )
+    }
+
+    override suspend fun getAllTagMangaHistoryForSync() =
+        mangaTagQueries.getAll().executeAsList().map { it.toHistory() }
+
+    override suspend fun getAllTagCatalogHistoryForSync() =
+        tagCatalogQueries.getAll().executeAsList().map { it.toHistory() }
+
+    override suspend fun getAllRssSearchHistoryForSync() =
+        rssSearchQueries.getAll().executeAsList().map { it.toHistory() }
+
+    override suspend fun getAllRssCatalogHistoryForSync() =
+        rssCatalogQueries.getAll().executeAsList().map { it.toHistory() }
+
+    override suspend fun getRssSubscriptionSyncId(subscriptionId: Long): String? =
+        db.rssSearchSubscriptionQueries.getById(subscriptionId).executeAsOneOrNull()?.let {
+            rssSearchSubscriptionSyncId(it.query, it.forumId)
+        }
 
     override suspend fun recordReadingDuration(dateKey: String, durationMillis: Long) {
         if (durationMillis <= 0L) return

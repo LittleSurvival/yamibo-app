@@ -1,0 +1,14 @@
+upsertChoice:
+INSERT OR REPLACE INTO FavoriteUpdateCategoryChoice(categorySyncId, enabled, winnerOperationId, updatedAt)
+VALUES (?, ?, ?, ?);
+
+getBySyncId:
+SELECT * FROM FavoriteUpdateCategoryChoice
+WHERE categorySyncId = ?;
+
+getAll:
+SELECT * FROM FavoriteUpdateCategoryChoice
+ORDER BY categorySyncId ASC;
+
+deleteAll:
+DELETE FROM FavoriteUpdateCategoryChoice;

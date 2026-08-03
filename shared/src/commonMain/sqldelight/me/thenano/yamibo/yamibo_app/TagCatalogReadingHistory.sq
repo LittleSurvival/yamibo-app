@@ -12,6 +12,10 @@ INSERT OR REPLACE INTO TagCatalogReadingHistory(
 getByTagId:
 SELECT * FROM TagCatalogReadingHistory WHERE tagId = ?;
 
+getAll:
+SELECT * FROM TagCatalogReadingHistory
+ORDER BY lastVisitTime DESC;
+
 deleteByTagId:
 DELETE FROM TagCatalogReadingHistory WHERE tagId = ?;
 

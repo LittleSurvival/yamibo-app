@@ -1,0 +1,3 @@
+ALTER TABLE AppSyncReliabilityRun ADD COLUMN durationMillis INTEGER;
+ALTER TABLE AppSyncReliabilityRun ADD COLUMN causalReplicaCount INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE AppSyncReliabilityRun ADD COLUMN causalCoverageHash TEXT;

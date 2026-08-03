@@ -23,12 +23,19 @@ import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
 import me.thenano.yamibo.yamibo_app.repository.contentcover.normalizeCoverUrl
-import me.thenano.yamibo.yamiboapp.LocalFavoriteCategory
-import me.thenano.yamibo.yamiboapp.LocalFavoriteCollection
-import me.thenano.yamibo.yamiboapp.LocalFavoriteItem
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncIdentityGenerator
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncMutationRecorder
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDomainId
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncEntityId
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationKind
+import me.thenano.yamibo.yamibo_app.store.appsync.LocalSyncOperationDraft
+import me.thenano.yamibo.yamibo_app.LocalFavoriteCategory
+import me.thenano.yamibo.yamibo_app.LocalFavoriteCollection
+import me.thenano.yamibo.yamibo_app.LocalFavoriteItem
 
-class FavoriteStoreRepositoryImpl(
-    private val db: Database
+class FavoriteStoreRepositoryImpl internal constructor(
+    private val db: Database,
+    private val mutationRecorder: AppSyncMutationRecorder? = null,
 ) : FavoriteStoreRepository {
     private val favoriteItemRevisionState = MutableStateFlow(0L)
     override val favoriteItemRevision: StateFlow<Long> = favoriteItemRevisionState.asStateFlow()
@@ -143,19 +150,27 @@ class FavoriteStoreRepositoryImpl(
         val normalizedName = validateFavoriteName(name = name)
         val now = currentTimeMillis()
         val nextOrder = (categoryQueries.getMaxSortOrder().executeAsOneOrNull()?.MAX ?: -1L) + 1L
-        categoryQueries.insertCategory(
-            name = normalizedName,
-            sortOrder = nextOrder,
-            createdAt = now,
-            updatedAt = now
-        )
-        return categoryQueries.getFirstByName(normalizedName).executeAsOne().toModel()
+        return mutateSyncable {
+            categoryQueries.insertCategory(
+                name = normalizedName,
+                sortOrder = nextOrder,
+                createdAt = now,
+                updatedAt = now
+            )
+            categoryQueries.getFirstByName(normalizedName).executeAsOne().also {
+                categoryQueries.setSyncId(SyncIdentityGenerator.stableEntityId().value, it.id)
+            }.let {
+                categoryQueries.getById(it.id).executeAsOne().toModel()
+            }
+        }
     }
 
     override suspend fun updateCategory(categoryId: Long, name: String) {
         if (isDefaultCategory(categoryId)) return
         val normalizedName = validateFavoriteName(name = name, excludeCategoryId = categoryId)
-        categoryQueries.updateCategoryName(normalizedName, currentTimeMillis(), categoryId)
+        mutateSyncable {
+            categoryQueries.updateCategoryName(normalizedName, currentTimeMillis(), categoryId)
+        }
     }
 
     override suspend fun getCategoryDeletePreview(categoryId: Long): FavoriteCategoryDeletePreview? {
@@ -193,7 +208,7 @@ class FavoriteStoreRepositoryImpl(
                     }
             ).distinct()
 
-        db.transaction {
+        mutateSyncable {
             itemCategoryCrossRefQueries.deleteByCategoryId(categoryId)
             collectionIds.forEach { collectionId ->
                 crossRefQueries.deleteByCollectionId(collectionId)
@@ -207,9 +222,8 @@ class FavoriteStoreRepositoryImpl(
                     itemCategoryCrossRefQueries.insertCrossRef(itemId, defaultCategoryId, now)
                 }
             }
+            cleanupOrphanItems(impactedItemIds)
         }
-
-        cleanupOrphanItems(impactedItemIds)
         ensureDefaults()
     }
 
@@ -221,7 +235,9 @@ class FavoriteStoreRepositoryImpl(
         val targetIndex = if (moveUp) index - 1 else index + 1
         if (targetIndex !in categories.indices) return
 
-        swapCategoryOrder(categories[index], categories[targetIndex])
+        mutateSyncable {
+            swapCategoryOrder(categories[index], categories[targetIndex])
+        }
     }
 
     override suspend fun moveCategoryToIndex(categoryId: Long, targetIndex: Int) {
@@ -235,7 +251,7 @@ class FavoriteStoreRepositoryImpl(
         val moved = categories.removeAt(currentIndex)
         categories.add(clampedTargetIndex, moved)
         val now = currentTimeMillis()
-        db.transaction {
+        mutateSyncable {
             categories.forEachIndexed { index, category ->
                 categoryQueries.updateCategoryOrder(index.toLong(), now, category.id)
             }
@@ -250,34 +266,42 @@ class FavoriteStoreRepositoryImpl(
         val normalizedName = validateFavoriteName(name = name)
         val now = currentTimeMillis()
         val nextOrder = (collectionQueries.getMaxSortOrderByCategoryId(categoryId).executeAsOneOrNull()?.MAX ?: -1L) + 1L
-        collectionQueries.insertCollection(
-            categoryId = categoryId,
-            name = normalizedName,
-            colorKey = colorKey,
-            sortOrder = nextOrder,
-            createdAt = now,
-            updatedAt = now
-        )
-        return collectionQueries.getLatestByCategoryId(categoryId).executeAsOne().toModel()
+        return mutateSyncable {
+            collectionQueries.insertCollection(
+                categoryId = categoryId,
+                name = normalizedName,
+                colorKey = colorKey,
+                sortOrder = nextOrder,
+                createdAt = now,
+                updatedAt = now
+            )
+            collectionQueries.getLatestByCategoryId(categoryId).executeAsOne().also {
+                collectionQueries.setSyncId(SyncIdentityGenerator.stableEntityId().value, it.id)
+            }.let {
+                collectionQueries.getById(it.id).executeAsOne().toModel()
+            }
+        }
     }
 
     override suspend fun updateCollection(collectionId: Long, name: String, colorKey: String) {
         val normalizedName = validateFavoriteName(name = name, excludeCollectionId = collectionId)
-        collectionQueries.updateCollection(
-            name = normalizedName,
-            colorKey = colorKey,
-            updatedAt = currentTimeMillis(),
-            id = collectionId
-        )
+        mutateSyncable {
+            collectionQueries.updateCollection(
+                name = normalizedName,
+                colorKey = colorKey,
+                updatedAt = currentTimeMillis(),
+                id = collectionId
+            )
+        }
     }
 
     override suspend fun deleteCollection(collectionId: Long) {
         val impactedItemIds = crossRefQueries.getItemIdsByCollectionId(collectionId).executeAsList()
-        db.transaction {
+        mutateSyncable {
             crossRefQueries.deleteByCollectionId(collectionId)
             collectionQueries.deleteById(collectionId)
+            cleanupOrphanItems(impactedItemIds)
         }
-        cleanupOrphanItems(impactedItemIds)
     }
 
     override suspend fun moveCollection(collectionId: Long, moveUp: Boolean) {
@@ -289,7 +313,9 @@ class FavoriteStoreRepositoryImpl(
         val targetIndex = if (moveUp) index - 1 else index + 1
         if (targetIndex !in collections.indices) return
 
-        swapCollectionOrder(collections[index], collections[targetIndex])
+        mutateSyncable {
+            swapCollectionOrder(collections[index], collections[targetIndex])
+        }
     }
 
     override suspend fun moveCollectionToIndex(collectionId: Long, targetIndex: Int) {
@@ -304,7 +330,7 @@ class FavoriteStoreRepositoryImpl(
         val moved = collections.removeAt(currentIndex)
         collections.add(clampedTargetIndex, moved)
         val now = currentTimeMillis()
-        db.transaction {
+        mutateSyncable {
             collections.forEachIndexed { index, item ->
                 collectionQueries.updateCollectionOrder(index.toLong(), now, item.id)
             }
@@ -321,18 +347,21 @@ class FavoriteStoreRepositoryImpl(
         categoryIds: List<Long>,
         collectionIds: List<Long>
     ) {
-        addThreadFavorite(
-            targetType = FavoriteTargetType.ThreadNormal,
-            tid = tid,
-            title = title,
-            authorId = null,
-            coverUrl = coverUrl,
-            lastUpdatedTime = lastUpdatedTime,
-            forumId = forumId,
-            forumName = forumName,
-            categoryIds = categoryIds,
-            collectionIds = collectionIds
-        )
+        ensureDefaults()
+        mutateSyncable {
+            addThreadFavorite(
+                targetType = FavoriteTargetType.ThreadNormal,
+                tid = tid,
+                title = title,
+                authorId = null,
+                coverUrl = coverUrl,
+                lastUpdatedTime = lastUpdatedTime,
+                forumId = forumId,
+                forumName = forumName,
+                categoryIds = categoryIds,
+                collectionIds = collectionIds
+            )
+        }
         notifyFavoriteItemsChanged()
     }
 
@@ -347,18 +376,21 @@ class FavoriteStoreRepositoryImpl(
         categoryIds: List<Long>,
         collectionIds: List<Long>
     ) {
-        addThreadFavorite(
-            targetType = FavoriteTargetType.ThreadNovel,
-            tid = tid,
-            title = title,
-            authorId = authorId,
-            coverUrl = coverUrl,
-            lastUpdatedTime = lastUpdatedTime,
-            forumId = forumId,
-            forumName = forumName,
-            categoryIds = categoryIds,
-            collectionIds = collectionIds
-        )
+        ensureDefaults()
+        mutateSyncable {
+            addThreadFavorite(
+                targetType = FavoriteTargetType.ThreadNovel,
+                tid = tid,
+                title = title,
+                authorId = authorId,
+                coverUrl = coverUrl,
+                lastUpdatedTime = lastUpdatedTime,
+                forumId = forumId,
+                forumName = forumName,
+                categoryIds = categoryIds,
+                collectionIds = collectionIds
+            )
+        }
         notifyFavoriteItemsChanged()
     }
 
@@ -370,50 +402,54 @@ class FavoriteStoreRepositoryImpl(
         collectionIds: List<Long>
     ) {
         ensureDefaults()
-        val now = currentTimeMillis()
-        val normalizedCollections = collectionIds.distinct()
-        val normalizedCategories = normalizeCategoryIds(categoryIds, normalizedCollections)
-        val existing = itemQueries.findByTarget(
-            targetType = FavoriteTargetType.TagManga.name,
-            targetId = tagId.value.toLong(),
-            authorId = 0L
-        ).executeAsOneOrNull()
-        upsertCanonicalCover(FavoriteTargetType.TagManga, tagId.value.toLong(), coverUrl, now)
-
-        val itemId = if (existing != null) {
-            itemQueries.updateFavoriteItem(
-                title = tagName,
-                coverUrl = coverUrl ?: existing.coverUrl,
-                lastUpdatedTime = null,
-                forumId = null,
-                forumName = null,
-                authorId = 0L,
-                lastFavoriteStatusUpdateAt = now,
-                id = existing.id
-            )
-            existing.id
-        } else {
-            itemQueries.insertFavoriteItem(
-                targetType = FavoriteTargetType.TagManga.name,
-                targetId = tagId.value.toLong(),
-                title = tagName,
-                coverUrl = coverUrl,
-                lastUpdatedTime = null,
-                forumId = null,
-                forumName = null,
-                authorId = 0L,
-                createdAt = now,
-                lastFavoriteStatusUpdateAt = now
-            )
-            itemQueries.findByTarget(
+        mutateSyncable {
+            val now = currentTimeMillis()
+            val normalizedCollections = collectionIds.distinct()
+            val normalizedCategories = normalizeCategoryIds(categoryIds, normalizedCollections)
+            val existing = itemQueries.findByTarget(
                 targetType = FavoriteTargetType.TagManga.name,
                 targetId = tagId.value.toLong(),
                 authorId = 0L
-            ).executeAsOne().id
-        }
+            ).executeAsOneOrNull()
+            upsertCanonicalCover(FavoriteTargetType.TagManga, tagId.value.toLong(), coverUrl, now)
 
-        mergeCategories(itemId, normalizedCategories)
-        mergeCollections(itemId, normalizedCollections)
+            val itemId = if (existing != null) {
+                val effectiveCoverUrl = coverUrl ?: existing.coverUrl
+                if (existing.title != tagName || existing.coverUrl != effectiveCoverUrl) {
+                    itemQueries.updateFavoriteItem(
+                        title = tagName,
+                        coverUrl = effectiveCoverUrl,
+                        lastUpdatedTime = null,
+                        forumId = null,
+                        forumName = null,
+                        authorId = 0L,
+                        lastFavoriteStatusUpdateAt = now,
+                        id = existing.id
+                    )
+                }
+                existing.id
+            } else {
+                itemQueries.insertFavoriteItem(
+                    targetType = FavoriteTargetType.TagManga.name,
+                    targetId = tagId.value.toLong(),
+                    title = tagName,
+                    coverUrl = coverUrl,
+                    lastUpdatedTime = null,
+                    forumId = null,
+                    forumName = null,
+                    authorId = 0L,
+                    createdAt = now,
+                    lastFavoriteStatusUpdateAt = now
+                )
+                itemQueries.findByTarget(
+                    targetType = FavoriteTargetType.TagManga.name,
+                    targetId = tagId.value.toLong(),
+                    authorId = 0L
+                ).executeAsOne().id
+            }
+            mergeCategories(itemId, normalizedCategories)
+            mergeCollections(itemId, normalizedCollections)
+        }
         notifyFavoriteItemsChanged()
     }
 
@@ -425,15 +461,18 @@ class FavoriteStoreRepositoryImpl(
         categoryIds: List<Long>,
         collectionIds: List<Long>,
     ) {
-        addCatalogLikeFavorite(
-            targetType = FavoriteTargetType.RssSearch,
-            targetId = subscriptionId,
-            title = title,
-            coverUrl = coverUrl,
-            lastUpdatedTime = lastUpdatedTime,
-            categoryIds = categoryIds,
-            collectionIds = collectionIds,
-        )
+        ensureDefaults()
+        mutateSyncable {
+            addCatalogLikeFavorite(
+                targetType = FavoriteTargetType.RssSearch,
+                targetId = subscriptionId,
+                title = title,
+                coverUrl = coverUrl,
+                lastUpdatedTime = lastUpdatedTime,
+                categoryIds = categoryIds,
+                collectionIds = collectionIds,
+            )
+        }
         notifyFavoriteItemsChanged()
     }
 
@@ -483,11 +522,10 @@ class FavoriteStoreRepositoryImpl(
         val normalizedCollections = collectionIds.distinct().toSet()
         val now = currentTimeMillis()
 
-        db.transaction {
+        mutateSyncable {
             replaceItemLocations(itemId, normalizedCategories, normalizedCollections, now)
+            cleanupOrphanItems(listOf(itemId))
         }
-
-        cleanupOrphanItems(listOf(itemId))
     }
 
     override suspend fun setItemsLocations(
@@ -500,12 +538,12 @@ class FavoriteStoreRepositoryImpl(
         val normalizedCollections = collectionIds.distinct().toSet()
         val now = currentTimeMillis()
 
-        db.transaction {
+        mutateSyncable {
             itemIds.forEach { itemId ->
                 replaceItemLocations(itemId, normalizedCategories, normalizedCollections, now)
             }
+            cleanupOrphanItems(itemIds.toList())
         }
-        cleanupOrphanItems(itemIds.toList())
     }
 
     override suspend fun addItemsToLocations(
@@ -518,7 +556,7 @@ class FavoriteStoreRepositoryImpl(
         val normalizedCollections = collectionIds.distinct().toSet()
         val now = currentTimeMillis()
 
-        db.transaction {
+        mutateSyncable {
             itemIds.forEach { itemId ->
                 appendItemLocations(itemId, normalizedCategories, normalizedCollections, now)
             }
@@ -536,33 +574,33 @@ class FavoriteStoreRepositoryImpl(
     override suspend fun removeItemsFromCategory(itemIds: Set<Long>, categoryId: Long) {
         if (itemIds.isEmpty()) return
         val now = currentTimeMillis()
-        db.transaction {
+        mutateSyncable {
             itemIds.forEach { itemId ->
                 itemCategoryCrossRefQueries.deleteByItemIdAndCategoryId(itemId, categoryId)
                 itemQueries.markFavoriteStatusUpdated(now, itemId)
             }
+            cleanupOrphanItems(itemIds.toList())
         }
-        cleanupOrphanItems(itemIds.toList())
     }
 
     override suspend fun removeItemsFromCollections(itemIds: Set<Long>, collectionIds: Set<Long>) {
         if (itemIds.isEmpty() || collectionIds.isEmpty()) return
         val now = currentTimeMillis()
-        db.transaction {
+        mutateSyncable {
             itemIds.forEach { itemId ->
                 collectionIds.forEach { collectionId ->
                     crossRefQueries.deleteByItemIdAndCollectionId(itemId, collectionId)
                 }
                 itemQueries.markFavoriteStatusUpdated(now, itemId)
             }
+            cleanupOrphanItems(itemIds.toList())
         }
-        cleanupOrphanItems(itemIds.toList())
     }
 
     override suspend fun deleteFavoriteItems(itemIds: Set<Long>) {
         if (itemIds.isEmpty()) return
 
-        db.transaction {
+        mutateSyncable {
             itemIds.forEach { itemId ->
                 itemCategoryCrossRefQueries.deleteByItemId(itemId)
                 crossRefQueries.deleteByItemId(itemId)
@@ -576,7 +614,7 @@ class FavoriteStoreRepositoryImpl(
         favoriteItemRevisionState.update { it + 1L }
     }
 
-    private suspend fun addThreadFavorite(
+    private fun addThreadFavorite(
         targetType: FavoriteTargetType,
         tid: ThreadId,
         title: String,
@@ -588,7 +626,6 @@ class FavoriteStoreRepositoryImpl(
         categoryIds: List<Long>,
         collectionIds: List<Long>
     ) {
-        ensureDefaults()
         val now = currentTimeMillis()
         val normalizedCollections = collectionIds.distinct()
         val normalizedCategories = normalizeCategoryIds(categoryIds, normalizedCollections)
@@ -603,16 +640,25 @@ class FavoriteStoreRepositoryImpl(
         upsertCanonicalCover(targetType, tid.value.toLong(), effectiveCoverUrl, now)
 
         val itemId = if (existing != null) {
-            itemQueries.updateFavoriteItem(
-                title = title,
-                coverUrl = effectiveCoverUrl,
-                lastUpdatedTime = effectiveLastUpdatedTime,
-                forumId = forumId?.value?.toLong(),
-                forumName = forumName,
-                authorId = storedAuthorId,
-                lastFavoriteStatusUpdateAt = now,
-                id = existing.id
-            )
+            if (
+                existing.title != title ||
+                existing.coverUrl != effectiveCoverUrl ||
+                existing.lastUpdatedTime != effectiveLastUpdatedTime ||
+                existing.forumId != forumId?.value?.toLong() ||
+                existing.forumName != forumName ||
+                existing.authorId != storedAuthorId
+            ) {
+                itemQueries.updateFavoriteItem(
+                    title = title,
+                    coverUrl = effectiveCoverUrl,
+                    lastUpdatedTime = effectiveLastUpdatedTime,
+                    forumId = forumId?.value?.toLong(),
+                    forumName = forumName,
+                    authorId = storedAuthorId,
+                    lastFavoriteStatusUpdateAt = now,
+                    id = existing.id
+                )
+            }
             existing.id
         } else {
             itemQueries.insertFavoriteItem(
@@ -638,7 +684,7 @@ class FavoriteStoreRepositoryImpl(
         mergeCollections(itemId, normalizedCollections)
     }
 
-    private suspend fun addCatalogLikeFavorite(
+    private fun addCatalogLikeFavorite(
         targetType: FavoriteTargetType,
         targetId: Long,
         title: String,
@@ -647,7 +693,6 @@ class FavoriteStoreRepositoryImpl(
         categoryIds: List<Long>,
         collectionIds: List<Long>,
     ) {
-        ensureDefaults()
         val now = currentTimeMillis()
         val normalizedCollections = collectionIds.distinct()
         val normalizedCategories = normalizeCategoryIds(categoryIds, normalizedCollections)
@@ -659,16 +704,24 @@ class FavoriteStoreRepositoryImpl(
         upsertCanonicalCover(targetType, targetId, coverUrl, now)
 
         val itemId = if (existing != null) {
-            itemQueries.updateFavoriteItem(
-                title = title,
-                coverUrl = coverUrl ?: existing.coverUrl,
-                lastUpdatedTime = lastUpdatedTime ?: existing.lastUpdatedTime,
-                forumId = null,
-                forumName = null,
-                authorId = 0L,
-                lastFavoriteStatusUpdateAt = now,
-                id = existing.id
-            )
+            val effectiveCoverUrl = coverUrl ?: existing.coverUrl
+            val effectiveLastUpdatedTime = lastUpdatedTime ?: existing.lastUpdatedTime
+            if (
+                existing.title != title ||
+                existing.coverUrl != effectiveCoverUrl ||
+                existing.lastUpdatedTime != effectiveLastUpdatedTime
+            ) {
+                itemQueries.updateFavoriteItem(
+                    title = title,
+                    coverUrl = effectiveCoverUrl,
+                    lastUpdatedTime = effectiveLastUpdatedTime,
+                    forumId = null,
+                    forumName = null,
+                    authorId = 0L,
+                    lastFavoriteStatusUpdateAt = now,
+                    id = existing.id
+                )
+            }
             existing.id
         } else {
             itemQueries.insertFavoriteItem(
@@ -694,13 +747,12 @@ class FavoriteStoreRepositoryImpl(
         mergeCollections(itemId, normalizedCollections)
     }
 
-    private suspend fun normalizeCategoryIds(
+    private fun normalizeCategoryIds(
         categoryIds: List<Long>,
         collectionIds: List<Long>
     ): List<Long> {
         if (categoryIds.isNotEmpty()) return categoryIds.distinct()
         if (collectionIds.isNotEmpty()) return emptyList()
-        ensureDefaults()
         return listOf(categoryQueries.getFirstCategory().executeAsOne().id)
     }
 
@@ -733,31 +785,34 @@ class FavoriteStoreRepositoryImpl(
         val existingCategories = itemCategoryCrossRefQueries.getCategoryIdsByItemId(itemId).executeAsList().toSet()
         val existingCollections = crossRefQueries.getCollectionIdsByItemId(itemId).executeAsList().toSet()
 
-        existingCategories
-            .filterNot(targetCategoryIds::contains)
-            .forEach { categoryId ->
+        val removedCategories = existingCategories.filterNot(targetCategoryIds::contains)
+        removedCategories.forEach { categoryId ->
                 itemCategoryCrossRefQueries.deleteByItemIdAndCategoryId(itemId, categoryId)
             }
 
-        targetCategoryIds
-            .filterNot(existingCategories::contains)
-            .forEach { categoryId ->
+        val addedCategories = targetCategoryIds.filterNot(existingCategories::contains)
+        addedCategories.forEach { categoryId ->
                 itemCategoryCrossRefQueries.insertCrossRef(itemId, categoryId, updatedAt)
             }
 
-        existingCollections
-            .filterNot(targetCollectionIds::contains)
-            .forEach { collectionId ->
+        val removedCollections = existingCollections.filterNot(targetCollectionIds::contains)
+        removedCollections.forEach { collectionId ->
                 crossRefQueries.deleteByItemIdAndCollectionId(itemId, collectionId)
             }
 
-        targetCollectionIds
-            .filterNot(existingCollections::contains)
-            .forEach { collectionId ->
+        val addedCollections = targetCollectionIds.filterNot(existingCollections::contains)
+        addedCollections.forEach { collectionId ->
                 crossRefQueries.insertCrossRef(itemId, collectionId, updatedAt)
             }
 
-        itemQueries.markFavoriteStatusUpdated(updatedAt, itemId)
+        if (
+            removedCategories.isNotEmpty() ||
+            addedCategories.isNotEmpty() ||
+            removedCollections.isNotEmpty() ||
+            addedCollections.isNotEmpty()
+        ) {
+            itemQueries.markFavoriteStatusUpdated(updatedAt, itemId)
+        }
     }
 
     private fun appendItemLocations(
@@ -769,19 +824,24 @@ class FavoriteStoreRepositoryImpl(
         val existingCategories = itemCategoryCrossRefQueries.getCategoryIdsByItemId(itemId).executeAsList().toMutableSet()
         val existingCollections = crossRefQueries.getCollectionIdsByItemId(itemId).executeAsList().toMutableSet()
 
+        var changed = false
         targetCategoryIds.forEach { categoryId ->
             if (existingCategories.add(categoryId)) {
                 itemCategoryCrossRefQueries.insertCrossRef(itemId, categoryId, updatedAt)
+                changed = true
             }
         }
 
         targetCollectionIds.forEach { collectionId ->
             if (existingCollections.add(collectionId)) {
                 crossRefQueries.insertCrossRef(itemId, collectionId, updatedAt)
+                changed = true
             }
         }
 
-        itemQueries.markFavoriteStatusUpdated(updatedAt, itemId)
+        if (changed) {
+            itemQueries.markFavoriteStatusUpdated(updatedAt, itemId)
+        }
     }
 
     private fun cleanupOrphanItems(itemIds: List<Long>) {
@@ -870,6 +930,171 @@ class FavoriteStoreRepositoryImpl(
         collectionQueries.updateCollectionOrder(first.sortOrder, now, second.id)
     }
 
+    @Suppress("UNCHECKED_CAST")
+    private fun <T> mutateSyncable(mutation: () -> T): T {
+        val recorder = mutationRecorder ?: return db.transactionWithResult { mutation() }
+        var completed = false
+        var result: Any? = null
+        recorder.recordCommand {
+            val before = captureSyncProjection()
+            result = mutation()
+            completed = true
+            val after = captureSyncProjection()
+            projectionDiff(before, after)
+        }
+        check(completed) { "Favorite mutation did not complete" }
+        return result as T
+    }
+
+    private fun captureSyncProjection(): Map<ProjectedEntityKey, ProjectedEntity> {
+        val categories = categoryQueries.getAll().executeAsList()
+        val categorySyncIds = categories.mapNotNull { category ->
+            category.syncId?.let { category.id to it }
+        }.toMap()
+        val collections = collectionQueries.getAll().executeAsList()
+        val collectionSyncIds = collections.mapNotNull { collection ->
+            collection.syncId?.let { collection.id to it }
+        }.toMap()
+        val items = itemQueries.getAll().executeAsList()
+        val itemKeys = items.associate { item ->
+            item.id to favoriteItemEntityId(item.targetType, item.targetId, item.authorId)
+        }
+        val result = linkedMapOf<ProjectedEntityKey, ProjectedEntity>()
+
+        categories.forEach { category ->
+            val syncId = category.syncId ?: return@forEach
+            result.putEntity(
+                domain = "favorite.category",
+                entityId = syncId,
+                fields = mapOf(
+                    "name" to category.name,
+                    "sortOrder" to category.sortOrder.toString(),
+                    "createdAt" to category.createdAt.toString(),
+                    "updatedAt" to category.updatedAt.toString(),
+                ),
+            )
+        }
+        collections.forEach { collection ->
+            val syncId = collection.syncId ?: return@forEach
+            val categorySyncId = categorySyncIds[collection.categoryId] ?: return@forEach
+            result.putEntity(
+                domain = "favorite.collection",
+                entityId = syncId,
+                fields = mapOf(
+                    "categorySyncId" to categorySyncId,
+                    "name" to collection.name,
+                    "colorKey" to collection.colorKey,
+                    "sortOrder" to collection.sortOrder.toString(),
+                    "createdAt" to collection.createdAt.toString(),
+                    "updatedAt" to collection.updatedAt.toString(),
+                ),
+            )
+        }
+        items.forEach { item ->
+            result.putEntity(
+                domain = "favorite.item",
+                entityId = favoriteItemEntityId(item.targetType, item.targetId, item.authorId),
+                fields = mapOf(
+                    "targetType" to item.targetType,
+                    "targetId" to item.targetId.toString(),
+                    "authorId" to item.authorId.toString(),
+                    "title" to item.title,
+                    "coverUrl" to item.coverUrl,
+                    "lastUpdatedTime" to item.lastUpdatedTime?.toString(),
+                    "forumId" to item.forumId?.toString(),
+                    "forumName" to item.forumName,
+                    "createdAt" to item.createdAt.toString(),
+                    "lastFavoriteStatusUpdateAt" to item.lastFavoriteStatusUpdateAt.toString(),
+                ),
+            )
+        }
+        itemCategoryCrossRefQueries.getAll().executeAsList().forEach { relation ->
+            val itemKey = itemKeys[relation.itemId] ?: return@forEach
+            val categorySyncId = categorySyncIds[relation.categoryId] ?: return@forEach
+            result.putEntity(
+                domain = "favorite.item-category",
+                entityId = "$itemKey|$categorySyncId",
+                fields = itemIdentityFields(itemKey) + mapOf(
+                    "categorySyncId" to categorySyncId,
+                    "createdAt" to relation.createdAt.toString(),
+                ),
+                relation = true,
+            )
+        }
+        crossRefQueries.getAll().executeAsList().forEach { relation ->
+            val itemKey = itemKeys[relation.itemId] ?: return@forEach
+            val collectionSyncId = collectionSyncIds[relation.collectionId] ?: return@forEach
+            result.putEntity(
+                domain = "favorite.item-collection",
+                entityId = "$itemKey|$collectionSyncId",
+                fields = itemIdentityFields(itemKey) + mapOf(
+                    "collectionSyncId" to collectionSyncId,
+                    "createdAt" to relation.createdAt.toString(),
+                ),
+                relation = true,
+            )
+        }
+        return result
+    }
+
+    private fun projectionDiff(
+        before: Map<ProjectedEntityKey, ProjectedEntity>,
+        after: Map<ProjectedEntityKey, ProjectedEntity>,
+    ): List<LocalSyncOperationDraft> {
+        val keys = (before.keys + after.keys).sortedWith(
+            compareBy<ProjectedEntityKey>({ FAVORITE_DOMAIN_ORDER[it.domain] ?: Int.MAX_VALUE }, { it.entityId }),
+        )
+        return keys.mapNotNull { key ->
+            val old = before[key]
+            val new = after[key]
+            when {
+                old == null && new != null -> new.toDraft(
+                    if (new.relation) SyncOperationKind.RelationAdd else SyncOperationKind.Put,
+                )
+                old != null && new == null -> old.toDraft(
+                    if (old.relation) SyncOperationKind.RelationRemove else SyncOperationKind.Delete,
+                )
+                old != null && new != null && old.fields != new.fields -> {
+                    if (new.relation) null else {
+                        val changedFields = new.fields.filter { (field, value) -> old.fields[field] != value }
+                        new.copy(fields = changedFields).toDraft(SyncOperationKind.Patch)
+                    }
+                }
+                else -> null
+            }
+        }
+    }
+
+    private fun MutableMap<ProjectedEntityKey, ProjectedEntity>.putEntity(
+        domain: String,
+        entityId: String,
+        fields: Map<String, String?>,
+        relation: Boolean = false,
+    ) {
+        val key = ProjectedEntityKey(domain, entityId)
+        put(key, ProjectedEntity(key, fields, relation))
+    }
+
+    private fun ProjectedEntity.toDraft(kind: SyncOperationKind) = LocalSyncOperationDraft(
+        domainId = SyncDomainId(key.domain),
+        entityId = SyncEntityId(key.entityId),
+        kind = kind,
+        fields = fields,
+    )
+
+    private fun favoriteItemEntityId(targetType: String, targetId: Long, authorId: Long): String =
+        "$targetType|$targetId|$authorId"
+
+    private fun itemIdentityFields(itemKey: String): Map<String, String?> {
+        val parts = itemKey.split('|')
+        require(parts.size == 3) { "Invalid favorite item key" }
+        return mapOf(
+            "targetType" to parts[0],
+            "targetId" to parts[1],
+            "authorId" to parts[2],
+        )
+    }
+
     private fun LocalFavoriteCategory.toModel(): FavoriteCategory {
         return FavoriteCategory(
             id = id,
@@ -905,6 +1130,27 @@ class FavoriteStoreRepositoryImpl(
             authorId = authorId.takeIf { it != 0L }?.toInt()?.let(::UserId),
             createdAt = createdAt,
             lastFavoriteStatusUpdateAt = lastFavoriteStatusUpdateAt
+        )
+    }
+
+    private data class ProjectedEntityKey(
+        val domain: String,
+        val entityId: String,
+    )
+
+    private data class ProjectedEntity(
+        val key: ProjectedEntityKey,
+        val fields: Map<String, String?>,
+        val relation: Boolean,
+    )
+
+    private companion object {
+        val FAVORITE_DOMAIN_ORDER = mapOf(
+            "favorite.category" to 10,
+            "favorite.collection" to 20,
+            "favorite.item" to 30,
+            "favorite.item-category" to 40,
+            "favorite.item-collection" to 50,
         )
     }
 }

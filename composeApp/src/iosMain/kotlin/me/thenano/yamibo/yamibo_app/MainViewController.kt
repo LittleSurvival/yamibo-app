@@ -23,6 +23,7 @@ import me.thenano.yamibo.yamibo_app.profile.settings.access.IOSBackgroundAccessR
 import me.thenano.yamibo.yamibo_app.profile.settings.backup.IOSBackupScheduler
 import me.thenano.yamibo.yamibo_app.repository.*
 import me.thenano.yamibo.yamibo_app.repository.backup.BackupRepositoryImpl
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncService
 import me.thenano.yamibo.yamibo_app.repository.chineseconversion.createChineseConversionRepository
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadImageFetcher
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadRepositoryImpl
@@ -49,6 +50,10 @@ import me.thenano.yamibo.yamibo_app.store.settings.IOSSettingsStore
 import me.thenano.yamibo.yamibo_app.update.IOSAppUpdatePlatform
 import me.thenano.yamibo.yamibo_app.task.AppTaskManager
 import me.thenano.yamibo.yamibo_app.confirmation.AppConfirmationController
+import me.thenano.yamibo.yamibo_app.appsync.IOSAppSyncBackgroundScheduler
+import me.thenano.yamibo.yamibo_app.appsync.AppSyncLifecycleController
+import me.thenano.yamibo.yamibo_app.appsync.attachIOSAppSyncLifecycle
+import me.thenano.yamibo.yamibo_app.appsync.detachIOSAppSyncLifecycle
 
 fun MainViewController() = ComposeUIViewController {
     /** Navigator Logic */
@@ -73,11 +78,33 @@ fun MainViewController() = ComposeUIViewController {
     val cookieStore = remember { IOSCookieStore() }
     val userStore = remember { IOSUserStore() }
     val forumFavoriteStore = remember { IOSForumFavoriteStore() }
-    val settingsStore = remember { IOSSettingsStore() }
+    val rawSettingsStore = remember { IOSSettingsStore() }
+
+    /** Repository Logic */
+    val yamiboClient = remember { YamiboClient() }
+    val authRepository = remember { IOSAuthRepository(cookieStore, userStore, yamiboClient, forumFavoriteStore) }
+
+    val dbFactory = remember { DatabaseFactory() }
+    val appDatabase = remember { Database(dbFactory.createDriver()) }
+    val appSyncService = remember {
+        AppSyncService(
+            db = appDatabase,
+            settingsStore = rawSettingsStore,
+            authRepository = authRepository,
+        )
+    }
+    val settingsStore = remember {
+        appSyncService.operationRecordingSettingsStore(appDatabase, rawSettingsStore)
+    }
     val appSettingsRepository = remember { AppSettingsRepository(settingsStore) }
     val novelReaderSettingsRepository = remember { NovelReaderSettingsRepository(settingsStore) }
     val mangaReaderSettingsRepository = remember { MangaReaderSettingsRepository(settingsStore) }
     val imageReaderModeOverrideRepository = remember { SettingsImageReaderModeOverrideRepository(settingsStore) }
+    remember(appSyncService, appSettingsRepository, novelReaderSettingsRepository, mangaReaderSettingsRepository) {
+        appSyncService.registerSyncableSettings(
+            listOf(appSettingsRepository, novelReaderSettingsRepository, mangaReaderSettingsRepository),
+        )
+    }
     val fontRepository = remember {
         DefaultFontRepository(
             settingsStore = settingsStore,
@@ -86,12 +113,6 @@ fun MainViewController() = ComposeUIViewController {
             platform = IOSFontPlatform(),
         )
     }
-
-    /** Repository Logic */
-    val yamiboClient = remember { YamiboClient() }
-    val authRepository = remember { IOSAuthRepository(cookieStore, userStore, yamiboClient, forumFavoriteStore) }
-    
-    val dbFactory = remember { DatabaseFactory() }
     val diskCacheFactory = remember { 
         val paths = platform.Foundation.NSSearchPathForDirectoriesInDomains(
             platform.Foundation.NSCachesDirectory, 
@@ -110,11 +131,11 @@ fun MainViewController() = ComposeUIViewController {
     val blogRepository = remember { BlogRepositoryImpl(cookieStore, yamiboClient, diskCacheFactory) }
     val chineseConversionRepository = remember { createChineseConversionRepository() }
     val tagRepository = remember { IOSTagRepository(cookieStore, yamiboClient, diskCacheFactory) }
-    val favoriteRepository = remember { IOSLocalFavoriteRepository(dbFactory) }
-    val detailNoteRepository = remember { IOSDetailNoteRepository(dbFactory) }
-    val bookMarkRepository = remember { IOSLocalBookMarkRepository(dbFactory) }
+    val favoriteRepository = remember { appSyncService.favoriteStoreRepository(appDatabase) }
+    val detailNoteRepository = remember { appSyncService.detailNoteRepository(appDatabase) }
+    val bookMarkRepository = remember { appSyncService.bookMarkRepository(appDatabase) }
     val remoteFavoriteRepository = remember { IOSFavoriteRepository(cookieStore, yamiboClient) }
-    val favoriteSyncDatabase = remember { Database(dbFactory.createDriver()) }
+    val favoriteSyncDatabase = appDatabase
     val favoriteSyncRepository = remember {
         FavoriteSyncRepositoryImpl(
             db = favoriteSyncDatabase,
@@ -125,7 +146,7 @@ fun MainViewController() = ComposeUIViewController {
         )
     }
     val rssSearchSubscriptionRepository = remember {
-        RssSearchSubscriptionRepositoryImpl(
+        appSyncService.rssSearchSubscriptionRepository(
             db = favoriteSyncDatabase,
             authRepository = authRepository,
             forumRepository = forumRepository,
@@ -138,7 +159,7 @@ fun MainViewController() = ComposeUIViewController {
         )
     }
     val favoriteUpdateRepository = remember {
-        FavoriteUpdateRepositoryImpl(
+        appSyncService.favoriteUpdateRepository(
             db = favoriteSyncDatabase,
             localFavoriteRepository = favoriteRepository,
             threadRepository = threadRepository,
@@ -160,6 +181,9 @@ fun MainViewController() = ComposeUIViewController {
             appVersionCode = AppVersion.VersionCode.toInt(),
         )
     }
+    remember(appSyncService, backupRepository) {
+        appSyncService.registerLocalSnapshotSource(backupRepository)
+    }
     val downloadRepository = remember {
         DownloadRepositoryImpl(
             threadRepository = threadRepository,
@@ -170,6 +194,14 @@ fun MainViewController() = ComposeUIViewController {
         )
     }
     val backupScheduler = remember { IOSBackupScheduler() }
+    val appSyncBackgroundScheduler = remember { IOSAppSyncBackgroundScheduler() }
+    val appSyncLifecycleController = remember(appSyncService, appSyncBackgroundScheduler) {
+        AppSyncLifecycleController(appSyncService, appSyncBackgroundScheduler)
+    }
+    DisposableEffect(appSyncLifecycleController) {
+        attachIOSAppSyncLifecycle(appSyncLifecycleController)
+        onDispose { detachIOSAppSyncLifecycle(appSyncLifecycleController) }
+    }
     androidx.compose.runtime.LaunchedEffect(backupRepository) {
         diskCacheFactory.backupStorageUsageProvider = { backupRepository.getBackupStorageBytes() }
     }
@@ -178,7 +210,9 @@ fun MainViewController() = ComposeUIViewController {
     val inAppLinkNavigationRepository = remember {
         DefaultInAppLinkNavigationRepository(threadRepository, novelCacheRepository)
     }
-    val readHistoryRepository = remember { IOSReadHistoryRepository(dbFactory) }
+    val readHistoryRepository = remember {
+        appSyncService.readHistoryRepository(IOSReadHistoryRepository(appDatabase))
+    }
     val contentCoverRepository = remember {
         ContentCoverRepositoryImpl(Database(dbFactory.createDriver()))
     }
@@ -206,6 +240,8 @@ fun MainViewController() = ComposeUIViewController {
         LocalAppTaskManager provides appTaskManager,
         LocalNavigator provides navigator,
         LocalAuthRepository provides authRepository,
+        LocalAppSyncService provides appSyncService,
+        LocalAppSyncBackgroundScheduler provides appSyncBackgroundScheduler,
         LocalAppUpdateRepository provides appUpdateRepository,
         LocalForumRepository provides forumRepository,
         LocalThreadRepository provides threadRepository,

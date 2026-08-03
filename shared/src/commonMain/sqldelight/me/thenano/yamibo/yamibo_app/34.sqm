@@ -1,0 +1,21 @@
+ALTER TABLE FavoriteUpdateEvent ADD COLUMN syncId TEXT NOT NULL DEFAULT '';
+ALTER TABLE FavoriteUpdateEvent ADD COLUMN sourceFingerprint TEXT NOT NULL DEFAULT '';
+ALTER TABLE FavoriteUpdateEvent ADD COLUMN sourceDiscriminator TEXT NOT NULL DEFAULT '';
+
+CREATE UNIQUE INDEX FavoriteUpdateEvent_syncId_unique
+ON FavoriteUpdateEvent(syncId)
+WHERE syncId <> '';
+
+CREATE TABLE FavoriteUpdateFidChoice (
+    fid INTEGER NOT NULL PRIMARY KEY,
+    enabled INTEGER NOT NULL,
+    winnerOperationId TEXT,
+    updatedAt INTEGER NOT NULL
+);
+
+CREATE TABLE FavoriteUpdateCategoryChoice (
+    categorySyncId TEXT NOT NULL PRIMARY KEY,
+    enabled INTEGER NOT NULL,
+    winnerOperationId TEXT,
+    updatedAt INTEGER NOT NULL
+);

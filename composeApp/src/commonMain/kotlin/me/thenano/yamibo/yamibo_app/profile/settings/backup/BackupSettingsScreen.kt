@@ -81,7 +81,7 @@ internal fun BackupSettingsScreen() {
     Scaffold(
         topBar = {
             YamiboTopBar(
-                title = i18n("設定與收藏備份"),
+                title = i18n("本地資料備份"),
                 titleFontSize = 18,
                 onBack = { navigator.pop() },
             )
@@ -101,6 +101,11 @@ internal fun BackupSettingsScreen() {
                 storageBytes = storageBytes,
                 backupCount = backupFiles.size,
                 onSelectFolder = fileActions.selectFolder,
+            )
+            Text(
+                text = i18n("備份範圍包含收藏、設定、筆記、書籤、歷史進度與更新紀錄。"),
+                fontSize = 13.sp,
+                color = colors.textDark.copy(alpha = 0.68f),
             )
 
             BackupSettingCard(
@@ -135,9 +140,7 @@ internal fun BackupSettingsScreen() {
                     repository.restoreBackup(uri, mode)
                         .onSuccess {
                             refresh()
-                            feedbackController.post(
-                                i18n("還原完成：收藏 {}，設定 {}，閱讀紀錄 {}", it.favorites, it.settings, it.readingHistory)
-                            )
+                            feedbackController.post(restoreSummaryText(it))
                         }
                         .onFailure { error ->
                             Logger.e("BackupSettingsScreen", "Failed to restore backup", error)
@@ -169,6 +172,21 @@ internal fun BackupSettingsScreen() {
                 }
             },
         )
+    }
+}
+
+internal fun restoreSummaryText(summary: BackupRepository.RestoreSummary): String {
+    val base = i18n(
+        "還原完成：收藏 {}，設定 {}，歷史進度 {}，更新紀錄 {}",
+        summary.favorites,
+        summary.settings,
+        summary.readingHistory,
+        summary.updateRecords,
+    )
+    return if (summary.skippedRecords > 0) {
+        "$base；${i18n("略過無法對應的輔助紀錄 {}", summary.skippedRecords)}"
+    } else {
+        base
     }
 }
 

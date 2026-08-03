@@ -311,4 +311,14 @@ interface ReadHistoryRepository {
     suspend fun getRssCatalogThreadHistoryPosition(subscriptionId: Long): RssCatalogReadingHistory?
 
     suspend fun deleteRssCatalogThreadHistory(subscriptionId: Long)
+
+    /** Complete backing-table snapshots used to build atomic AppSync delete batches. */
+    suspend fun getAllImageHistoryForSync(): List<ImageReadingHistory> = emptyList()
+    suspend fun getAllTagMangaHistoryForSync(): List<TagMangaReadingHistory> = emptyList()
+    suspend fun getAllTagCatalogHistoryForSync(): List<TagCatalogReadingHistory> = emptyList()
+    suspend fun getAllRssSearchHistoryForSync(): List<RssSearchReadingHistory> = emptyList()
+    suspend fun getAllRssCatalogHistoryForSync(): List<RssCatalogReadingHistory> = emptyList()
+
+    /** Resolves a device-local RSS row id to the subscription's cloud identity. */
+    suspend fun getRssSubscriptionSyncId(subscriptionId: Long): String? = null
 }

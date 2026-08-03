@@ -1,0 +1,12 @@
+CREATE TABLE AppSyncRemoteBlog (
+    remoteKey TEXT NOT NULL PRIMARY KEY,
+    kind TEXT NOT NULL,
+    blogId INTEGER NOT NULL,
+    classId INTEGER,
+    fingerprint TEXT,
+    validatedAtEpochMillis INTEGER NOT NULL,
+    contentUpdatedAtEpochMillis INTEGER
+);
+
+CREATE INDEX AppSyncRemoteBlogKindIndex
+ON AppSyncRemoteBlog(kind);

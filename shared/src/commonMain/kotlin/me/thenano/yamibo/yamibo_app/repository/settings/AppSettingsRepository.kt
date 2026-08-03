@@ -3,6 +3,7 @@ package me.thenano.yamibo.yamibo_app.repository.settings
 import me.thenano.yamibo.yamibo_app.repository.scheme.YamiboColorScheme
 import me.thenano.yamibo.yamibo_app.repository.settings.core.SettingsRegistry
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
+import me.thenano.yamibo.yamibo_app.util.time.FixedScheduleInterval
 
 enum class AppThemeMode(val label: String) {
     SYSTEM("system"),
@@ -64,32 +65,54 @@ enum class FavoriteSortMode(val label: String) {
     LAST_READ("last_read"),
 }
 
-enum class FavoriteUpdateInterval(val label: String, val hours: Long?, val smart: Boolean = false) {
+enum class FavoriteUpdateInterval(
+    val label: String,
+    val fixedInterval: FixedScheduleInterval?,
+    val smart: Boolean = false,
+) {
     MANUAL("manual", null),
-    HOURS_6("6h", 6L),
-    HOURS_12("12h", 12L),
-    HOURS_24("24h", 24L),
-    DAYS_3("3d", 72L),
-    DAYS_7("7d", 168L),
+    HOURS_6("6h", FixedScheduleInterval.Hours6),
+    HOURS_12("12h", FixedScheduleInterval.Hours12),
+    HOURS_24("24h", FixedScheduleInterval.Hours24),
+    DAYS_3("3d", FixedScheduleInterval.Days3),
+    DAYS_7("7d", FixedScheduleInterval.Days7),
     SMART("smart_todo", null, smart = true),
+    ;
+
+    val hours: Long?
+        get() = fixedInterval?.duration?.inWholeHours
 }
 
-enum class AppUpdateLaunchCheckThreshold(val label: String, val hours: Long?) {
+enum class AppUpdateLaunchCheckThreshold(
+    val label: String,
+    val fixedInterval: FixedScheduleInterval?,
+) {
     MANUAL("manual", null),
-    HOURS_6("6h", 6L),
-    HOURS_12("12h", 12L),
-    HOURS_24("24h", 24L),
-    DAYS_3("3d", 72L),
-    DAYS_7("7d", 168L),
+    HOURS_6("6h", FixedScheduleInterval.Hours6),
+    HOURS_12("12h", FixedScheduleInterval.Hours12),
+    HOURS_24("24h", FixedScheduleInterval.Hours24),
+    DAYS_3("3d", FixedScheduleInterval.Days3),
+    DAYS_7("7d", FixedScheduleInterval.Days7),
+    ;
+
+    val hours: Long?
+        get() = fixedInterval?.duration?.inWholeHours
 }
 
-enum class BackupInterval(val label: String, val hours: Long?) {
-    HOURS_6("6h", 6L),
-    HOURS_12("12h", 12L),
-    DAYS_1("1d", 24L),
-    DAYS_3("3d", 72L),
-    WEEK_1("1week", 168L),
+enum class BackupInterval(
+    val label: String,
+    val fixedInterval: FixedScheduleInterval?,
+) {
+    HOURS_6("6h", FixedScheduleInterval.Hours6),
+    HOURS_12("12h", FixedScheduleInterval.Hours12),
+    DAYS_1("1d", FixedScheduleInterval.Days1),
+    DAYS_3("3d", FixedScheduleInterval.Days3),
+    WEEK_1("1week", FixedScheduleInterval.Week1),
     NEVER("never", null),
+    ;
+
+    val hours: Long?
+        get() = fixedInterval?.duration?.inWholeHours
 }
 
 enum class SignInMode(val label: String) {

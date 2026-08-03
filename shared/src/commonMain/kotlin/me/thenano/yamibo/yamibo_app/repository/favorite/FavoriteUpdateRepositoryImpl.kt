@@ -16,24 +16,34 @@ import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.repository.*
 import me.thenano.yamibo.yamibo_app.repository.FavoriteUpdateRepository.*
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncMutationRecorder
+import me.thenano.yamibo.yamibo_app.repository.appsync.backfillFavoriteUpdateSyncState
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDomainId
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncEntityId
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationKind
+import me.thenano.yamibo.yamibo_app.repository.backup.favoriteUpdateEventIdentity
+import me.thenano.yamibo.yamibo_app.store.appsync.LocalSyncOperationDraft
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
-import me.thenano.yamibo.yamiboapp.*
+import me.thenano.yamibo.yamibo_app.*
 import kotlin.math.max
 import kotlin.random.Random
 import kotlin.time.Duration.Companion.milliseconds
 
-class FavoriteUpdateRepositoryImpl(
+class FavoriteUpdateRepositoryImpl internal constructor(
     private val db: Database,
     private val localFavoriteRepository: FavoriteStoreRepository,
     private val threadRepository: ThreadRepository,
     private val tagRepository: TagRepository,
     private val rssSearchSubscriptionRepository: RssSearchSubscriptionRepository,
+    private val mutationRecorder: AppSyncMutationRecorder? = null,
 ) : FavoriteUpdateRepository {
     private val targetQueries = db.favoriteUpdateTrackedTargetQueries
     private val eventQueries = db.favoriteUpdateEventQueries
     private val runQueries = db.favoriteUpdateRunQueries
     private val filterQueries = db.favoriteUpdateFidFilterQueries
     private val categoryFilterQueries = db.favoriteUpdateCategoryFilterQueries
+    private val fidChoiceQueries = db.favoriteUpdateFidChoiceQueries
+    private val categoryChoiceQueries = db.favoriteUpdateCategoryChoiceQueries
     private val itemQueries = db.localFavoriteItemQueries
     private val rssResultQueries = db.rssSearchSubscriptionResultQueries
     private val interruptRequestedRunIds = linkedSetOf<String>()
@@ -42,6 +52,7 @@ class FavoriteUpdateRepositoryImpl(
     override val state: StateFlow<RunState> = stateFlow.asStateFlow()
 
     init {
+        backfillFavoriteUpdateSyncState(db)
         stateFlow.value = runQueries.getLatestRecoverable()
             .executeAsOneOrNull()
             ?.toSnapshot()
@@ -258,32 +269,58 @@ class FavoriteUpdateRepositoryImpl(
     }
 
     override suspend fun markEventRead(eventId: Long) {
-        eventQueries.markRead(currentTimeMillis(), eventId)
+        val event = eventQueries.getById(eventId).executeAsOneOrNull() ?: return
+        val now = currentTimeMillis()
+        recordEventPatch(event.syncId, "readAt", now) {
+            eventQueries.markRead(now, eventId)
+        }
     }
 
     override suspend fun dismissEvent(eventId: Long) {
-        eventQueries.dismiss(currentTimeMillis(), eventId)
+        val event = eventQueries.getById(eventId).executeAsOneOrNull() ?: return
+        val now = currentTimeMillis()
+        recordEventPatch(event.syncId, "dismissedAt", now) {
+            eventQueries.dismiss(now, eventId)
+        }
     }
 
     override suspend fun dismissEvents(eventIds: List<Long>) {
         if (eventIds.isEmpty()) return
-        db.transaction {
-            val now = currentTimeMillis()
-            eventIds.forEach { id ->
-                eventQueries.dismiss(now, id)
-            }
+        val events = eventIds.distinct().mapNotNull {
+            eventQueries.getById(it).executeAsOneOrNull()
+        }
+        val now = currentTimeMillis()
+        val drafts = events.map {
+            LocalSyncOperationDraft(
+                domainId = SyncDomainId(EVENT_DOMAIN),
+                entityId = SyncEntityId(it.syncId),
+                kind = SyncOperationKind.Patch,
+                fields = mapOf("dismissedAt" to now.toString()),
+            )
+        }
+        recordBatch(drafts) {
+            events.forEach { eventQueries.dismiss(now, it.id) }
         }
     }
 
     override suspend fun dismissAllEvents() {
-        eventQueries.dismissAll(currentTimeMillis())
+        dismissEvents(eventQueries.getActive().executeAsList().map { it.id })
     }
 
     override suspend fun getFidFilters(): List<FidFilter> =
         refreshAndGetFidFilters()
 
     override suspend fun setFidEnabled(fid: Int, enabled: Boolean) {
-        filterQueries.setEnabled(if (enabled) 1L else 0L, currentTimeMillis(), fid.toLong())
+        val now = currentTimeMillis()
+        val value = if (enabled) 1L else 0L
+        recordFilterChoice(
+            domain = FID_FILTER_DOMAIN,
+            entityId = "fid:$fid",
+            fields = mapOf("fid" to fid.toString(), "enabled" to enabled.toString()),
+        ) { operationId ->
+            fidChoiceQueries.upsertChoice(fid.toLong(), value, operationId, now)
+            filterQueries.setEnabled(value, now, fid.toLong())
+        }
     }
 
     override suspend fun getCategoryFilters(): List<CategoryFilter> {
@@ -292,7 +329,19 @@ class FavoriteUpdateRepositoryImpl(
     }
 
     override suspend fun setCategoryEnabled(categoryId: Long, enabled: Boolean) {
-        categoryFilterQueries.setEnabled(if (enabled) 1L else 0L, currentTimeMillis(), categoryId)
+        val category = db.localFavoriteCategoryQueries.getById(categoryId).executeAsOneOrNull()
+            ?: return
+        val syncId = category.syncId ?: return
+        val now = currentTimeMillis()
+        val value = if (enabled) 1L else 0L
+        recordFilterChoice(
+            domain = CATEGORY_FILTER_DOMAIN,
+            entityId = "category:$syncId",
+            fields = mapOf("categorySyncId" to syncId, "enabled" to enabled.toString()),
+        ) { operationId ->
+            categoryChoiceQueries.upsertChoice(syncId, value, operationId, now)
+            categoryFilterQueries.setEnabled(value, now, categoryId)
+        }
     }
 
     override suspend fun getScopeTargets(): List<ScopeTarget> =
@@ -369,6 +418,7 @@ class FavoriteUpdateRepositoryImpl(
                     detailIds = listOf(latestPid),
                     ambiguous = false,
                     detectedAt = now,
+                    sourceDiscriminator = threadSourceDiscriminator(latestPid, latestUpdateMillis),
                 )
                 1
             } else {
@@ -424,6 +474,9 @@ class FavoriteUpdateRepositoryImpl(
                 detailIds = detailIds,
                 ambiguous = ambiguous,
                 detectedAt = now,
+                sourceDiscriminator = latestPid?.let {
+                    threadSourceDiscriminator(it, latestUpdateMillis)
+                },
             )
             1
         } else {
@@ -575,6 +628,9 @@ class FavoriteUpdateRepositoryImpl(
             emptyList()
         }
         val ambiguous = pagesToScan.size > MAX_TAG_SCAN_PAGES
+        val fingerprints = scannedPages.map { (page, tagPage) ->
+            "$page:${tagPage.threadSummaries.map { it.tid.value }.joinToString("|")}"
+        }.joinToString(";")
         val detectedCount = when {
             !baselineReady -> 0
             newThreads.isNotEmpty() -> {
@@ -598,6 +654,7 @@ class FavoriteUpdateRepositoryImpl(
                     detailIds = emptyList(),
                     ambiguous = true,
                     detectedAt = now,
+                    sourceDiscriminator = "scan:$fingerprints",
                 )
                 1
             }
@@ -606,9 +663,6 @@ class FavoriteUpdateRepositoryImpl(
 
         knownIds += allScannedThreads.map { it.tid.value.toLong() }
         val firstThreadId = firstPageIds.firstOrNull() ?: existing?.knownFirstThreadId
-        val fingerprints = scannedPages.map { (page, tagPage) ->
-            "$page:${tagPage.threadSummaries.map { it.tid.value }.joinToString("|")}"
-        }.joinToString(";")
         targetQueries.upsert(
             targetType = item.targetType.name,
             targetId = item.targetId,
@@ -690,24 +744,66 @@ class FavoriteUpdateRepositoryImpl(
         detailIds: List<Long>,
         ambiguous: Boolean,
         detectedAt: Long,
+        sourceDiscriminator: String? = null,
     ) {
-        eventQueries.insertEvent(
+        val authorId = item.authorId?.value?.toLong() ?: 0L
+        val identity = favoriteUpdateEventIdentity(
             targetType = item.targetType.name,
             targetId = item.targetId,
-            authorId = item.authorId?.value?.toLong() ?: 0L,
-            fid = item.forumId?.value?.toLong(),
-            forumName = item.forumName,
-            title = item.title,
-            latestPostTitle = latestPostTitle,
+            authorId = authorId.takeIf { it != 0L },
             mode = mode.name,
-            summary = summary,
-            detailIds = detailIds.joinToString(","),
-            coverUrl = item.coverUrl,
+            detailIds = detailIds,
+            ambiguous = ambiguous,
             detectedAt = detectedAt,
-            readAt = null,
-            dismissedAt = null,
-            ambiguous = if (ambiguous) 1L else 0L,
+            summary = summary,
+            title = item.title,
+            sourceDiscriminator = sourceDiscriminator,
         )
+        if (eventQueries.getBySyncId(identity.syncId).executeAsOneOrNull() != null) return
+        val fields = mapOf(
+            "targetType" to item.targetType.name,
+            "targetId" to item.targetId.toString(),
+            "authorId" to authorId.toString(),
+            "fid" to item.forumId?.value?.toString(),
+            "forumName" to item.forumName,
+            "title" to item.title,
+            "latestPostTitle" to latestPostTitle,
+            "mode" to mode.name,
+            "summary" to summary,
+            "detailIds" to detailIds.distinct().sorted().joinToString(","),
+            "coverUrl" to item.coverUrl,
+            "detectedAt" to detectedAt.toString(),
+            "ambiguous" to ambiguous.toString(),
+            "sourceFingerprint" to identity.sourceFingerprint,
+            "sourceDiscriminator" to identity.sourceDiscriminator,
+        )
+        recordMutation(
+            domain = EVENT_DOMAIN,
+            entityId = identity.syncId,
+            kind = SyncOperationKind.Put,
+            fields = fields,
+        ) {
+            eventQueries.upsertBySyncId(
+                targetType = item.targetType.name,
+                targetId = item.targetId,
+                authorId = authorId,
+                fid = item.forumId?.value?.toLong(),
+                forumName = item.forumName,
+                title = item.title,
+                latestPostTitle = latestPostTitle,
+                mode = mode.name,
+                summary = summary,
+                detailIds = detailIds.distinct().sorted().joinToString(","),
+                coverUrl = item.coverUrl,
+                detectedAt = detectedAt,
+                readAt = null,
+                dismissedAt = null,
+                ambiguous = if (ambiguous) 1L else 0L,
+                syncId = identity.syncId,
+                sourceFingerprint = identity.sourceFingerprint,
+                sourceDiscriminator = identity.sourceDiscriminator,
+            )
+        }
     }
 
     private fun refreshFidFilters(favorites: List<FavoriteStoreRepository.FavoriteItem>) {
@@ -718,12 +814,13 @@ class FavoriteUpdateRepositoryImpl(
             fid to name
         }.groupingBy { it }.eachCount()
         val existing = filterQueries.getAll().executeAsList().associateBy { it.fid.toInt() }
+        val choices = fidChoiceQueries.getAll().executeAsList().associateBy { it.fid.toInt() }
         counts.entries.forEach { (fidAndName, count) ->
             val (fid, name) = fidAndName
             filterQueries.upsertFilter(
                 fid = fid.toLong(),
                 forumName = name,
-                enabled = existing[fid]?.enabled ?: 1L,
+                enabled = choices[fid]?.enabled ?: existing[fid]?.enabled ?: 1L,
                 itemCount = count.toLong(),
                 updatedAt = now,
             )
@@ -752,10 +849,16 @@ class FavoriteUpdateRepositoryImpl(
         val existing = categoryFilterQueries.getAll().executeAsList().associateBy { it.categoryId }
         val activeCategories = localFavoriteRepository.getCategories()
         activeCategories.forEach { category ->
+            val choice = db.localFavoriteCategoryQueries.getById(category.id)
+                .executeAsOneOrNull()
+                ?.syncId
+                ?.let {
+                categoryChoiceQueries.getBySyncId(it).executeAsOneOrNull()
+            }
             categoryFilterQueries.upsertFilter(
                 categoryId = category.id,
                 categoryName = category.name,
-                enabled = existing[category.id]?.enabled ?: 1L,
+                enabled = choice?.enabled ?: existing[category.id]?.enabled ?: 1L,
                 itemCount = (counts[category.id] ?: 0).toLong(),
                 updatedAt = now,
             )
@@ -785,6 +888,69 @@ class FavoriteUpdateRepositoryImpl(
             emptySet()
         } else {
             enabled.map { it.categoryId }.toSet()
+        }
+    }
+
+    private fun recordEventPatch(
+        syncId: String,
+        field: String,
+        value: Long,
+        mutation: () -> Unit,
+    ) {
+        recordMutation(
+            domain = EVENT_DOMAIN,
+            entityId = syncId,
+            kind = SyncOperationKind.Patch,
+            fields = mapOf(field to value.toString()),
+            mutation = mutation,
+        )
+    }
+
+    private fun recordFilterChoice(
+        domain: String,
+        entityId: String,
+        fields: Map<String, String?>,
+        mutation: (String?) -> Unit,
+    ) {
+        val recorder = mutationRecorder
+        if (recorder == null) {
+            mutation(null)
+        } else {
+            recorder.record(
+                domain = domain,
+                entityId = entityId,
+                kind = SyncOperationKind.Put,
+                fields = fields,
+            ) { operation ->
+                mutation(operation?.operationId?.value)
+            }
+        }
+    }
+
+    private fun recordMutation(
+        domain: String,
+        entityId: String,
+        kind: SyncOperationKind,
+        fields: Map<String, String?>,
+        mutation: () -> Unit,
+    ) {
+        val recorder = mutationRecorder
+        if (recorder == null) {
+            mutation()
+        } else {
+            recorder.record(domain, entityId, kind, fields) { mutation() }
+        }
+    }
+
+    private fun recordBatch(
+        drafts: List<LocalSyncOperationDraft>,
+        mutation: () -> Unit,
+    ) {
+        val recorder = mutationRecorder
+        if (recorder == null) {
+            db.transaction { mutation() }
+        } else {
+            recorder.recordBatch(drafts) { mutation() }
         }
     }
 
@@ -923,6 +1089,9 @@ class FavoriteUpdateRepositoryImpl(
     private fun appendLine(existing: String?, line: String): String =
         listOfNotNull(existing, line).joinToString("\n")
 
+    private fun threadSourceDiscriminator(postId: Long, updatedAt: Long?): String =
+        if (updatedAt == null) "post:$postId" else "post:$postId:revision:$updatedAt"
+
     private fun YamiboResult<*>.toCheckFailure(itemTitle: String): CheckResult.Failed =
         CheckResult.Failed(favoriteUpdateFailureReason(itemTitle))
 
@@ -939,6 +1108,9 @@ class FavoriteUpdateRepositoryImpl(
     }
 
     companion object {
+        private const val EVENT_DOMAIN = "favorite.update-event"
+        private const val FID_FILTER_DOMAIN = "favorite.update-fid-filter"
+        private const val CATEGORY_FILTER_DOMAIN = "favorite.update-category-filter"
         private const val MAX_TAG_SCAN_PAGES = 8
         private const val UPDATE_TIME_TOLERANCE_MILLIS = 60_000L
         private const val TAG_MANGA_SCOPE_FID = -100_000

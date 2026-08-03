@@ -3,10 +3,37 @@
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import kotlin.test.Test
 import kotlin.test.assertNull
+import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
 import kotlinx.coroutines.runBlocking
 import me.thenano.yamibo.yamibo_app.Database
 
 class LocalFavoriteRepositoryImplRssTest {
+    @Test
+    fun createdContainersReceiveStableIdsIndependentOfLocalRows() = runBlocking {
+        val db = inMemoryDatabase()
+        val repository = FavoriteStoreRepositoryImpl(db)
+
+        val first = repository.createCategory("A")
+        val second = repository.createCategory("B")
+        val collection = repository.createCollection(first.id, "C", "brown")
+        val firstSyncId = db.localFavoriteCategoryQueries.getById(first.id)
+            .executeAsOne()
+            .syncId
+        val secondSyncId = db.localFavoriteCategoryQueries.getById(second.id)
+            .executeAsOne()
+            .syncId
+        val collectionSyncId = db.localFavoriteCollectionQueries.getById(collection.id)
+            .executeAsOne()
+            .syncId
+
+        assertNotNull(firstSyncId)
+        assertNotNull(secondSyncId)
+        assertNotNull(collectionSyncId)
+        assertNotEquals(first.id.toString(), firstSyncId)
+        assertNotEquals(firstSyncId, secondSyncId)
+    }
+
     @Test
     fun deletingRssFavoriteDeletesSubscriptionAndResults() = runBlocking {
         val db = inMemoryDatabase()

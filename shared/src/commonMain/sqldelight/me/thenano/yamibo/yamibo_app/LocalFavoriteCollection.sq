@@ -16,6 +16,16 @@ getById:
 SELECT * FROM LocalFavoriteCollection
 WHERE id = ?;
 
+getBySyncId:
+SELECT * FROM LocalFavoriteCollection
+WHERE syncId = ?
+LIMIT 1;
+
+setSyncId:
+UPDATE LocalFavoriteCollection
+SET syncId = ?
+WHERE id = ? AND syncId IS NULL;
+
 getFirstByCategoryId:
 SELECT * FROM LocalFavoriteCollection
 WHERE categoryId = ?

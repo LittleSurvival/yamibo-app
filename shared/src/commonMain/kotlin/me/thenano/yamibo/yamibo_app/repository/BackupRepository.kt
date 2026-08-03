@@ -20,6 +20,8 @@ interface BackupRepository {
         val notes: Int,
         val bookmarks: Int,
         val readingHistory: Int,
+        val updateRecords: Int = 0,
+        val skippedRecords: Int = 0,
     )
 
     suspend fun createBackup(automatic: Boolean = false, customName: String? = null): Result<BackupFileInfo>

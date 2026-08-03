@@ -23,8 +23,16 @@ import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.repository.AuthRepository
 import me.thenano.yamibo.yamibo_app.repository.ForumRepository
 import me.thenano.yamibo.yamibo_app.repository.RssSearchSubscriptionRepository
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncMutationRecorder
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.DatabaseSyncDomainMaterializer
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.SqlDelightSyncDomainStateAdapter
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncInstallationState
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncAccountBinding
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationKind
+import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncOperationStore
 import me.thenano.yamibo.yamibo_app.store.auth.CookieStore
 import me.thenano.yamibo.yamibo_app.store.auth.UserStore
+import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 
 class RssSearchSubscriptionRepositoryImplTest {
     @Test
@@ -139,6 +147,73 @@ class RssSearchSubscriptionRepositoryImplTest {
         assertEquals(RssSearchSubscriptionRepository.RefreshStatus.Failed, repository.getSubscription(id)!!.lastRefreshStatus)
     }
 
+    @Test
+    fun appSyncRecordsOnlyDurableSubscriptionMutations() = runBlocking {
+        val db = inMemoryDatabase()
+        val store = SqlDelightAppSyncOperationStore(db).also {
+            it.initialize("generation")
+            it.bindAccount(SyncAccountBinding("account"), AppSyncInstallationState.Active)
+        }
+        val recorder = AppSyncMutationRecorder(
+            enabled = true,
+            store = store,
+            domainState = SqlDelightSyncDomainStateAdapter(
+                db = db,
+                materializer = DatabaseSyncDomainMaterializer(db, MapSettingsStore()),
+                nowMillis = { 100 },
+            ),
+            nowMillis = { 100 },
+        )
+        val forum = FakeForumRepository(
+            nextSearch = SearchPage(query = "app", totalCount = 0, threads = emptyList()),
+        )
+        val repository = RssSearchSubscriptionRepositoryImpl(
+            db,
+            FakeAuthRepository(),
+            forum,
+            recorder,
+        )
+        val id = assertIs<YamiboResult.Success<Long>>(
+            repository.createFromSearch(
+                title = "app",
+                query = " app ",
+                forumId = null,
+                forumName = null,
+                searchPage = SearchPage(query = "app", totalCount = 0, threads = emptyList()),
+            ),
+        ).value
+
+        repository.refresh(id)
+        repository.rename(id, "App feed")
+        repository.setEnabled(id, false)
+        repository.delete(id)
+        repository.createFromSearch(
+            title = "app",
+            query = "app",
+            forumId = null,
+            forumName = null,
+            searchPage = SearchPage(query = "app", totalCount = 0, threads = emptyList()),
+        )
+
+        val operations = store.allOutboxOperations().map { it.first }
+        assertEquals(5, operations.size)
+        assertTrue(operations.all { it.domainId.value == "rss.search-subscription" })
+        assertEquals(
+            listOf(
+                SyncOperationKind.Put,
+                SyncOperationKind.Patch,
+                SyncOperationKind.Patch,
+                SyncOperationKind.Delete,
+                SyncOperationKind.Put,
+            ),
+            operations.map { it.kind },
+        )
+        assertEquals(1, operations.first().entityGeneration)
+        assertEquals(2, operations.last().entityGeneration)
+        assertTrue("lastRefreshStatus" !in operations.first().fields)
+        assertTrue("lastSearchId" !in operations.first().fields)
+    }
+
     private fun inMemoryDatabase(): Database {
         val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
         Database.Schema.create(driver)
@@ -152,6 +227,27 @@ class RssSearchSubscriptionRepositoryImplTest {
         hasPoll = false,
         url = "https://bbs.yamibo.com/forum.php?mod=viewthread&tid=$id",
     )
+
+    private class MapSettingsStore : SettingsStore {
+        private val values = mutableMapOf<String, Any>()
+        override fun getInt(key: String, defaultValue: Int) = values[key] as? Int ?: defaultValue
+        override fun putInt(key: String, value: Int) = set(key, value)
+        override fun getFloat(key: String, defaultValue: Float) = values[key] as? Float ?: defaultValue
+        override fun putFloat(key: String, value: Float) = set(key, value)
+        override fun getString(key: String, defaultValue: String) =
+            values[key] as? String ?: defaultValue
+        override fun putString(key: String, value: String) = set(key, value)
+        override fun getBoolean(key: String, defaultValue: Boolean) =
+            values[key] as? Boolean ?: defaultValue
+        override fun putBoolean(key: String, value: Boolean) = set(key, value)
+        override fun remove(key: String) {
+            values.remove(key)
+        }
+        override fun hasKey(key: String) = key in values
+        private fun set(key: String, value: Any) {
+            values[key] = value
+        }
+    }
 }
 
 private class FakeAuthRepository : AuthRepository {

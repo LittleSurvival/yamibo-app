@@ -16,18 +16,38 @@ import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.repository.AuthRepository
 import me.thenano.yamibo.yamibo_app.repository.ForumRepository
 import me.thenano.yamibo.yamibo_app.repository.RssSearchSubscriptionRepository
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncMutationRecorder
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationKind
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
-import me.thenano.yamibo.yamiboapp.RssSearchSubscription
+import me.thenano.yamibo.yamibo_app.RssSearchSubscription
 
-class RssSearchSubscriptionRepositoryImpl(
+class RssSearchSubscriptionRepositoryImpl private constructor(
     private val db: Database,
     private val authRepository: AuthRepository,
     private val forumRepository: ForumRepository,
-    private val json: Json = Json {
-        ignoreUnknownKeys = true
-        encodeDefaults = true
-    },
+    private val mutationRecorder: AppSyncMutationRecorder?,
+    private val json: Json,
 ) : RssSearchSubscriptionRepository {
+    constructor(
+        db: Database,
+        authRepository: AuthRepository,
+        forumRepository: ForumRepository,
+        json: Json = defaultRssSearchJson(),
+    ) : this(db, authRepository, forumRepository, null, json)
+
+    internal constructor(
+        db: Database,
+        authRepository: AuthRepository,
+        forumRepository: ForumRepository,
+        mutationRecorder: AppSyncMutationRecorder,
+    ) : this(
+        db,
+        authRepository,
+        forumRepository,
+        mutationRecorder,
+        defaultRssSearchJson(),
+    )
+
     private val subscriptionQueries = db.rssSearchSubscriptionQueries
     private val resultQueries = db.rssSearchSubscriptionResultQueries
     private val pageCacheQueries = db.rssSearchPageCacheQueries
@@ -55,7 +75,19 @@ class RssSearchSubscriptionRepositoryImpl(
         val now = currentTimeMillis()
         val scopedForumId = searchPage.forumId ?: forumId
         val scopedForumName = forumName ?: scopedForumId?.let { YamiboForum.toForumName(it) }
-        db.transaction {
+        recordSubscriptionMutation(
+            entityId = rssSearchSubscriptionSyncId(keyword, scopedForumId?.value?.toLong()),
+            kind = SyncOperationKind.Put,
+            fields = subscriptionFields(
+                title = keyword,
+                query = keyword,
+                forumId = scopedForumId?.value?.toLong(),
+                forumName = scopedForumName,
+                enabled = true,
+                createdAt = now,
+                updatedAt = now,
+            ),
+        ) {
             subscriptionQueries.insertSubscription(
                 title = keyword,
                 query = keyword,
@@ -95,21 +127,35 @@ class RssSearchSubscriptionRepositoryImpl(
         findBySearch(keyword, forumId)?.let { return YamiboResult.Success(it.id) }
         val now = currentTimeMillis()
         val scopedForumName = forumName ?: forumId?.let { YamiboForum.toForumName(it) }
-        subscriptionQueries.insertSubscription(
-            title = keyword,
-            query = keyword,
-            forumId = forumId?.value?.toLong(),
-            forumName = scopedForumName,
-            enabled = 1,
-            createdAt = now,
-            updatedAt = now,
-            lastRefreshStartedAt = null,
-            lastRefreshFinishedAt = null,
-            lastRefreshStatus = null,
-            lastRefreshMessage = null,
-            lastSearchId = null,
-            lastTotalCount = 0,
-        )
+        recordSubscriptionMutation(
+            entityId = rssSearchSubscriptionSyncId(keyword, forumId?.value?.toLong()),
+            kind = SyncOperationKind.Put,
+            fields = subscriptionFields(
+                title = keyword,
+                query = keyword,
+                forumId = forumId?.value?.toLong(),
+                forumName = scopedForumName,
+                enabled = true,
+                createdAt = now,
+                updatedAt = now,
+            ),
+        ) {
+            subscriptionQueries.insertSubscription(
+                title = keyword,
+                query = keyword,
+                forumId = forumId?.value?.toLong(),
+                forumName = scopedForumName,
+                enabled = 1,
+                createdAt = now,
+                updatedAt = now,
+                lastRefreshStartedAt = null,
+                lastRefreshFinishedAt = null,
+                lastRefreshStatus = null,
+                lastRefreshMessage = null,
+                lastSearchId = null,
+                lastTotalCount = 0,
+            )
+        }
         val id = subscriptionQueries.lastInsertedId().executeAsOne()
         reloadState()
         return YamiboResult.Success(id)
@@ -316,23 +362,87 @@ class RssSearchSubscriptionRepositoryImpl(
     }
 
     override suspend fun rename(subscriptionId: Long, title: String) {
-        subscriptionQueries.rename(title, currentTimeMillis(), subscriptionId)
+        val subscription = subscriptionQueries.getById(subscriptionId).executeAsOneOrNull() ?: return
+        val now = currentTimeMillis()
+        recordSubscriptionMutation(
+            entityId = rssSearchSubscriptionSyncId(subscription.query, subscription.forumId),
+            kind = SyncOperationKind.Patch,
+            fields = mapOf("title" to title, "updatedAt" to now.toString()),
+        ) {
+            subscriptionQueries.rename(title, now, subscriptionId)
+        }
         reloadState()
     }
 
     override suspend fun setEnabled(subscriptionId: Long, enabled: Boolean) {
-        subscriptionQueries.setEnabled(if (enabled) 1 else 0, currentTimeMillis(), subscriptionId)
+        val subscription = subscriptionQueries.getById(subscriptionId).executeAsOneOrNull() ?: return
+        val now = currentTimeMillis()
+        recordSubscriptionMutation(
+            entityId = rssSearchSubscriptionSyncId(subscription.query, subscription.forumId),
+            kind = SyncOperationKind.Patch,
+            fields = mapOf("enabled" to enabled.toString(), "updatedAt" to now.toString()),
+        ) {
+            subscriptionQueries.setEnabled(if (enabled) 1 else 0, now, subscriptionId)
+        }
         reloadState()
     }
 
     override suspend fun delete(subscriptionId: Long) {
-        db.transaction {
+        val subscription = subscriptionQueries.getById(subscriptionId).executeAsOneOrNull() ?: return
+        recordSubscriptionMutation(
+            entityId = rssSearchSubscriptionSyncId(subscription.query, subscription.forumId),
+            kind = SyncOperationKind.Delete,
+            fields = emptyMap(),
+        ) {
             pageCacheQueries.deleteBySubscription(subscriptionId)
             resultQueries.deleteBySubscription(subscriptionId)
             subscriptionQueries.deleteById(subscriptionId)
         }
         reloadState()
     }
+
+    private fun recordSubscriptionMutation(
+        entityId: String,
+        kind: SyncOperationKind,
+        fields: Map<String, String?>,
+        mutation: () -> Unit,
+    ) {
+        val recorder = mutationRecorder
+        if (recorder == null) {
+            db.transaction { mutation() }
+        } else {
+            recorder.record(
+                domain = RSS_SUBSCRIPTION_DOMAIN,
+                entityId = entityId,
+                kind = kind,
+                fields = fields,
+                entityGeneration = recorder.currentGeneration(
+                    domain = RSS_SUBSCRIPTION_DOMAIN,
+                    entityId = entityId,
+                ),
+            ) {
+                mutation()
+            }
+        }
+    }
+
+    private fun subscriptionFields(
+        title: String,
+        query: String,
+        forumId: Long?,
+        forumName: String?,
+        enabled: Boolean,
+        createdAt: Long,
+        updatedAt: Long,
+    ): Map<String, String?> = mapOf(
+        "title" to title,
+        "query" to query,
+        "forumId" to forumId?.toString(),
+        "forumName" to forumName,
+        "enabled" to enabled.toString(),
+        "createdAt" to createdAt.toString(),
+        "updatedAt" to updatedAt.toString(),
+    )
 
     private fun mergeResults(
         subscriptionId: Long,
@@ -465,3 +575,9 @@ class RssSearchSubscriptionRepositoryImpl(
 }
 
 private const val TAG = "RssSearchSubscriptionRepository"
+private const val RSS_SUBSCRIPTION_DOMAIN = "rss.search-subscription"
+
+private fun defaultRssSearchJson() = Json {
+    ignoreUnknownKeys = true
+    encodeDefaults = true
+}
