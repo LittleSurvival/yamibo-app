@@ -93,10 +93,6 @@ kotlin {
     }
 }
 
-compose.resources {
-    customDirectory("commonMain", layout.buildDirectory.dir("generated/i18n/composeResources"))
-}
-
 i18nAutoMerge {
     scanDirs.set(listOf("composeApp/src", "shared/src"))
     glossary.set(rootProject.layout.projectDirectory.file("i18n/glossary.csv"))
@@ -138,10 +134,27 @@ val generateYamiboIcons by tasks.registering(GenerateYamiboIconsTask::class) {
     outputFile.set(layout.buildDirectory.file("generated/yamiboIcons/commonMain/kotlin/YamiboIcons.kt"))
 }
 
-val copyChangelogs by tasks.registering(Copy::class) {
-    description = "Copies changelogs from update/changelogs to composeResources."
-    from(rootProject.layout.projectDirectory.dir("update/changelogs"))
-    into(layout.projectDirectory.dir("src/commonMain/composeResources/files/changelogs"))
+val stageComposeResources by tasks.registering(Sync::class) {
+    description = "Stages generated Compose resources and bundled changelogs."
+    dependsOn("generateI18nResources")
+    from(layout.buildDirectory.dir("generated/i18n/composeResources"))
+    from(
+        listOf(1, yamiboAppVersionCode)
+            .distinct()
+            .map { versionCode ->
+                rootProject.layout.projectDirectory.file("update/changelogs/$versionCode.changelog")
+            },
+    ) {
+        into("files/changelogs")
+    }
+    into(layout.buildDirectory.dir("generated/composeResources"))
+}
+
+compose.resources {
+    customDirectory(
+        "commonMain",
+        layout.dir(stageComposeResources.map { task -> task.destinationDir }),
+    )
 }
 
 tasks.matching { task ->
@@ -150,16 +163,7 @@ tasks.matching { task ->
     dependsOn(generateRestorableScreenRegistry)
     dependsOn(generateAppVersion)
     dependsOn(generateYamiboIcons)
-    dependsOn(copyChangelogs)
-}
-
-tasks.configureEach {
-    if (name.contains("ComposeResources", ignoreCase = true) ||
-        name.contains("ComposeResClass", ignoreCase = true) ||
-        name.contains("I18nResources", ignoreCase = true)
-    ) {
-        dependsOn(copyChangelogs)
-    }
+    dependsOn(stageComposeResources)
 }
 
 android {

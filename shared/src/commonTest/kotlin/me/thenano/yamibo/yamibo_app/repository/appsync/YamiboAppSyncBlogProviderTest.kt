@@ -174,7 +174,7 @@ class YamiboAppSyncBlogProviderTest {
 
     private fun assertMultipartField(body: String, name: String, value: String) {
         assertTrue(
-            body.contains("name=$name") && body.contains("\r\n\r\n$value\r\n"),
+            body.contains("name=\"$name\"") && body.contains("\r\n\r\n$value\r\n"),
             "Multipart body did not contain $name",
         )
     }
