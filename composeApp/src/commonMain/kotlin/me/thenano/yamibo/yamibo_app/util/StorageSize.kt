@@ -2,6 +2,10 @@ package me.thenano.yamibo.yamibo_app.util
 
 import kotlin.math.roundToInt
 
+private const val ONE_KB: Long = 1024L
+private const val ONE_MB: Long = ONE_KB * 1024L
+private const val ONE_GB: Long = ONE_MB * 1024L
+
 fun formatStorageSize(size: Long): String {
     return formatByteSize(
         bytes = size,
@@ -31,11 +35,11 @@ private fun formatByteSize(
     oneDecimalMode: DecimalMode,
     kilobyteLabel: String,
 ): String {
-    if (includeBytesUnit && bytes < 1024L) return "$bytes B"
+    if (includeBytesUnit && bytes < ONE_KB) return "$bytes B"
     return when {
-        bytes >= 1024L * 1024L * 1024L -> "${formatDecimal(bytes / (1024f * 1024f * 1024f), oneDecimalMode)} GB"
-        bytes >= 1024L * 1024L -> "${formatDecimal(bytes / (1024f * 1024f), oneDecimalMode)} MB"
-        else -> "${formatDecimal(bytes / 1024f, oneDecimalMode)} $kilobyteLabel"
+        bytes >= ONE_GB -> "${formatDecimal(bytes / ONE_GB.toFloat(), oneDecimalMode)} GB"
+        bytes >= ONE_MB -> "${formatDecimal(bytes / ONE_MB.toFloat(), oneDecimalMode)} MB"
+        else -> "${formatDecimal(bytes / ONE_KB.toFloat(), oneDecimalMode)} $kilobyteLabel"
     }
 }
 

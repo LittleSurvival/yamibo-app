@@ -31,12 +31,10 @@ import me.thenano.yamibo.yamibo_app.repository.download.IOSDownloadStorageProvid
 import me.thenano.yamibo.yamibo_app.repository.favorite.FavoriteShareRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.favorite.FavoriteSyncRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.contentcover.ContentCoverRepositoryImpl
-import me.thenano.yamibo.yamibo_app.repository.favorite.FavoriteUpdateRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.font.DefaultFontRepository
 import me.thenano.yamibo.yamibo_app.repository.font.IOSFontPlatform
 import me.thenano.yamibo.yamibo_app.repository.appupdate.DefaultAppUpdateRepository
 import me.thenano.yamibo.yamibo_app.repository.inapplinknavigation.DefaultInAppLinkNavigationRepository
-import me.thenano.yamibo.yamibo_app.repository.rss.RssSearchSubscriptionRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.settings.AppSettingsRepository
 import me.thenano.yamibo.yamibo_app.repository.settings.MangaReaderSettingsRepository
 import me.thenano.yamibo.yamibo_app.repository.settings.NovelReaderSettingsRepository
@@ -135,10 +133,9 @@ fun MainViewController() = ComposeUIViewController {
     val detailNoteRepository = remember { appSyncService.detailNoteRepository(appDatabase) }
     val bookMarkRepository = remember { appSyncService.bookMarkRepository(appDatabase) }
     val remoteFavoriteRepository = remember { IOSFavoriteRepository(cookieStore, yamiboClient) }
-    val favoriteSyncDatabase = appDatabase
     val favoriteSyncRepository = remember {
         FavoriteSyncRepositoryImpl(
-            db = favoriteSyncDatabase,
+            db = appDatabase,
             authRepository = authRepository,
             favoriteRepository = remoteFavoriteRepository,
             localFavoriteRepository = favoriteRepository,
@@ -147,7 +144,7 @@ fun MainViewController() = ComposeUIViewController {
     }
     val rssSearchSubscriptionRepository = remember {
         appSyncService.rssSearchSubscriptionRepository(
-            db = favoriteSyncDatabase,
+            db = appDatabase,
             authRepository = authRepository,
             forumRepository = forumRepository,
         )
@@ -160,7 +157,7 @@ fun MainViewController() = ComposeUIViewController {
     }
     val favoriteUpdateRepository = remember {
         appSyncService.favoriteUpdateRepository(
-            db = favoriteSyncDatabase,
+            db = appDatabase,
             localFavoriteRepository = favoriteRepository,
             threadRepository = threadRepository,
             tagRepository = tagRepository,
@@ -174,7 +171,7 @@ fun MainViewController() = ComposeUIViewController {
     val backupStorageProvider = remember { IOSBackupStorageProvider(appSettingsRepository) }
     val backupRepository = remember {
         BackupRepositoryImpl(
-            db = favoriteSyncDatabase,
+            db = appDatabase,
             settingsStore = settingsStore,
             settingsRegistries = listOf(appSettingsRepository, novelReaderSettingsRepository, mangaReaderSettingsRepository),
             storageProvider = backupStorageProvider,
