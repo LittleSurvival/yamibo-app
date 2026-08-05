@@ -70,7 +70,9 @@ if [ -z "$release_id" ]; then
 fi
 
 echo "Uploading ${APK_NAME} ($(stat -c%s "$APK") bytes) to Gitee..." >&2
-upload_json="$(curl "${upload_curl_opts[@]}" -X POST "${api}/releases/${release_id}/attach_files" \
+upload_json="$(curl "${upload_curl_opts[@]}" \
+  2> >(python3 .github/scripts/filter-upload-progress.py "Gitee upload") \
+  -X POST "${api}/releases/${release_id}/attach_files" \
   -F "access_token=${GITEE_TOKEN}" \
   -F "file=@${APK}")"
 echo "Gitee upload request completed." >&2

@@ -87,7 +87,9 @@ if [ -z "$release_id" ]; then
 fi
 
 echo "Uploading ${APK_NAME} ($(stat -c%s "$APK") bytes) to Gitea..." >&2
-upload_json="$(curl "${upload_curl_opts[@]}" -X POST -H "$auth_header" \
+upload_json="$(curl "${upload_curl_opts[@]}" \
+  2> >(python3 .github/scripts/filter-upload-progress.py "Gitea upload") \
+  -X POST -H "$auth_header" \
   -F "attachment=@${APK}" \
   "${api}/releases/${release_id}/assets?name=${encoded_apk_name}")"
 echo "Gitea upload request completed." >&2
