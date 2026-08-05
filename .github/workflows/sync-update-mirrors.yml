@@ -9,6 +9,10 @@ on:
         default: "false"
         type: boolean
 
+concurrency:
+  group: mirror-publish-${{ github.repository }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -121,6 +125,7 @@ jobs:
       - name: Publish Gitee release asset
         if: ${{ inputs.use_latest_release_asset }}
         id: gitee_release
+        timeout-minutes: 60
         shell: bash
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
@@ -136,6 +141,7 @@ jobs:
       - name: Publish Gitea release asset
         if: ${{ inputs.use_latest_release_asset }}
         id: gitea_release
+        timeout-minutes: 60
         shell: bash
         env:
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
@@ -215,15 +221,39 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
-          ssh-keyscan gitee.com >> ~/.ssh/known_hosts
+          ssh-keyscan -T 60 gitee.com >> ~/.ssh/known_hosts
           gitea_host="${GITEA_SSH_HOST:-gitea.com}"
           gitea_port="${GITEA_SSH_PORT:-22}"
-          ssh-keyscan -p "$gitea_port" "$gitea_host" >> ~/.ssh/known_hosts
+          ssh-keyscan -T 60 -p "$gitea_port" "$gitea_host" >> ~/.ssh/known_hosts
 
       - name: Push update folder to mirror repositories
+        timeout-minutes: 60
         shell: bash
+        env:
+          GIT_SSH_COMMAND: >-
+            ssh -o BatchMode=yes
+            -o ConnectTimeout=60
+            -o ServerAliveInterval=15
+            -o ServerAliveCountMax=2
         run: |
           set -euo pipefail
+
+          retry_git() {
+            local label="$1"
+            shift
+            local attempt
+            for attempt in 1 2 3; do
+              if timeout --foreground 30s "$@"; then
+                return 0
+              fi
+              if [ "$attempt" -lt 3 ]; then
+                echo "$label failed (attempt $attempt/3); retrying in $((attempt * 5))s..." >&2
+                sleep "$((attempt * 5))"
+              fi
+            done
+            echo "$label failed after 3 attempts" >&2
+            return 1
+          }
 
           gitea_remote() {
             local host="${GITEA_SSH_HOST:-gitea.com}"
@@ -251,7 +281,7 @@ jobs:
             git -C "$dir" add update
             git -C "$dir" commit -m "Sync update folder"
             git -C "$dir" branch -M main
-            git -C "$dir" push --force origin main
+            retry_git "$name main push" git -C "$dir" push --force origin main
           }
 
           push_mirror "gitee" "git@gitee.com:${MIRROR_OWNER}/${MIRROR_REPO}.git"

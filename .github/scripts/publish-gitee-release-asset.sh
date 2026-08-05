@@ -19,14 +19,17 @@ body="$(cat "$CHANGELOG")"
 api="https://gitee.com/api/v5/repos/${MIRROR_OWNER}/${MIRROR_REPO}"
 release_url="https://gitee.com/${MIRROR_OWNER}/${MIRROR_REPO}/releases/tag/${TAG}"
 fallback_asset_url="https://gitee.com/${MIRROR_OWNER}/${MIRROR_REPO}/releases/download/${TAG}/${APK_NAME}"
-curl_opts=(
+transport_curl_opts=(
   --silent
   --show-error
-  --fail-with-body
   --connect-timeout 120
   --retry 2
   --retry-delay 5
   --retry-connrefused
+)
+curl_opts=(
+  "${transport_curl_opts[@]}"
+  --fail-with-body
 )
 upload_curl_opts=(
   --show-error
@@ -43,7 +46,27 @@ json_field() {
   python3 -c 'import json,sys; data=json.load(sys.stdin); print(data.get(sys.argv[1],""))' "$field" 2>/dev/null || true
 }
 
-release_json="$(curl "${curl_opts[@]}" "${api}/releases/tags/${TAG}?access_token=${GITEE_TOKEN}" || true)"
+lookup_release() {
+  local response status body
+  if ! response="$(curl "${transport_curl_opts[@]}" \
+    --write-out $'\n%{http_code}' \
+    "${api}/releases/tags/${TAG}?access_token=${GITEE_TOKEN}")"; then
+    echo "Failed to query existing Gitee release" >&2
+    return 1
+  fi
+  status="${response##*$'\n'}"
+  body="${response%$'\n'*}"
+  case "$status" in
+    200) printf '%s' "$body" ;;
+    404) return 0 ;;
+    *)
+      echo "Gitee release lookup returned HTTP ${status}" >&2
+      return 1
+      ;;
+  esac
+}
+
+release_json="$(lookup_release)"
 release_id="$(printf '%s' "$release_json" | json_field id)"
 
 if [ -n "$release_id" ]; then
@@ -72,13 +95,45 @@ upload_json="$(curl "${upload_curl_opts[@]}" \
   -F "access_token=${GITEE_TOKEN}" \
   -F "file=@${APK}")"
 echo "Gitee upload request completed." >&2
-release_json="$(curl "${curl_opts[@]}" "${api}/releases/tags/${TAG}?access_token=${GITEE_TOKEN}" || true)"
+release_json="$(lookup_release)"
 asset_url="$(
   {
     printf '%s\n' "$upload_json"
     printf '%s\n' "$release_json"
   } | python3 .github/scripts/extract-release-asset-url.py "$APK_NAME" "$fallback_asset_url"
 )"
+
+if [ -z "$asset_url" ]; then
+  echo "Gitee upload did not produce an asset URL" >&2
+  exit 1
+fi
+
+apk_size="$(stat -c%s "$APK")"
+headers_file="$RUNNER_TEMP/gitee-apk-headers.txt"
+verify_gitee_asset() {
+  local attempt
+  for attempt in 1 2 3; do
+    if curl --silent --show-error --fail-with-body \
+      --location \
+      --head \
+      --connect-timeout 30 \
+      --max-time 60 \
+      --dump-header "$headers_file" \
+      --output /dev/null \
+      "$asset_url" && python3 .github/scripts/validate-release-asset-headers.py \
+        "$headers_file" "$APK_NAME" "$apk_size"; then
+      return 0
+    fi
+    if [ "$attempt" -lt 3 ]; then
+      echo "Gitee asset is not ready (attempt ${attempt}/3); retrying in 5s..." >&2
+      sleep 5
+    fi
+  done
+  echo "Gitee asset validation failed after 3 attempts" >&2
+  return 1
+}
+
+verify_gitee_asset
 
 echo "release_url=$release_url" >> "$GITHUB_OUTPUT"
 echo "asset_url=$asset_url" >> "$GITHUB_OUTPUT"

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: release-${{ github.repository }}
+  group: mirror-publish-${{ github.repository }}
   cancel-in-progress: false
 
 permissions:
