@@ -19,22 +19,33 @@ body="$(cat "$CHANGELOG")"
 api="https://gitee.com/api/v5/repos/${MIRROR_OWNER}/${MIRROR_REPO}"
 release_url="https://gitee.com/${MIRROR_OWNER}/${MIRROR_REPO}/releases/tag/${TAG}"
 fallback_asset_url="https://gitee.com/${MIRROR_OWNER}/${MIRROR_REPO}/releases/download/${TAG}/${APK_NAME}"
+curl_opts=(
+  --silent
+  --show-error
+  --fail-with-body
+  --connect-timeout 60
+  --max-time 180
+  --retry 2
+  --retry-delay 5
+  --retry-max-time 180
+  --retry-connrefused
+)
 
 json_field() {
   local field="$1"
   python3 -c 'import json,sys; data=json.load(sys.stdin); print(data.get(sys.argv[1],""))' "$field" 2>/dev/null || true
 }
 
-release_json="$(curl -sS "${api}/releases/tags/${TAG}?access_token=${GITEE_TOKEN}" || true)"
+release_json="$(curl "${curl_opts[@]}" "${api}/releases/tags/${TAG}?access_token=${GITEE_TOKEN}" || true)"
 release_id="$(printf '%s' "$release_json" | json_field id)"
 
 if [ -n "$release_id" ]; then
-  curl -fsS -X DELETE "${api}/releases/${release_id}" \
+  curl "${curl_opts[@]}" -X DELETE "${api}/releases/${release_id}" \
     -d "access_token=${GITEE_TOKEN}" \
     >/dev/null
 fi
 
-release_json="$(curl -sS -X POST "${api}/releases" \
+release_json="$(curl "${curl_opts[@]}" -X POST "${api}/releases" \
   -d "access_token=${GITEE_TOKEN}" \
   -d "tag_name=${TAG}" \
   -d "target_commitish=main" \
@@ -47,10 +58,10 @@ if [ -z "$release_id" ]; then
   exit 1
 fi
 
-upload_json="$(curl -sS -X POST "${api}/releases/${release_id}/attach_files" \
+upload_json="$(curl "${curl_opts[@]}" -X POST "${api}/releases/${release_id}/attach_files" \
   -F "access_token=${GITEE_TOKEN}" \
   -F "file=@${APK}")"
-release_json="$(curl -sS "${api}/releases/tags/${TAG}?access_token=${GITEE_TOKEN}" || true)"
+release_json="$(curl "${curl_opts[@]}" "${api}/releases/tags/${TAG}?access_token=${GITEE_TOKEN}" || true)"
 asset_url="$(
   {
     printf '%s\n' "$upload_json"

@@ -22,17 +22,28 @@ release_url="${gitea_base}/${MIRROR_OWNER}/${MIRROR_REPO}/releases/tag/${TAG}"
 encoded_apk_name="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$APK_NAME")"
 
 auth_header="Authorization: token ${GITEA_TOKEN}"
+curl_opts=(
+  --silent
+  --show-error
+  --fail-with-body
+  --connect-timeout 60
+  --max-time 180
+  --retry 2
+  --retry-delay 5
+  --retry-max-time 180
+  --retry-connrefused
+)
 
 json_field() {
   local field="$1"
   python3 -c 'import json,sys; data=json.load(sys.stdin); print(data.get(sys.argv[1],""))' "$field" 2>/dev/null || true
 }
 
-release_json="$(curl -sS -H "$auth_header" "${api}/releases/tags/${TAG}" || true)"
+release_json="$(curl "${curl_opts[@]}" -H "$auth_header" "${api}/releases/tags/${TAG}" || true)"
 release_id="$(printf '%s' "$release_json" | json_field id)"
 
 if [ -n "$release_id" ]; then
-  curl -fsS -X DELETE -H "$auth_header" "${api}/releases/${release_id}" >/dev/null
+  curl "${curl_opts[@]}" -X DELETE -H "$auth_header" "${api}/releases/${release_id}" >/dev/null
 fi
 
 body_file="$RUNNER_TEMP/gitea-release-body.json"
@@ -54,7 +65,7 @@ payload = {
 Path(output).write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 PY
 
-release_json="$(curl -sS -X POST -H "$auth_header" -H "Content-Type: application/json" \
+release_json="$(curl "${curl_opts[@]}" -X POST -H "$auth_header" -H "Content-Type: application/json" \
   --data-binary "@${body_file}" \
   "${api}/releases")"
 release_id="$(printf '%s' "$release_json" | json_field id)"
@@ -64,7 +75,7 @@ if [ -z "$release_id" ]; then
   exit 1
 fi
 
-upload_json="$(curl -sS -X POST -H "$auth_header" \
+upload_json="$(curl "${curl_opts[@]}" -X POST -H "$auth_header" \
   -F "attachment=@${APK}" \
   "${api}/releases/${release_id}/assets?name=${encoded_apk_name}")"
 asset_url="$(
@@ -81,7 +92,7 @@ if [ -z "$asset_url" ]; then
 fi
 
 probe_file="$RUNNER_TEMP/gitea-apk-probe.bin"
-curl -fsSL --range 0-3 --max-filesize 1024 "$asset_url" -o "$probe_file"
+curl "${curl_opts[@]}" -fsSL --range 0-3 --max-filesize 1024 "$asset_url" -o "$probe_file"
 python3 - "$probe_file" <<'PY'
 import sys
 from pathlib import Path
