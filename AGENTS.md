@@ -12,6 +12,6 @@
 
 ## Git identity guard
 
-- Before every commit, run `git config --get user.name` and require the exact value `TheNano`.
-- Before every push, inspect every outgoing commit and require both its author name and committer name to be exactly `TheNano`.
-- If either check fails, do not commit or push; correct the Git identity or rewrite the affected commits first.
+- Before every commit, run `python .github/scripts/validate_git_name.py` from the project root.
+- Continue with the commit only when the validator exits successfully. Do not duplicate its identity prompt; its repository-local saved choice is authoritative.
+- The validator script is located at [`.github/scripts/validate_git_name.py`](.github/scripts/validate_git_name.py).
