@@ -33,6 +33,17 @@ curl_opts=(
   --retry-max-time 180
   --retry-connrefused
 )
+upload_curl_opts=(
+  --show-error
+  --fail-with-body
+  --progress-bar
+  --connect-timeout 60
+  --max-time 180
+  --retry 2
+  --retry-delay 5
+  --retry-max-time 180
+  --retry-connrefused
+)
 
 json_field() {
   local field="$1"
@@ -75,9 +86,11 @@ if [ -z "$release_id" ]; then
   exit 1
 fi
 
-upload_json="$(curl "${curl_opts[@]}" -X POST -H "$auth_header" \
+echo "Uploading ${APK_NAME} ($(stat -c%s "$APK") bytes) to Gitea..." >&2
+upload_json="$(curl "${upload_curl_opts[@]}" -X POST -H "$auth_header" \
   -F "attachment=@${APK}" \
   "${api}/releases/${release_id}/assets?name=${encoded_apk_name}")"
+echo "Gitea upload request completed." >&2
 asset_url="$(
   printf '%s' "$upload_json" | python3 -c '
 import json, sys

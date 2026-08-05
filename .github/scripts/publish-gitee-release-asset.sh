@@ -30,6 +30,17 @@ curl_opts=(
   --retry-max-time 180
   --retry-connrefused
 )
+upload_curl_opts=(
+  --show-error
+  --fail-with-body
+  --progress-bar
+  --connect-timeout 60
+  --max-time 180
+  --retry 2
+  --retry-delay 5
+  --retry-max-time 180
+  --retry-connrefused
+)
 
 json_field() {
   local field="$1"
@@ -58,9 +69,11 @@ if [ -z "$release_id" ]; then
   exit 1
 fi
 
-upload_json="$(curl "${curl_opts[@]}" -X POST "${api}/releases/${release_id}/attach_files" \
+echo "Uploading ${APK_NAME} ($(stat -c%s "$APK") bytes) to Gitee..." >&2
+upload_json="$(curl "${upload_curl_opts[@]}" -X POST "${api}/releases/${release_id}/attach_files" \
   -F "access_token=${GITEE_TOKEN}" \
   -F "file=@${APK}")"
+echo "Gitee upload request completed." >&2
 release_json="$(curl "${curl_opts[@]}" "${api}/releases/tags/${TAG}?access_token=${GITEE_TOKEN}" || true)"
 asset_url="$(
   {
