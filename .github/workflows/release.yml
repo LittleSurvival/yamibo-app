@@ -184,7 +184,7 @@ jobs:
           ssh-keyscan -T 60 -p "$gitea_port" "$gitea_host" >> ~/.ssh/known_hosts
 
       - name: Prepare mirror release tags
-        timeout-minutes: 10
+        timeout-minutes: 60
         shell: bash
         env:
           GIT_SSH_COMMAND: >-
@@ -249,7 +249,7 @@ jobs:
 
       - name: Publish Gitee release asset
         id: gitee_release
-        timeout-minutes: 10
+        timeout-minutes: 60
         shell: bash
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
@@ -264,7 +264,7 @@ jobs:
 
       - name: Publish Gitea release asset
         id: gitea_release
-        timeout-minutes: 10
+        timeout-minutes: 60
         shell: bash
         env:
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
@@ -331,7 +331,7 @@ jobs:
           git -C "$dir" push --force origin update-release
 
       - name: Push update folder to mirror repositories
-        timeout-minutes: 10
+        timeout-minutes: 60
         shell: bash
         env:
           GIT_SSH_COMMAND: >-
