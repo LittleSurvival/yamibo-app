@@ -23,22 +23,18 @@ curl_opts=(
   --silent
   --show-error
   --fail-with-body
-  --connect-timeout 60
-  --max-time 180
+  --connect-timeout 120
   --retry 2
   --retry-delay 5
-  --retry-max-time 180
   --retry-connrefused
 )
 upload_curl_opts=(
   --show-error
   --fail-with-body
   --progress-bar
-  --connect-timeout 60
-  --max-time 180
+  --connect-timeout 120
   --retry 2
   --retry-delay 5
-  --retry-max-time 180
   --retry-connrefused
 )
 
