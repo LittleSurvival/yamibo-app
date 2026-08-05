@@ -38,6 +38,7 @@ import me.thenano.yamibo.yamibo_app.profile.settings.cloud.IAppSyncSettingsScree
 import me.thenano.yamibo.yamibo_app.profile.sign.ISignInfoScreen
 import me.thenano.yamibo.yamibo_app.profile.sign.ISignWebView
 import me.thenano.yamibo.yamibo_app.profile.sign.signActionFeedbackMessage
+import me.thenano.yamibo.yamibo_app.profile.sign.shouldEmitSignStatusChanged
 import me.thenano.yamibo.yamibo_app.profile.support.ISupportAppDevelopmentScreen
 import me.thenano.yamibo.yamibo_app.repository.SignRepository
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadQueueEntry
@@ -180,6 +181,7 @@ fun ProfilePage(
                                             signButtonTitle = i18n("正在簽到...")
                                             authRepository.syncCookieFromWebView()
                                             signRepository.markTodaySigned()
+                                            AppEventBus.emit(SignStatusChangedEvent)
                                             when (signRepository.fetchPageInfo()) {
                                                 is YamiboResult.Success -> {
                                                     signRefreshKey += 1
@@ -206,13 +208,17 @@ fun ProfilePage(
                                     onCfCleared = {
                                         coroutineScope.launch {
                                             var snackbarMessage: String?
-                                            when (val result = signRepository.runAutoSign(allowRepair)) {
+                                            val result = signRepository.runAutoSign(allowRepair)
+                                            when (result) {
                                                 is YamiboResult.Success -> {
                                                     signRefreshKey += 1
                                                     snackbarMessage = result.value.message
                                                 }
 
                                                 else -> snackbarMessage = result.signActionFeedbackMessage()
+                                            }
+                                            if (shouldEmitSignStatusChanged(result)) {
+                                                AppEventBus.emit(SignStatusChangedEvent)
                                             }
                                             isSigning = false
                                             refreshSignStatus()

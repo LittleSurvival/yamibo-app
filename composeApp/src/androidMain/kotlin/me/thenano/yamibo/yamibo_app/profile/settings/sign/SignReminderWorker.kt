@@ -16,8 +16,9 @@ import androidx.work.WorkerParameters
 import io.github.littlesurvival.YamiboClient
 import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.MainActivity
-import me.thenano.yamibo.yamibo_app.R
 import me.thenano.yamibo.yamibo_app.db.DatabaseFactory
+import me.thenano.yamibo.yamibo_app.notification.AndroidNotificationMetadata
+import me.thenano.yamibo.yamibo_app.notification.dismissActiveSignReminder
 import me.thenano.yamibo.yamibo_app.repository.AndroidAuthRepository
 import me.thenano.yamibo.yamibo_app.repository.AndroidSignRepository
 import me.thenano.yamibo.yamibo_app.repository.settings.AppSettingsRepository
@@ -62,7 +63,11 @@ class SignReminderWorker(
         }
 
         val isTest = inputData.getBoolean(KEY_IS_TEST, false)
-        if (!shouldPostSignReminder(isTest, signRepository.getKnownSignedToday())) {
+        val initialSignedToday = signRepository.getKnownSignedToday()
+        if (!shouldPostSignReminder(isTest, initialSignedToday)) {
+            if (shouldDismissSignReminder(initialSignedToday)) {
+                dismissActiveSignReminder(applicationContext)
+            }
             return Result.success()
         }
 
@@ -81,7 +86,6 @@ class SignReminderWorker(
 
         val muteIntent = Intent(applicationContext, SignReminderActionReceiver::class.java).apply {
             action = SignReminderActionReceiver.ACTION_MUTE_REMINDERS
-            putExtra(SignReminderActionReceiver.EXTRA_NOTIFICATION_ID, NOTIFICATION_ID)
         }
         val mutePendingIntent = PendingIntent.getBroadcast(
             applicationContext,
@@ -91,19 +95,27 @@ class SignReminderWorker(
         )
 
         val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(AndroidNotificationMetadata.SMALL_ICON_RES_ID)
             .setContentTitle("百合會每日簽到")
             .setContentText("今天尚未完成簽到，點擊前往完成簽到任務吧！")
             .setAutoCancel(true)
             .setContentIntent(openAppPendingIntent)
-            .addAction(R.mipmap.ic_launcher, "前往簽到", openAppPendingIntent)
+            .addAction(AndroidNotificationMetadata.SMALL_ICON_RES_ID, "前往簽到", openAppPendingIntent)
             .addAction(0, "不再提醒", mutePendingIntent)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
 
+        val finalSignedToday = signRepository.getKnownSignedToday()
+        if (!shouldPostSignReminder(isTest, finalSignedToday)) {
+            if (shouldDismissSignReminder(finalSignedToday)) {
+                dismissActiveSignReminder(applicationContext)
+            }
+            return Result.success()
+        }
+
         try {
             val notificationManager = NotificationManagerCompat.from(applicationContext)
-            notificationManager.notify(NOTIFICATION_ID, notification)
+            notificationManager.notify(AndroidNotificationMetadata.SIGN_REMINDER_NOTIFICATION_ID, notification)
         } catch (e: SecurityException) {
             Logger.e("SignReminderWorker", "Permission might have been revoked just before notify", e)
         }
@@ -123,8 +135,8 @@ class SignReminderWorker(
     }
 
     companion object {
-        const val CHANNEL_ID = "yamibo_sign_reminder_channel"
-        const val NOTIFICATION_ID = 240619
+        const val CHANNEL_ID = AndroidNotificationMetadata.SIGN_REMINDER_CHANNEL_ID
+        const val NOTIFICATION_ID = AndroidNotificationMetadata.SIGN_REMINDER_NOTIFICATION_ID
         const val KEY_IS_TEST = "is_test"
         private const val REQUEST_CODE_GO_SIGN = 1041
         private const val REQUEST_CODE_MUTE = 1042
@@ -135,3 +147,6 @@ internal fun shouldPostSignReminder(
     isTest: Boolean,
     knownSignedToday: Boolean?,
 ): Boolean = isTest || knownSignedToday != true
+
+internal fun shouldDismissSignReminder(knownSignedToday: Boolean?): Boolean =
+    knownSignedToday == true

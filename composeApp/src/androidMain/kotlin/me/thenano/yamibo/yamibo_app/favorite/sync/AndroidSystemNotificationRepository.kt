@@ -14,7 +14,7 @@ import androidx.annotation.RequiresPermission
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import me.thenano.yamibo.yamibo_app.MainActivity
-import me.thenano.yamibo.yamibo_app.R
+import me.thenano.yamibo.yamibo_app.notification.AndroidNotificationMetadata
 import me.thenano.yamibo.yamibo_app.repository.SystemNotificationRepository
 
 class AndroidSystemNotificationRepository(
@@ -29,7 +29,7 @@ class AndroidSystemNotificationRepository(
 
     fun buildProgressNotification(model: SystemNotificationRepository.ProgressNotificationModel): Notification {
         return NotificationCompat.Builder(appContext, CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(AndroidNotificationMetadata.SMALL_ICON_RES_ID)
             .setContentTitle(model.title)
             .setContentText(model.text)
             .setOnlyAlertOnce(true)
@@ -60,7 +60,7 @@ class AndroidSystemNotificationRepository(
         notificationManager.notify(
             notificationId,
             NotificationCompat.Builder(appContext, CHANNEL_ID)
-                .setSmallIcon(R.mipmap.ic_launcher)
+                .setSmallIcon(AndroidNotificationMetadata.SMALL_ICON_RES_ID)
                 .setContentTitle(title)
                 .setContentText(text)
                 .setAutoCancel(true)
@@ -76,7 +76,7 @@ class AndroidSystemNotificationRepository(
         notificationManager.notify(
             notificationId,
             NotificationCompat.Builder(appContext, CHANNEL_ID)
-                .setSmallIcon(R.mipmap.ic_launcher)
+                .setSmallIcon(AndroidNotificationMetadata.SMALL_ICON_RES_ID)
                 .setContentTitle(title)
                 .setContentText(text)
                 .setAutoCancel(true)

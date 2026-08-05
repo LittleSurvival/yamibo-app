@@ -16,4 +16,17 @@ class SignReminderWorkerTest {
     fun explicitTestReminderBypassesSignedGuard() {
         assertTrue(shouldPostSignReminder(isTest = true, knownSignedToday = true))
     }
+
+    @Test
+    fun signedStateDismissesStaleReminder() {
+        assertTrue(shouldDismissSignReminder(knownSignedToday = true))
+        assertFalse(shouldDismissSignReminder(knownSignedToday = false))
+        assertFalse(shouldDismissSignReminder(knownSignedToday = null))
+    }
+
+    @Test
+    fun finalStateCheckSuppressesReminderAfterConcurrentSignIn() {
+        assertTrue(shouldPostSignReminder(isTest = false, knownSignedToday = false))
+        assertFalse(shouldPostSignReminder(isTest = false, knownSignedToday = true))
+    }
 }

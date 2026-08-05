@@ -12,8 +12,8 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import me.thenano.yamibo.yamibo_app.MainActivity
-import me.thenano.yamibo.yamibo_app.R
 import me.thenano.yamibo.yamibo_app.i18n.i18n
+import me.thenano.yamibo.yamibo_app.notification.AndroidNotificationMetadata
 
 internal class AndroidAppSyncNotificationRepository(context: Context) {
     private val appContext = context.applicationContext
@@ -36,7 +36,7 @@ internal class AndroidAppSyncNotificationRepository(context: Context) {
         notificationManager.notify(
             NOTIFICATION_ID,
             NotificationCompat.Builder(appContext, CHANNEL_ID)
-                .setSmallIcon(R.mipmap.ic_launcher)
+                .setSmallIcon(AndroidNotificationMetadata.SMALL_ICON_RES_ID)
                 .setContentTitle(i18n("雲端同步需要檢查"))
                 .setContentText(i18n("背景同步已停止，請開啟雲端同步頁面檢查資料"))
                 .setAutoCancel(true)

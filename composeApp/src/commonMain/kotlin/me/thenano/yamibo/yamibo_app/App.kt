@@ -53,6 +53,8 @@ import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.navigation.NavAction
 import me.thenano.yamibo.yamibo_app.profile.settings.update.AppUpdatePromptContent
 import me.thenano.yamibo.yamibo_app.profile.sign.ISignWebView
+import me.thenano.yamibo.yamibo_app.profile.sign.shouldDismissSignReminderFor
+import me.thenano.yamibo.yamibo_app.profile.sign.shouldEmitSignStatusChanged
 import me.thenano.yamibo.yamibo_app.profile.sign.signActionFeedbackMessage
 import me.thenano.yamibo.yamibo_app.repository.AuthRepository
 import me.thenano.yamibo.yamibo_app.repository.SignRepository
@@ -101,6 +103,7 @@ fun App() {
     val appSettingsRepository = LocalAppSettingsRepository.current
     val authRepository = LocalAuthRepository.current
     val signRepository = LocalSignRepository.current
+    val signReminderScheduler = LocalSignReminderScheduler.current
     val appUpdateRepository = LocalAppUpdateRepository.current
     val fontRepository = LocalFontRepository.current
     val feedbackController = LocalAppFeedbackController.current
@@ -120,6 +123,13 @@ fun App() {
     var completedPushTopId by remember { mutableStateOf(stack.lastOrNull()?.id) }
     var showSignReminder by remember { mutableStateOf(false) }
     var launchUpdateRelease by remember { mutableStateOf<AppUpdateRelease?>(null) }
+    LaunchedEffect(signReminderScheduler) {
+        AppEventBus.events.collect { event ->
+            if (shouldDismissSignReminderFor(event)) {
+                signReminderScheduler.dismissActiveReminder()
+            }
+        }
+    }
     LaunchedEffect(Unit) {
         val threshold = appSettingsRepository.appUpdateLaunchCheckThreshold.getValue()
         val intervalMillis = threshold.fixedInterval?.duration?.inWholeMilliseconds
@@ -621,7 +631,7 @@ private fun navigateToSignWebViewOrProfile(
                             appTaskManager.launch(AppTaskKey("sign:auto")) {
                                 feedbackController.post(i18n("開始自動簽到..."))
                                 val result = signRepository.runAutoSign(allowRepair)
-                                if (result is io.github.littlesurvival.core.YamiboResult.Success) {
+                                if (shouldEmitSignStatusChanged(result)) {
                                     AppEventBus.emit(SignStatusChangedEvent)
                                 }
                                 feedbackController.post(result.signActionFeedbackMessage())
