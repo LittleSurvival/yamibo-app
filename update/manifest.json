@@ -1,8 +1,8 @@
 {
   "channel": "stable",
-  "versionName": "0.0.4",
-  "versionCode": 5,
+  "versionName": "0.0.5",
+  "versionCode": 6,
   "isReady": false,
-  "releaseNotes": "新增小說閱讀器單頁模式與收藏批量下載，完善博客管理操作，並修復下載狀態、Ruby 排版及跨頁任務提示問題。",
+  "releaseNotes": "新增雲端同步與閱讀器觸控反轉選項，改善閱讀器效能，並修復簽到通知、系統通知圖標、進度顯示與部分翻譯問題。",
   "assets": []
 }
