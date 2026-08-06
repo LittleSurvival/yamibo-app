@@ -41,6 +41,8 @@ internal class BootstrapCoordinator(
     private val remote: AppSyncJournalRemote,
     private val domainState: SyncDomainStateAdapter,
     private val reducer: OperationReducer = OperationReducer(),
+    private val localProjectionRepairPlanner: LocalProjectionRepairPlanner =
+        LocalProjectionRepairPlanner(),
     private val nowMillis: () -> Long,
     private val inactiveAfterMillis: Long = 90L * 24 * 60 * 60 * 1_000,
     private val captureLocalSnapshot: () -> CapturedBootstrapSnapshot = {
@@ -127,6 +129,9 @@ internal class BootstrapCoordinator(
                 "Bootstrap contains ${cloudReduction.quarantined.size} quarantined operation(s)",
             )
         }
+        val cloudCoverage = cloudOperations.fold(checkpointCoverage) { current, operation ->
+            current.advance(operation.replicaKey, operation.sequence)
+        }
         val requiresAdmission = installation.accountBinding == null ||
             accountChanged || inactive ||
             installation.state == AppSyncInstallationState.RebootstrapRequired
@@ -148,11 +153,22 @@ internal class BootstrapCoordinator(
                 )
             }
         }
-        if (mode == AppSyncBootstrapMode.Seed) {
+        val capturesMigration = mode == AppSyncBootstrapMode.Seed ||
+            (mode == AppSyncBootstrapMode.Join && installation.accountBinding == null)
+        if (capturesMigration) {
             try {
+                val migrationDrafts = if (mode == AppSyncBootstrapMode.Join) {
+                    localProjectionRepairPlanner.plan(
+                        requireNotNull(capturedSnapshot).migrationDrafts,
+                        cloudReduction.entities,
+                    )
+                } else {
+                    requireNotNull(capturedSnapshot).migrationDrafts
+                }
                 store.captureBootstrapMigration(
                     accountBinding = accountBinding,
-                    drafts = requireNotNull(capturedSnapshot).migrationDrafts,
+                    drafts = migrationDrafts,
+                    causalContext = cloudCoverage,
                     createdAtEpochMillis = nowMillis(),
                 )
             } catch (error: Throwable) {
@@ -161,7 +177,8 @@ internal class BootstrapCoordinator(
                     "Local migration persistence failed: ${error.message ?: error::class.simpleName}",
                 )
             }
-        } else if (mode == AppSyncBootstrapMode.Join) {
+        }
+        if (mode == AppSyncBootstrapMode.Join) {
             try {
                 store.saveBootstrapRollbackSnapshot(
                     AppSyncBootstrapRollbackSnapshot(
@@ -180,7 +197,9 @@ internal class BootstrapCoordinator(
         }
 
         val currentInstallation = requireNotNull(store.installation())
-        val pendingLocalOperations = if (mode == AppSyncBootstrapMode.Join) {
+        val pendingLocalOperations = if (
+            mode == AppSyncBootstrapMode.Join && installation.accountBinding != null
+        ) {
             emptyList()
         } else {
             store.allOutboxOperations()
@@ -235,7 +254,8 @@ internal class BootstrapCoordinator(
                 coverage = coverage,
                 cloudOperationIds = cloudOperationIds,
                 appliedAtEpochMillis = appliedAt,
-                rotateDeviceEpoch = mode == AppSyncBootstrapMode.Join,
+                rotateDeviceEpoch = mode == AppSyncBootstrapMode.Join &&
+                    installation.accountBinding != null,
                 checkpoint = checkpointRecord,
                 domainMutation = {
                     domainState.adoptCheckpointWithinTransaction(it.entities.values)

@@ -845,7 +845,7 @@ private fun cloudSyncStatusHeadline(phase: AppSyncServicePhase?): String = when 
 
 private fun appSyncStatusMessageText(message: AppSyncStatusMessage): String = when (message) {
     AppSyncStatusMessage.NotStarted -> i18n("尚未開始同步")
-    AppSyncStatusMessage.CoreNotAvailable -> i18n("新同步核心仍在驗證中，尚未開放雲端寫入")
+    AppSyncStatusMessage.CoreNotAvailable -> i18n("同步核心目前無法使用")
     AppSyncStatusMessage.QuarantinedRefresh ->
         i18n("同步資料已隔離；重新檢查不會修改本機資料")
     AppSyncStatusMessage.QuarantinedManualSync ->

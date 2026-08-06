@@ -250,6 +250,7 @@ internal class SqlDelightAppSyncOperationStore(
     override fun captureBootstrapMigration(
         accountBinding: SyncAccountBinding,
         drafts: List<LocalSyncOperationDraft>,
+        causalContext: SyncCausalContext,
         createdAtEpochMillis: Long,
     ): List<SyncOperation> {
         var created = emptyList<SyncOperation>()
@@ -284,7 +285,7 @@ internal class SqlDelightAppSyncOperationStore(
                     entityGeneration = draft.entityGeneration,
                     kind = draft.kind,
                     fields = draft.fields,
-                    causalContext = SyncCausalContext(),
+                    causalContext = causalContext,
                     createdAtEpochMillis = createdAtEpochMillis,
                     origin = SyncOperationOrigin.Migration,
                     bulkDeleteAuthorizationId = draft.bulkDeleteAuthorizationId,

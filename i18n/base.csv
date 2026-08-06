@@ -911,7 +911,7 @@ Journal 清理程序等待下一次重新驗證：{},Journal cleanup is waiting 
 開啟 {},Enabled {},開啟 {},开启 {}
 雲端清除未完整確認：{}；下次會先安全載入再繼續,Cloud deletion was not fully confirmed: {}; the next run will safely load data before continuing,雲端清除未完整確認：{}；下次會先安全載入再繼續,云端清除未完整确认：{}；下次会先安全加载再继续
 雲端暫時無法使用,Cloud is temporarily unavailable,雲端暫時無法使用,云端暂时无法使用
-新同步核心仍在驗證中，尚未開放雲端寫入,The new sync core is still being validated; cloud writes are not enabled yet,新同步核心仍在驗證中，尚未開放雲端寫入,新同步核心仍在验证中，尚未开放云端写入
+同步核心目前無法使用,The sync core is currently unavailable,同步核心目前無法使用,同步核心目前无法使用
 新增 {},Added {},新增 {},新增 {}
 詳細備註,Detail notes,詳細備註,详细备注
 隔離,Quarantined,隔離,隔离

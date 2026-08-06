@@ -12,6 +12,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.repository.AuthRepository
@@ -205,6 +208,18 @@ class FavoriteSyncRepositoryImpl(
     }
 
     override suspend fun runImport(runId: String) {
+        try {
+            runImportUntilComplete(runId)
+        } catch (cancelled: CancellationException) {
+            withContext(NonCancellable) {
+                markRunInterrupted(runId, i18n("同步已取消。"))
+            }
+        } finally {
+            interruptRequestedRunIds.remove(runId)
+        }
+    }
+
+    private suspend fun runImportUntilComplete(runId: String) {
         interruptRequestedRunIds.remove(runId)
         val initial = taskQueries.getByRunId(runId).executeAsOneOrNull()?.toSnapshot() ?: return
         if (shouldStop(runId)) {
@@ -438,6 +453,10 @@ class FavoriteSyncRepositoryImpl(
             appendLog(logs, i18n("有 {} 項收藏已曾同步過至 {}，不進行重複同步", count, path))
         }
         current = updateSnapshot(current, warnings = warnings, logs = logs)
+        if (shouldStop(runId)) {
+            interruptRun(current, i18n("同步已取消。"))
+            return
+        }
 
         val formHash = when (val formHashResult = ensureFormHash()) {
             is YamiboResult.Success -> formHashResult.value
@@ -523,6 +542,11 @@ class FavoriteSyncRepositoryImpl(
             }
         }
 
+        if (shouldStop(runId)) {
+            interruptRun(current, i18n("同步已取消。"))
+            return
+        }
+
         if (current.uploadedCount > 0) {
             when (val reconcile = fetchRemoteFavoritesSilently()) {
                 is RemoteFetchResult.Success -> {
@@ -544,6 +568,11 @@ class FavoriteSyncRepositoryImpl(
             }
         }
 
+        if (shouldStop(runId)) {
+            interruptRun(current, i18n("同步已取消。"))
+            return
+        }
+
         val completedAt = currentTimeMillis()
         val completed = current.copy(
             status = FavoriteSyncStatus.COMPLETED,
@@ -557,7 +586,6 @@ class FavoriteSyncRepositoryImpl(
         )
         persistSnapshot(completed)
         stateFlow.value = FavoriteSyncState.Completed(completed)
-        interruptRequestedRunIds.remove(runId)
     }
 
     override suspend fun removeLocalFavoriteItem(itemId: Long, removeRemote: Boolean): FavoriteSyncDeleteResult {
@@ -768,7 +796,11 @@ class FavoriteSyncRepositoryImpl(
         return truncateFavoriteMessage(i18n("無法同步到百合會 {}：{}", formatPostLabel(threadId, title), reason))
     }
 
-    private fun shouldStop(runId: String): Boolean = runId in interruptRequestedRunIds
+    private fun shouldStop(runId: String): Boolean {
+        if (runId in interruptRequestedRunIds) return true
+        val snapshot = taskQueries.getByRunId(runId).executeAsOneOrNull()?.toSnapshot() ?: return false
+        return snapshot.status != FavoriteSyncStatus.RUNNING
+    }
 
     private fun currentSnapshotOrNull(): FavoriteSyncSnapshot? {
         return when (val current = stateFlow.value) {
@@ -808,7 +840,6 @@ class FavoriteSyncRepositoryImpl(
         )
         persistSnapshot(interrupted)
         stateFlow.value = FavoriteSyncState.Interrupted(interrupted)
-        interruptRequestedRunIds.remove(snapshot.runId)
     }
 
     private fun failRun(snapshot: FavoriteSyncSnapshot, reason: String) {
