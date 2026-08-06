@@ -14,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
@@ -21,7 +22,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.zIndex
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -30,6 +30,8 @@ import coil3.PlatformContext
 import coil3.compose.setSingletonImageLoaderFactory
 import coil3.memory.MemoryCache
 import coil3.network.ktor3.KtorNetworkFetcherFactory
+import io.github.littlesurvival.YamiboClient
+import io.github.littlesurvival.waf.YamiboWafChallengeHost
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -73,6 +75,39 @@ import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
 
 internal val showSignWebViewTrigger = mutableStateOf(false)
 private const val APP_FEEDBACK_Z_INDEX = Float.MAX_VALUE
+
+@Composable
+fun YamiboWafRecoveryRoot(
+    client: YamiboClient,
+    content: @Composable () -> Unit,
+) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var isForeground by remember(lifecycleOwner) {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+    }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> isForeground = true
+                Lifecycle.Event.ON_PAUSE,
+                Lifecycle.Event.ON_STOP,
+                Lifecycle.Event.ON_DESTROY -> isForeground = false
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        YamiboWafChallengeHost(
+            client = client,
+            isForeground = isForeground,
+            modifier = Modifier.fillMaxSize(),
+        )
+        content()
+    }
+}
 
 @Composable
 fun HomeScreenContent(

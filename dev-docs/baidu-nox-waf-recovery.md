@@ -1,28 +1,32 @@
-# Baidu NOX WAF recovery integration
+# Baidu NOX WAF Recovery
 
-`yamibo-api` owns WAF detection, NOX cookie isolation, safe probing, replay policy, single-flight coordination, and the Android/iOS system WebView implementations. `yamibo-app` owns only the foreground lifecycle signal and mounts one API composable behind its existing navigation content.
+## What the WAF Does
 
-## Runtime ownership
+Some connections to `bbs.yamibo.com` are routed through Baidu WAF. When a request does not contain a valid `nox_jst_v1` cookie, the WAF returns HTTP 405 with a NOX JavaScript challenge instead of the requested forum page.
 
-- Android and iOS foreground repositories share one `YamiboClient`; the client owns WAF state, cookies, coordination, and lifecycle.
-- `YamiboWafRecoveryRoot` places `YamiboWafChallengeHost` before the visible app content, preserving navigation, scroll state, and touch handling without any WAF overlay, message, control, or visible browser.
-- WorkManager, reminder, update, debug-probe, and iOS background entry points intentionally use headless `YamiboClient` instances. They must treat `YamiboResult.WafChallenge` as deferred foreground work; they must not open UI or report logout.
-- The existing sign-in WebView remains independent. WAF recovery does not replace sign-in.
-- Logout calls `YamiboClient.clearCookies()`, then clears the app stores. Ordinary WAF failure never clears Discuz login state.
+A regular HTTP client cannot execute this JavaScript, so repeating the same request still returns 405. A browser can execute the challenge, obtain `nox_jst_v1`, and use that cookie to access the forum normally.
 
-## Security and replay rules
+## How the App Recovers
 
-- Only an HTTP 405 body containing an observed NOX marker (`__noxExpire`, `/nox_`, or `gangplank_`) starts recovery; diagnostic headers alone and ordinary HTTP 405 responses remain ordinary errors.
-- The WebView permits only HTTPS Yamibo same-origin top-level navigation, exposes no JavaScript bridge, and disables file/content access where supported.
-- Recovery stays silent. A normal-viewport WebView runs behind app content, polls the platform cookie store without waiting for page completion, and is disposed after success or typed failure.
-- `nox_jst_v1` is stored separately from authentication cookies and is never included in diagnostics.
-- Safe reads may replay once. Every write declares `SAFE_ONCE`, `AFTER_CONFIRMED_EDGE_REJECTION`, or `NEVER`; no write has an implicit default.
-- Recovery verifies the acquired cookie with a safe GET before replay and prevents recovery/replay loops.
+1. `yamibo-api` identifies Baidu WAF only when an HTTP 405 response body contains a known NOX marker. Ordinary HTTP 405 responses do not start recovery.
+2. While the app is in the foreground, the API creates a system-native WebView behind the existing app content and loads the same Yamibo URL. The WebView is never shown to the user.
+3. The API polls the WebView cookie store without waiting for the forum page to finish loading. It stops the WebView as soon as `nox_jst_v1` is available.
+4. The new NOX cookie replaces only the entry with the same name in the client's composed Cookie header. Login cookies remain unchanged.
+5. The API validates the cookie with a safe same-origin GET. After successful validation, it replays the original request at most once.
 
-## Rollback
+Concurrent requests share a single WebView challenge instead of creating multiple WebViews.
 
-Construct the foreground client with `WafRecoveryConfig(enabled = false)` to retain typed WAF detection while disabling WebView recovery. The App host may then remain mounted safely or be removed in a follow-up release.
+## User Experience
 
-## Remaining release gates
+Recovery is silent. The current screen remains visible and may only appear to load longer than usual. No browser, WAF prompt, or additional control is displayed.
 
-Physical/simulator WebView lifecycle tests, Guangzhou route validation, controlled write duplicate detection, iOS archive size comparison, and Maven Central publication remain release gates. Live authentication and NOX cookie values must never be saved in fixtures, logs, screenshots, or reports.
+If the WebView, cookie validation, or replay fails, the API returns `YamiboResult.WafChallenge`. The app displays it as a normal loading failure, and the user can use the existing refresh action to fetch again.
+
+Background work never creates a WebView when no foreground host is available, and a WAF challenge is never treated as logout.
+
+## Security Limits
+
+- The WebView permits only same-origin HTTPS Yamibo navigation and exposes no native JavaScript bridge.
+- Login cookies and `nox_jst_v1` are never written to logs, error reports, or test data.
+- Each request allows at most one recovery attempt and one replay, preventing loops and duplicate writes.
+- Recovery supports only the observed non-interactive NOX challenge. It does not automate CAPTCHA.

@@ -49,6 +49,8 @@ class AndroidAuthRepository(
             is YamiboResult.NoPermission -> {
                 return YamiboResult.Failure(i18n("獲取用戶資料失敗: {}", profileResult.reason))
             }
+
+            is YamiboResult.WafChallenge -> return profileResult
         }
     }
 
@@ -70,6 +72,7 @@ class AndroidAuthRepository(
     override fun syncCookieFromWebView() {
         val cookie = CookieManager.getInstance().getCookie(YamiboRoute.Domain.build()) ?: return
         cookieStore.save(cookie)
+        yamiboClient.setCookie(cookie, importNox = true)
     }
 
     override fun currentUser(): ProfilePage? {
@@ -77,6 +80,7 @@ class AndroidAuthRepository(
     }
 
     override suspend fun logOut() {
+        yamiboClient.clearCookies()
         cookieStore.clear()
         userStore.clear()
         forumFavoriteStore?.clear()
