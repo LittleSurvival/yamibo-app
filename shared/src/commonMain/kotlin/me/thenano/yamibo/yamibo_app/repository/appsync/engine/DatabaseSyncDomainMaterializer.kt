@@ -1,6 +1,7 @@
 package me.thenano.yamibo.yamibo_app.repository.appsync.engine
 
 import me.thenano.yamibo.yamibo_app.Database
+import me.thenano.yamibo.yamibo_app.repository.appsync.isAppSyncLocalOnlySetting
 import me.thenano.yamibo.yamibo_app.repository.rss.rssSearchSubscriptionSyncId
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 
@@ -36,8 +37,11 @@ internal class DatabaseSyncDomainMaterializer(
     override fun reconcileProjections() {
         db.appSyncOperationQueries.getKnownSyncSettingKeys()
             .executeAsList()
+            .filterNot(::isAppSyncLocalOnlySetting)
             .forEach(settingsStore::remove)
-        db.appSyncOperationQueries.getSyncSettingValues().executeAsList().forEach { setting ->
+        db.appSyncOperationQueries.getSyncSettingValues().executeAsList()
+            .filterNot { isAppSyncLocalOnlySetting(it.settingKey) }
+            .forEach { setting ->
             when (setting.type) {
                 "int" -> setting.settingValue?.toIntOrNull()?.let {
                     settingsStore.putInt(setting.settingKey, it)
@@ -105,6 +109,7 @@ internal class DatabaseSyncDomainMaterializer(
     }
 
     private fun applySetting(entity: ResolvedSyncEntity) {
+        if (isAppSyncLocalOnlySetting(entity.key.entityId.value)) return
         db.appSyncOperationQueries.recordKnownSyncSettingKey(entity.key.entityId.value)
         if (entity.tombstone != null) {
             db.appSyncOperationQueries.deleteSyncSettingValue(entity.key.entityId.value)

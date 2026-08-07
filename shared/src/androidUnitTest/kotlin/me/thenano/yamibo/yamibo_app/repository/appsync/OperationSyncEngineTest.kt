@@ -746,6 +746,21 @@ class OperationSyncEngineTest {
     }
 
     @Test
+    fun retryableJournalLoadUsesRemainingAttemptAndConverges() = runBlocking {
+        val fixture = fixture()
+        activate(fixture)
+        appendSetting(fixture, "dark")
+        fixture.remote.retryableLoadFailuresRemaining = 1
+        val loadsBeforeSync = fixture.remote.loadCount
+
+        val result = fixture.engine.synchronize(account, formHash)
+
+        assertIs<OperationSyncResult.Converged>(result)
+        assertEquals(loadsBeforeSync + 2, fixture.remote.loadCount)
+        assertTrue(fixture.store.pendingOperations().isEmpty())
+    }
+
+    @Test
     fun terminalCloudValidationFailurePausesProviderWithoutPublishing() = runBlocking {
         val fixture = fixture()
         activate(fixture)
@@ -1191,6 +1206,7 @@ class OperationSyncEngineTest {
         var acceptThenReturnUnknown = false
         var throwOnLoad = false
         var throwOnPublish = false
+        var retryableLoadFailuresRemaining = 0
         var loadFailure: AppSyncJournalLoadResult? = null
         var publishFailure: AppSyncJournalPublishResult? = null
         var loadGate: CompletableDeferred<Unit>? = null
@@ -1209,6 +1225,10 @@ class OperationSyncEngineTest {
             loadGate?.await()
             loadGate = null
             if (throwOnLoad) error("unexpected provider failure")
+            if (retryableLoadFailuresRemaining > 0) {
+                retryableLoadFailuresRemaining--
+                return AppSyncJournalLoadResult.RetryableFailure("transient timeout")
+            }
             return loadFailure ?: AppSyncJournalLoadResult.Success(
                 journals.values.filter { it.payload.accountBinding == accountBinding },
                 checkpoints,

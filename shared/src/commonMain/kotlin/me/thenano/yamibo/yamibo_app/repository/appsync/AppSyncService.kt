@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.CancellationException
 import me.thenano.yamibo.yamibo_app.Database
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.repository.AuthRepository
 import me.thenano.yamibo.yamibo_app.repository.BookMarkRepository
 import me.thenano.yamibo.yamibo_app.repository.DetailNoteRepository
@@ -459,6 +460,7 @@ class AppSyncService(
         db.transaction {
             registries.flatMap { it.exportableSettingItems }
                 .distinctBy { it.storageKey }
+                .filterNot { isAppSyncLocalOnlySetting(it.storageKey) }
                 .filter { settingsStore.hasKey(it.storageKey) }
                 .forEach { setting ->
                     if (db.appSyncOperationQueries.getSyncSettingValue(setting.storageKey)
@@ -590,7 +592,12 @@ class AppSyncService(
             synchronize(binding, forceDiscovery, trigger, demand)
         } catch (error: CancellationException) {
             throw error
-        } catch (_: Throwable) {
+        } catch (error: Throwable) {
+            Logger.e(
+                APPSYNC_LOG_TAG,
+                "Synchronization crashed trigger=$trigger; pending operations were preserved",
+                error,
+            )
             val status = statusFor(
                 requireNotNull(store.installation()).state,
                 "同步發生未預期錯誤，已保留待同步操作並排定重試",
@@ -746,7 +753,13 @@ class AppSyncService(
             is ManualSyncPreviewResult.Ready -> AppSyncForcePreviewResult.Ready(
                 result.preview.toPublic(),
             )
-            is ManualSyncPreviewResult.Failed -> AppSyncForcePreviewResult.Failed(result.reason)
+            is ManualSyncPreviewResult.Failed -> {
+                Logger.w(
+                    APPSYNC_LOG_TAG,
+                    "Force override preview failed direction=${direction.name} reason=${result.reason}",
+                )
+                AppSyncForcePreviewResult.Failed(result.reason)
+            }
         }
     }
 
@@ -832,6 +845,10 @@ class AppSyncService(
                 AppSyncForceApplyResult.StalePreview
             }
             is ManualSyncApplyResult.Failed -> {
+                Logger.w(
+                    APPSYNC_LOG_TAG,
+                    "Force override apply failed direction=${preview.direction.name} reason=${result.reason}",
+                )
                 mutableStatus.value = currentStatus().copy(
                     message = result.reason,
                     presentationMessage = AppSyncStatusMessage.External(result.reason),
@@ -926,6 +943,7 @@ class AppSyncService(
             when (val audit = repairLocalProjection(binding)) {
                 is LocalProjectionRepairResult.Ready -> Unit
                 is LocalProjectionRepairResult.Failed -> {
+                    logSyncFailure(trigger, "local_projection_audit_failed", audit.reason)
                     val status = statusFor(
                         requireNotNull(store.installation()).state,
                         audit.reason,
@@ -942,6 +960,7 @@ class AppSyncService(
             forceDiscovery = forceDiscovery,
             detectEmptyCloud = forcePushWhenCloudEmpty,
         )
+        logSyncResult(trigger, result)
         if (result is OperationSyncResult.EmptyCloud) {
             val status = forcePushSeedToEmptyCloud()
             return finishReliabilityDemand(demand, status)
@@ -1027,6 +1046,49 @@ class AppSyncService(
         }
         mutableStatus.value = status
         return finishReliabilityDemand(demand, status)
+    }
+
+    /**
+     * UI messages intentionally expose only localized, user-actionable summaries. The engine
+     * reason must still be written to the platform log so provider failures, verification
+     * failures, and invalid remote state can be diagnosed without leaking untranslated backend
+     * text into the UI. Do not remove this when changing AppSyncStatusMessage presentation.
+     */
+    private fun logSyncResult(trigger: String, result: OperationSyncResult) {
+        val pending = store.pendingOperations().size
+        when (result) {
+            is OperationSyncResult.Converged -> Logger.i(
+                APPSYNC_LOG_TAG,
+                "Synchronization converged trigger=$trigger " +
+                    "received=${result.appliedRemoteCount} acknowledged=${result.acknowledgedLocalCount} " +
+                    "pending=$pending",
+            )
+            OperationSyncResult.EmptyCloud -> Logger.i(
+                APPSYNC_LOG_TAG,
+                "Verified empty cloud trigger=$trigger; starting authoritative local seed",
+            )
+            OperationSyncResult.AlreadyRunning -> Logger.w(
+                APPSYNC_LOG_TAG,
+                "Synchronization deferred trigger=$trigger reason=already_running pending=$pending",
+            )
+            is OperationSyncResult.PausedAuth -> logSyncFailure(trigger, "paused_auth", result.reason)
+            is OperationSyncResult.PausedProvider ->
+                logSyncFailure(trigger, "paused_provider", result.reason)
+            is OperationSyncResult.StoragePressure ->
+                logSyncFailure(trigger, "storage_pressure", result.reason)
+            is OperationSyncResult.RebootstrapRequired ->
+                logSyncFailure(trigger, "rebootstrap_required", result.reason)
+            is OperationSyncResult.RetryScheduled ->
+                logSyncFailure(trigger, "retry_scheduled", result.reason)
+        }
+    }
+
+    private fun logSyncFailure(trigger: String, outcome: String, reason: String) {
+        Logger.w(
+            APPSYNC_LOG_TAG,
+            "Synchronization did not converge trigger=$trigger outcome=$outcome " +
+                "pending=${store.pendingOperations().size} reason=$reason",
+        )
     }
 
     private fun repairLocalProjection(
@@ -1256,6 +1318,7 @@ class AppSyncService(
     }
 
     private companion object {
+        const val APPSYNC_LOG_TAG = "AppSyncService"
         const val DATABASE_GENERATION_KEY = "appsync.database_generation"
         const val JOURNAL_RETIREMENT_DELETE_ENABLED_KEY =
             "appsync.journal_retirement_delete_enabled"

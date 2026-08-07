@@ -82,6 +82,35 @@ class AppSyncLocalMutationRoutingTest {
     }
 
     @Test
+    fun deviceLocalCategorySelectionIgnoresCloudCanonicalValueAndDoesNotPublish() {
+        val fixture = activeFixture()
+        val settings = MapSettingsStore().also {
+            it.putInt("appsettings.favoritelastcategoryid", 7)
+        }
+        fixture.db.appSyncOperationQueries.upsertSyncSettingValue(
+            settingKey = "appsettings.favoritelastcategoryid",
+            type = "int",
+            value_ = "99",
+            winnerOperationId = "remote-device",
+            updatedAtEpochMillis = 1,
+        )
+        val recordingStore = OperationRecordingSettingsStore(fixture.db, settings, fixture.recorder)
+
+        assertEquals(7, recordingStore.getInt("appsettings.favoritelastcategoryid", 0))
+        recordingStore.putInt("appsettings.favoritelastcategoryid", 8)
+
+        assertEquals(8, recordingStore.getInt("appsettings.favoritelastcategoryid", 0))
+        assertTrue(fixture.store.pendingOperations().isEmpty())
+        assertEquals(
+            "99",
+            fixture.db.appSyncOperationQueries
+                .getSyncSettingValue("appsettings.favoritelastcategoryid")
+                .executeAsOne()
+                .settingValue,
+        )
+    }
+
+    @Test
     fun mangaAndThreadTouchSettingsSyncAsIndependentEntities() {
         val source = activeFixture()
         val sourceSettings = MapSettingsStore()

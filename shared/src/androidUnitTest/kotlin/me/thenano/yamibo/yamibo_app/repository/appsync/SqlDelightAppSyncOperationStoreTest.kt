@@ -601,6 +601,7 @@ class SqlDelightAppSyncOperationStoreTest {
     fun forcePullReplacementDiscardsUnpublishedOperationsAndAdoptsCloudCoverage() {
         val db = inMemoryDatabase()
         val store = activeStore(db)
+        val originalInstallation = requireNotNull(store.installation())
         store.updateState(AppSyncInstallationState.Quarantined)
         val local = appendSetting(store)
         val remote = remoteOperation()
@@ -623,6 +624,16 @@ class SqlDelightAppSyncOperationStoreTest {
         assertTrue(store.isApplied(remote.operationId))
         assertEquals(coverage.asStableMap(), store.causalContext().asStableMap())
         assertEquals(AppSyncInstallationState.Active, store.installation()?.state)
+        val replacementInstallation = requireNotNull(store.installation())
+        assertNotEquals(originalInstallation.deviceId, replacementInstallation.deviceId)
+        assertNotEquals(originalInstallation.deviceEpoch, replacementInstallation.deviceEpoch)
+        assertNotEquals(originalInstallation.writerNonce, replacementInstallation.writerNonce)
+        assertEquals(1L, replacementInstallation.nextSequence)
+
+        val afterPull = appendSetting(store)
+        assertEquals(1L, afterPull.sequence.value)
+        assertEquals(replacementInstallation.deviceId, afterPull.deviceId)
+        assertEquals(replacementInstallation.deviceEpoch, afterPull.deviceEpoch)
     }
 
     @Test

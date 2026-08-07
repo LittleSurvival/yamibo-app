@@ -422,6 +422,10 @@ internal class SqlDelightAppSyncOperationStore(
         domainMutation: (OperationReductionResult) -> Unit,
     ) {
         db.transaction {
+            val current = requireInstallation()
+            val accountBinding = requireNotNull(current.accountBinding) {
+                "Force pull requires an account-bound installation"
+            }
             val localCloudIds = allOutboxOperations()
                 .filter { (_, lifecycle) ->
                     lifecycle == AppSyncOperationLifecycle.PendingLocal ||
@@ -451,7 +455,18 @@ internal class SqlDelightAppSyncOperationStore(
                 queries.upsertCausalWatermark(replicaKey, sequence)
             }
             recordReductionMetadata(result, appliedAtEpochMillis)
-            queries.updateInstallationState(AppSyncInstallationState.Active.toDb())
+            // A force pull may discard unpublished operations from the current replica. Reusing
+            // that replica afterwards would create a permanent sequence gap when the next local
+            // operation is appended. Start a fresh writer identity while retaining the old
+            // outbox rows and their DiscardedByForcePull lifecycle as an audit trail.
+            queries.updateInstallationIdentity(
+                accountBinding = accountBinding.value,
+                deviceId = SyncIdentityGenerator.deviceId().value,
+                deviceEpoch = SyncIdentityGenerator.deviceEpoch().value,
+                writerNonce = SyncIdentityGenerator.writerNonce().value,
+                nextSequence = 1L,
+                state = AppSyncInstallationState.Active.toDb(),
+            )
         }
     }
 

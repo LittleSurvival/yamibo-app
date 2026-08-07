@@ -3,6 +3,7 @@ package me.thenano.yamibo.yamibo_app.repository.appsync.engine
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDomainId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncEntityId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationKind
+import me.thenano.yamibo.yamibo_app.repository.appsync.isAppSyncLocalOnlySetting
 import me.thenano.yamibo.yamibo_app.repository.backup.YamiboBackupFile
 import me.thenano.yamibo.yamibo_app.store.appsync.LocalSyncOperationDraft
 
@@ -29,7 +30,7 @@ internal class BackupSnapshotMigrationPlanner {
             .associate { it.localId to it.syncId }
         var skippedOrphanRssHistoryCount = 0
         val drafts = buildList {
-            snapshot.settings.forEach {
+            snapshot.settings.filterNot { isAppSyncLocalOnlySetting(it.key) }.forEach {
                 add(put("settings", it.key, mapOf("type" to it.type.serialName(), "value" to it.value)))
             }
             snapshot.favorites.categories.forEach {

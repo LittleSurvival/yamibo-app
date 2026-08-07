@@ -4,6 +4,7 @@ import io.github.littlesurvival.dto.value.FormHash
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncInstallationState
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncJournalRetirementIntent
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncVerifiedCheckpoint
@@ -260,8 +261,14 @@ internal class OperationSyncEngine(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
+                Logger.e(
+                    LOG_TAG,
+                    "Unexpected synchronization provider failure; pending operations were preserved",
+                    error,
+                )
                 OperationSyncResult.RetryScheduled(
-                    "Unexpected sync provider failure (${error::class.simpleName ?: "unknown"})",
+                    "Unexpected sync provider failure (${error::class.simpleName ?: "unknown"}): " +
+                        (error.message ?: "no detail"),
                 )
             }
         } finally {
@@ -306,8 +313,16 @@ internal class OperationSyncEngine(
                     store.updateState(AppSyncInstallationState.PausedAuth)
                     return OperationSyncResult.PausedAuth("Yamibo login is unavailable")
                 }
-                is AppSyncJournalLoadResult.RetryableFailure ->
-                    return OperationSyncResult.RetryScheduled(result.reason)
+                is AppSyncJournalLoadResult.RetryableFailure -> {
+                    Logger.w(
+                        LOG_TAG,
+                        "Journal load attempt ${attemptIndex + 1}/$maxAttempts failed: ${result.reason}",
+                    )
+                    if (attemptIndex == maxAttempts - 1) {
+                        return OperationSyncResult.RetryScheduled(result.reason)
+                    }
+                    return@repeat
+                }
                 is AppSyncJournalLoadResult.TerminalFailure -> {
                     store.updateState(AppSyncInstallationState.PausedProvider)
                     return OperationSyncResult.PausedProvider(result.reason)
@@ -564,5 +579,9 @@ internal class OperationSyncEngine(
             }
         }
         return merged
+    }
+
+    private companion object {
+        const val LOG_TAG = "OperationSyncEngine"
     }
 }
