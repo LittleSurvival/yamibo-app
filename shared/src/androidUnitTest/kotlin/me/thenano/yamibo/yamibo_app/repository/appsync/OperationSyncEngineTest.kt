@@ -389,7 +389,7 @@ class OperationSyncEngineTest {
     }
 
     @Test
-    fun establishedCloudJoinIgnoresDivergentLegacyLocalStateAndKeepsRollback() = runBlocking {
+    fun establishedCloudJoinMigratesDivergentLegacyLocalStateAndKeepsRollback() = runBlocking {
         val remote = FakeJournalRemote()
         val cloudOperation = standaloneSettingOperation("dark")
         remote.seed(
@@ -432,9 +432,9 @@ class OperationSyncEngineTest {
         val result = assertIs<AppSyncBootstrapResult.Ready>(fixture.bootstrap.bootstrap(account))
 
         assertEquals(AppSyncBootstrapMode.Join, result.mode)
-        assertEquals("dark", fixture.domain.value("settings", "theme", "value"))
-        assertEquals(null, fixture.domain.value("settings", "local-only", "value"))
-        assertTrue(fixture.store.pendingOperations().isEmpty())
+        assertEquals("system", fixture.domain.value("settings", "theme", "value"))
+        assertEquals("kept", fixture.domain.value("settings", "local-only", "value"))
+        assertEquals(2, fixture.store.pendingOperations().size)
         assertEquals("rollback", fixture.store.latestBootstrapRollbackSnapshot()?.encodedSnapshot)
         assertEquals(AppSyncInstallationState.Active, fixture.store.installation()?.state)
         assertEquals(0, remote.publishCount)
@@ -505,7 +505,7 @@ class OperationSyncEngineTest {
     }
 
     @Test
-    fun establishedCloudJoinDoesNotUploadNonOverlappingLegacyLocalEntities() = runBlocking {
+    fun establishedCloudJoinPreservesNonOverlappingLegacyLocalEntitiesForUpload() = runBlocking {
         val remote = FakeJournalRemote()
         val cloudOperation = standaloneSettingOperation("dark")
         remote.seed(journalPayload(cloudOperation))
@@ -525,8 +525,8 @@ class OperationSyncEngineTest {
         assertIs<AppSyncBootstrapResult.Ready>(fixture.bootstrap.bootstrap(account))
 
         assertEquals("dark", fixture.domain.value("settings", "theme", "value"))
-        assertEquals(null, fixture.domain.value("settings", "local-only", "value"))
-        assertTrue(fixture.store.pendingOperations().isEmpty())
+        assertEquals("kept", fixture.domain.value("settings", "local-only", "value"))
+        assertEquals(1, fixture.store.pendingOperations().size)
     }
 
     @Test

@@ -21,10 +21,12 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.engine.BackupSnapshotMigr
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.BootstrapCoordinator
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.CapturedBootstrapSnapshot
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.CheckpointCoordinator
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.CheckpointProjection
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.CheckpointCreationResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.DatabaseSyncDomainMaterializer
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.OperationSyncEngine
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.OperationSyncResult
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.OperationReducer
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.OperationChangeAction
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.OperationChangeDirection
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.OperationChangeSummary
@@ -36,9 +38,13 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.engine.ManualSyncPreviewR
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.JournalRetirementCoordinator
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalRetirementMaintenanceResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.SqlDelightSyncDomainStateAdapter
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.LocalProjectionRepairPlanner
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncBootstrapRollbackSnapshot
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncInstallationState
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncOperationLifecycle
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncAccountBinding
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncIdentityGenerator
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationOrigin
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.YamiboAppSyncBlogProvider
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.YamiboAppSyncJournalRemote
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCloudResetResult
@@ -229,6 +235,15 @@ internal data class ReliabilityDemandContext(
     val retryCount: Long,
 )
 
+private sealed interface LocalProjectionRepairResult {
+    data class Ready(
+        val snapshot: me.thenano.yamibo.yamibo_app.repository.backup.YamiboBackupFile,
+        val repairedOperationCount: Int,
+    ) : LocalProjectionRepairResult
+
+    data class Failed(val reason: String) : LocalProjectionRepairResult
+}
+
 internal fun nextReliabilityDemand(
     trigger: String,
     nowEpochMillis: Long,
@@ -262,7 +277,6 @@ class AppSyncService(
     private val authRepository: AuthRepository,
     private val nowMillis: () -> Long = ::currentTimeMillis,
 ) {
-    private val featureEnabled = settingsStore.getBoolean(FEATURE_ENABLED_KEY, false)
     private val store = SqlDelightAppSyncOperationStore(db)
     private val domainState = SqlDelightSyncDomainStateAdapter(
         db = db,
@@ -280,6 +294,7 @@ class AppSyncService(
     )
     private var localSnapshotSource: BackupRepositoryImpl? = null
     private val migrationPlanner = BackupSnapshotMigrationPlanner()
+    private val localProjectionRepairPlanner = LocalProjectionRepairPlanner()
     private val rollbackSnapshotCodec = CloudBackupPayloadCodec()
     private val bootstrap = BootstrapCoordinator(
         store,
@@ -310,16 +325,34 @@ class AppSyncService(
         store = store,
         remote = remote,
         domainState = domainState,
+        captureAuthoritativeLocalDrafts = {
+            db.transactionWithResult {
+                migrationPlanner.plan(
+                    checkNotNull(localSnapshotSource) {
+                        "Backup snapshot source is not configured"
+                    }.createAppSyncSnapshot(),
+                )
+            }
+        },
         nowMillis = nowMillis,
     )
     private val checkpointCoordinator = CheckpointCoordinator(
         store = store,
         remote = remote,
-        domainState = domainState,
-        snapshot = {
-            checkNotNull(localSnapshotSource) {
-                "Backup snapshot source is not configured"
-            }.createAppSyncSnapshot()
+        captureProjection = {
+            db.transactionWithResult {
+                CheckpointProjection(
+                    coverage = store.causalContext(),
+                    entities = domainState.currentState().values.toList(),
+                    snapshot = checkNotNull(localSnapshotSource) {
+                        "Backup snapshot source is not configured"
+                    }.createAppSyncSnapshot(),
+                    pendingOperationCount = store.pendingOperations().size,
+                    acknowledgedOperationCount = store.allOutboxOperations().count {
+                        it.second == AppSyncOperationLifecycle.Acknowledged
+                    },
+                )
+            }
         },
         nowMillis = nowMillis,
     )
@@ -330,7 +363,7 @@ class AppSyncService(
         ownerId = { SyncIdentityGenerator.writerNonce().value },
     )
     internal val mutationRecorder = AppSyncMutationRecorder(
-        enabled = featureEnabled,
+        enabled = true,
         store = store,
         domainState = domainState,
         nowMillis = nowMillis,
@@ -349,31 +382,21 @@ class AppSyncService(
         val installation = store.initialize(generation)
         backfillStableContainerIds(db)
         backfillFavoriteUpdateSyncState(db)
-        if (featureEnabled) {
-            store.reconcileResolvedStateCoverage()
-            domainState.reconcileProjections()
-        }
+        store.reconcileResolvedStateCoverage()
+        domainState.reconcileProjections()
         mutableStatus = MutableStateFlow(
-            if (featureEnabled) {
-                statusFor(
-                    installation.state,
-                    "尚未開始同步",
-                    AppSyncStatusMessage.NotStarted,
-                )
-            } else {
-                disabledStatus(installation.automaticEnabled)
-            },
+            statusFor(
+                installation.state,
+                "尚未開始同步",
+                AppSyncStatusMessage.NotStarted,
+            ),
         )
     }
 
     fun operationRecordingSettingsStore(
         db: Database,
         delegate: SettingsStore,
-    ): SettingsStore = if (featureEnabled) {
-        OperationRecordingSettingsStore(db, delegate, mutationRecorder)
-    } else {
-        delegate
-    }
+    ): SettingsStore = OperationRecordingSettingsStore(db, delegate, mutationRecorder)
 
     fun detailNoteRepository(db: Database): DetailNoteRepository =
         DetailNoteRepositoryImpl(db, mutationRecorder)
@@ -411,10 +434,9 @@ class AppSyncService(
     )
 
     fun readHistoryRepository(delegate: ReadHistoryRepository): ReadHistoryRepository =
-        if (featureEnabled) OperationRecordingReadHistoryRepository(delegate, mutationRecorder) else delegate
+        OperationRecordingReadHistoryRepository(delegate, mutationRecorder)
 
     fun registerSyncableSettings(registries: List<SettingsRegistry>) {
-        if (!featureEnabled) return
         db.transaction {
             registries.flatMap { it.exportableSettingItems }
                 .distinctBy { it.storageKey }
@@ -452,7 +474,6 @@ class AppSyncService(
     }
 
     suspend fun refresh(forceDiscovery: Boolean = false): AppSyncServiceStatus {
-        if (!featureEnabled) return disabledStatus()
         val binding = currentAccountBinding() ?: return pausedAuth("foreground_refresh")
         val installation = store.installation()
         return when {
@@ -477,7 +498,6 @@ class AppSyncService(
         forceDiscovery: Boolean = false,
         trigger: String = "manual",
     ): AppSyncServiceStatus {
-        if (!featureEnabled) return disabledStatus()
         val binding = currentAccountBinding() ?: return pausedAuth(trigger)
         val demand = beginReliabilityDemand(trigger)
         return try {
@@ -520,10 +540,6 @@ class AppSyncService(
     }
 
     fun setAutomaticEnabled(enabled: Boolean) {
-        if (!featureEnabled) {
-            mutableStatus.value = disabledStatus()
-            return
-        }
         store.setAutomaticEnabled(enabled)
         val installation = requireNotNull(store.installation())
         mutableStatus.value = statusFor(
@@ -539,10 +555,6 @@ class AppSyncService(
     }
 
     fun setScheduleSettings(settings: AppSyncScheduleSettings) {
-        if (!featureEnabled) {
-            mutableStatus.value = disabledStatus()
-            return
-        }
         store.setScheduleSettings(settings)
         val installation = requireNotNull(store.installation())
         mutableStatus.value = statusFor(
@@ -554,7 +566,6 @@ class AppSyncService(
     }
 
     fun requestAutomaticTrigger(trigger: AppSyncAutomaticTrigger): Long? {
-        if (!featureEnabled) return null
         val generation = store.requestAutomaticTrigger(trigger)
         if (generation != null) {
             val installation = requireNotNull(store.installation())
@@ -594,7 +605,6 @@ class AppSyncService(
     }
 
     suspend fun deleteCloudData(): AppSyncServiceStatus {
-        if (!featureEnabled) return disabledStatus()
         val binding = currentAccountBinding() ?: return pausedAuth("cloud_reset")
         val formHash = authRepository.currentUser()?.formHash
             ?: return pausedAuth("cloud_reset")
@@ -646,7 +656,6 @@ class AppSyncService(
     }
 
     fun clearCloudLinkCache(): AppSyncServiceStatus {
-        if (!featureEnabled) return disabledStatus()
         val binding = currentAccountBinding() ?: return pausedAuth("clear_cloud_link_cache")
         if (mutableStatus.value.phase == AppSyncServicePhase.Running) {
             return mutableStatus.value
@@ -664,12 +673,6 @@ class AppSyncService(
     suspend fun previewForceOverride(
         direction: AppSyncForceDirection,
     ): AppSyncForcePreviewResult {
-        if (!featureEnabled) {
-            return AppSyncForcePreviewResult.Failed(
-                "同步核心尚未啟用",
-                AppSyncForceFailureKind.CoreUnavailable,
-            )
-        }
         val binding = currentAccountBinding()
             ?: return AppSyncForcePreviewResult.Failed(
                 "登入狀態已過期，請先刷新登入狀態",
@@ -687,12 +690,6 @@ class AppSyncService(
     suspend fun applyForceOverride(
         preview: AppSyncForcePreview,
     ): AppSyncForceApplyResult {
-        if (!featureEnabled) {
-            return AppSyncForceApplyResult.Failed(
-                "同步核心尚未啟用",
-                AppSyncForceFailureKind.CoreUnavailable,
-            )
-        }
         val binding = currentAccountBinding()
             ?: return AppSyncForceApplyResult.Failed(
                 "登入狀態已過期，請先刷新登入狀態",
@@ -705,6 +702,29 @@ class AppSyncService(
                 "登入狀態已過期，請先刷新登入狀態",
                 AppSyncForceFailureKind.AuthenticationExpired,
             )
+        }
+        if (preview.direction == AppSyncForceDirection.Pull) {
+            val installation = requireNotNull(store.installation())
+            try {
+                val rollbackSnapshot = db.transactionWithResult {
+                    checkNotNull(localSnapshotSource) {
+                        "Backup snapshot source is not configured"
+                    }.createAppSyncSnapshot()
+                }
+                store.saveBootstrapRollbackSnapshot(
+                    AppSyncBootstrapRollbackSnapshot(
+                        accountBinding = binding,
+                        databaseGeneration = installation.databaseGeneration,
+                        encodedSnapshot = rollbackSnapshotCodec.encode(rollbackSnapshot).getOrThrow(),
+                        createdAtEpochMillis = nowMillis(),
+                    ),
+                )
+            } catch (error: Throwable) {
+                if (error is CancellationException) throw error
+                return AppSyncForceApplyResult.Failed(
+                    "Local rollback snapshot failed: ${error.message ?: error::class.simpleName}",
+                )
+            }
         }
         mutableStatus.value = mutableStatus.value.copy(
             phase = AppSyncServicePhase.Running,
@@ -726,6 +746,7 @@ class AppSyncService(
                         binding = binding,
                         forceDiscovery = false,
                         trigger = "manual_force_push",
+                        auditLocalProjection = false,
                     )
                 } else {
                     statusFor(
@@ -757,7 +778,6 @@ class AppSyncService(
     }
 
     fun currentStatus(): AppSyncServiceStatus {
-        if (!featureEnabled) return disabledStatus()
         val installation = requireNotNull(store.installation())
         return statusFor(
             installation.state,
@@ -819,6 +839,7 @@ class AppSyncService(
         forceDiscovery: Boolean,
         trigger: String,
         existingDemand: ReliabilityDemandContext? = null,
+        auditLocalProjection: Boolean = true,
     ): AppSyncServiceStatus {
         val demand = existingDemand ?: beginReliabilityDemand(trigger)
         mutableStatus.value = mutableStatus.value.copy(
@@ -826,6 +847,20 @@ class AppSyncService(
             message = "正在同步操作紀錄",
             presentationMessage = AppSyncStatusMessage.SyncRunning,
         )
+        if (auditLocalProjection && localSnapshotSource != null) {
+            when (val audit = repairLocalProjection(binding)) {
+                is LocalProjectionRepairResult.Ready -> Unit
+                is LocalProjectionRepairResult.Failed -> {
+                    val status = statusFor(
+                        requireNotNull(store.installation()).state,
+                        audit.reason,
+                        phaseOverride = AppSyncServicePhase.RetryPending,
+                    )
+                    mutableStatus.value = status
+                    return finishReliabilityDemand(demand, status)
+                }
+            }
+        }
         val result = engine.synchronize(
             accountBinding = binding,
             formHash = authRepository.currentUser()?.formHash,
@@ -858,10 +893,16 @@ class AppSyncService(
         val retirementStatus = retirementResult?.toPublicStatus()
         val status = when (checkpointResult) {
             is CheckpointCreationResult.StoragePressure -> {
-                store.updateState(AppSyncInstallationState.PausedProvider)
+                val converged = result as OperationSyncResult.Converged
                 statusFor(
-                    AppSyncInstallationState.PausedProvider,
-                    checkpointResult.reason,
+                    AppSyncInstallationState.Active,
+                    "同步完成：接收 ${converged.appliedRemoteCount}、確認 " +
+                        "${converged.acknowledgedLocalCount}；checkpoint 因容量限制延後",
+                    AppSyncStatusMessage.SyncCompleted(
+                        receivedCount = converged.appliedRemoteCount,
+                        acknowledgedCount = converged.acknowledgedLocalCount,
+                    ),
+                    changeSummaries = converged.changes.map(OperationChangeSummary::toPublic),
                 )
             }
             is CheckpointCreationResult.RetryableFailure -> statusFor(
@@ -903,6 +944,53 @@ class AppSyncService(
         }
         mutableStatus.value = status
         return finishReliabilityDemand(demand, status)
+    }
+
+    private fun repairLocalProjection(
+        binding: SyncAccountBinding,
+    ): LocalProjectionRepairResult {
+        val source = localSnapshotSource
+            ?: return LocalProjectionRepairResult.Failed(
+                "Local data safety audit is unavailable because the snapshot source is not configured",
+            )
+        return try {
+            val captured = db.transactionWithResult {
+                val snapshot = source.createAppSyncSnapshot()
+                Triple(snapshot, migrationPlanner.plan(snapshot), domainState.currentState())
+            }
+            val snapshot = captured.first
+            val localDrafts = captured.second
+            val repairs = localProjectionRepairPlanner.plan(localDrafts, captured.third)
+            if (repairs.isNotEmpty()) {
+                val installation = requireNotNull(store.installation())
+                check(installation.accountBinding == binding) {
+                    "Local data belongs to a different AppSync account"
+                }
+                store.appendLocalOperations(
+                    accountBinding = binding,
+                    drafts = repairs,
+                    causalContext = store.causalContext(),
+                    createdAtEpochMillis = nowMillis(),
+                    origin = SyncOperationOrigin.Migration,
+                ) { operations ->
+                    val reduction = OperationReducer().reduce(domainState.currentState(), operations)
+                    check(reduction.quarantined.isEmpty()) {
+                        "Local projection repair produced invalid operations"
+                    }
+                    domainState.applyWithinTransaction(reduction)
+                }
+                domainState.reconcileProjections()
+            }
+            check(localProjectionRepairPlanner.isRepresented(localDrafts, domainState.currentState())) {
+                "Local projection still differs after safe repair"
+            }
+            LocalProjectionRepairResult.Ready(snapshot, repairs.size)
+        } catch (error: Throwable) {
+            if (error is CancellationException) throw error
+            LocalProjectionRepairResult.Failed(
+                "Local data safety audit failed: ${error.message ?: error::class.simpleName}",
+            )
+        }
     }
 
     private fun beginReliabilityDemand(trigger: String): ReliabilityDemandContext {
@@ -1019,23 +1107,6 @@ class AppSyncService(
         ).also { mutableStatus.value = it }
     }
 
-    private fun disabledStatus(
-        automaticEnabled: Boolean = store.installation()?.automaticEnabled ?: false,
-    ) = AppSyncServiceStatus(
-        phase = AppSyncServicePhase.Disabled,
-        automaticEnabled = automaticEnabled && featureEnabled,
-        pendingOperationCount = store.pendingOperations().size,
-        lastVerifiedAtEpochMillis = store.installation()?.lastVerifiedHeartbeatAt,
-        message = "新同步核心仍在驗證中，尚未開放雲端寫入",
-        presentationMessage = AppSyncStatusMessage.CoreNotAvailable,
-        scheduleSettings = store.installation()?.scheduleSettings ?: AppSyncScheduleSettings(),
-        pendingTriggerGeneration = store.installation()?.let {
-            it.requestedTriggerGeneration.takeIf { generation ->
-                generation > it.accountedTriggerGeneration
-            }
-        },
-    )
-
     private fun statusFor(
         state: AppSyncInstallationState,
         message: String,
@@ -1103,7 +1174,6 @@ class AppSyncService(
 
     private companion object {
         const val DATABASE_GENERATION_KEY = "appsync.database_generation"
-        const val FEATURE_ENABLED_KEY = "appsync.operation_log_engine_enabled"
         const val JOURNAL_RETIREMENT_DELETE_ENABLED_KEY =
             "appsync.journal_retirement_delete_enabled"
     }

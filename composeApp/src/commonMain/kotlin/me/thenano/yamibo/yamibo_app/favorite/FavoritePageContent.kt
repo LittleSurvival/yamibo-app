@@ -184,6 +184,8 @@ internal fun FavoritePageContent(
                 onDismiss = onHideSyncCard,
                 onResume = onResumeSync,
                 onInterrupt = onInterruptSync,
+                messageMaxHeight = 120.dp,
+                contentMaxHeight = 360.dp,
             )
         }
 

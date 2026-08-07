@@ -19,7 +19,7 @@ import me.thenano.yamibo.yamibo_app.repository.SystemNotificationRepository
 import kotlin.math.absoluteValue
 
 class FavoriteSyncForegroundService : Service() {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val activeRuns = linkedMapOf<String, ActiveRun>()
     private lateinit var favoriteSyncRepository: FavoriteSyncRepository
     private lateinit var notificationRepository: AndroidSystemNotificationRepository
@@ -75,7 +75,7 @@ class FavoriteSyncForegroundService : Service() {
         }
         runningRunIdsState.value += runId
 
-        val stateJob = scope.launch {
+        val stateJob = scope.launch(start = CoroutineStart.LAZY) {
             favoriteSyncRepository.observeRun(runId).collectLatest { state ->
                 val snapshot = state.snapshotOrNull() ?: return@collectLatest
                 notificationRepository.showProgress(snapshot.toNotificationModel(state))
@@ -96,18 +96,26 @@ class FavoriteSyncForegroundService : Service() {
                 }
             }
         }
-        val workJob = scope.launch {
+        val workJob = scope.launch(Dispatchers.Default, start = CoroutineStart.LAZY) {
             favoriteSyncRepository.runImport(runId)
         }
         activeRuns[runId] = ActiveRun(notificationId, stateJob, workJob)
+        stateJob.start()
+        workJob.start()
     }
 
     private fun cancelRun(runId: String) {
-        val activeRun = activeRuns[runId] ?: return
+        val activeRun = activeRuns[runId] ?: run {
+            if (activeRuns.isEmpty()) stopSelf()
+            return
+        }
         scope.launch {
             favoriteSyncRepository.interruptRun(runId)
+            activeRun.workJob.cancelAndJoin()
+            if (activeRuns.containsKey(runId)) {
+                finishRun(runId, keepNotification = true)
+            }
         }
-        activeRun.workJob.cancel()
     }
 
     private fun finishRun(runId: String, keepNotification: Boolean) {

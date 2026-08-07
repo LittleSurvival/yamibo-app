@@ -2,9 +2,9 @@ package me.thenano.yamibo.yamibo_app.repository.appsync.engine
 
 import io.github.littlesurvival.dto.value.FormHash
 import me.thenano.yamibo.yamibo_app.repository.appsync.domain.stableAppSyncFingerprint
-import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncOperationLifecycle
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncVerifiedCheckpoint
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncAccountBinding
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncCausalContext
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointEnvelopeCodec
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointTombstone
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointValidation
@@ -19,11 +19,18 @@ internal sealed interface CheckpointCreationResult {
     data class StoragePressure(val reason: String) : CheckpointCreationResult
 }
 
+internal data class CheckpointProjection(
+    val coverage: SyncCausalContext,
+    val entities: Collection<ResolvedSyncEntity>,
+    val snapshot: YamiboBackupFile,
+    val pendingOperationCount: Int,
+    val acknowledgedOperationCount: Int,
+)
+
 internal class CheckpointCoordinator(
     private val store: AppSyncOperationStore,
     private val remote: AppSyncJournalRemote,
-    private val domainState: SyncDomainStateAdapter,
-    private val snapshot: () -> YamiboBackupFile,
+    private val captureProjection: () -> CheckpointProjection,
     private val nowMillis: () -> Long,
     private val minimumAcknowledgedOperations: Int = 64,
     private val maximumRetainedCheckpoints: Int = 3,
@@ -42,14 +49,14 @@ internal class CheckpointCoordinator(
                 store.pinnedRetirementCheckpointIds(),
             ),
         )?.let { return it }
-        val acknowledged = store.allOutboxOperations().filter {
-            it.second == AppSyncOperationLifecycle.Acknowledged
-        }
-        if (acknowledged.size < minimumAcknowledgedOperations) {
+        val projection = captureProjection()
+        if (projection.pendingOperationCount > 0 ||
+            projection.acknowledgedOperationCount < minimumAcknowledgedOperations
+        ) {
             return CheckpointCreationResult.NotNeeded
         }
-        val coverage = store.causalContext()
-        val entities = domainState.currentState().values
+        val coverage = projection.coverage
+        val entities = projection.entities
         val checkpointId = deterministicCheckpointId(coverage.asStableMap(), entities)
         if (store.verifiedCheckpoints().any { it.checkpointId == checkpointId }) {
             return CheckpointCreationResult.NotNeeded
@@ -59,7 +66,7 @@ internal class CheckpointCoordinator(
             checkpointId = checkpointId,
             accountBinding = accountBinding,
             coverage = coverage,
-            snapshot = snapshot(),
+            snapshot = projection.snapshot,
             resolvedEntities = entities,
             tombstones = entities.mapNotNull { entity ->
                 entity.tombstone?.let {
@@ -73,8 +80,14 @@ internal class CheckpointCoordinator(
             },
             createdAtEpochMillis = createdAt,
         )
-        val expectedEnvelope = codec.validate(codec.encode(payload))
-            as AppSyncCheckpointValidation.Valid
+        val expectedEnvelope = when (val validation = codec.validate(codec.encode(payload))) {
+            is AppSyncCheckpointValidation.Valid -> validation
+            is AppSyncCheckpointValidation.Invalid -> {
+                return CheckpointCreationResult.RetryableFailure(
+                    "Checkpoint projection validation failed: ${validation.reason}",
+                )
+            }
+        }
         return when (val published = remote.publishCheckpoint(payload, formHash)) {
             is AppSyncCheckpointPublishResult.Verified -> {
                 val checkpoint = published.checkpoint

@@ -15,6 +15,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalPubl
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalRemote
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.CheckpointCoordinator
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.CheckpointCreationResult
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.CheckpointProjection
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.LoadedAppSyncCheckpoint
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.OperationReductionResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.OperationReducer
@@ -69,7 +70,19 @@ class CheckpointCoordinatorTest {
         assertEquals(3, fixture.remote.retentionCalls)
     }
 
-    private fun fixture(): Fixture {
+    @Test
+    fun invalidLocalProjectionReturnsRetryableFailureWithoutPublishing() = runBlocking {
+        val fixture = fixture(inconsistentFavoriteUpdateProjection = true)
+
+        val result = fixture.coordinator.createIfNeeded(account, formHash)
+
+        val failure = assertIs<CheckpointCreationResult.RetryableFailure>(result)
+        assertTrue(failure.reason.contains("projection validation failed"))
+        assertTrue(fixture.remote.publishedIds.isEmpty())
+        assertTrue(fixture.store.verifiedCheckpoints().isEmpty())
+    }
+
+    private fun fixture(inconsistentFavoriteUpdateProjection: Boolean = false): Fixture {
         val database = Database(
             JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).also(Database.Schema::create),
         )
@@ -91,6 +104,21 @@ class CheckpointCoordinatorTest {
         )
         domain.apply(OperationReducer().reduce(operations = listOf(operation)))
         store.markAcknowledged(setOf(operation.operationId), atEpochMillis = 20)
+        if (inconsistentFavoriteUpdateProjection) {
+            val inconsistent = store.appendLocalOperation(
+                accountBinding = account,
+                domainId = SyncDomainId("favorite.update-fid-filter"),
+                entityId = SyncEntityId("fid:12"),
+                entityGeneration = 1,
+                kind = SyncOperationKind.Put,
+                fields = mapOf("fid" to "12", "enabled" to "true"),
+                causalContext = store.causalContext(),
+                createdAtEpochMillis = 11,
+                origin = SyncOperationOrigin.UserAction,
+            )
+            domain.apply(OperationReducer().reduce(domain.currentState(), listOf(inconsistent)))
+            store.markAcknowledged(setOf(inconsistent.operationId), atEpochMillis = 21)
+        }
         val remote = FakeCheckpointRemote()
         return Fixture(
             store = store,
@@ -98,8 +126,17 @@ class CheckpointCoordinatorTest {
             coordinator = CheckpointCoordinator(
                 store = store,
                 remote = remote,
-                domainState = domain,
-                snapshot = { YamiboBackupFile(appVersionCode = 1, createdAt = 20) },
+                captureProjection = {
+                    CheckpointProjection(
+                        coverage = store.causalContext(),
+                        entities = domain.currentState().values,
+                        snapshot = YamiboBackupFile(appVersionCode = 1, createdAt = 20),
+                        pendingOperationCount = store.pendingOperations().size,
+                        acknowledgedOperationCount = store.allOutboxOperations().count {
+                            it.second == me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncOperationLifecycle.Acknowledged
+                        },
+                    )
+                },
                 nowMillis = { 30 },
                 minimumAcknowledgedOperations = 1,
             ),

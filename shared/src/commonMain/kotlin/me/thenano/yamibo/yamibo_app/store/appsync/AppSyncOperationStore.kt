@@ -71,6 +71,7 @@ internal interface AppSyncOperationStore {
     fun captureBootstrapMigration(
         accountBinding: SyncAccountBinding,
         drafts: List<LocalSyncOperationDraft>,
+        causalContext: SyncCausalContext = SyncCausalContext(),
         createdAtEpochMillis: Long,
     ): List<SyncOperation>
 

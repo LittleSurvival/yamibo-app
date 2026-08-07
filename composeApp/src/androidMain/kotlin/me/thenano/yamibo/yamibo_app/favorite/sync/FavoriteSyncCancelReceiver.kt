@@ -4,21 +4,11 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 
 class FavoriteSyncCancelReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val runId = intent.getStringExtra(EXTRA_RUN_ID) ?: return
-        val pendingResult = goAsync()
-        CoroutineScope(Dispatchers.Default).launch {
-            try {
-                AndroidFavoriteSyncSupport.createRepository(context).interruptRun(runId)
-            } finally {
-                pendingResult.finish()
-            }
-        }
+        context.startService(FavoriteSyncForegroundService.createCancelIntent(context, runId))
     }
 
     companion object {

@@ -310,6 +310,91 @@ class FavoriteSyncRepositoryImplTest {
     }
 
     @Test
+    fun cancellationPersistedByAnotherRepositoryStopsImportBeforeNetworkWork() = runBlocking {
+        val db = inMemoryDatabase()
+        val localRepository = FavoriteStoreRepositoryImpl(db)
+        localRepository.ensureDefaults()
+        val category = localRepository.getDefaultCategory()
+        val favoriteRepository = CountingFavoriteRepository().apply {
+            fetchFavoritesOperation = { _, type, _ ->
+                YamiboResult.Success(FavoritePage(type = type, items = emptyList()))
+            }
+        }
+        fun repository() = FavoriteSyncRepositoryImpl(
+            db = db,
+            authRepository = FakeFavoriteSyncAuthRepository(),
+            favoriteRepository = favoriteRepository,
+            localFavoriteRepository = localRepository,
+            threadRepository = CountingThreadRepository(),
+        )
+        val owner = repository()
+        val runId = owner.startRemoteImport(category.id)
+        owner.interruptRun(runId)
+
+        val separateWorkerInstance = repository()
+        separateWorkerInstance.runImport(runId)
+
+        assertEquals(0, favoriteRepository.fetchFavoritesCalls)
+        assertEquals(
+            me.thenano.yamibo.yamibo_app.repository.FavoriteSyncRepository.FavoriteSyncStatus.INTERRUPTED,
+            separateWorkerInstance.getLatestSnapshot()?.status,
+        )
+    }
+
+    @Test
+    fun requestCompletingAfterCancellationCannotRestoreRunningState() = runBlocking {
+        val db = inMemoryDatabase()
+        val localRepository = FavoriteStoreRepositoryImpl(db)
+        localRepository.ensureDefaults()
+        val category = localRepository.getDefaultCategory()
+        val requestStarted = CompletableDeferred<Unit>()
+        val responseGate = CompletableDeferred<Unit>()
+        val favoriteRepository = CountingFavoriteRepository().apply {
+            fetchFavoritesOperation = { _, type, _ ->
+                YamiboResult.Success(
+                    FavoritePage(
+                        type = type,
+                        items = listOf(
+                            FavoriteItem(
+                                name = "Remote",
+                                url = "forum.php?mod=viewthread&tid=99",
+                                favId = FavoriteId(999),
+                            ),
+                        ),
+                    ),
+                )
+            }
+        }
+        val threadRepository = CountingThreadRepository().apply {
+            fetchThreadOperation = {
+                requestStarted.complete(Unit)
+                responseGate.await()
+                YamiboResult.Failure("cancelled transport")
+            }
+        }
+        val repository = FavoriteSyncRepositoryImpl(
+            db = db,
+            authRepository = FakeFavoriteSyncAuthRepository(),
+            favoriteRepository = favoriteRepository,
+            localFavoriteRepository = localRepository,
+            threadRepository = threadRepository,
+        )
+        val runId = repository.startRemoteImport(category.id)
+        val work = async { repository.runImport(runId) }
+        requestStarted.await()
+
+        repository.interruptRun(runId)
+        responseGate.complete(Unit)
+        work.await()
+
+        assertEquals(
+            me.thenano.yamibo.yamibo_app.repository.FavoriteSyncRepository.FavoriteSyncStatus.INTERRUPTED,
+            repository.getLatestSnapshot()?.status,
+        )
+        assertEquals(0, localRepository.getAllFavoriteItems().size)
+    }
+
+    @Test
     fun syncingOneFavoriteDoesNotModifyAnotherFavoriteMapping() = runBlocking {
         val db = inMemoryDatabase()
         val localRepository = FavoriteStoreRepositoryImpl(db)
@@ -443,13 +528,14 @@ private class CountingThreadRepository : ThreadRepository {
     var addFavoriteOperation: suspend () -> YamiboResult<AddFavoriteResult> = {
         YamiboResult.Success(AddFavoriteResult("ok", FavoriteId(88)))
     }
+    var fetchThreadOperation: suspend () -> YamiboResult<ThreadPage> = { error("unused") }
 
     override suspend fun addFavorite(tid: ThreadId, formHash: FormHash): YamiboResult<AddFavoriteResult> {
         addFavoriteCalls += 1
         return addFavoriteOperation()
     }
 
-    override suspend fun fetchThread(tid: ThreadId, authorId: UserId?, page: Int, reverse: Boolean): YamiboResult<ThreadPage> = error("unused")
+    override suspend fun fetchThread(tid: ThreadId, authorId: UserId?, page: Int, reverse: Boolean): YamiboResult<ThreadPage> = fetchThreadOperation()
     override suspend fun fetchFindPost(tid: ThreadId, postId: PostId, authorId: UserId?): YamiboResult<ThreadPage> = error("unused")
     override suspend fun votePoll(fId: ForumId, tId: ThreadId, pollOptionIds: List<PollOptionId>, formHash: FormHash): YamiboResult<String> = error("unused")
     override suspend fun fetchRatePopoutPage(tId: ThreadId, pId: PostId): YamiboResult<RatePopoutPage> = error("unused")
