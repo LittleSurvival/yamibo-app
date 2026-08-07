@@ -1,5 +1,6 @@
 package me.thenano.yamibo.yamibo_app.repository.appsync.engine
 
+import kotlinx.coroutines.CancellationException
 import me.thenano.yamibo.yamibo_app.repository.appsync.domain.stableAppSyncFingerprint
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncBulkDeleteAuthorization
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.*
@@ -43,35 +44,44 @@ internal class ManualSyncOverrideCoordinator(
     private val store: AppSyncOperationStore,
     private val remote: AppSyncJournalRemote,
     private val domainState: SyncDomainStateAdapter,
+    private val captureAuthoritativeLocalDrafts: (() -> List<LocalSyncOperationDraft>)? = null,
     private val reducer: OperationReducer = OperationReducer(),
     private val nowMillis: () -> Long,
 ) {
     suspend fun preview(
         accountBinding: SyncAccountBinding,
         direction: ManualSyncOverrideDirection,
-    ): ManualSyncPreviewResult = when (val loaded = loadCloud(accountBinding)) {
-        is CloudLoad.Failed -> ManualSyncPreviewResult.Failed(loaded.reason)
-        is CloudLoad.Ready -> {
-            val local = domainState.currentState()
-            ManualSyncPreviewResult.Ready(
-                ManualSyncOverridePreview(
-                    direction = direction,
-                    token = previewToken(direction, local, loaded),
-                    differences = differences(
-                        source = if (direction == ManualSyncOverrideDirection.ForcePush) {
-                            loaded.state
-                        } else {
-                            local
-                        },
-                        target = if (direction == ManualSyncOverrideDirection.ForcePush) {
-                            local
-                        } else {
-                            loaded.state
-                        },
-                    ),
-                ),
+    ): ManualSyncPreviewResult {
+        val loaded = when (val result = loadCloud(accountBinding)) {
+            is CloudLoad.Failed -> return ManualSyncPreviewResult.Failed(result.reason)
+            is CloudLoad.Ready -> result
+        }
+        val local = try {
+            authoritativeLocalState(accountBinding)
+        } catch (error: Throwable) {
+            if (error is CancellationException) throw error
+            return ManualSyncPreviewResult.Failed(
+                "Authoritative local snapshot failed (${error::class.simpleName ?: "unknown"})",
             )
         }
+        return ManualSyncPreviewResult.Ready(
+            ManualSyncOverridePreview(
+                direction = direction,
+                token = previewToken(direction, local, loaded),
+                differences = differences(
+                    source = if (direction == ManualSyncOverrideDirection.ForcePush) {
+                        loaded.state
+                    } else {
+                        local
+                    },
+                    target = if (direction == ManualSyncOverrideDirection.ForcePush) {
+                        local
+                    } else {
+                        loaded.state
+                    },
+                ),
+            ),
+        )
     }
 
     suspend fun apply(
@@ -97,7 +107,14 @@ internal class ManualSyncOverrideCoordinator(
             is CloudLoad.Failed -> return ManualSyncApplyResult.Failed(result.reason)
             is CloudLoad.Ready -> result
         }
-        val local = domainState.currentState()
+        val local = try {
+            authoritativeLocalState(accountBinding)
+        } catch (error: Throwable) {
+            if (error is CancellationException) throw error
+            return ManualSyncApplyResult.Failed(
+                "Authoritative local snapshot failed (${error::class.simpleName ?: "unknown"})",
+            )
+        }
         if (preview.token != previewToken(preview.direction, local, loaded)) {
             return ManualSyncApplyResult.StalePreview
         }
@@ -218,6 +235,43 @@ internal class ManualSyncOverrideCoordinator(
                 if (semantic(target) == semantic(current)) return@mapNotNull null
                 draftFor(target, current)
             }
+    }
+
+    /**
+     * Force operations use the live application database as their authoritative local side.
+     * The operation projection is intentionally not audited or repaired here: a force push
+     * must treat rows missing from the live database as deletions instead of resurrecting
+     * stale projected entities.
+     */
+    private fun authoritativeLocalState(
+        accountBinding: SyncAccountBinding,
+    ): Map<SyncEntityKey, ResolvedSyncEntity> {
+        val drafts = captureAuthoritativeLocalDrafts?.invoke() ?: return domainState.currentState()
+        if (drafts.isEmpty()) return emptyMap()
+        val deviceId = SyncDeviceId("manual-force-source")
+        val deviceEpoch = SyncDeviceEpoch("authoritative-snapshot")
+        val operations = drafts.mapIndexed { index, draft ->
+            val sequence = SyncSequence(index + 1L)
+            SyncOperation(
+                operationId = SyncOperation.idFor(deviceId, deviceEpoch, sequence),
+                deviceId = deviceId,
+                deviceEpoch = deviceEpoch,
+                sequence = sequence,
+                accountBinding = accountBinding,
+                domainId = draft.domainId,
+                entityId = draft.entityId,
+                entityGeneration = draft.entityGeneration,
+                kind = draft.kind,
+                fields = draft.fields,
+                createdAtEpochMillis = 0L,
+                origin = SyncOperationOrigin.Migration,
+            )
+        }
+        return reducer.reduce(operations = operations).also { reduction ->
+            check(reduction.quarantined.isEmpty()) {
+                "Authoritative local snapshot produced invalid operations"
+            }
+        }.entities
     }
 
     private fun draftFor(

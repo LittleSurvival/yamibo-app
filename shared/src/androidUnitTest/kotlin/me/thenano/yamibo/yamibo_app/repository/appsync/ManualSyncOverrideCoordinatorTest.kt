@@ -33,6 +33,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationOr
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncSequence
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncWriterNonce
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncJournalPayload
+import me.thenano.yamibo.yamibo_app.store.appsync.LocalSyncOperationDraft
 import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncOperationStore
 
 class ManualSyncOverrideCoordinatorTest {
@@ -141,6 +142,31 @@ class ManualSyncOverrideCoordinatorTest {
 
         assertEquals(AppSyncInstallationState.Active, store.installation()?.state)
         assertTrue(store.pendingOperations().isNotEmpty())
+    }
+
+    @Test
+    fun forcePushTreatsMissingAuthoritativeLocalRowAsDeletion() = runBlocking {
+        val store = activeStore()
+        val staleProjectedOperation = settingOperation("stale", "local-device")
+        val domain = FakeDomainState(
+            OperationReducer().reduce(operations = listOf(staleProjectedOperation)).entities,
+        )
+        val coordinator = ManualSyncOverrideCoordinator(
+            store = store,
+            remote = FakeRemote(settingOperation("cloud", "remote-device")),
+            domainState = domain,
+            captureAuthoritativeLocalDrafts = { emptyList<LocalSyncOperationDraft>() },
+            nowMillis = { 100 },
+        )
+
+        val preview = assertIs<ManualSyncPreviewResult.Ready>(
+            coordinator.preview(account, ManualSyncOverrideDirection.ForcePush),
+        ).preview
+        assertEquals(1, preview.differences.single().deleted)
+
+        assertIs<ManualSyncApplyResult.Applied>(coordinator.apply(account, preview))
+
+        assertEquals(SyncOperationKind.Delete, store.pendingOperations().single().kind)
     }
 
     private fun activeStore(): SqlDelightAppSyncOperationStore {

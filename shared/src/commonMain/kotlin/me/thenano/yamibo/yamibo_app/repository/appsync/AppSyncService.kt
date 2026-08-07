@@ -325,6 +325,15 @@ class AppSyncService(
         store = store,
         remote = remote,
         domainState = domainState,
+        captureAuthoritativeLocalDrafts = {
+            db.transactionWithResult {
+                migrationPlanner.plan(
+                    checkNotNull(localSnapshotSource) {
+                        "Backup snapshot source is not configured"
+                    }.createAppSyncSnapshot(),
+                )
+            }
+        },
         nowMillis = nowMillis,
     )
     private val checkpointCoordinator = CheckpointCoordinator(
@@ -669,11 +678,6 @@ class AppSyncService(
                 "登入狀態已過期，請先刷新登入狀態",
                 AppSyncForceFailureKind.AuthenticationExpired,
             )
-        when (val audit = repairLocalProjection(binding)) {
-            is LocalProjectionRepairResult.Ready -> Unit
-            is LocalProjectionRepairResult.Failed ->
-                return AppSyncForcePreviewResult.Failed(audit.reason)
-        }
         val internalDirection = direction.toInternal()
         return when (val result = manualOverride.preview(binding, internalDirection)) {
             is ManualSyncPreviewResult.Ready -> AppSyncForcePreviewResult.Ready(
@@ -699,22 +703,19 @@ class AppSyncService(
                 AppSyncForceFailureKind.AuthenticationExpired,
             )
         }
-        val localProjection = when (val audit = repairLocalProjection(binding)) {
-            is LocalProjectionRepairResult.Ready -> audit
-            is LocalProjectionRepairResult.Failed ->
-                return AppSyncForceApplyResult.Failed(audit.reason)
-        }
-        if (localProjection.repairedOperationCount > 0) {
-            return AppSyncForceApplyResult.StalePreview
-        }
         if (preview.direction == AppSyncForceDirection.Pull) {
             val installation = requireNotNull(store.installation())
             try {
+                val rollbackSnapshot = db.transactionWithResult {
+                    checkNotNull(localSnapshotSource) {
+                        "Backup snapshot source is not configured"
+                    }.createAppSyncSnapshot()
+                }
                 store.saveBootstrapRollbackSnapshot(
                     AppSyncBootstrapRollbackSnapshot(
                         accountBinding = binding,
                         databaseGeneration = installation.databaseGeneration,
-                        encodedSnapshot = rollbackSnapshotCodec.encode(localProjection.snapshot).getOrThrow(),
+                        encodedSnapshot = rollbackSnapshotCodec.encode(rollbackSnapshot).getOrThrow(),
                         createdAtEpochMillis = nowMillis(),
                     ),
                 )
@@ -745,6 +746,7 @@ class AppSyncService(
                         binding = binding,
                         forceDiscovery = false,
                         trigger = "manual_force_push",
+                        auditLocalProjection = false,
                     )
                 } else {
                     statusFor(
@@ -837,6 +839,7 @@ class AppSyncService(
         forceDiscovery: Boolean,
         trigger: String,
         existingDemand: ReliabilityDemandContext? = null,
+        auditLocalProjection: Boolean = true,
     ): AppSyncServiceStatus {
         val demand = existingDemand ?: beginReliabilityDemand(trigger)
         mutableStatus.value = mutableStatus.value.copy(
@@ -844,7 +847,7 @@ class AppSyncService(
             message = "正在同步操作紀錄",
             presentationMessage = AppSyncStatusMessage.SyncRunning,
         )
-        if (localSnapshotSource != null) {
+        if (auditLocalProjection && localSnapshotSource != null) {
             when (val audit = repairLocalProjection(binding)) {
                 is LocalProjectionRepairResult.Ready -> Unit
                 is LocalProjectionRepairResult.Failed -> {

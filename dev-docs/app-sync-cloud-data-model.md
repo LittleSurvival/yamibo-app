@@ -504,6 +504,12 @@ iOS 在使用者已授權通知時發出本機通知。既有 `Quarantined` 的�
 倒數與二次確認後才執行 Force Pull 或 Force Push。preview token 若因本機或雲端在確認前
 變更會失效。成功資料 transition 與 durable `Active` state 一起保存；失敗仍維持隔離。
 
+Force preview 與確認只用於顯示破壞範圍及避免誤觸，不參與資料勝負判斷。Force Push
+直接以確認當下的本機資料庫 snapshot 覆蓋雲端 projection；本機不存在的項目會成為明確
+刪除。Force Pull 直接以重新載入的雲端 projection 覆蓋本機 scope。兩條路徑都不執行
+local projection audit/repair，也不套用一般同步的 merge policy；Force Pull 前的 rollback
+snapshot 僅供失敗復原。
+
 ## Request 成本
 
 在同一 App 程序、Index 與 payload cache 有效且沒有本機變更時：
