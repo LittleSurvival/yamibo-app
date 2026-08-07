@@ -80,6 +80,9 @@ fun MainViewController() = ComposeUIViewController {
 
     /** Repository Logic */
     val yamiboClient = remember { YamiboClient() }
+    DisposableEffect(yamiboClient) {
+        onDispose { yamiboClient.close() }
+    }
     val authRepository = remember { IOSAuthRepository(cookieStore, userStore, yamiboClient, forumFavoriteStore) }
 
     val dbFactory = remember { DatabaseFactory() }
@@ -278,6 +281,8 @@ fun MainViewController() = ComposeUIViewController {
                 diskCacheFactory.clearAllCache()
             }
         }
-        App()
+        YamiboWafRecoveryRoot(yamiboClient) {
+            App()
+        }
     }
 }

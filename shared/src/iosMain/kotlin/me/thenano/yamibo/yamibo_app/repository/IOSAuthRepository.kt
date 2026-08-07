@@ -51,6 +51,8 @@ class IOSAuthRepository(
             is YamiboResult.NoPermission -> {
                 return YamiboResult.Failure(i18n("獲取用戶資料失敗: {}", profileResult.reason))
             }
+
+            is YamiboResult.WafChallenge -> return profileResult
         }
     }
 
@@ -79,7 +81,9 @@ class IOSAuthRepository(
                     cookieStrings.add("${cookie.name}=${cookie.value}")
                 }
             }
-            cookieStore.save(cookieStrings.joinToString("; "))
+            val cookieHeader = cookieStrings.joinToString("; ")
+            cookieStore.save(cookieHeader)
+            yamiboClient.setCookie(cookieHeader, importNox = true)
         }
     }
 
@@ -88,6 +92,7 @@ class IOSAuthRepository(
     }
 
     override suspend fun logOut() {
+        yamiboClient.clearCookies()
         cookieStore.clear()
         userStore.clear()
         forumFavoriteStore?.clear()

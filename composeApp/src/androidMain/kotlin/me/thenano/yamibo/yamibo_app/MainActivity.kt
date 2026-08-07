@@ -158,6 +158,9 @@ class MainActivity : ComponentActivity() {
 
             /** Repository Logic */
             val yamiboClient = remember { YamiboClient(timeoutMillis = 60_000L) }
+            DisposableEffect(yamiboClient) {
+                onDispose { yamiboClient.close() }
+            }
             val authRepository = remember {
                 AndroidAuthRepository(cookieStore, userStore, yamiboClient, forumFavoriteStore)
             }
@@ -416,7 +419,9 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                App()
+                YamiboWafRecoveryRoot(yamiboClient) {
+                    App()
+                }
             }
         }
     }

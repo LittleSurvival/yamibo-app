@@ -1,22 +1,14 @@
 package me.thenano.yamibo.yamibo_app.repository.appsync
 
 import io.github.littlesurvival.YamiboClient
+import io.github.littlesurvival.core.WafProvider
+import io.github.littlesurvival.core.YamiboResult
+import io.github.littlesurvival.dto.model.BlogClassSelection
+import io.github.littlesurvival.dto.model.BlogMutationResponse
 import io.github.littlesurvival.dto.value.BlogClassId
 import io.github.littlesurvival.dto.value.BlogId
 import io.github.littlesurvival.dto.value.FormHash
-import io.ktor.client.HttpClient
-import io.ktor.client.engine.mock.MockEngine
-import io.ktor.client.engine.mock.respond
-import io.ktor.client.engine.mock.toByteArray
-import io.ktor.http.HttpHeaders
-import io.ktor.http.HttpMethod
-import io.ktor.http.HttpStatusCode
-import io.ktor.http.headersOf
 import kotlinx.coroutines.runBlocking
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertIs
-import kotlin.test.assertTrue
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncCloudConfigDefaults
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncCloudResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncBlogClassSelection
@@ -24,29 +16,17 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncBlogDeleteR
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncBlogWriteRequest
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncPostAcknowledgement
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.YamiboAppSyncBlogProvider
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.YamiboBlogMutationApi
 import me.thenano.yamibo.yamibo_app.store.auth.CookieStore
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertIs
 
 class YamiboAppSyncBlogProviderTest {
     @Test
-    fun submitBlogMatchesCapturedMultipartFormContract() = runBlocking {
-        var capturedMethod: HttpMethod? = null
-        var capturedUrl = ""
-        var capturedCookie: String? = null
-        var capturedContentType: String? = null
-        var capturedBody = ""
-        val engine = MockEngine { request ->
-            capturedMethod = request.method
-            capturedUrl = request.url.toString()
-            capturedCookie = request.headers[HttpHeaders.Cookie]
-            capturedContentType = request.body.contentType?.toString()
-            capturedBody = request.body.toByteArray().decodeToString()
-            respond(
-                content = successResponse(blogId = 77),
-                status = HttpStatusCode.OK,
-                headers = headersOf(HttpHeaders.ContentType, "text/html; charset=utf-8"),
-            )
-        }
-        val provider = provider(HttpClient(engine))
+    fun updateBlogDelegatesToYamiboClientApiAndParsesAcknowledgement() = runBlocking {
+        val mutationApi = FakeYamiboBlogMutationApi(successResult(blogId = 77))
+        val provider = provider(mutationApi)
 
         val result = assertIs<AppSyncCloudResult.VerifiedSuccess<AppSyncPostAcknowledgement>>(
             provider.submitBlog(
@@ -60,31 +40,19 @@ class YamiboAppSyncBlogProviderTest {
             ),
         )
 
-        assertEquals(HttpMethod.Post, capturedMethod)
-        assertTrue(capturedUrl.contains("mod=spacecp"))
-        assertTrue(capturedUrl.contains("ac=blog"))
-        assertTrue(capturedUrl.contains("blogid=77"))
-        assertEquals(TEST_COOKIE, capturedCookie)
-        assertTrue(capturedContentType.orEmpty().startsWith("multipart/form-data; boundary="))
-        assertMultipartField(capturedBody, "subject", AppSyncCloudConfigDefaults.BLOG_NAME)
-        assertMultipartField(capturedBody, "message", "config-body")
-        assertMultipartField(capturedBody, "classid", "4568")
-        assertMultipartField(capturedBody, "friend", "3")
-        assertMultipartField(capturedBody, "blogsubmit", "true")
-        assertMultipartField(capturedBody, "formhash", FORM_HASH.value)
+        val call = assertIs<MutationCall.Update>(mutationApi.lastCall)
+        assertEquals(BlogId(77), call.blogId)
+        assertEquals(AppSyncCloudConfigDefaults.BLOG_NAME, call.title)
+        assertEquals("config-body", call.message)
+        assertEquals(BlogClassSelection.Existing(BlogClassId(4568)), call.classSelection)
+        assertEquals(FORM_HASH, call.formHash)
         assertEquals(listOf(BlogId(77)), result.value.candidateBlogIds)
     }
 
     @Test
-    fun createBlogUsesNewClassFormValueAndEmptyBlogId() = runBlocking {
-        var capturedUrl = ""
-        var capturedBody = ""
-        val engine = MockEngine { request ->
-            capturedUrl = request.url.toString()
-            capturedBody = request.body.toByteArray().decodeToString()
-            respond(successResponse(78), HttpStatusCode.OK)
-        }
-        val provider = provider(HttpClient(engine))
+    fun createBlogDelegatesToAddWithNewClassSelection() = runBlocking {
+        val mutationApi = FakeYamiboBlogMutationApi(successResult(blogId = 78))
+        val provider = provider(mutationApi)
 
         assertIs<AppSyncCloudResult.VerifiedSuccess<AppSyncPostAcknowledgement>>(
             provider.submitBlog(
@@ -100,30 +68,19 @@ class YamiboAppSyncBlogProviderTest {
             ),
         )
 
-        assertTrue(capturedUrl.contains("blogid="))
-        assertMultipartField(
-            capturedBody,
-            "classid",
-            "new:${AppSyncCloudConfigDefaults.BLOG_CLASS_NAME}",
+        val call = assertIs<MutationCall.Add>(mutationApi.lastCall)
+        assertEquals(
+            BlogClassSelection.Create(AppSyncCloudConfigDefaults.BLOG_CLASS_NAME),
+            call.classSelection,
         )
     }
 
     @Test
-    fun deleteBlogMatchesCapturedUrlEncodedContract() = runBlocking {
-        var capturedUrl = ""
-        var capturedReferer: String? = null
-        var capturedContentType: String? = null
-        var capturedBody = ""
-        val engine = MockEngine { request ->
-            capturedUrl = request.url.toString()
-            capturedReferer = request.headers["Referer"]
-            capturedContentType = request.body.contentType?.toString()
-            capturedBody = request.body.toByteArray().decodeToString()
-            respond(successResponse(79), HttpStatusCode.OK)
-        }
-        val provider = provider(HttpClient(engine))
+    fun deleteBlogDelegatesToYamiboClientApi() = runBlocking {
+        val mutationApi = FakeYamiboBlogMutationApi(successResult(blogId = 79))
+        val provider = provider(mutationApi)
 
-        assertIs<AppSyncCloudResult.VerifiedSuccess<AppSyncPostAcknowledgement>>(
+        val result = assertIs<AppSyncCloudResult.VerifiedSuccess<AppSyncPostAcknowledgement>>(
             provider.deleteBlog(
                 AppSyncBlogDeleteRequest(
                     blogId = BlogId(79),
@@ -132,66 +89,142 @@ class YamiboAppSyncBlogProviderTest {
             ),
         )
 
-        assertTrue(capturedUrl.contains("op=delete"))
-        assertTrue(capturedUrl.contains("blogid=79"))
-        assertEquals("https://bbs.yamibo.com/", capturedReferer)
-        assertTrue(capturedContentType.orEmpty().startsWith("application/x-www-form-urlencoded"))
-        assertTrue(capturedBody.contains("deletesubmit=true"))
-        assertTrue(capturedBody.contains("btnsubmit=true"))
-        assertTrue(capturedBody.contains("formhash=${FORM_HASH.value}"))
-        assertTrue(capturedBody.contains("referer="))
+        assertEquals(MutationCall.Delete(BlogId(79), FORM_HASH), mutationApi.lastCall)
+        assertEquals(listOf(BlogId(79)), result.value.candidateBlogIds)
     }
 
     @Test
-    fun unexpectedTransportExceptionIsNotMisreportedAsNetworkFailure() = runBlocking {
-        val engine = MockEngine {
-            throw IllegalStateException("unexpected")
-        }
-        val provider = provider(HttpClient(engine))
-
-        assertIs<AppSyncCloudResult.UnknownFailed>(
-            provider.submitBlog(
-                AppSyncBlogWriteRequest(
-                    blogId = null,
-                    title = AppSyncCloudConfigDefaults.BLOG_NAME,
-                    message = "config-body",
-                    classSelection = AppSyncBlogClassSelection.Create(
-                        AppSyncCloudConfigDefaults.BLOG_CLASS_NAME,
-                    ),
-                    formHash = FORM_HASH,
-                ),
+    fun wafChallengeIsNotMisreportedAsLogout() = runBlocking {
+        val mutationApi = FakeYamiboBlogMutationApi(
+            YamiboResult.WafChallenge(
+                provider = WafProvider.BAIDU_NOX,
+                statusCode = 405,
+                url = "https://bbs.yamibo.com/home.php",
             ),
+        )
+        val provider = provider(mutationApi)
+
+        assertIs<AppSyncCloudResult.NetworkFailed>(
+            provider.submitBlog(createRequest()),
         )
         Unit
     }
 
-    private fun provider(httpClient: HttpClient): YamiboAppSyncBlogProvider =
+    @Test
+    fun unexpectedMutationExceptionIsNotMisreportedAsNetworkFailure() = runBlocking {
+        val mutationApi = FakeYamiboBlogMutationApi(
+            result = successResult(blogId = 80),
+            throwable = IllegalStateException("unexpected"),
+        )
+        val provider = provider(mutationApi)
+
+        assertIs<AppSyncCloudResult.UnknownFailed>(
+            provider.submitBlog(createRequest()),
+        )
+        Unit
+    }
+
+    private fun provider(mutationApi: YamiboBlogMutationApi): YamiboAppSyncBlogProvider =
         YamiboAppSyncBlogProvider(
             cookieStore = FakeCookieStore(TEST_COOKIE),
             yamiboClient = YamiboClient(),
-            httpClient = httpClient,
+            mutationApi = mutationApi,
         )
 
-    private fun assertMultipartField(body: String, name: String, value: String) {
-        assertTrue(
-            body.contains("name=\"$name\"") && body.contains("\r\n\r\n$value\r\n"),
-            "Multipart body did not contain $name",
-        )
-    }
+    private fun createRequest(): AppSyncBlogWriteRequest = AppSyncBlogWriteRequest(
+        blogId = null,
+        title = AppSyncCloudConfigDefaults.BLOG_NAME,
+        message = "config-body",
+        classSelection = AppSyncBlogClassSelection.Create(
+            AppSyncCloudConfigDefaults.BLOG_CLASS_NAME,
+        ),
+        formHash = FORM_HASH,
+    )
 
-    private fun successResponse(blogId: Int): String = """
-        <root><![CDATA[
-          <div id="messagetext"><p>
-            操作成功
-            <script>succeedhandle_blog('home.php?mod=space&do=blog&id=$blogId')</script>
-          </p></div>
-        ]]></root>
-    """.trimIndent()
+    private fun successResult(blogId: Int): YamiboResult<BlogMutationResponse> =
+        YamiboResult.Success(
+            BlogMutationResponse(
+                body = """
+                    <root><![CDATA[
+                      <div id="messagetext"><p>
+                        操作成功
+                        <script>succeedhandle_blog('home.php?mod=space&do=blog&id=$blogId')</script>
+                      </p></div>
+                    ]]></root>
+                """.trimIndent(),
+                statusCode = 200,
+                requestUrl = "https://bbs.yamibo.com/home.php?mod=spacecp&ac=blog",
+                finalUrl = "https://bbs.yamibo.com/home.php?mod=space&do=blog&id=$blogId",
+                location = null,
+            ),
+        )
 
     companion object {
         private const val TEST_COOKIE = "session=test"
         private val FORM_HASH = FormHash("testhash")
     }
+}
+
+private class FakeYamiboBlogMutationApi(
+    private val result: YamiboResult<BlogMutationResponse>,
+    private val throwable: Throwable? = null,
+) : YamiboBlogMutationApi {
+    var lastCall: MutationCall? = null
+        private set
+
+    override suspend fun addBlog(
+        title: String,
+        message: String,
+        classSelection: BlogClassSelection,
+        formHash: FormHash,
+    ): YamiboResult<BlogMutationResponse> {
+        lastCall = MutationCall.Add(title, message, classSelection, formHash)
+        throwable?.let { throw it }
+        return result
+    }
+
+    override suspend fun updateBlog(
+        blogId: BlogId,
+        title: String,
+        message: String,
+        classSelection: BlogClassSelection,
+        formHash: FormHash,
+    ): YamiboResult<BlogMutationResponse> {
+        lastCall = MutationCall.Update(blogId, title, message, classSelection, formHash)
+        throwable?.let { throw it }
+        return result
+    }
+
+    override suspend fun deleteBlog(
+        blogId: BlogId,
+        formHash: FormHash,
+    ): YamiboResult<BlogMutationResponse> {
+        lastCall = MutationCall.Delete(blogId, formHash)
+        throwable?.let { throw it }
+        return result
+    }
+}
+
+private sealed interface MutationCall {
+    data class Add(
+        val title: String,
+        val message: String,
+        val classSelection: BlogClassSelection,
+        val formHash: FormHash,
+    ) : MutationCall
+
+    data class Update(
+        val blogId: BlogId,
+        val title: String,
+        val message: String,
+        val classSelection: BlogClassSelection,
+        val formHash: FormHash,
+    ) : MutationCall
+
+    data class Delete(
+        val blogId: BlogId,
+        val formHash: FormHash,
+    ) : MutationCall
 }
 
 private class FakeCookieStore(

@@ -311,6 +311,11 @@ class FavoriteSyncRepositoryImpl(
                     return
                 }
 
+                is YamiboResult.WafChallenge -> {
+                    failRun(current.copy(failedCount = current.failedCount + 1), result.message())
+                    return
+                }
+
                 is YamiboResult.Failure -> {
                     failRun(current.copy(failedCount = current.failedCount + 1), truncateFavoriteMessage(result.reason))
                     return
@@ -413,6 +418,11 @@ class FavoriteSyncRepositoryImpl(
                             return
                         }
 
+                        is YamiboResult.WafChallenge -> {
+                            failRun(current.copy(failedCount = current.failedCount + 1), threadResult.message())
+                            return
+                        }
+
                         is YamiboResult.Failure -> {
                             warnings += importFailureMessage(remoteItem, threadResult.reason)
                             current = updateSnapshot(
@@ -453,6 +463,11 @@ class FavoriteSyncRepositoryImpl(
 
             is YamiboResult.Maintenance -> {
                 failRun(current, i18n("百合會目前維護中，請稍後再試。"))
+                return
+            }
+
+            is YamiboResult.WafChallenge -> {
+                failRun(current, formHashResult.message())
                 return
             }
 
@@ -509,6 +524,11 @@ class FavoriteSyncRepositoryImpl(
 
                 is YamiboResult.Maintenance -> {
                     failRun(current, i18n("百合會目前維護中，請稍後再試。"))
+                    return
+                }
+
+                is YamiboResult.WafChallenge -> {
+                    failRun(current, addResult.message())
                     return
                 }
 
@@ -679,6 +699,7 @@ class FavoriteSyncRepositoryImpl(
             is YamiboResult.NotLoggedIn,
             is YamiboResult.NoPermission,
             is YamiboResult.Maintenance,
+            is YamiboResult.WafChallenge,
             is YamiboResult.Failure -> authResult
         }
     }

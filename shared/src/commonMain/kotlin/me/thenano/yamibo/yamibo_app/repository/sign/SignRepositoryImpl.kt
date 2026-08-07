@@ -43,6 +43,7 @@ class SignRepositoryImpl(
             is YamiboResult.NotLoggedIn -> result
             is YamiboResult.NoPermission -> result
             is YamiboResult.Maintenance -> result
+            is YamiboResult.WafChallenge -> result
         }
     }
 
@@ -52,6 +53,7 @@ class SignRepositoryImpl(
             is YamiboResult.NotLoggedIn -> return result
             is YamiboResult.NoPermission -> return result
             is YamiboResult.Maintenance -> return result
+            is YamiboResult.WafChallenge -> return result
             is YamiboResult.Failure -> return result
         }
 
@@ -72,6 +74,7 @@ class SignRepositoryImpl(
                 is YamiboResult.NotLoggedIn -> return action
                 is YamiboResult.NoPermission -> return action
                 is YamiboResult.Maintenance -> return action
+                is YamiboResult.WafChallenge -> return action
                 is YamiboResult.Failure -> return action
             }
             lastMessage = signAction.message
@@ -85,7 +88,11 @@ class SignRepositoryImpl(
                         refreshed.value
                     }
                 }
-                else -> optimisticSignedPageInfo(pageInfo)
+                is YamiboResult.NotLoggedIn,
+                is YamiboResult.NoPermission,
+                is YamiboResult.Maintenance,
+                is YamiboResult.WafChallenge,
+                is YamiboResult.Failure -> optimisticSignedPageInfo(pageInfo)
             }
         } else {
             lastMessage = i18n("今天已經打卡過了。")
@@ -104,6 +111,7 @@ class SignRepositoryImpl(
                     is YamiboResult.NotLoggedIn -> return action
                     is YamiboResult.NoPermission -> return action
                     is YamiboResult.Maintenance -> return action
+                    is YamiboResult.WafChallenge -> return action
                     is YamiboResult.Failure -> return action
                 }
                 repairCount += 1
@@ -112,7 +120,11 @@ class SignRepositoryImpl(
 
                 pageInfo = when (val refreshed = fetchPageInfo()) {
                     is YamiboResult.Success -> refreshed.value
-                    else -> optimisticRepairedPageInfo(pageInfo, repairOption.value)
+                    is YamiboResult.NotLoggedIn,
+                    is YamiboResult.NoPermission,
+                    is YamiboResult.Maintenance,
+                    is YamiboResult.WafChallenge,
+                    is YamiboResult.Failure -> optimisticRepairedPageInfo(pageInfo, repairOption.value)
                 }
                 seenRepairValues = mutableSetOf()
             }
@@ -201,6 +213,7 @@ class SignRepositoryImpl(
             is YamiboResult.NotLoggedIn -> result
             is YamiboResult.NoPermission -> result
             is YamiboResult.Maintenance -> result
+            is YamiboResult.WafChallenge -> result
         }
     }
 
