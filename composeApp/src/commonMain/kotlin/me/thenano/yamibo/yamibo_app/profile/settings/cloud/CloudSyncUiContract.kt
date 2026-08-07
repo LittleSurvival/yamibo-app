@@ -194,6 +194,7 @@ internal sealed interface CloudSyncForceError {
     data object StalePreview : CloudSyncForceError
     data object CoreUnavailable : CloudSyncForceError
     data object AuthenticationExpired : CloudSyncForceError
+    /** Diagnostic-only value. The screen replaces it with a stable localized error message. */
     data class External(val value: String) : CloudSyncForceError
 }
 

@@ -158,6 +158,17 @@ internal interface SyncDomainStateAdapter {
 }
 
 internal sealed interface OperationSyncResult {
+    /**
+     * The authoritative cloud scan found neither journals nor checkpoints.
+     *
+     * This is deliberately reported before the engine publishes its normal empty heartbeat.
+     * The app-level service must treat it as a recovery signal and route the complete local
+     * projection through the existing force-push workflow. Otherwise an already-active device
+     * whose cloud blogs were deleted would incorrectly converge on an empty cloud and later offer
+     * to delete all local data during force pull.
+     */
+    data object EmptyCloud : OperationSyncResult
+
     data class Converged(
         val appliedRemoteCount: Int,
         val acknowledgedLocalCount: Int,
@@ -215,6 +226,7 @@ internal class OperationSyncEngine(
         accountBinding: SyncAccountBinding,
         formHash: FormHash?,
         forceDiscovery: Boolean = false,
+        detectEmptyCloud: Boolean = false,
     ): OperationSyncResult = processMutex.withLock {
         val installation = store.installation()
             ?: return@withLock OperationSyncResult.RebootstrapRequired("Installation is not initialized")
@@ -244,7 +256,7 @@ internal class OperationSyncEngine(
         }
         try {
             try {
-                runAttempts(accountBinding, formHash, forceDiscovery)
+                runAttempts(accountBinding, formHash, forceDiscovery, detectEmptyCloud)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -261,6 +273,7 @@ internal class OperationSyncEngine(
         accountBinding: SyncAccountBinding,
         formHash: FormHash,
         forceDiscovery: Boolean,
+        detectEmptyCloud: Boolean,
     ): OperationSyncResult {
         var totalApplied = 0
         var totalAcknowledged = 0
@@ -269,12 +282,25 @@ internal class OperationSyncEngine(
         val uploadedOperations = linkedMapOf<SyncOperationId, SyncOperation>()
 
         repeat(maxAttempts) { attemptIndex ->
-            val cloud = when (
-                val result = remote.loadJournals(
-                    accountBinding,
-                    forceDiscovery = forceDiscovery && attemptIndex == 0,
-                )
+            val requestedForcedDiscovery = forceDiscovery && attemptIndex == 0
+            val initialLoad = remote.loadJournals(
+                accountBinding,
+                forceDiscovery = requestedForcedDiscovery,
+            )
+            val authoritativeLoad = if (
+                detectEmptyCloud &&
+                !requestedForcedDiscovery &&
+                initialLoad is AppSyncJournalLoadResult.Success &&
+                initialLoad.journals.isEmpty() &&
+                initialLoad.checkpoints.isEmpty()
             ) {
+                // An empty cached result is not enough to authorize destructive recovery policy.
+                // Re-scan the provider so EmptyCloud always means the remote source was checked.
+                remote.loadJournals(accountBinding, forceDiscovery = true)
+            } else {
+                initialLoad
+            }
+            val cloud = when (val result = authoritativeLoad) {
                 is AppSyncJournalLoadResult.Success -> result
                 AppSyncJournalLoadResult.NotLoggedIn -> {
                     store.updateState(AppSyncInstallationState.PausedAuth)
@@ -286,6 +312,16 @@ internal class OperationSyncEngine(
                     store.updateState(AppSyncInstallationState.PausedProvider)
                     return OperationSyncResult.PausedProvider(result.reason)
                 }
+            }
+            if (
+                detectEmptyCloud &&
+                cloud.journals.isEmpty() &&
+                cloud.checkpoints.isEmpty()
+            ) {
+                // Do not publish an empty heartbeat here. The service will turn the complete local
+                // projection into force-push operations, then call the engine once with this guard
+                // disabled to publish and verify those operations.
+                return OperationSyncResult.EmptyCloud
             }
             val loaded = cloud.journals
             reconcileVerifiedCheckpoint(cloud.checkpoints, loaded)

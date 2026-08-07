@@ -583,7 +583,7 @@ private fun SyncDetailsSection(
                                     )
                                     if (change.details.isNotEmpty()) {
                                         appendLine()
-                                        append(change.details.joinToString("、"))
+                                        append(change.details.joinToString(i18n("、")))
                                     }
                                     if (change.remainingDetailCount > 0) {
                                         append(
@@ -790,7 +790,7 @@ private fun ForceOverrideDialog(
                                     append(cloudSyncForceDifferenceText(difference))
                                     if (difference.details.isNotEmpty()) {
                                         appendLine()
-                                        append(difference.details.joinToString("、"))
+                                        append(difference.details.joinToString(i18n("、")))
                                     }
                                     if (difference.remainingDetailCount > 0) {
                                         append(
@@ -863,7 +863,7 @@ private fun appSyncStatusMessageText(message: AppSyncStatusMessage): String = wh
     AppSyncStatusMessage.CloudResetAuthExpired ->
         i18n("登入狀態已過期；重新整理登入後會先載入仍存活的雲端資料")
     is AppSyncStatusMessage.CloudResetIncomplete ->
-        i18n("雲端清除未完整確認：{}；下次會先安全載入再繼續", message.reason)
+        i18n("雲端暫時無法使用")
     is AppSyncStatusMessage.CloudLinkCacheCleared ->
         i18n("已清除 {} 筆雲端連結紀錄；下次同步會重新驗證最新索引", message.count)
     AppSyncStatusMessage.ForcePushRunning -> i18n("正在執行強制上傳並驗證雲端結果")
@@ -891,7 +891,9 @@ private fun appSyncStatusMessageText(message: AppSyncStatusMessage): String = wh
         )
     AppSyncStatusMessage.SyncAlreadyRunning -> i18n("已有同步工作執行中")
     AppSyncStatusMessage.AuthenticationExpired -> i18n("登入狀態已過期，請先刷新登入狀態")
-    is AppSyncStatusMessage.External -> message.value
+    // External values are provider/engine diagnostics, not localization keys. Keep them in the
+    // service status for logs and tests, but never leak untranslated implementation text into UI.
+    is AppSyncStatusMessage.External -> i18n("同步失敗")
 }
 
 private fun cloudSyncDetailValueText(value: CloudSyncDetailValue): String = when (value) {
@@ -922,14 +924,15 @@ private fun appSyncJournalRetirementText(message: AppSyncJournalRetirementMessag
         is AppSyncJournalRetirementMessage.Candidate ->
             i18n("發現 {} 個安全清理候選；目前為只觀察模式", message.count)
         is AppSyncJournalRetirementMessage.Pending ->
-            i18n("Journal 清理程序等待下一次重新驗證：{}", message.stage)
+            i18n("Journal 清理程序等待下一次重新驗證：{}", i18n("雲端暫時無法使用"))
         AppSyncJournalRetirementMessage.Completed ->
             i18n("已完成一個非活躍 Journal 的安全清理")
         AppSyncJournalRetirementMessage.PausedAuth ->
             i18n("登入狀態不足，Journal 清理已暫停")
         AppSyncJournalRetirementMessage.AlreadyRunning ->
             i18n("已有同步或 Journal 維護工作執行中")
-        is AppSyncJournalRetirementMessage.External -> message.value
+        // Retirement diagnostics may contain provider text and therefore stay out of the UI.
+        is AppSyncJournalRetirementMessage.External -> i18n("雲端暫時無法使用")
     }
 
 private fun cloudSyncDirectionText(direction: AppSyncChangeDirection): String = when (direction) {
@@ -961,7 +964,8 @@ private fun cloudSyncForceErrorText(error: CloudSyncForceError): String = when (
         i18n("本機或雲端資料已變更，請重新檢視差異後再確認")
     CloudSyncForceError.CoreUnavailable -> i18n("同步核心尚未啟用")
     CloudSyncForceError.AuthenticationExpired -> i18n("登入狀態已過期，請先刷新登入狀態")
-    is CloudSyncForceError.External -> error.value
+    // Force-operation diagnostics remain available to the controller, while UI gets a stable key.
+    is CloudSyncForceError.External -> i18n("同步失敗")
 }
 
 @Composable

@@ -55,14 +55,6 @@ internal class SyncDomainRegistry(
 
     fun contractFor(id: SyncDomainId): SyncDomainContract? = contractsById[id]
 
-    fun requireValid(operation: SyncOperation): SyncDomainContract {
-        val contract = requireNotNull(contractFor(operation.domainId)) {
-            "Unknown sync domain: ${operation.domainId.value}"
-        }
-        contract.validate(operation)?.let { throw IllegalArgumentException(it) }
-        return contract
-    }
-
     fun validationFailure(operation: SyncOperation): String? {
         val contract = contractFor(operation.domainId)
             ?: return "Unknown sync domain: ${operation.domainId.value}"

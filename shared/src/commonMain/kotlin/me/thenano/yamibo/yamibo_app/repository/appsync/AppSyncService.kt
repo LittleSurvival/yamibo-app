@@ -17,6 +17,7 @@ import me.thenano.yamibo.yamibo_app.repository.TagRepository
 import me.thenano.yamibo.yamibo_app.repository.ThreadRepository
 import me.thenano.yamibo.yamibo_app.repository.appsync.domain.stableAppSyncFingerprint
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncBootstrapResult
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncBootstrapMode
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.BackupSnapshotMigrationPlanner
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.BootstrapCoordinator
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.CapturedBootstrapSnapshot
@@ -82,6 +83,12 @@ data class AppSyncServiceStatus(
     val automaticEnabled: Boolean,
     val pendingOperationCount: Int,
     val lastVerifiedAtEpochMillis: Long?,
+    /**
+     * Diagnostic text for logs, reliability evidence, and tests only.
+     *
+     * UI code must never render this field because it can contain provider exception text.
+     * Render [presentationMessage] through the app i18n layer instead.
+     */
     val message: String,
     val presentationMessage: AppSyncStatusMessage = AppSyncStatusMessage.External(message),
     val changeSummaries: List<AppSyncChangeSummary> = emptyList(),
@@ -123,11 +130,13 @@ sealed interface AppSyncStatusMessage {
     ) : AppSyncStatusMessage
     data object SyncAlreadyRunning : AppSyncStatusMessage
     data object AuthenticationExpired : AppSyncStatusMessage
+    /** Carries diagnostics across layers; the UI intentionally replaces it with a localized key. */
     data class External(val value: String) : AppSyncStatusMessage
 }
 
 data class AppSyncJournalRetirementStatus(
     val state: AppSyncJournalRetirementState,
+    /** Diagnostic-only text. UI must render [presentationMessage], never this value. */
     val message: String,
     val presentationMessage: AppSyncJournalRetirementMessage =
         AppSyncJournalRetirementMessage.External(message),
@@ -140,6 +149,7 @@ sealed interface AppSyncJournalRetirementMessage {
     data object Completed : AppSyncJournalRetirementMessage
     data object PausedAuth : AppSyncJournalRetirementMessage
     data object AlreadyRunning : AppSyncJournalRetirementMessage
+    /** Carries diagnostics across layers; the UI intentionally replaces it with a localized key. */
     data class External(val value: String) : AppSyncJournalRetirementMessage
 }
 
@@ -266,6 +276,15 @@ internal fun nextReliabilityDemand(
         retryCount = 0,
     )
 }
+
+internal fun shouldForcePushAfterBootstrap(
+    mode: AppSyncBootstrapMode?,
+): Boolean = mode == AppSyncBootstrapMode.Seed
+
+private data class AppSyncBootstrapOutcome(
+    val status: AppSyncServiceStatus,
+    val mode: AppSyncBootstrapMode?,
+)
 
 /**
  * App-scoped entry point. Platform schedulers and the UI call this service;
@@ -478,7 +497,7 @@ class AppSyncService(
         val installation = store.installation()
         return when {
             installation == null || installation.accountBinding != binding ->
-                bootstrap(binding, forceDiscovery = true)
+                bootstrapForForeground(binding)
             installation.state.blocksRegularSync() ->
                 statusFor(
                     AppSyncInstallationState.Quarantined,
@@ -486,12 +505,56 @@ class AppSyncService(
                     AppSyncStatusMessage.QuarantinedRefresh,
                 )
             installation.state.requiresBootstrapForSync() ->
-                bootstrap(binding, forceDiscovery = true)
+                bootstrapForForeground(binding)
             else -> {
                 resumeRetryableInstallation(installation.state)
                 synchronize(binding, forceDiscovery, trigger = "foreground_refresh")
             }
         }
+    }
+
+    private suspend fun bootstrapForForeground(
+        binding: SyncAccountBinding,
+    ): AppSyncServiceStatus {
+        val outcome = bootstrapOutcome(binding, forceDiscovery = true)
+        return if (shouldForcePushAfterBootstrap(outcome.mode)) {
+            forcePushSeedToEmptyCloud()
+        } else {
+            outcome.status
+        }
+    }
+
+    private suspend fun forcePushSeedToEmptyCloud(): AppSyncServiceStatus {
+        val preview = when (val result = previewForceOverride(AppSyncForceDirection.Push)) {
+            is AppSyncForcePreviewResult.Ready -> result.preview
+            is AppSyncForcePreviewResult.Failed -> return forcePushSeedFailure(
+                reason = result.reason,
+                kind = result.kind,
+            )
+        }
+        return when (val result = applyForceOverride(preview)) {
+            is AppSyncForceApplyResult.Applied -> result.status
+            AppSyncForceApplyResult.StalePreview -> forcePushSeedFailure(
+                "雲端資料在強制上傳前已變更，已停止自動覆蓋",
+            )
+            is AppSyncForceApplyResult.Failed -> forcePushSeedFailure(
+                reason = result.reason,
+                kind = result.kind,
+            )
+        }
+    }
+
+    private fun forcePushSeedFailure(
+        reason: String,
+        kind: AppSyncForceFailureKind = AppSyncForceFailureKind.External,
+    ): AppSyncServiceStatus = if (kind == AppSyncForceFailureKind.AuthenticationExpired) {
+        pausedAuth("foreground_seed_force_push")
+    } else {
+        statusFor(
+            state = requireNotNull(store.installation()).state,
+            message = reason,
+            phaseOverride = AppSyncServicePhase.RetryPending,
+        ).also { mutableStatus.value = it }
     }
 
     suspend fun synchronizeNow(
@@ -747,6 +810,7 @@ class AppSyncService(
                         forceDiscovery = false,
                         trigger = "manual_force_push",
                         auditLocalProjection = false,
+                        forcePushWhenCloudEmpty = false,
                     )
                 } else {
                     statusFor(
@@ -794,13 +858,19 @@ class AppSyncService(
     private suspend fun bootstrap(
         binding: SyncAccountBinding,
         forceDiscovery: Boolean,
-    ): AppSyncServiceStatus {
+    ): AppSyncServiceStatus = bootstrapOutcome(binding, forceDiscovery).status
+
+    private suspend fun bootstrapOutcome(
+        binding: SyncAccountBinding,
+        forceDiscovery: Boolean,
+    ): AppSyncBootstrapOutcome {
         mutableStatus.value = mutableStatus.value.copy(
             phase = AppSyncServicePhase.Running,
             message = "正在安全載入雲端紀錄，本階段不會上傳本機資料",
             presentationMessage = AppSyncStatusMessage.SafeLoadRunning,
         )
-        return when (val result = bootstrap.bootstrap(binding, forceDiscovery)) {
+        val result = bootstrap.bootstrap(binding, forceDiscovery)
+        val status = when (result) {
             is AppSyncBootstrapResult.Ready -> {
                 val skipped = result.skippedOrphanRssHistoryCount
                 statusFor(
@@ -832,6 +902,10 @@ class AppSyncService(
                 statusFor(state, result.reason)
             }
         }.also { mutableStatus.value = it }
+        return AppSyncBootstrapOutcome(
+            status = status,
+            mode = (result as? AppSyncBootstrapResult.Ready)?.mode,
+        )
     }
 
     private suspend fun synchronize(
@@ -840,6 +914,7 @@ class AppSyncService(
         trigger: String,
         existingDemand: ReliabilityDemandContext? = null,
         auditLocalProjection: Boolean = true,
+        forcePushWhenCloudEmpty: Boolean = true,
     ): AppSyncServiceStatus {
         val demand = existingDemand ?: beginReliabilityDemand(trigger)
         mutableStatus.value = mutableStatus.value.copy(
@@ -865,7 +940,12 @@ class AppSyncService(
             accountBinding = binding,
             formHash = authRepository.currentUser()?.formHash,
             forceDiscovery = forceDiscovery,
+            detectEmptyCloud = forcePushWhenCloudEmpty,
         )
+        if (result is OperationSyncResult.EmptyCloud) {
+            val status = forcePushSeedToEmptyCloud()
+            return finishReliabilityDemand(demand, status)
+        }
         var checkpointResult: CheckpointCreationResult? = null
         var retirementResult: AppSyncJournalRetirementMaintenanceResult? = null
         if (result is OperationSyncResult.Converged) {
@@ -911,6 +991,9 @@ class AppSyncService(
                 phaseOverride = AppSyncServicePhase.RetryPending,
             )
             else -> when (result) {
+                OperationSyncResult.EmptyCloud -> error(
+                    "EmptyCloud is handled before checkpoint and status processing",
+                )
                 is OperationSyncResult.Converged -> statusFor(
                     AppSyncInstallationState.Active,
                     "同步完成：接收 ${result.appliedRemoteCount}、確認 ${result.acknowledgedLocalCount}",

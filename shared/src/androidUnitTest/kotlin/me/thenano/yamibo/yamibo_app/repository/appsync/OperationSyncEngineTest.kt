@@ -64,6 +64,23 @@ class OperationSyncEngineTest {
     }
 
     @Test
+    fun activeDeviceWithAuthoritativelyEmptyCloudRequestsForcePushWithoutHeartbeat() = runBlocking {
+        val fixture = fixture()
+        activate(fixture)
+        val loadCountBeforeSync = fixture.remote.loadCount
+
+        val result = fixture.engine.synchronize(
+            accountBinding = account,
+            formHash = formHash,
+            detectEmptyCloud = true,
+        )
+
+        assertIs<OperationSyncResult.EmptyCloud>(result)
+        assertEquals(loadCountBeforeSync + 2, fixture.remote.loadCount)
+        assertEquals(0, fixture.remote.publishCount)
+    }
+
+    @Test
     fun bootstrapIsPullOnlyAndRotatesFreshEpoch() = runBlocking {
         val fixture = fixture()
         val before = fixture.store.initialize("generation")
