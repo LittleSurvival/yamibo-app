@@ -65,7 +65,10 @@ actual fun PlatformWebViewContent(
                         request: WebResourceRequest?
                     ): WebResourceResponse? {
                         val targetUrl = request?.url?.toString().orEmpty()
-                        if (targetUrl.isBlockedThirdPartyUrl()) {
+                        if (
+                            request != null &&
+                            shouldBlockThirdPartyRequest(targetUrl, request.isForMainFrame)
+                        ) {
                             Logger.d("WebView", "Blocked unreachable third-party: $targetUrl")
                             return WebResourceResponse(
                                 "text/javascript",
@@ -187,6 +190,11 @@ private fun decodeEvaluatedHtml(value: String?): String {
  * keeping the loading overlay visible for ~15s+. Intercepting these hosts with an empty
  * response lets the page finish immediately.
  */
+internal fun shouldBlockThirdPartyRequest(
+    targetUrl: String,
+    isForMainFrame: Boolean,
+): Boolean = !isForMainFrame && targetUrl.isBlockedThirdPartyUrl()
+
 private fun String.isBlockedThirdPartyUrl(): Boolean {
     val host = substringAfter("://").substringBefore("/").lowercase()
     return host.endsWith("googletagmanager.com") ||

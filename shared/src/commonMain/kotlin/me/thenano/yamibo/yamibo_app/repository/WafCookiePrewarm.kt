@@ -11,25 +11,22 @@ internal suspend fun runWafCookiePrewarm(
     loadStoredCookieHeader: () -> String?,
     saveStoredCookieHeader: (String) -> Unit,
     importCookieHeader: (String) -> Unit,
-    triggerChallenge: suspend () -> Unit,
+    triggerChallenge: suspend () -> Boolean,
     timeoutMillis: Long = WAF_PREWARM_TIMEOUT_MILLIS,
     onFailure: (Exception) -> Unit = {},
 ): Boolean {
-    suspend fun importPlatformNox(): Boolean {
+    suspend fun mergedPlatformNoxHeader(): String? {
         val platformHeader = readPlatformCookieHeader()
-        val noxValue = cookieValue(platformHeader, NOX_COOKIE_NAME) ?: return false
-        val mergedHeader = mergeCookieValue(
+        val noxValue = cookieValue(platformHeader, NOX_COOKIE_NAME) ?: return null
+        return mergeCookieValue(
             loadStoredCookieHeader(),
             NOX_COOKIE_NAME,
             noxValue,
         )
-        saveStoredCookieHeader(mergedHeader)
-        importCookieHeader(mergedHeader)
-        return true
     }
 
     try {
-        if (importPlatformNox()) return true
+        mergedPlatformNoxHeader()?.let(importCookieHeader)
     } catch (error: CancellationException) {
         throw error
     } catch (error: Exception) {
@@ -38,17 +35,22 @@ internal suspend fun runWafCookiePrewarm(
     }
 
     try {
-        withTimeoutOrNull(timeoutMillis) {
+        val challengeSucceeded = withTimeoutOrNull(timeoutMillis) {
             triggerChallenge()
-        }
+        } == true
+        if (!challengeSucceeded) return false
     } catch (error: CancellationException) {
         throw error
     } catch (error: Exception) {
         onFailure(error)
+        return false
     }
 
     return try {
-        importPlatformNox()
+        val verifiedHeader = mergedPlatformNoxHeader() ?: return false
+        saveStoredCookieHeader(verifiedHeader)
+        importCookieHeader(verifiedHeader)
+        true
     } catch (error: CancellationException) {
         throw error
     } catch (error: Exception) {

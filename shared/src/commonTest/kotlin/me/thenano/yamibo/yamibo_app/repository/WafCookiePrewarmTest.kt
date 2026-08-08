@@ -54,7 +54,7 @@ class WafCookiePrewarmTest {
     }
 
     @Test
-    fun reusesPlatformNoxWithoutTriggeringChallenge() = runBlocking {
+    fun validatesPlatformNoxBeforeCompletingPrewarm() = runBlocking {
         var challengeTriggered = false
         var savedHeader = ""
         var importedHeader = ""
@@ -64,13 +64,32 @@ class WafCookiePrewarmTest {
             loadStoredCookieHeader = { "auth=token; nox_jst_v1=old" },
             saveStoredCookieHeader = { savedHeader = it },
             importCookieHeader = { importedHeader = it },
-            triggerChallenge = { challengeTriggered = true },
+            triggerChallenge = {
+                challengeTriggered = true
+                true
+            },
         )
 
         assertTrue(result)
-        assertFalse(challengeTriggered)
+        assertTrue(challengeTriggered)
         assertEquals("auth=token; nox_jst_v1=fresh", savedHeader)
         assertEquals(savedHeader, importedHeader)
+    }
+
+    @Test
+    fun returnsFalseWhenPlatformNoxFailsValidation() = runBlocking {
+        var savedHeader: String? = null
+
+        val result = runWafCookiePrewarm(
+            readPlatformCookieHeader = { "nox_jst_v1=stale" },
+            loadStoredCookieHeader = { null },
+            saveStoredCookieHeader = { savedHeader = it },
+            importCookieHeader = {},
+            triggerChallenge = { false },
+        )
+
+        assertFalse(result)
+        assertNull(savedHeader)
     }
 
     @Test
@@ -83,7 +102,10 @@ class WafCookiePrewarmTest {
             loadStoredCookieHeader = { "auth=token" },
             saveStoredCookieHeader = {},
             importCookieHeader = { importedHeader = it },
-            triggerChallenge = { platformHeader = "nox_jst_v1=fresh" },
+            triggerChallenge = {
+                platformHeader = "nox_jst_v1=fresh"
+                true
+            },
         )
 
         assertTrue(result)
@@ -97,7 +119,10 @@ class WafCookiePrewarmTest {
             loadStoredCookieHeader = { null },
             saveStoredCookieHeader = {},
             importCookieHeader = {},
-            triggerChallenge = { delay(100) },
+            triggerChallenge = {
+                delay(100)
+                true
+            },
             timeoutMillis = 1,
         )
 

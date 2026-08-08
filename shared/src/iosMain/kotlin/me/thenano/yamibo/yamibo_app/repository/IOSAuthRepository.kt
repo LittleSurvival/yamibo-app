@@ -70,7 +70,7 @@ class IOSAuthRepository(
         },
         triggerChallenge = {
             yamiboClient.setCookie(cookieStore.load().orEmpty())
-            yamiboClient.fetchHomePage()
+            yamiboClient.fetchHomePage() is YamiboResult.Success
         },
         onFailure = { error ->
             Logger.w(
