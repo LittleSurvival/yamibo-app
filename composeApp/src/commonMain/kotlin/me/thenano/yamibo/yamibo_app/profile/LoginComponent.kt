@@ -64,6 +64,27 @@ class ILoginScreen : RestorableNavigatable {
 fun LoginScreen() {
     val navigator = LocalNavigator.current
     val authRepo = LocalAuthRepository.current
+    var prewarmCompleted by remember(authRepo) { mutableStateOf(false) }
+
+    LaunchedEffect(authRepo) {
+        runLoginWafPrewarm(
+            prewarm = authRepo::prewarmWafCookie,
+            onComplete = { prewarmCompleted = true },
+        )
+    }
+
+    if (!prewarmCompleted) {
+        LoadingOverlay(visible = true) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                CircularProgressIndicator()
+                Text(i18n("正在通過安全驗證…"))
+            }
+        }
+        return
+    }
 
     PlatformWebViewScreen(
         initialUrl = YamiboRoute.Login.build(),
@@ -73,7 +94,7 @@ fun LoginScreen() {
         onPageFinished = { authRepo.syncCookieFromWebView() },
     )
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(authRepo, navigator) {
         authRepo.startLoginDetect(
             onSuccess = {
                 val status = authRepo.fetchStatus()
