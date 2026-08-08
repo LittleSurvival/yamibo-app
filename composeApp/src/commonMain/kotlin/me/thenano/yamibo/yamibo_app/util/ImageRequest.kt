@@ -13,6 +13,12 @@ import coil3.size.Precision
 import io.github.littlesurvival.YamiboRoute
 import me.thenano.yamibo.yamibo_app.LocalAuthRepository
 
+/**
+ * Converts an image source into the URL or URI passed to Coil.
+ *
+ * Absolute network URLs and local `content://` or `file://` URIs are preserved. Relative forum
+ * attachment paths are resolved against [YamiboRoute.Domain].
+ */
 fun normalizeImageUrl(url: String): String {
     val cleaned = repairDomainPrefixedLocalUri(url)
     return if (cleaned.contains("://")) {
@@ -22,6 +28,13 @@ fun normalizeImageUrl(url: String): String {
     }
 }
 
+/**
+ * Restores a local URI that was accidentally prefixed with the Yamibo forum origin.
+ *
+ * For example, `https://bbs.yamibo.com/content://...` must become `content://...` before it is
+ * passed to Coil. Without this repair, Coil treats the value as an HTTP URL instead of a local
+ * content or file URI.
+ */
 private fun repairDomainPrefixedLocalUri(url: String): String {
     val domain = YamiboRoute.Domain.build().trimEnd('/')
     return when {
@@ -40,7 +53,7 @@ fun buildImageRequest(
     enableCrossfade: Boolean = true,
 ): ImageRequest {
     val fullUrl = normalizeImageUrl(url)
-    val isYamiboDomain = fullUrl.contains("yamibo.com")
+    val isYamiboDomain = fullUrl.startsWith(YamiboRoute.Domain.build())
 
     return ImageRequest.Builder(context)
         .data(fullUrl)

@@ -48,6 +48,7 @@ import me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration
 import me.thenano.yamibo.yamibo_app.feedback.AppFeedbackResult
 import me.thenano.yamibo.yamibo_app.event.AppEventBus
 import me.thenano.yamibo.yamibo_app.event.events.SignStatusChangedEvent
+import me.thenano.yamibo.yamibo_app.factory.HttpClientFactory
 import me.thenano.yamibo.yamibo_app.home.HomePageScreen
 import me.thenano.yamibo.yamibo_app.i18n.AppLocaleProvider
 import me.thenano.yamibo.yamibo_app.i18n.i18n
@@ -128,7 +129,9 @@ fun App() {
                         .build()
                 }
                 .components {
-                    add(KtorNetworkFetcherFactory())
+                    // Coil lazily retains this client for the singleton ImageLoader, allowing the
+                    // in-memory WAF cookie to be reused without another app-level singleton.
+                    add(KtorNetworkFetcherFactory(httpClient = { HttpClientFactory.create() }))
                     add(SvgDecoder.Factory())
                 }
                 .build()
