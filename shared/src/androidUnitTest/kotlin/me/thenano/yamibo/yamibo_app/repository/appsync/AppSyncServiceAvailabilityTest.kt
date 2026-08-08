@@ -64,6 +64,7 @@ class AppSyncServiceAvailabilityTest {
 
         override suspend fun isLoggedIn() = false
         override suspend fun fetchStatus(): YamiboResult<Boolean> = YamiboResult.Success(false)
+        override suspend fun prewarmWafCookie(): Boolean = false
         override suspend fun startLoginDetect(
             onSuccess: suspend () -> Unit,
             onTimeOut: () -> Unit,

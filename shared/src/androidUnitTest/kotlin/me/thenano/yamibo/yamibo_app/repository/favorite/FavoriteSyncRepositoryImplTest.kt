@@ -563,6 +563,7 @@ private class FakeFavoriteSyncAuthRepository : AuthRepository {
 
     override suspend fun isLoggedIn(): Boolean = true
     override suspend fun fetchStatus(): YamiboResult<Boolean> = YamiboResult.Success(true)
+    override suspend fun prewarmWafCookie(): Boolean = false
     override suspend fun startLoginDetect(onSuccess: suspend () -> Unit, onTimeOut: () -> Unit) = onSuccess()
     override fun syncCookieFromWebView() = Unit
     override fun currentUser(): ProfilePage? = UserStore.Preview

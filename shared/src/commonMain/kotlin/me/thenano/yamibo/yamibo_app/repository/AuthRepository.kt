@@ -21,6 +21,15 @@ interface AuthRepository {
     suspend fun isLoggedIn(): Boolean
     suspend fun fetchStatus(): YamiboResult<Boolean>
 
+    /**
+     * Best-effort WAF cookie prewarm for the login WebView.
+     *
+     * Returns true only when the platform WebView cookie store contains a non-empty
+     * nox_jst_v1 after the attempt. Operational failures return false while coroutine
+     * cancellation propagates.
+     */
+    suspend fun prewarmWafCookie(): Boolean
+
     suspend fun startLoginDetect(onSuccess: suspend () -> Unit, onTimeOut: () -> Unit = {})
     fun syncCookieFromWebView()
 

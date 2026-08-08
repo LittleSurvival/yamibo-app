@@ -4,7 +4,10 @@ import io.github.littlesurvival.YamiboClient
 import io.github.littlesurvival.YamiboRoute
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.page.ProfilePage
+import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.suspendCancellableCoroutine
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.store.auth.CookieStore
 import me.thenano.yamibo.yamibo_app.store.auth.UserStore
@@ -13,6 +16,8 @@ import me.thenano.yamibo.yamibo_app.util.auth.parseCookieStringToMap
 import platform.Foundation.NSHTTPCookie
 import platform.Foundation.NSHTTPCookieStorage
 import platform.Foundation.NSURL
+import platform.WebKit.WKWebsiteDataStore
+import kotlin.coroutines.resume
 import kotlin.time.Duration.Companion.milliseconds
 
 class IOSAuthRepository(
@@ -55,6 +60,42 @@ class IOSAuthRepository(
             is YamiboResult.WafChallenge -> return profileResult
         }
     }
+
+    override suspend fun prewarmWafCookie(): Boolean = runWafCookiePrewarm(
+        readPlatformCookieHeader = ::readPlatformCookieHeader,
+        loadStoredCookieHeader = cookieStore::load,
+        saveStoredCookieHeader = cookieStore::save,
+        importCookieHeader = { cookieHeader ->
+            yamiboClient.setCookie(cookieHeader, importNox = true)
+        },
+        triggerChallenge = {
+            yamiboClient.setCookie(cookieStore.load().orEmpty())
+            yamiboClient.fetchHomePage()
+        },
+        onFailure = { error ->
+            Logger.w(
+                "IOSAuthRepository",
+                "WAF cookie prewarm failed; falling back to login WebView",
+                error,
+            )
+        },
+    )
+
+    @OptIn(ExperimentalForeignApi::class)
+    private suspend fun readPlatformCookieHeader(): String =
+        suspendCancellableCoroutine { continuation ->
+            WKWebsiteDataStore.defaultDataStore().httpCookieStore.getAllCookies { cookies ->
+                val cookieHeader = cookies.orEmpty()
+                    .filterIsInstance<NSHTTPCookie>()
+                    .filter { cookie ->
+                        cookie.domain
+                            .removePrefix(".")
+                            .equals(YAMIBO_HOST, ignoreCase = true)
+                    }
+                    .joinToString("; ") { cookie -> "${cookie.name}=${cookie.value}" }
+                if (continuation.isActive) continuation.resume(cookieHeader)
+            }
+        }
 
     override suspend fun startLoginDetect(onSuccess: suspend () -> Unit, onTimeOut: () -> Unit) {
         var elapsed = 0L
@@ -105,5 +146,9 @@ class IOSAuthRepository(
                 storage.deleteCookie(cookie as NSHTTPCookie)
             }
         }
+    }
+
+    private companion object {
+        const val YAMIBO_HOST = "bbs.yamibo.com"
     }
 }

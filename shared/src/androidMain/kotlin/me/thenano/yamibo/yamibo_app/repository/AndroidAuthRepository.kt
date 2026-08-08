@@ -6,6 +6,7 @@ import io.github.littlesurvival.YamiboRoute
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.page.ProfilePage
 import kotlinx.coroutines.delay
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.store.auth.CookieStore
 import me.thenano.yamibo.yamibo_app.store.auth.UserStore
@@ -53,6 +54,30 @@ class AndroidAuthRepository(
             is YamiboResult.WafChallenge -> return profileResult
         }
     }
+
+    override suspend fun prewarmWafCookie(): Boolean = runWafCookiePrewarm(
+        readPlatformCookieHeader = {
+            CookieManager.getInstance()
+                .getCookie(YamiboRoute.Domain.build())
+                .orEmpty()
+        },
+        loadStoredCookieHeader = cookieStore::load,
+        saveStoredCookieHeader = cookieStore::save,
+        importCookieHeader = { cookieHeader ->
+            yamiboClient.setCookie(cookieHeader, importNox = true)
+        },
+        triggerChallenge = {
+            yamiboClient.setCookie(cookieStore.load().orEmpty())
+            yamiboClient.fetchHomePage()
+        },
+        onFailure = { error ->
+            Logger.w(
+                "AndroidAuthRepository",
+                "WAF cookie prewarm failed; falling back to login WebView",
+                error,
+            )
+        },
+    )
 
     override suspend fun startLoginDetect(onSuccess: suspend () -> Unit, onTimeOut: () -> Unit) {
         var elapsed = 0L
