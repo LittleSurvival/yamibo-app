@@ -18,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import io.github.littlesurvival.YamiboClient
+import io.github.littlesurvival.waf.WafRecoveryConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -157,7 +158,17 @@ class MainActivity : ComponentActivity() {
             val rawSettingsStore = remember { AndroidSettingsStore(context) }
 
             /** Repository Logic */
-            val yamiboClient = remember { YamiboClient(timeoutMillis = 60_000L) }
+            // Cap the SDK challenge flight at the login prewarm timeout so an abandoned
+            // prewarm cannot leave an orphan hidden WebView challenging alongside the
+            // visible login WebView.
+            val yamiboClient = remember {
+                YamiboClient(
+                    timeoutMillis = 60_000L,
+                    wafRecoveryConfig = WafRecoveryConfig(
+                        challengeTimeoutMillis = WAF_PREWARM_TIMEOUT_MILLIS,
+                    ),
+                )
+            }
             DisposableEffect(yamiboClient) {
                 onDispose { yamiboClient.close() }
             }

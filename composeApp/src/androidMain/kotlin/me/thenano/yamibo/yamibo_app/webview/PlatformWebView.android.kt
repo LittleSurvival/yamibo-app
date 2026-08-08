@@ -22,6 +22,7 @@ actual fun PlatformWebViewContent(
     url: String,
     syncAuthCookies: Boolean,
     captureHtml: Boolean,
+    blockThirdPartyHosts: Boolean,
     onTitleChanged: (String) -> Unit,
     onUrlChanged: (String) -> Unit,
     onLoadingChanged: (Boolean) -> Unit,
@@ -64,12 +65,13 @@ actual fun PlatformWebViewContent(
                         view: WebView?,
                         request: WebResourceRequest?
                     ): WebResourceResponse? {
-                        val targetUrl = request?.url?.toString().orEmpty()
                         if (
+                            blockThirdPartyHosts &&
                             request != null &&
-                            shouldBlockThirdPartyRequest(targetUrl, request.isForMainFrame)
+                            !request.isForMainFrame &&
+                            request.url.host?.let(::isBlockedThirdPartyHost) == true
                         ) {
-                            Logger.d("WebView", "Blocked unreachable third-party: $targetUrl")
+                            Logger.d("WebView", "Blocked unreachable third-party: ${request.url}")
                             return WebResourceResponse(
                                 "text/javascript",
                                 "UTF-8",
@@ -179,28 +181,4 @@ private fun decodeEvaluatedHtml(value: String?): String {
     return runCatching { JSONArray("[$value]").getString(0) }
         .onFailure { Logger.d("PlatformWebView", "Failed to decode evaluated HTML", it) }
         .getOrElse { value }
-}
-
-/**
- * Third-party hosts that are unreachable from the app's network (e.g. mainland China)
- * and would otherwise stall page load with a long connection timeout.
- *
- * The login page embeds Google Analytics (googletagmanager.com) which never resolves
- * from the app's network; WebView waits for its timeout before firing onPageFinished,
- * keeping the loading overlay visible for ~15s+. Intercepting these hosts with an empty
- * response lets the page finish immediately.
- */
-internal fun shouldBlockThirdPartyRequest(
-    targetUrl: String,
-    isForMainFrame: Boolean,
-): Boolean = !isForMainFrame && targetUrl.isBlockedThirdPartyUrl()
-
-private fun String.isBlockedThirdPartyUrl(): Boolean {
-    val host = substringAfter("://").substringBefore("/").lowercase()
-    return host.endsWith("googletagmanager.com") ||
-        host.endsWith("google-analytics.com") ||
-        host.endsWith("googleadservices.com") ||
-        host.endsWith("googlesyndication.com") ||
-        host.endsWith("doubleclick.net") ||
-        host.endsWith("gtagjs.com")
 }

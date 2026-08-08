@@ -82,6 +82,10 @@ actual fun PlatformWebViewContent(
     url: String,
     syncAuthCookies: Boolean,
     captureHtml: Boolean,
+    // Reserved: iOS third-party host blocking needs WKContentRuleList (the navigation
+    // delegate cannot intercept <script>/<img> subresource loads), which is a follow-up.
+    @Suppress("UNUSED_PARAMETER")
+    blockThirdPartyHosts: Boolean,
     onTitleChanged: (String) -> Unit,
     onUrlChanged: (String) -> Unit,
     onLoadingChanged: (Boolean) -> Unit,

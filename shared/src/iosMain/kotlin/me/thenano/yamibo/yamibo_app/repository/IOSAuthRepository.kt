@@ -4,6 +4,7 @@ import io.github.littlesurvival.YamiboClient
 import io.github.littlesurvival.YamiboRoute
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.page.ProfilePage
+import kotlin.coroutines.resume
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -17,7 +18,6 @@ import platform.Foundation.NSHTTPCookie
 import platform.Foundation.NSHTTPCookieStorage
 import platform.Foundation.NSURL
 import platform.WebKit.WKWebsiteDataStore
-import kotlin.coroutines.resume
 import kotlin.time.Duration.Companion.milliseconds
 
 class IOSAuthRepository(
@@ -61,25 +61,33 @@ class IOSAuthRepository(
         }
     }
 
-    override suspend fun prewarmWafCookie(): Boolean = runWafCookiePrewarm(
-        readPlatformCookieHeader = ::readPlatformCookieHeader,
-        loadStoredCookieHeader = cookieStore::load,
-        saveStoredCookieHeader = cookieStore::save,
-        importCookieHeader = { cookieHeader ->
-            yamiboClient.setCookie(cookieHeader, importNox = true)
-        },
-        triggerChallenge = {
-            yamiboClient.setCookie(cookieStore.load().orEmpty())
-            yamiboClient.fetchHomePage() is YamiboResult.Success
-        },
-        onFailure = { error ->
-            Logger.w(
-                "IOSAuthRepository",
-                "WAF cookie prewarm failed; falling back to login WebView",
-                error,
-            )
-        },
-    )
+    override suspend fun prewarmWafCookie(): WafPrewarmResult =
+        runWafCookiePrewarm(
+            readPlatformCookieHeader = ::readPlatformCookieHeader,
+            loadStoredCookieHeader = cookieStore::load,
+            saveStoredCookieHeader = cookieStore::save,
+            importCookieHeader = { cookieHeader ->
+                yamiboClient.setCookie(cookieHeader, importNox = true)
+            },
+            triggerChallenge = {
+                // Fire a pipeline GET of the login route: a 405 there drives the SDK hidden
+                // challenger to verify exactly the route the login WebView will load. The page
+                // does not parse as any SDK type, so the pipeline result is irrelevant —
+                // success is decided by the post-challenge nox_jst_v1 check in
+                // runWafCookiePrewarm.
+                yamiboClient.setCookie(cookieStore.load().orEmpty())
+                yamiboClient.fetchSignAction(YamiboRoute.Login.build())
+            },
+            onFailure = { error ->
+                Logger.w(
+                    "IOSAuthRepository",
+                    "WAF cookie prewarm failed; falling back to login WebView",
+                    error,
+                )
+            },
+        ).also { result ->
+            Logger.i("IOSAuthRepository", "WAF cookie prewarm result: $result")
+        }
 
     @OptIn(ExperimentalForeignApi::class)
     private suspend fun readPlatformCookieHeader(): String =

@@ -27,6 +27,7 @@ import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.repository.AuthRepository
 import me.thenano.yamibo.yamibo_app.repository.FavoriteRepository
 import me.thenano.yamibo.yamibo_app.repository.ThreadRepository
+import me.thenano.yamibo.yamibo_app.repository.WafPrewarmResult
 import me.thenano.yamibo.yamibo_app.store.auth.CookieStore
 import me.thenano.yamibo.yamibo_app.store.auth.UserStore
 import kotlin.test.Test
@@ -563,7 +564,7 @@ private class FakeFavoriteSyncAuthRepository : AuthRepository {
 
     override suspend fun isLoggedIn(): Boolean = true
     override suspend fun fetchStatus(): YamiboResult<Boolean> = YamiboResult.Success(true)
-    override suspend fun prewarmWafCookie(): Boolean = false
+    override suspend fun prewarmWafCookie(): WafPrewarmResult = WafPrewarmResult.Failed
     override suspend fun startLoginDetect(onSuccess: suspend () -> Unit, onTimeOut: () -> Unit) = onSuccess()
     override fun syncCookieFromWebView() = Unit
     override fun currentUser(): ProfilePage? = UserStore.Preview

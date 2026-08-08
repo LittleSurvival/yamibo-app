@@ -9,6 +9,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotSame
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.repository.AuthRepository
+import me.thenano.yamibo.yamibo_app.repository.WafPrewarmResult
 import me.thenano.yamibo.yamibo_app.store.auth.CookieStore
 import me.thenano.yamibo.yamibo_app.store.auth.UserStore
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
@@ -64,7 +65,7 @@ class AppSyncServiceAvailabilityTest {
 
         override suspend fun isLoggedIn() = false
         override suspend fun fetchStatus(): YamiboResult<Boolean> = YamiboResult.Success(false)
-        override suspend fun prewarmWafCookie(): Boolean = false
+        override suspend fun prewarmWafCookie(): WafPrewarmResult = WafPrewarmResult.Failed
         override suspend fun startLoginDetect(
             onSuccess: suspend () -> Unit,
             onTimeOut: () -> Unit,

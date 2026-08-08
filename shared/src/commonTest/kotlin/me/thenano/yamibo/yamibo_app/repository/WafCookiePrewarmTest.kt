@@ -5,9 +5,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
-import kotlin.test.assertNull
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class WafCookiePrewarmTest {
@@ -54,6 +53,33 @@ class WafCookiePrewarmTest {
     }
 
     @Test
+    fun stripsCrLfBetweenSegmentsBeforeParsing() {
+        assertEquals(
+            "2",
+            cookieValue("a=1;\r\nb=2", "b"),
+        )
+        assertEquals(
+            "2",
+            cookieValue("a=1;b=2\r\n", "b"),
+        )
+    }
+
+    @Test
+    fun rejectsCookieNamesContainingWhitespaceOrControlCharacters() {
+        val header = "bad name=1; bad\u0001name=2; ok=3"
+        assertNull(cookieValue(header, "bad name"))
+        assertNull(cookieValue(header, "bad\u0001name"))
+        assertEquals("3", cookieValue(header, "ok"))
+    }
+
+    @Test
+    fun skipsSegmentsWithoutSeparator() {
+        val header = "a=1; malformed; c=3"
+        assertNull(cookieValue(header, "malformed"))
+        assertEquals("3", cookieValue(header, "c"))
+    }
+
+    @Test
     fun validatesPlatformNoxBeforeCompletingPrewarm() = runBlocking {
         var challengeTriggered = false
         var savedHeader = ""
@@ -66,29 +92,28 @@ class WafCookiePrewarmTest {
             importCookieHeader = { importedHeader = it },
             triggerChallenge = {
                 challengeTriggered = true
-                true
             },
         )
 
-        assertTrue(result)
+        assertEquals(WafPrewarmResult.Success, result)
         assertTrue(challengeTriggered)
         assertEquals("auth=token; nox_jst_v1=fresh", savedHeader)
         assertEquals(savedHeader, importedHeader)
     }
 
     @Test
-    fun returnsFalseWhenPlatformNoxFailsValidation() = runBlocking {
+    fun returnsFailedWhenPlatformStoreHasNoNoxAfterAttempt() = runBlocking {
         var savedHeader: String? = null
 
         val result = runWafCookiePrewarm(
-            readPlatformCookieHeader = { "nox_jst_v1=stale" },
+            readPlatformCookieHeader = { "" },
             loadStoredCookieHeader = { null },
             saveStoredCookieHeader = { savedHeader = it },
             importCookieHeader = {},
-            triggerChallenge = { false },
+            triggerChallenge = {},
         )
 
-        assertFalse(result)
+        assertEquals(WafPrewarmResult.Failed, result)
         assertNull(savedHeader)
     }
 
@@ -104,16 +129,15 @@ class WafCookiePrewarmTest {
             importCookieHeader = { importedHeader = it },
             triggerChallenge = {
                 platformHeader = "nox_jst_v1=fresh"
-                true
             },
         )
 
-        assertTrue(result)
+        assertEquals(WafPrewarmResult.Success, result)
         assertEquals("auth=token; nox_jst_v1=fresh", importedHeader)
     }
 
     @Test
-    fun returnsFalseAfterChallengeTimeout() = runBlocking {
+    fun returnsTimedOutWhenChallengeDoesNotSettle() = runBlocking {
         val result = runWafCookiePrewarm(
             readPlatformCookieHeader = { "" },
             loadStoredCookieHeader = { null },
@@ -121,16 +145,15 @@ class WafCookiePrewarmTest {
             importCookieHeader = {},
             triggerChallenge = {
                 delay(100)
-                true
             },
             timeoutMillis = 1,
         )
 
-        assertFalse(result)
+        assertEquals(WafPrewarmResult.TimedOut, result)
     }
 
     @Test
-    fun returnsFalseWhenChallengeFails() = runBlocking {
+    fun returnsFailedWhenChallengeThrows() = runBlocking {
         var observedFailure: Exception? = null
 
         val result = runWafCookiePrewarm(
@@ -142,7 +165,7 @@ class WafCookiePrewarmTest {
             onFailure = { observedFailure = it },
         )
 
-        assertFalse(result)
+        assertEquals(WafPrewarmResult.Failed, result)
         assertEquals("network failed", observedFailure?.message)
     }
 

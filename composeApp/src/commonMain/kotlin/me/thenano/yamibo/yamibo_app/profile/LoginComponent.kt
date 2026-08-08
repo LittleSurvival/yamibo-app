@@ -30,12 +30,15 @@ import io.github.littlesurvival.YamiboLevels
 import io.github.littlesurvival.YamiboRoute
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.page.ProfilePage
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import me.thenano.yamibo.yamibo_app.LocalAuthRepository
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.event.AppEventBus
 import me.thenano.yamibo.yamibo_app.event.events.LoginSuccessEvent
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.navigation.*
+import me.thenano.yamibo.yamibo_app.repository.WafPrewarmResult
 import me.thenano.yamibo.yamibo_app.store.auth.UserStore
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.userspace.IUserSpaceScreen
@@ -64,23 +67,30 @@ class ILoginScreen : RestorableNavigatable {
 fun LoginScreen() {
     val navigator = LocalNavigator.current
     val authRepo = LocalAuthRepository.current
-    var prewarmCompleted by remember(authRepo) { mutableStateOf(false) }
+    var prewarmResult by remember(authRepo) { mutableStateOf<WafPrewarmResult?>(null) }
 
+    // Wait for the WAF prewarm attempt to settle, then fail open: a success lets the login
+    // WebView load the login route directly, any other outcome falls back to the WebView
+    // self-challenging as before (slow but functional).
     LaunchedEffect(authRepo) {
-        runLoginWafPrewarm(
-            prewarm = authRepo::prewarmWafCookie,
-            onComplete = { prewarmCompleted = true },
-        )
+        prewarmResult = try {
+            authRepo.prewarmWafCookie()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Logger.w("LoginComponent", "WAF prewarm failed; opening login WebView anyway", error)
+            WafPrewarmResult.Failed
+        }
     }
 
-    if (!prewarmCompleted) {
+    if (prewarmResult == null) {
         LoadingOverlay(visible = true) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 CircularProgressIndicator()
-                Text(i18n("正在通過安全驗證…"))
+                Text(i18n("正在通過安全驗證..."))
             }
         }
         return
@@ -91,10 +101,11 @@ fun LoginScreen() {
         initialTitle = i18n("登入頁面"),
         showNavigation = false,
         useBackIcon = true,
+        blockThirdPartyHosts = true,
         onPageFinished = { authRepo.syncCookieFromWebView() },
     )
 
-    LaunchedEffect(authRepo, navigator) {
+    LaunchedEffect(authRepo) {
         authRepo.startLoginDetect(
             onSuccess = {
                 val status = authRepo.fetchStatus()

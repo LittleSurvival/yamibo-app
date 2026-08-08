@@ -55,29 +55,37 @@ class AndroidAuthRepository(
         }
     }
 
-    override suspend fun prewarmWafCookie(): Boolean = runWafCookiePrewarm(
-        readPlatformCookieHeader = {
-            CookieManager.getInstance()
-                .getCookie(YamiboRoute.Domain.build())
-                .orEmpty()
-        },
-        loadStoredCookieHeader = cookieStore::load,
-        saveStoredCookieHeader = cookieStore::save,
-        importCookieHeader = { cookieHeader ->
-            yamiboClient.setCookie(cookieHeader, importNox = true)
-        },
-        triggerChallenge = {
-            yamiboClient.setCookie(cookieStore.load().orEmpty())
-            yamiboClient.fetchHomePage() is YamiboResult.Success
-        },
-        onFailure = { error ->
-            Logger.w(
-                "AndroidAuthRepository",
-                "WAF cookie prewarm failed; falling back to login WebView",
-                error,
-            )
-        },
-    )
+    override suspend fun prewarmWafCookie(): WafPrewarmResult =
+        runWafCookiePrewarm(
+            readPlatformCookieHeader = {
+                CookieManager.getInstance()
+                    .getCookie(YamiboRoute.Domain.build())
+                    .orEmpty()
+            },
+            loadStoredCookieHeader = cookieStore::load,
+            saveStoredCookieHeader = cookieStore::save,
+            importCookieHeader = { cookieHeader ->
+                yamiboClient.setCookie(cookieHeader, importNox = true)
+            },
+            triggerChallenge = {
+                // Fire a pipeline GET of the login route: a 405 there drives the SDK hidden
+                // challenger to verify exactly the route the login WebView will load. The page
+                // does not parse as any SDK type, so the pipeline result is irrelevant —
+                // success is decided by the post-challenge nox_jst_v1 check in
+                // runWafCookiePrewarm.
+                yamiboClient.setCookie(cookieStore.load().orEmpty())
+                yamiboClient.fetchSignAction(YamiboRoute.Login.build())
+            },
+            onFailure = { error ->
+                Logger.w(
+                    "AndroidAuthRepository",
+                    "WAF cookie prewarm failed; falling back to login WebView",
+                    error,
+                )
+            },
+        ).also { result ->
+            Logger.i("AndroidAuthRepository", "WAF cookie prewarm result: $result")
+        }
 
     override suspend fun startLoginDetect(onSuccess: suspend () -> Unit, onTimeOut: () -> Unit) {
         var elapsed = 0L

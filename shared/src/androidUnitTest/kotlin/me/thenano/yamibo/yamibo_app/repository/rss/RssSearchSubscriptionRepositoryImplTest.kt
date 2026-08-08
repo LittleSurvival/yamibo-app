@@ -23,6 +23,7 @@ import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.repository.AuthRepository
 import me.thenano.yamibo.yamibo_app.repository.ForumRepository
 import me.thenano.yamibo.yamibo_app.repository.RssSearchSubscriptionRepository
+import me.thenano.yamibo.yamibo_app.repository.WafPrewarmResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncMutationRecorder
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.DatabaseSyncDomainMaterializer
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.SqlDelightSyncDomainStateAdapter
@@ -265,7 +266,7 @@ private class FakeAuthRepository : AuthRepository {
 
     override suspend fun isLoggedIn(): Boolean = true
     override suspend fun fetchStatus(): YamiboResult<Boolean> = YamiboResult.Success(true)
-    override suspend fun prewarmWafCookie(): Boolean = false
+    override suspend fun prewarmWafCookie(): WafPrewarmResult = WafPrewarmResult.Failed
     override suspend fun startLoginDetect(onSuccess: suspend () -> Unit, onTimeOut: () -> Unit) = onSuccess()
     override fun syncCookieFromWebView() = Unit
     override fun currentUser(): ProfilePage? = UserStore.Preview

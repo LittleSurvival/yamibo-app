@@ -7,6 +7,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.window.ComposeUIViewController
 import io.github.littlesurvival.YamiboClient
+import io.github.littlesurvival.waf.WafRecoveryConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -79,7 +80,16 @@ fun MainViewController() = ComposeUIViewController {
     val rawSettingsStore = remember { IOSSettingsStore() }
 
     /** Repository Logic */
-    val yamiboClient = remember { YamiboClient() }
+    // Cap the SDK challenge flight at the login prewarm timeout so an abandoned
+    // prewarm cannot leave an orphan hidden WebView challenging alongside the
+    // visible login WebView.
+    val yamiboClient = remember {
+        YamiboClient(
+            wafRecoveryConfig = WafRecoveryConfig(
+                challengeTimeoutMillis = WAF_PREWARM_TIMEOUT_MILLIS,
+            ),
+        )
+    }
     DisposableEffect(yamiboClient) {
         onDispose { yamiboClient.close() }
     }

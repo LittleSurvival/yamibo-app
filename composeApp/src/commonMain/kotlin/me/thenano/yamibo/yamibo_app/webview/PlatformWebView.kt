@@ -26,6 +26,7 @@ expect fun PlatformWebViewContent(
     url: String,
     syncAuthCookies: Boolean,
     captureHtml: Boolean,
+    blockThirdPartyHosts: Boolean,
     onTitleChanged: (String) -> Unit,
     onUrlChanged: (String) -> Unit,
     onLoadingChanged: (Boolean) -> Unit,
@@ -86,6 +87,7 @@ internal fun PlatformWebViewScreen(
     useBackIcon: Boolean = false,
     syncAuthCookies: Boolean = true,
     captureHtml: Boolean = false,
+    blockThirdPartyHosts: Boolean = false,
     onPageFinished: (String) -> Unit = {},
     onHtmlAvailable: (url: String, html: String) -> Unit = { _, _ -> },
     onLoadError: (url: String?, description: String) -> Unit = { _, _ -> },
@@ -127,6 +129,7 @@ internal fun PlatformWebViewScreen(
                     url = initialUrl,
                     syncAuthCookies = syncAuthCookies,
                     captureHtml = captureHtml,
+                    blockThirdPartyHosts = blockThirdPartyHosts,
                     onTitleChanged = { currentTitle = it },
                     onUrlChanged = { currentUrl = it },
                     onLoadingChanged = { loading = it },
@@ -151,12 +154,14 @@ class IPlatformWebView(
     private val useBackIcon: Boolean = false,
     private val syncAuthCookies: Boolean = true,
     private val captureHtml: Boolean = false,
+    private val blockThirdPartyHosts: Boolean = false,
     private val onPageFinished: (String) -> Unit = {},
     private val onHtmlAvailable: (url: String, html: String) -> Unit = { _, _ -> },
     private val onLoadError: (url: String?, description: String) -> Unit = { _, _ -> },
     private val shouldOverrideUrlLoading: (String) -> Boolean = { false },
 ) : Navigatable {
-    override val id = buildId(link, title, showNavigation, useBackIcon, syncAuthCookies, captureHtml)
+    override val id =
+        buildId(link, title, showNavigation, useBackIcon, syncAuthCookies, captureHtml, blockThirdPartyHosts)
 
     @Composable
     override fun Content() {
@@ -167,6 +172,7 @@ class IPlatformWebView(
             useBackIcon = useBackIcon,
             syncAuthCookies = syncAuthCookies,
             captureHtml = captureHtml,
+            blockThirdPartyHosts = blockThirdPartyHosts,
             onPageFinished = onPageFinished,
             onHtmlAvailable = onHtmlAvailable,
             onLoadError = onLoadError,
