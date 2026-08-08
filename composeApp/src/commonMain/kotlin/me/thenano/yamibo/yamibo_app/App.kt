@@ -30,6 +30,7 @@ import coil3.PlatformContext
 import coil3.compose.setSingletonImageLoaderFactory
 import coil3.memory.MemoryCache
 import coil3.network.ktor3.KtorNetworkFetcherFactory
+import coil3.svg.SvgDecoder
 import io.github.littlesurvival.YamiboClient
 import io.github.littlesurvival.waf.YamiboWafChallengeHost
 import kotlinx.coroutines.coroutineScope
@@ -128,6 +129,7 @@ fun App() {
                 }
                 .components {
                     add(KtorNetworkFetcherFactory())
+                    add(SvgDecoder.Factory())
                 }
                 .build()
             }
