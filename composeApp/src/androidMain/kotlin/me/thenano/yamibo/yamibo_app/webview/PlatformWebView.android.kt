@@ -14,6 +14,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import me.thenano.yamibo.yamibo_app.LocalAuthRepository
 import me.thenano.yamibo.yamibo_app.Logger
 import org.json.JSONArray
+import java.io.ByteArrayInputStream
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -57,6 +58,22 @@ actual fun PlatformWebViewContent(
                 webViewClient = object : WebViewClient() {
                     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                         onLoadingChanged(true)
+                    }
+
+                    override fun shouldInterceptRequest(
+                        view: WebView?,
+                        request: WebResourceRequest?
+                    ): WebResourceResponse? {
+                        val targetUrl = request?.url?.toString().orEmpty()
+                        if (targetUrl.isBlockedThirdPartyUrl()) {
+                            Logger.d("WebView", "Blocked unreachable third-party: $targetUrl")
+                            return WebResourceResponse(
+                                "text/javascript",
+                                "UTF-8",
+                                ByteArrayInputStream(ByteArray(0)),
+                            )
+                        }
+                        return super.shouldInterceptRequest(view, request)
                     }
 
                     override fun onPageFinished(view: WebView?, url: String?) {
@@ -159,4 +176,23 @@ private fun decodeEvaluatedHtml(value: String?): String {
     return runCatching { JSONArray("[$value]").getString(0) }
         .onFailure { Logger.d("PlatformWebView", "Failed to decode evaluated HTML", it) }
         .getOrElse { value }
+}
+
+/**
+ * Third-party hosts that are unreachable from the app's network (e.g. mainland China)
+ * and would otherwise stall page load with a long connection timeout.
+ *
+ * The login page embeds Google Analytics (googletagmanager.com) which never resolves
+ * from the app's network; WebView waits for its timeout before firing onPageFinished,
+ * keeping the loading overlay visible for ~15s+. Intercepting these hosts with an empty
+ * response lets the page finish immediately.
+ */
+private fun String.isBlockedThirdPartyUrl(): Boolean {
+    val host = substringAfter("://").substringBefore("/").lowercase()
+    return host.endsWith("googletagmanager.com") ||
+        host.endsWith("google-analytics.com") ||
+        host.endsWith("googleadservices.com") ||
+        host.endsWith("googlesyndication.com") ||
+        host.endsWith("doubleclick.net") ||
+        host.endsWith("gtagjs.com")
 }
