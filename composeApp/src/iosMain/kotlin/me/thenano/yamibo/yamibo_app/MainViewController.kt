@@ -213,6 +213,7 @@ fun MainViewController() = ComposeUIViewController {
     val readHistoryRepository = remember {
         appSyncService.readHistoryRepository(IOSReadHistoryRepository(appDatabase))
     }
+    val chapterStateRepository = remember { IOSLocalChapterStateRepository(dbFactory) }
     val contentCoverRepository = remember {
         ContentCoverRepositoryImpl(Database(dbFactory.createDriver()))
     }
@@ -266,6 +267,7 @@ fun MainViewController() = ComposeUIViewController {
         LocalBackgroundAccessRepository provides backgroundAccessRepository,
         LocalNovelThreadCacheRepository provides novelCacheRepository,
         LocalReadHistoryRepository provides readHistoryRepository,
+        LocalChapterStateRepository provides chapterStateRepository,
         LocalContentCoverRepository provides contentCoverRepository,
         LocalSignRepository provides signRepository,
         LocalThemeRepository provides themeRepository,

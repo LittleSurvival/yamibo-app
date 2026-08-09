@@ -99,7 +99,14 @@ fun ForumPageScreen(fid: ForumId, name: String) {
             return
         }
 
-        val result = forumRepository.fetchForum(fid, page, filterType, orderType)
+        // The library can throw (e.g. a K/N linkage Error) instead of returning a result;
+        // surface it as an error card rather than crashing the coroutine.
+        val result =
+            try {
+                forumRepository.fetchForum(fid, page, filterType, orderType)
+            } catch (t: Throwable) {
+                YamiboResult.Failure(t.message ?: "未知錯誤", t)
+            }
         if (requestGeneration != loadGeneration) return
         state =
             when (result) {
@@ -259,9 +266,18 @@ fun ForumPageScreen(fid: ForumId, name: String) {
                         onRefresh = {
                             isRefreshing = true
                             scope.launch {
-                                when (val result =
-                                    forumRepository.fetchForum(fid, currentPage, selectedFilterType, selectedOrderType)
-                                ) {
+                                val result =
+                                    try {
+                                        forumRepository.fetchForum(
+                                            fid,
+                                            currentPage,
+                                            selectedFilterType,
+                                            selectedOrderType,
+                                        )
+                                    } catch (t: Throwable) {
+                                        YamiboResult.Failure(t.message ?: "未知錯誤", t)
+                                    }
+                                when (result) {
                                     is YamiboResult.Success -> {
                                         forumRepository.setCachedForumPage(
                                             fid,
