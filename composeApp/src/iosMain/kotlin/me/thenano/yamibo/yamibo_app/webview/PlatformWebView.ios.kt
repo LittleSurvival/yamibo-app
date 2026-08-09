@@ -42,23 +42,31 @@ class PlatformNavigationDelegate(
         val currentUrl = webView.URL?.absoluteString ?: return
         onUrlChanged(currentUrl)
         webView.title?.let { onTitleChanged(it) }
+
+        val notifyPageFinished = {
+            onPageFinished(currentUrl)
+            if (captureHtml) {
+                webView.evaluateJavaScript("document.documentElement.outerHTML") { result, _ ->
+                    val html = result as? String ?: return@evaluateJavaScript
+                    if (html.isNotBlank()) {
+                        onHtmlAvailable(currentUrl, html)
+                    }
+                }
+            }
+        }
+
         if (syncAuthCookies) {
-            // WKWebView cookies never surface in NSHTTPCookieStorage; bridge them
-            // over before the auth cookie sync reads it.
+            // Higher-level completion handlers can immediately start native requests.
+            // Bridge and import the WKWebView cookies first so those requests observe
+            // the same authenticated session as the page that just finished loading.
             WKWebViewCookieBridge.bridgeToNSHTTPCookieStorage(
                 store = webView.configuration.websiteDataStore.httpCookieStore,
             ) {
                 authCookieSync()
+                notifyPageFinished()
             }
-        }
-        onPageFinished(currentUrl)
-        if (captureHtml) {
-            webView.evaluateJavaScript("document.documentElement.outerHTML") { result, _ ->
-                val html = result as? String ?: return@evaluateJavaScript
-                if (html.isNotBlank()) {
-                    onHtmlAvailable(currentUrl, html)
-                }
-            }
+        } else {
+            notifyPageFinished()
         }
     }
 

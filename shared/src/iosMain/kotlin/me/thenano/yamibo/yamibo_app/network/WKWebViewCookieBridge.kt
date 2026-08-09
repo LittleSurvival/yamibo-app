@@ -4,6 +4,8 @@ import platform.Foundation.NSHTTPCookie
 import platform.Foundation.NSHTTPCookieStorage
 import platform.WebKit.WKHTTPCookieStore
 import platform.WebKit.WKWebsiteDataStore
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 
 /**
  * Bridges WKWebView's cookie store (WKHTTPCookieStore) to NSHTTPCookieStorage.
@@ -41,10 +43,23 @@ object WKWebViewCookieBridge {
         }
     }
 
-    /** Deletes every cookie from [store] (defaults to the app-wide persistent store). */
-    fun clearAll(store: WKHTTPCookieStore = defaultStore) {
-        readAll(store) { cookies ->
-            cookies.forEach { store.deleteCookie(it, completionHandler = null) }
+    /**
+     * Deletes every cookie from [store] and returns only after WebKit confirms every deletion.
+     *
+     * Logout must not return while authentication cookies are still present in WebKit. Otherwise,
+     * a WebView opened immediately afterward can reuse the old session before the asynchronous
+     * deletion callbacks finish.
+     */
+    suspend fun clearAll(store: WKHTTPCookieStore = defaultStore) {
+        val cookies = suspendCoroutine<List<NSHTTPCookie>> { continuation ->
+            readAll(store) { continuation.resume(it) }
+        }
+        cookies.forEach { cookie ->
+            suspendCoroutine { continuation ->
+                store.deleteCookie(cookie) {
+                    continuation.resume(Unit)
+                }
+            }
         }
     }
 }
