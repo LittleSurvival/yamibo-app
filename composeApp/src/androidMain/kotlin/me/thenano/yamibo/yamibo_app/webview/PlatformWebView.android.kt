@@ -59,6 +59,20 @@ actual fun PlatformWebViewContent(
                         onLoadingChanged(true)
                     }
 
+                    /**
+                     * Android invokes this callback when the new main-frame document has
+                     * committed and its next draw will no longer show content from the
+                     * previous page. This is the earliest semantic point at which the
+                     * modal loading overlay can be removed without relying on sub-resource
+                     * completion. onPageFinished remains responsible for cookie sync, HTML
+                     * capture, and the caller's completion callback because those operations
+                     * still require the full page-finished signal.
+                     */
+                    override fun onPageCommitVisible(view: WebView?, url: String?) {
+                        super.onPageCommitVisible(view, url)
+                        onLoadingChanged(false)
+                    }
+
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
                         onLoadingChanged(false)
