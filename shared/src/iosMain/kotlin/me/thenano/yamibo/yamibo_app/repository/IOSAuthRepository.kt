@@ -6,6 +6,7 @@ import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.page.ProfilePage
 import kotlinx.coroutines.delay
 import me.thenano.yamibo.yamibo_app.i18n.i18n
+import me.thenano.yamibo.yamibo_app.network.WKWebViewCookieBridge
 import me.thenano.yamibo.yamibo_app.store.auth.CookieStore
 import me.thenano.yamibo.yamibo_app.store.auth.UserStore
 import me.thenano.yamibo.yamibo_app.store.forum.ForumFavoriteStore
@@ -13,7 +14,6 @@ import me.thenano.yamibo.yamibo_app.util.auth.parseCookieStringToMap
 import platform.Foundation.NSHTTPCookie
 import platform.Foundation.NSHTTPCookieStorage
 import platform.Foundation.NSURL
-import platform.WebKit.WKWebsiteDataStore
 import kotlin.time.Duration.Companion.milliseconds
 
 class IOSAuthRepository(
@@ -99,12 +99,7 @@ class IOSAuthRepository(
         forumFavoriteStore?.clear()
 
         /** remove cookie from webview */
-        val webStore = WKWebsiteDataStore.defaultDataStore().httpCookieStore
-        webStore.getAllCookies { cookies ->
-            cookies.orEmpty()
-                .filterIsInstance<NSHTTPCookie>()
-                .forEach { webStore.deleteCookie(it, completionHandler = null) }
-        }
+        WKWebViewCookieBridge.clearAll()
         val storage = NSHTTPCookieStorage.sharedHTTPCookieStorage
         val cookies = storage.cookies
         if (cookies != null) {
