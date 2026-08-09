@@ -324,12 +324,17 @@ object HtmlParser {
                              */
                         }
                         "a" -> {
-                            val href = node.attr("href")
+                            val cloudflareEmail = decodeCloudflareEmail(node.attr("data-cfemail"))
+                            val href = cloudflareEmail?.let { "mailto:$it" } ?: node.attr("href")
                             val prevLink = currentLinkHref
                             if (href.isNotBlank()) currentLinkHref = href
                             
                             val start = globalBuilder.length
-                            node.childNodes().forEach { parseNode(it, parentAlign) }
+                            if (cloudflareEmail != null) {
+                                appendTextNodeText(cloudflareEmail)
+                            } else {
+                                node.childNodes().forEach { parseNode(it, parentAlign) }
+                            }
                             val end = globalBuilder.length
                             
                             if (href.isNotBlank() && start < end) {
@@ -376,6 +381,20 @@ object HtmlParser {
         commitText()
 
         return blocks
+    }
+
+    private fun decodeCloudflareEmail(encoded: String): String? {
+        if (encoded.length < 4 || encoded.length % 2 != 0) return null
+
+        return runCatching {
+            val bytes = encoded.chunked(2).map { it.toInt(16) }
+            val key = bytes.first()
+            bytes.drop(1)
+                .map { (it xor key).toByte() }
+                .toByteArray()
+                .decodeToString()
+                .takeIf { it.isNotBlank() }
+        }.getOrNull()
     }
 
     private fun parseAttachment(node: Element): ParsedAttachment? {
