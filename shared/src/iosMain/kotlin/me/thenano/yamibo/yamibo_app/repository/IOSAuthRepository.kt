@@ -6,6 +6,7 @@ import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.page.ProfilePage
 import kotlinx.coroutines.delay
 import me.thenano.yamibo.yamibo_app.i18n.i18n
+import me.thenano.yamibo.yamibo_app.network.WKWebViewCookieBridge
 import me.thenano.yamibo.yamibo_app.store.auth.CookieStore
 import me.thenano.yamibo.yamibo_app.store.auth.UserStore
 import me.thenano.yamibo.yamibo_app.store.forum.ForumFavoriteStore
@@ -98,6 +99,7 @@ class IOSAuthRepository(
         forumFavoriteStore?.clear()
 
         /** remove cookie from webview */
+        WKWebViewCookieBridge.clearAll()
         val storage = NSHTTPCookieStorage.sharedHTTPCookieStorage
         val cookies = storage.cookies
         if (cookies != null) {

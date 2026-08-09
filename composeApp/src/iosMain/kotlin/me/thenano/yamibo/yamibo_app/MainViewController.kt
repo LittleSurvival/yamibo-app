@@ -21,6 +21,7 @@ import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.navigation.rememberRestorableNavigator
 import me.thenano.yamibo.yamibo_app.profile.settings.access.IOSBackgroundAccessRepository
 import me.thenano.yamibo.yamibo_app.profile.settings.backup.IOSBackupScheduler
+import me.thenano.yamibo.yamibo_app.profile.settings.sign.IOSSignReminderScheduler
 import me.thenano.yamibo.yamibo_app.repository.*
 import me.thenano.yamibo.yamibo_app.repository.backup.BackupRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncService
@@ -213,6 +214,7 @@ fun MainViewController() = ComposeUIViewController {
     val readHistoryRepository = remember {
         appSyncService.readHistoryRepository(IOSReadHistoryRepository(appDatabase))
     }
+    val chapterStateRepository = remember { IOSLocalChapterStateRepository(dbFactory) }
     val contentCoverRepository = remember {
         ContentCoverRepositoryImpl(Database(dbFactory.createDriver()))
     }
@@ -225,6 +227,7 @@ fun MainViewController() = ComposeUIViewController {
         )
     }
     val themeRepository = remember { IOSThemeRepository() }
+    val signReminderScheduler = remember { IOSSignReminderScheduler() }
     val appUpdateRepository = remember {
         DefaultAppUpdateRepository(
             appSettingsRepository = appSettingsRepository,
@@ -266,6 +269,7 @@ fun MainViewController() = ComposeUIViewController {
         LocalBackgroundAccessRepository provides backgroundAccessRepository,
         LocalNovelThreadCacheRepository provides novelCacheRepository,
         LocalReadHistoryRepository provides readHistoryRepository,
+        LocalChapterStateRepository provides chapterStateRepository,
         LocalContentCoverRepository provides contentCoverRepository,
         LocalSignRepository provides signRepository,
         LocalThemeRepository provides themeRepository,
@@ -275,6 +279,7 @@ fun MainViewController() = ComposeUIViewController {
         LocalNovelReaderSettingsRepository provides novelReaderSettingsRepository,
         LocalMangaReaderSettingsRepository provides mangaReaderSettingsRepository,
         LocalImageReaderModeOverrideRepository provides imageReaderModeOverrideRepository,
+        LocalSignReminderScheduler provides signReminderScheduler,
     ) {
         androidx.compose.runtime.LaunchedEffect(Unit) {
             if (appSettingsRepository.clearCacheOnAppLaunch.getValue()) {

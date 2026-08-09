@@ -11,6 +11,7 @@ import androidx.compose.ui.viewinterop.UIKitView
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.ObjCSignatureOverride
 import me.thenano.yamibo.yamibo_app.LocalAuthRepository
+import me.thenano.yamibo.yamibo_app.network.WKWebViewCookieBridge
 import platform.Foundation.NSURL
 import platform.Foundation.NSURLRequest
 import platform.WebKit.WKNavigation
@@ -41,17 +42,31 @@ class PlatformNavigationDelegate(
         val currentUrl = webView.URL?.absoluteString ?: return
         onUrlChanged(currentUrl)
         webView.title?.let { onTitleChanged(it) }
-        if (syncAuthCookies) {
-            authCookieSync()
-        }
-        onPageFinished(currentUrl)
-        if (captureHtml) {
-            webView.evaluateJavaScript("document.documentElement.outerHTML") { result, _ ->
-                val html = result as? String ?: return@evaluateJavaScript
-                if (html.isNotBlank()) {
-                    onHtmlAvailable(currentUrl, html)
+
+        val notifyPageFinished = {
+            onPageFinished(currentUrl)
+            if (captureHtml) {
+                webView.evaluateJavaScript("document.documentElement.outerHTML") { result, _ ->
+                    val html = result as? String ?: return@evaluateJavaScript
+                    if (html.isNotBlank()) {
+                        onHtmlAvailable(currentUrl, html)
+                    }
                 }
             }
+        }
+
+        if (syncAuthCookies) {
+            // Higher-level completion handlers can immediately start native requests.
+            // Bridge and import the WKWebView cookies first so those requests observe
+            // the same authenticated session as the page that just finished loading.
+            WKWebViewCookieBridge.bridgeToNSHTTPCookieStorage(
+                store = webView.configuration.websiteDataStore.httpCookieStore,
+            ) {
+                authCookieSync()
+                notifyPageFinished()
+            }
+        } else {
+            notifyPageFinished()
         }
     }
 
