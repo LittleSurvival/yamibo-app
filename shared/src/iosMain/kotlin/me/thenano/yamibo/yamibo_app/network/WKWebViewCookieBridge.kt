@@ -1,11 +1,11 @@
 package me.thenano.yamibo.yamibo_app.network
 
+import kotlinx.coroutines.suspendCancellableCoroutine
 import platform.Foundation.NSHTTPCookie
 import platform.Foundation.NSHTTPCookieStorage
 import platform.WebKit.WKHTTPCookieStore
 import platform.WebKit.WKWebsiteDataStore
 import kotlin.coroutines.resume
-import kotlin.coroutines.suspendCoroutine
 
 /**
  * Bridges WKWebView's cookie store (WKHTTPCookieStore) to NSHTTPCookieStorage.
@@ -51,11 +51,11 @@ object WKWebViewCookieBridge {
      * deletion callbacks finish.
      */
     suspend fun clearAll(store: WKHTTPCookieStore = defaultStore) {
-        val cookies = suspendCoroutine<List<NSHTTPCookie>> { continuation ->
+        val cookies = suspendCancellableCoroutine { continuation ->
             readAll(store) { continuation.resume(it) }
         }
         cookies.forEach { cookie ->
-            suspendCoroutine { continuation ->
+            suspendCancellableCoroutine { continuation ->
                 store.deleteCookie(cookie) {
                     continuation.resume(Unit)
                 }
