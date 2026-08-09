@@ -110,6 +110,18 @@ actual fun PlatformWebViewContent(
                     }
                 }
                 webChromeClient = object : WebChromeClient() {
+                    override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                        super.onProgressChanged(view, newProgress)
+                        // Release the loading overlay as soon as the main document is
+                        // loaded. onPageFinished waits for every sub-resource and can be
+                        // stalled indefinitely by a hanging request (observed with
+                        // net::ERR_CONNECTION_TIMED_OUT), leaving the overlay stuck over an
+                        // already-usable page.
+                        if (newProgress >= 100) {
+                            onLoadingChanged(false)
+                        }
+                    }
+
                     override fun onReceivedTitle(view: WebView?, title: String?) {
                         super.onReceivedTitle(view, title)
                         title?.let { onTitleChanged(it) }
