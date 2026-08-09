@@ -13,6 +13,7 @@ import me.thenano.yamibo.yamibo_app.util.auth.parseCookieStringToMap
 import platform.Foundation.NSHTTPCookie
 import platform.Foundation.NSHTTPCookieStorage
 import platform.Foundation.NSURL
+import platform.WebKit.WKWebsiteDataStore
 import kotlin.time.Duration.Companion.milliseconds
 
 class IOSAuthRepository(
@@ -98,6 +99,12 @@ class IOSAuthRepository(
         forumFavoriteStore?.clear()
 
         /** remove cookie from webview */
+        val webStore = WKWebsiteDataStore.defaultDataStore().httpCookieStore
+        webStore.getAllCookies { cookies ->
+            cookies.orEmpty()
+                .filterIsInstance<NSHTTPCookie>()
+                .forEach { webStore.deleteCookie(it, completionHandler = null) }
+        }
         val storage = NSHTTPCookieStorage.sharedHTTPCookieStorage
         val cookies = storage.cookies
         if (cookies != null) {

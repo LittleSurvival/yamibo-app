@@ -11,6 +11,8 @@ import androidx.compose.ui.viewinterop.UIKitView
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.ObjCSignatureOverride
 import me.thenano.yamibo.yamibo_app.LocalAuthRepository
+import platform.Foundation.NSHTTPCookie
+import platform.Foundation.NSHTTPCookieStorage
 import platform.Foundation.NSURL
 import platform.Foundation.NSURLRequest
 import platform.WebKit.WKNavigation
@@ -42,7 +44,16 @@ class PlatformNavigationDelegate(
         onUrlChanged(currentUrl)
         webView.title?.let { onTitleChanged(it) }
         if (syncAuthCookies) {
-            authCookieSync()
+            // WKWebView's cookies live in its own WKHTTPCookieStore and never surface in
+            // NSHTTPCookieStorage, so bridge them over before the auth cookie sync reads it.
+            webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { cookies ->
+                val bridge = cookies.orEmpty().filterIsInstance<NSHTTPCookie>()
+                if (bridge.isNotEmpty()) {
+                    val storage = NSHTTPCookieStorage.sharedHTTPCookieStorage
+                    bridge.forEach { storage.setCookie(it) }
+                }
+                authCookieSync()
+            }
         }
         onPageFinished(currentUrl)
         if (captureHtml) {
