@@ -92,6 +92,7 @@ import me.thenano.yamibo.yamibo_app.thread.reader.debug.debugPerfLog
 import me.thenano.yamibo.yamibo_app.thread.reader.debug.isThreadReaderPerfDebugEnabled
 import me.thenano.yamibo.yamibo_app.thread.reader.debug.isThreadReaderReferencePlanningEnabled
 import me.thenano.yamibo.yamibo_app.util.buildImageRequest
+import me.thenano.yamibo.yamibo_app.util.imageSourceForDiagnostics
 import me.thenano.yamibo.yamibo_app.util.normalizeImageUrl
 import me.thenano.yamibo.yamibo_app.util.shareText
 import me.thenano.yamibo.yamibo_app.util.state
@@ -2014,7 +2015,7 @@ internal fun ThreadReaderScreen(
             }
             val postPage = pageState?.forumPage ?: pageByPid[centerPost.pid.value.toLong()] ?: initialPage
             val forumInfo = threadInfo?.forum
-            Logger.i("ThreadReaderScreen", "$title : $coverUrl")
+            Logger.i("ThreadReaderScreen", "$title : ${coverUrl?.let(::imageSourceForDiagnostics)}")
             return ThreadReadingHistory(
                 threadType = threadType,
                 threadName = threadInfo?.title ?: title,
@@ -2081,7 +2082,7 @@ internal fun ThreadReaderScreen(
         val forumInfo = threadInfo?.forum
         val firstVisible = listState.firstVisibleItemIndex
         val firstVisibleOffset = listState.firstVisibleItemScrollOffset
-        Logger.i("ThreadReaderScreen", "$title : $coverUrl")
+        Logger.i("ThreadReaderScreen", "$title : ${coverUrl?.let(::imageSourceForDiagnostics)}")
         return ThreadReadingHistory(
             threadType = threadType,
             threadName = threadInfo?.title ?: title,
@@ -3201,7 +3202,9 @@ internal fun ThreadReaderScreen(
                     expectedImageUrlsByPost[post.pid.value.toLong()].orEmpty().forEach { imageUrl ->
                         if (imageUrl in failedImageMessages) return@forEach
                         if (!prefetchedImageUrls.add(imageUrl)) return@forEach
-                        debugPerfLog("image_prefetch_enqueue|post=${post.pid.value}|url=$imageUrl")
+                        debugPerfLog(
+                            "image_prefetch_enqueue|post=${post.pid.value}|url=${imageSourceForDiagnostics(imageUrl)}"
+                        )
                         imageLoader.enqueue(
                             buildImageRequest(
                                 context = platformContext,

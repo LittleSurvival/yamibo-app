@@ -1223,7 +1223,12 @@ fun ImagesReaderScreen(
                 LazyColumn(
                     state = scrollListState,
                     modifier = Modifier.fillMaxSize()
-                        .nestedScroll(nestedScrollConnection)
+                        .nestedScroll(nestedScrollConnection),
+                    verticalArrangement = if (!isCatalogMode && actualImageList.size == 1) {
+                        Arrangement.Center
+                    } else {
+                        Arrangement.Top
+                    },
                 ) {
                     if (isCatalogMode) {
                         item {

@@ -58,6 +58,7 @@ import me.thenano.yamibo.yamibo_app.repository.inapplinknavigation.normalizeYami
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.thread.image.ImageViewer
 import me.thenano.yamibo.yamibo_app.thread.reader.debug.DebugRecomposeProbe
+import me.thenano.yamibo.yamibo_app.util.normalizeImageUrl
 import me.thenano.yamibo.yamibo_app.util.rememberImageRequest
 import me.thenano.yamibo.yamibo_app.util.state
 import me.thenano.yamibo.yamibo_app.webview.IPlatformWebView
@@ -809,7 +810,7 @@ private fun HtmlBlockRenderer(
         }
 
         is HtmlBlock.Image -> {
-            val url = if (block.url.startsWith("http")) block.url else "https://bbs.yamibo.com/${block.url}"
+            val url = normalizeImageUrl(block.url)
             if (block.isEmoticon) {
                 AsyncImage(
                     model = rememberImageRequest(url, enableCrossfade = false),

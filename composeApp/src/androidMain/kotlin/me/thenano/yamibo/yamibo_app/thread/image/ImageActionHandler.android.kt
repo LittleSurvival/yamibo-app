@@ -23,14 +23,24 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import me.thenano.yamibo.yamibo_app.util.buildImageRequest
+import me.thenano.yamibo.yamibo_app.util.imageErrorForDiagnostics
+import me.thenano.yamibo.yamibo_app.util.normalizeImageUrl
 
 private const val ImageActionLogTag = "YamiboImageAction"
 
-private fun logImageRequestFailure(result: Any) {
+private fun logImageRequestFailure(result: Any, url: String) {
     if (result is ErrorResult) {
-        Log.e(ImageActionLogTag, "Image request failed", result.throwable)
+        logImageActionFailure("Image request failed", result.throwable, url)
     } else {
         Log.e(ImageActionLogTag, "Image request returned ${result::class.simpleName}")
+    }
+}
+
+private fun logImageActionFailure(message: String, error: Throwable, url: String) {
+    if (normalizeImageUrl(url).startsWith("data:", ignoreCase = true)) {
+        Log.e(ImageActionLogTag, "$message: ${imageErrorForDiagnostics(error.message.orEmpty(), url)}")
+    } else {
+        Log.e(ImageActionLogTag, message, error)
     }
 }
 
@@ -39,8 +49,8 @@ private data class ImageDownloadResult(
     val errorMessage: String? = null,
 )
 
-private fun detailedDownloadFailure(action: String, error: Throwable?): String {
-    val rawMessage = error?.message.orEmpty()
+private fun detailedDownloadFailure(action: String, error: Throwable?, url: String): String {
+    val rawMessage = imageErrorForDiagnostics(error?.message.orEmpty(), url)
     val detail = when {
         rawMessage.contains("401") || rawMessage.contains("403") ->
             i18n("HTTP {}，可能是登入狀態或圖片 Referer 已失效", rawMessage.substringAfter("HTTP ").substringBefore(' ').ifBlank { rawMessage })
@@ -52,9 +62,9 @@ private fun detailedDownloadFailure(action: String, error: Throwable?): String {
     return i18n("{}失敗：{}", action, detail)
 }
 
-private fun detailedDownloadFailureFromResult(action: String, result: Any): String {
+private fun detailedDownloadFailureFromResult(action: String, result: Any, url: String): String {
     val error = (result as? ErrorResult)?.throwable
-    return detailedDownloadFailure(action, error)
+    return detailedDownloadFailure(action, error, url)
 }
 
 private fun detailedSaveFailure(reason: String): ImageActionResult =
@@ -101,11 +111,11 @@ private suspend fun downloadImage(context: Context, url: String, cookie: String,
                     return@withContext ImageDownloadResult(file = file)
                 }
             }
-            logImageRequestFailure(result)
-            ImageDownloadResult(errorMessage = detailedDownloadFailureFromResult(i18n("下載圖片"), result))
+            logImageRequestFailure(result, url)
+            ImageDownloadResult(errorMessage = detailedDownloadFailureFromResult(i18n("下載圖片"), result, url))
         } catch (e: Exception) {
-            Log.e(ImageActionLogTag, "Image download failed", e)
-            ImageDownloadResult(errorMessage = detailedDownloadFailure(i18n("下載圖片"), e))
+            logImageActionFailure("Image download failed", e, url)
+            ImageDownloadResult(errorMessage = detailedDownloadFailure(i18n("下載圖片"), e, url))
         }
     }
 }
@@ -205,12 +215,17 @@ actual suspend fun saveImageToGallery(context: PlatformContext, url: String, coo
                     return@withContext detailedSaveFailure(i18n("系統相簿無法建立檔案"))
                 }
             } else {
-                logImageRequestFailure(result)
-                return@withContext ImageActionResult(errorMessage = detailedDownloadFailureFromResult(i18n("下載圖片"), result))
+                logImageRequestFailure(result, url)
+                return@withContext ImageActionResult(errorMessage = detailedDownloadFailureFromResult(i18n("下載圖片"), result, url))
             }
         } catch (e: Exception) {
-            Log.e(ImageActionLogTag, "Saving image failed", e)
-            return@withContext ImageActionResult(errorMessage = i18n("儲存圖片失敗：{}", e.message ?: i18n("系統相簿寫入失敗")))
+            logImageActionFailure("Saving image failed", e, url)
+            return@withContext ImageActionResult(
+                errorMessage = i18n(
+                    "儲存圖片失敗：{}",
+                    imageErrorForDiagnostics(e.message ?: i18n("系統相簿寫入失敗"), url),
+                )
+            )
         }
     }
 }

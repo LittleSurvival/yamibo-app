@@ -16,12 +16,12 @@ import me.thenano.yamibo.yamibo_app.LocalAuthRepository
 /**
  * Converts an image source into the URL or URI passed to Coil.
  *
- * Absolute network URLs and local `content://` or `file://` URIs are preserved. Relative forum
- * attachment paths are resolved against [YamiboRoute.Domain].
+ * Absolute network URLs and local `data:`, `content://`, or `file://` URIs are preserved. Relative
+ * forum attachment paths are resolved against [YamiboRoute.Domain].
  */
 fun normalizeImageUrl(url: String): String {
-    val cleaned = repairDomainPrefixedLocalUri(url)
-    return if (cleaned.contains("://")) {
+    val cleaned = repairMalformedImageUri(url)
+    return if (cleaned.contains("://") || cleaned.startsWith("data:", ignoreCase = true)) {
         cleaned
     } else {
         "${YamiboRoute.Domain.build().trimEnd('/')}/${cleaned.removePrefix("/")}"
@@ -29,18 +29,62 @@ fun normalizeImageUrl(url: String): String {
 }
 
 /**
- * Restores a local URI that was accidentally prefixed with the Yamibo forum origin.
+ * Restores an inline or local URI that was accidentally prefixed with an HTTP origin.
  *
- * For example, `https://bbs.yamibo.com/content://...` must become `content://...` before it is
- * passed to Coil. Without this repair, Coil treats the value as an HTTP URL instead of a local
- * content or file URI.
+ * For example, `http://data:image/...` must become `data:image/...`, and
+ * `https://bbs.yamibo.com/content://...` must become `content://...`, before the source is passed
+ * to Coil. Without this repair, Coil treats the value as an HTTP URL instead of inline or local
+ * data.
  */
-private fun repairDomainPrefixedLocalUri(url: String): String {
+private fun repairMalformedImageUri(url: String): String {
     val domain = YamiboRoute.Domain.build().trimEnd('/')
-    return when {
+    val repaired = when {
+        url.startsWith("http://data:image/", ignoreCase = true) -> url.substring("http://".length)
+        url.startsWith("https://data:image/", ignoreCase = true) -> url.substring("https://".length)
         url.startsWith("$domain/content://") -> url.removePrefix("$domain/")
         url.startsWith("$domain/file://") -> url.removePrefix("$domain/")
+        url.startsWith("$domain/data:", ignoreCase = true) -> url.substring(domain.length + 1)
         else -> url
+    }
+    return if (repaired.startsWith("data:", ignoreCase = true)) {
+        "data:${repaired.substring("data:".length)}"
+    } else {
+        repaired
+    }
+}
+
+internal fun buildImageNetworkHeaders(
+    normalizedUrl: String,
+    cookie: String,
+    referer: String,
+): NetworkHeaders = NetworkHeaders.Builder().apply {
+    if (normalizedUrl.startsWith(YamiboRoute.Domain.build())) {
+        add("Cookie", cookie)
+        add("Referer", referer)
+    }
+}.build()
+
+internal fun imageSourceForDiagnostics(url: String): String {
+    val normalized = normalizeImageUrl(url)
+    if (!normalized.startsWith("data:", ignoreCase = true)) return normalized
+
+    val commaIndex = normalized.indexOf(',')
+    val metadata = normalized
+        .substring(0, if (commaIndex >= 0) commaIndex else normalized.length)
+        .take(80)
+    val payloadLength = if (commaIndex >= 0) normalized.length - commaIndex - 1 else 0
+    return "$metadata,<inline data: $payloadLength chars>"
+}
+
+internal fun imageErrorForDiagnostics(errorMessage: String, url: String): String {
+    val normalized = normalizeImageUrl(url)
+    if (!normalized.startsWith("data:", ignoreCase = true)) return errorMessage
+
+    val sourceSummary = imageSourceForDiagnostics(normalized)
+    return when {
+        errorMessage.contains(normalized) -> errorMessage.replace(normalized, sourceSummary)
+        errorMessage.contains("data:", ignoreCase = true) -> "Failed to load $sourceSummary"
+        else -> errorMessage
     }
 }
 
@@ -53,21 +97,12 @@ fun buildImageRequest(
     enableCrossfade: Boolean = true,
 ): ImageRequest {
     val fullUrl = normalizeImageUrl(url)
-    val isYamiboDomain = fullUrl.startsWith(YamiboRoute.Domain.build())
-
     return ImageRequest.Builder(context)
         .data(fullUrl)
         .memoryCacheKey(fullUrl)
         .diskCacheKey(fullUrl)
         .precision(Precision.INEXACT)
-        .httpHeaders(
-            NetworkHeaders.Builder().apply {
-                if (isYamiboDomain) {
-                    add("Cookie", cookie)
-                    add("Referer", referer)
-                }
-            }.build()
-        )
+        .httpHeaders(buildImageNetworkHeaders(fullUrl, cookie, referer))
         .crossfade(enableCrossfade)
         .apply {
             if (retryKey > 0) {
