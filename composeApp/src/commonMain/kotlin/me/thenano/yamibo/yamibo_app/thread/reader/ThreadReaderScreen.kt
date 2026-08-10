@@ -25,6 +25,8 @@ import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.platform.ViewConfiguration
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
@@ -554,6 +556,26 @@ private fun buildReaderBodySegments(post: Post, contentHtml: String): List<Reade
 }
 
 @Composable
+private fun ReaderLazyColumn(
+    state: LazyListState,
+    modifier: Modifier,
+    userScrollEnabled: Boolean,
+    contentPadding: PaddingValues,
+    viewConfiguration: ViewConfiguration,
+    content: LazyListScope.() -> Unit,
+) {
+    CompositionLocalProvider(LocalViewConfiguration provides viewConfiguration) {
+        LazyColumn(
+            state = state,
+            modifier = modifier,
+            userScrollEnabled = userScrollEnabled,
+            contentPadding = contentPadding,
+            content = content,
+        )
+    }
+}
+
+@Composable
 internal fun ThreadReaderScreen(
     tid: ThreadId,
     title: String,
@@ -590,6 +612,16 @@ internal fun ThreadReaderScreen(
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current
+    val readerContentViewConfiguration = LocalViewConfiguration.current
+    val postLongPressDragSlopState = remember { PostLongPressDragSlopState() }
+    val readerScrollViewConfiguration = remember(readerContentViewConfiguration) {
+        object : ViewConfiguration by readerContentViewConfiguration {
+            override val touchSlop: Float
+                get() = postLongPressDragSlopState.scrollTouchSlop(
+                    readerContentViewConfiguration.touchSlop
+                )
+        }
+    }
     val textMeasurer = rememberTextMeasurer()
     val perfDebugEnabled = isThreadReaderPerfDebugEnabled()
     val referencePlanningEnabled = isThreadReaderReferencePlanningEnabled()
@@ -3434,7 +3466,10 @@ internal fun ThreadReaderScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(colors.creamBackground)
-                        .pointerInput(isSinglePageMode) {
+                        .pointerInput(
+                            isSinglePageMode,
+                            readerContentViewConfiguration,
+                        ) {
                             if (isSinglePageMode) return@pointerInput
                             awaitEachGesture {
                                 val down = awaitFirstDown(
@@ -3447,22 +3482,45 @@ internal fun ThreadReaderScreen(
                                 val hadActiveSession = readerScrollSession.activeGeneration() != null
                                 val gestureGeneration =
                                     readerScrollSession.start(gestureStartPosition.first)
+                                postLongPressDragSlopState.onDown(down.uptimeMillis)
                                 var exceededTouchSlop = false
                                 var pointerEvent = awaitPointerEvent(PointerEventPass.Initial)
                                 while (pointerEvent.changes.any { it.pressed }) {
                                     val trackedChange = pointerEvent.changes.firstOrNull { it.id == down.id }
+                                    val distanceFromDown = trackedChange
+                                        ?.let { (it.position - down.position).getDistance() }
+                                        ?: 0f
+                                    if (trackedChange != null) {
+                                        postLongPressDragSlopState.onInitialPointerEvent(
+                                            uptimeMillis = trackedChange.uptimeMillis,
+                                            distanceFromDown = distanceFromDown,
+                                            pressed = trackedChange.pressed,
+                                            viewConfiguration = readerContentViewConfiguration,
+                                        )
+                                    }
                                     if (
                                         trackedChange != null &&
-                                        (trackedChange.position - down.position).getDistance() > viewConfiguration.touchSlop
+                                        distanceFromDown > readerContentViewConfiguration.touchSlop
                                     ) {
                                         exceededTouchSlop = true
                                     }
                                     pointerEvent = awaitPointerEvent(PointerEventPass.Initial)
                                 }
                                 val finalChange = pointerEvent.changes.firstOrNull { it.id == down.id }
+                                val finalDistanceFromDown = finalChange
+                                    ?.let { (it.position - down.position).getDistance() }
+                                    ?: 0f
+                                if (finalChange != null) {
+                                    postLongPressDragSlopState.onInitialPointerEvent(
+                                        uptimeMillis = finalChange.uptimeMillis,
+                                        distanceFromDown = finalDistanceFromDown,
+                                        pressed = finalChange.pressed,
+                                        viewConfiguration = readerContentViewConfiguration,
+                                    )
+                                }
                                 if (
                                     finalChange != null &&
-                                    (finalChange.position - down.position).getDistance() > viewConfiguration.touchSlop
+                                    finalDistanceFromDown > readerContentViewConfiguration.touchSlop
                                 ) {
                                     exceededTouchSlop = true
                                 }
@@ -3920,7 +3978,7 @@ internal fun ThreadReaderScreen(
                                 ?.takeIf { previewTargetDelta != 0 }
                                 ?.renderEntry
                             Box(modifier = Modifier.fillMaxSize()) {
-                                LazyColumn(
+                                ReaderLazyColumn(
                                     state = listState,
                                     modifier = Modifier
                                         .fillMaxSize()
@@ -3938,7 +3996,8 @@ internal fun ThreadReaderScreen(
                                     contentPadding = PaddingValues(
                                         top = topContentPadding,
                                         bottom = bottomContentPadding,
-                                    )
+                                    ),
+                                    viewConfiguration = readerScrollViewConfiguration,
                                 ) {
                                     itemsIndexed(
                                         items = displayedReaderEntries,

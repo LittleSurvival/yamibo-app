@@ -38,6 +38,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.TextUnitType
 import androidx.compose.ui.unit.dp
@@ -62,6 +63,7 @@ import me.thenano.yamibo.yamibo_app.util.normalizeImageUrl
 import me.thenano.yamibo.yamibo_app.util.rememberImageRequest
 import me.thenano.yamibo.yamibo_app.util.state
 import me.thenano.yamibo.yamibo_app.webview.IPlatformWebView
+import kotlin.math.roundToInt
 
 internal fun normalizeHtmlBlocks(rawBlocks: List<HtmlBlock>): List<HtmlBlock> {
     val maxMergedTextLength = 320
@@ -308,6 +310,67 @@ private fun TextUnit.toAbsoluteSpOrNull(baseFontSizeSp: Float): Float? {
 
 private fun String.isHtmlBlankText(): Boolean {
     return all { it.isWhitespace() || it == '\u3000' }
+}
+
+internal fun String.isVisuallyBlankTextLine(start: Int, end: Int): Boolean {
+    val safeStart = start.coerceIn(0, length)
+    val safeEnd = end.coerceIn(safeStart, length)
+    return substring(safeStart, safeEnd).all { character ->
+        character.isWhitespace() ||
+            character == '\u00A0' ||
+            character == '\u200B' ||
+            character == '\u2060' ||
+            character == '\u3000'
+    }
+}
+
+@Composable
+private fun BoxScope.BlankTextLinePointerPassThrough(
+    text: String,
+    layoutResult: TextLayoutResult?,
+) {
+    val blankLines = remember(text, layoutResult) {
+        if (layoutResult == null) {
+            emptyList()
+        } else {
+            buildList {
+                repeat(layoutResult.lineCount) { lineIndex ->
+                    val start = layoutResult.getLineStart(lineIndex)
+                    val end = layoutResult.getLineEnd(lineIndex, visibleEnd = false)
+                    if (text.isVisuallyBlankTextLine(start, end)) {
+                        add(
+                            layoutResult.getLineTop(lineIndex).roundToInt() to
+                                layoutResult.getLineBottom(lineIndex).roundToInt()
+                        )
+                    }
+                }
+            }
+        }
+    }
+    if (blankLines.isEmpty()) return
+
+    val density = LocalDensity.current
+    Box(modifier = Modifier.matchParentSize()) {
+        blankLines.forEachIndexed { index, (topPx, bottomPx) ->
+            val heightPx = (bottomPx - topPx).coerceAtLeast(1)
+            Spacer(
+                modifier = Modifier
+                    .offset { IntOffset(x = 0, y = topPx) }
+                    .fillMaxWidth()
+                    .height(with(density) { heightPx.toDp() })
+                    .pointerInput(index) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                // Being the topmost hit target keeps the underlying static Text
+                                // selection recognizer out of this blank-line pointer path. Events
+                                // remain unconsumed so the existing LazyColumn owns drag and fling.
+                                awaitPointerEvent()
+                            }
+                        }
+                    }
+            )
+        }
+    }
 }
 
 @Composable
@@ -706,31 +769,43 @@ private fun HtmlBlockRenderer(
                         .height(with(density) { lineHeightSp.sp.toDp() })
                 )
             } else if (block.rubies.isNotEmpty()) {
-                RubyTextBlock(
-                    text = adjustedAnnotatedString,
-                    rubies = block.rubies,
-                    textAlign = block.textAlign,
-                    fontFamily = fontFamily,
-                    fontSizeSp = fontSize.toFloat(),
-                    lineHeightSp = lineHeightSp,
-                    textColor = colors.htmlTextDark,
-                    modifier = textModifier,
-                    onTextLayout = { layoutResult.value = it },
-                )
-            } else {
-                Text(
-                    text = adjustedAnnotatedString,
-                    style = TextStyle(
-                        color = colors.htmlTextDark,
+                Box {
+                    RubyTextBlock(
+                        text = adjustedAnnotatedString,
+                        rubies = block.rubies,
+                        textAlign = block.textAlign,
                         fontFamily = fontFamily,
-                        fontSize = fontSize.sp,
-                        lineHeight = lineHeightSp.sp,
-                        textAlign = block.textAlign
-                    ),
-                    modifier = textModifier,
-                    inlineContent = inlineContent,
-                    onTextLayout = { layoutResult.value = it }
-                )
+                        fontSizeSp = fontSize.toFloat(),
+                        lineHeightSp = lineHeightSp,
+                        textColor = colors.htmlTextDark,
+                        modifier = textModifier,
+                        onTextLayout = { layoutResult.value = it },
+                    )
+                    BlankTextLinePointerPassThrough(
+                        text = adjustedAnnotatedString.text,
+                        layoutResult = layoutResult.value,
+                    )
+                }
+            } else {
+                Box {
+                    Text(
+                        text = adjustedAnnotatedString,
+                        style = TextStyle(
+                            color = colors.htmlTextDark,
+                            fontFamily = fontFamily,
+                            fontSize = fontSize.sp,
+                            lineHeight = lineHeightSp.sp,
+                            textAlign = block.textAlign
+                        ),
+                        modifier = textModifier,
+                        inlineContent = inlineContent,
+                        onTextLayout = { layoutResult.value = it }
+                    )
+                    BlankTextLinePointerPassThrough(
+                        text = adjustedAnnotatedString.text,
+                        layoutResult = layoutResult.value,
+                    )
+                }
             }
 
             if (!isBlankText && showLongPressMenu != null) {
