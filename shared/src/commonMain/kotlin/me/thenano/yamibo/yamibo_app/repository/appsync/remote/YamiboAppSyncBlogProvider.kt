@@ -241,7 +241,7 @@ private class YamiboClientBlogMutationApi(
         classSelection: BlogClassSelection,
         formHash: FormHash,
     ): YamiboResult<BlogMutationResponse> =
-        client.addBlog(title, message, classSelection, formHash)
+        client.fetchAddPrivtaeBlog(title, message, classSelection, formHash)
 
     override suspend fun updateBlog(
         blogId: BlogId,
@@ -250,10 +250,10 @@ private class YamiboClientBlogMutationApi(
         classSelection: BlogClassSelection,
         formHash: FormHash,
     ): YamiboResult<BlogMutationResponse> =
-        client.updateBlog(blogId, title, message, classSelection, formHash)
+        client.fetchUpdateBlog(blogId, title, message, classSelection, formHash)
 
     override suspend fun deleteBlog(
         blogId: BlogId,
         formHash: FormHash,
-    ): YamiboResult<BlogMutationResponse> = client.deleteBlog(blogId, formHash)
+    ): YamiboResult<BlogMutationResponse> = client.fetchDeleteBlog(blogId, formHash)
 }

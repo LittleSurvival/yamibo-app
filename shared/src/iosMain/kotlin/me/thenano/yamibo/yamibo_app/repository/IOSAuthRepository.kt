@@ -93,19 +93,25 @@ class IOSAuthRepository(
     }
 
     override suspend fun logOut() {
-        yamiboClient.clearCookies()
+        yamiboClient.clearCookies(clearNox = false)
         cookieStore.clear()
         userStore.clear()
         forumFavoriteStore?.clear()
 
-        /** remove cookie from webview */
-        WKWebViewCookieBridge.clearAll()
+        WKWebViewCookieBridge.clearAll(preservingNames = setOf(NOX_COOKIE_NAME))
         val storage = NSHTTPCookieStorage.sharedHTTPCookieStorage
         val cookies = storage.cookies
         if (cookies != null) {
             for (cookie in cookies) {
-                storage.deleteCookie(cookie as NSHTTPCookie)
+                val httpCookie = cookie as NSHTTPCookie
+                if (httpCookie.name != NOX_COOKIE_NAME) {
+                    storage.deleteCookie(httpCookie)
+                }
             }
         }
+    }
+
+    private companion object {
+        const val NOX_COOKIE_NAME = "nox_jst_v1"
     }
 }

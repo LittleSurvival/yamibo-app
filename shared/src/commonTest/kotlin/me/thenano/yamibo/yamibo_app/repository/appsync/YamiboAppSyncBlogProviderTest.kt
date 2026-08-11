@@ -1,7 +1,6 @@
 package me.thenano.yamibo.yamibo_app.repository.appsync
 
 import io.github.littlesurvival.YamiboClient
-import io.github.littlesurvival.core.WafProvider
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.model.BlogClassSelection
 import io.github.littlesurvival.dto.model.BlogMutationResponse
@@ -97,7 +96,6 @@ class YamiboAppSyncBlogProviderTest {
     fun wafChallengeIsNotMisreportedAsLogout() = runBlocking {
         val mutationApi = FakeYamiboBlogMutationApi(
             YamiboResult.WafChallenge(
-                provider = WafProvider.BAIDU_NOX,
                 statusCode = 405,
                 url = "https://bbs.yamibo.com/home.php",
             ),

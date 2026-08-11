@@ -43,18 +43,15 @@ object WKWebViewCookieBridge {
         }
     }
 
-    /**
-     * Deletes every cookie from [store] and returns only after WebKit confirms every deletion.
-     *
-     * Logout must not return while authentication cookies are still present in WebKit. Otherwise,
-     * a WebView opened immediately afterward can reuse the old session before the asynchronous
-     * deletion callbacks finish.
-     */
-    suspend fun clearAll(store: WKHTTPCookieStore = defaultStore) {
+    /** Deletes cookies except [preservingNames] after WebKit confirms every deletion. */
+    suspend fun clearAll(
+        store: WKHTTPCookieStore = defaultStore,
+        preservingNames: Set<String> = emptySet(),
+    ) {
         val cookies = suspendCancellableCoroutine { continuation ->
             readAll(store) { continuation.resume(it) }
         }
-        cookies.forEach { cookie ->
+        cookies.filterNot { it.name in preservingNames }.forEach { cookie ->
             suspendCancellableCoroutine { continuation ->
                 store.deleteCookie(cookie) {
                     continuation.resume(Unit)

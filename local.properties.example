@@ -42,3 +42,9 @@ yamibo.releaseRun.keyPassword=
 # yamibo.debug.useReleaseSignature=true
 
 yamibo.debug.useReleaseSignature=true
+
+# Optional local HTTP 405 WAF simulator environment.
+# Defaults to false when omitted or invalid. Set true only while running
+# :composeApp:runDebugWafEnvironment on an Android emulator.
+
+debugWafEnvironment=false
