@@ -27,6 +27,8 @@ import me.thenano.yamibo.yamibo_app.core.cache.DiskCacheFactory
 import me.thenano.yamibo.yamibo_app.db.DatabaseFactory
 import me.thenano.yamibo.yamibo_app.download.AndroidDownloadBackgroundController
 import me.thenano.yamibo.yamibo_app.download.AndroidDownloadRuntime
+import me.thenano.yamibo.yamibo_app.event.AppEventBus
+import me.thenano.yamibo.yamibo_app.event.events.HomePageLoadedEvent
 import me.thenano.yamibo.yamibo_app.favorite.sync.AndroidAppForegroundTracker
 import me.thenano.yamibo.yamibo_app.favorite.sync.AndroidBackgroundTaskRepository
 import me.thenano.yamibo.yamibo_app.favorite.sync.FavoriteSyncRunner
@@ -407,15 +409,23 @@ class MainActivity : ComponentActivity() {
                     signReminderScheduler.schedule(signReminderFrequency)
                 }
                 LaunchedEffect(Unit) {
-                    delay(1_200.milliseconds)
-                    if (
-                        android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
-                        ContextCompat.checkSelfPermission(
-                            context,
-                            Manifest.permission.POST_NOTIFICATIONS,
-                        ) != PackageManager.PERMISSION_GRANTED
-                    ) {
-                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    // Deferred out of the cold-start path: requesting POST_NOTIFICATIONS during
+                    // startup pauses the activity and fails the first WAF recovery flight with
+                    // FOREGROUND_REQUIRED. Request it once the home page has loaded instead.
+                    var notificationPermissionRequested = false
+                    AppEventBus.events.collect { event ->
+                        if (
+                            !notificationPermissionRequested &&
+                            event == HomePageLoadedEvent &&
+                            android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
+                            ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.POST_NOTIFICATIONS,
+                            ) != PackageManager.PERMISSION_GRANTED
+                        ) {
+                            notificationPermissionRequested = true
+                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        }
                     }
                 }
 
