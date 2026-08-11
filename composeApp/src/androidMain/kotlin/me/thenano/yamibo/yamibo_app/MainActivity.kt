@@ -18,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import io.github.littlesurvival.YamiboClient
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -412,18 +413,16 @@ class MainActivity : ComponentActivity() {
                     // Deferred out of the cold-start path: requesting POST_NOTIFICATIONS during
                     // startup pauses the activity and fails the first WAF recovery flight with
                     // FOREGROUND_REQUIRED. Request it once the home page has loaded instead.
-                    var notificationPermissionRequested = false
                     AppEventBus.events.collect { event ->
                         if (
-                            !notificationPermissionRequested &&
                             event == HomePageLoadedEvent &&
                             android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
                             ContextCompat.checkSelfPermission(
                                 context,
                                 Manifest.permission.POST_NOTIFICATIONS,
-                            ) != PackageManager.PERMISSION_GRANTED
+                            ) != PackageManager.PERMISSION_GRANTED &&
+                            notificationPermissionRequested.compareAndSet(false, true)
                         ) {
-                            notificationPermissionRequested = true
                             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                         }
                     }
@@ -437,6 +436,8 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
+        private val notificationPermissionRequested = AtomicBoolean(false)
+
         const val EXTRA_FROM_NOTIFICATION_SIGN_IN = "extra_from_notification_sign_in"
     }
 }
