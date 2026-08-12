@@ -176,12 +176,12 @@ private data class ThreadReaderSinglePageSession(
 )
 
 private data class ReaderPersistenceSnapshot(
-    val history: ReadHistoryRepository.ThreadReadingHistory?,
+    val history: ThreadReadingHistory?,
     val progressUpdates: List<ChapterStateRepository.ProgressUpdate>,
 )
 
 private data class ReaderPersistenceSemanticKey(
-    val history: ReadHistoryRepository.ThreadReadingHistory?,
+    val history: ThreadReadingHistory?,
     val progressUpdates: List<ChapterStateRepository.ProgressUpdate>,
 )
 
