@@ -841,10 +841,8 @@ internal fun ThreadReaderScreen(
         )
     }
 
-    suspend fun refreshFavoriteState() {
-        val target = favoriteTarget()
-        favoriteRepository.syncFavoriteMetadata(target)
-        val selection = favoriteRepository.getFavoriteLocationSelection(target)
+    suspend fun refreshFavoriteSelection() {
+        val selection = favoriteRepository.getFavoriteLocationSelection(favoriteTarget())
         isFavorited = selection.item != null
     }
 
@@ -951,9 +949,15 @@ internal fun ThreadReaderScreen(
         threadInfo?.forum?.name,
         title,
         favoriteRefreshToken,
-        favoriteRepositoryRevision
     ) {
-        refreshFavoriteState()
+        favoriteRepository.syncFavoriteMetadata(favoriteTarget())
+        refreshFavoriteSelection()
+    }
+
+    // Repository revisions can be emitted by syncFavoriteMetadata itself. Keep revision-driven
+    // refreshes read-only so a metadata write cannot continuously restart its own effect.
+    LaunchedEffect(tid, threadType, authorId, favoriteRepositoryRevision) {
+        refreshFavoriteSelection()
     }
 
     fun getFormHash(): FormHash? {
