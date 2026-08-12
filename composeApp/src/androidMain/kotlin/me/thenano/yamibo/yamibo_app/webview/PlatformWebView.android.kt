@@ -33,7 +33,6 @@ actual fun PlatformWebViewContent(
     shouldOverrideUrlLoading: (String) -> Boolean,
 ) {
     val authRepo = LocalAuthRepository.current
-    val cookies = authRepo.cookieStore.load() ?: ""
 
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
 
@@ -152,14 +151,11 @@ actual fun PlatformWebViewContent(
                 cookieManager.setAcceptCookie(true)
                 cookieManager.setAcceptThirdPartyCookies(this, true)
 
-                if (syncAuthCookies && cookies.isNotEmpty()) {
-                    cookies.split(";").forEach {
-                        cookieManager.setCookie(url, it.trim())
-                    }
-                    cookieManager.flush()
+                if (syncAuthCookies) {
+                    authRepo.restoreCookiesToWebView { loadUrl(url) }
+                } else {
+                    loadUrl(url)
                 }
-
-                loadUrl(url)
             }
         },
         update = {

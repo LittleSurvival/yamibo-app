@@ -143,7 +143,13 @@ actual fun PlatformWebViewContent(
             WKWebView().apply {
                 webViewInstance = this
                 this.navigationDelegate = delegate
-                loadRequest(NSURLRequest(NSURL(string = url)))
+                if (syncAuthCookies) {
+                    authRepo.restoreCookiesToWebView {
+                        loadRequest(NSURLRequest(NSURL(string = url)))
+                    }
+                } else {
+                    loadRequest(NSURLRequest(NSURL(string = url)))
+                }
             }
         },
         update = {

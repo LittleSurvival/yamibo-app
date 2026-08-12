@@ -22,7 +22,7 @@ class AndroidAuthRepository(
     private val forumFavoriteStore: ForumFavoriteStore? = null,
 ) : AuthRepository {
     override suspend fun isLoggedIn(): Boolean {
-        return parseCookieStringToMap(cookieStore.load()).containsKey(authCookieKey)
+        return AuthRepository.hasCompleteAuthenticationCookies(cookieStore.load())
     }
 
     override suspend fun fetchStatus(): YamiboResult<Boolean> {
@@ -71,10 +71,42 @@ class AndroidAuthRepository(
         onTimeOut()
     }
 
+    override fun restoreCookiesToWebView(onComplete: () -> Unit) {
+        val cookieHeader = cookieStore.load()
+        val cookies = parseCookieStringToMap(cookieHeader)
+        if (cookies.isEmpty()) {
+            onComplete()
+            return
+        }
+
+        val persistentNames = AuthRepository.completeAuthenticationCookies(cookieHeader).keys
+        val manager = CookieManager.getInstance()
+        val url = YamiboRoute.Domain.build()
+        var remaining = cookies.size
+        cookies.forEach { (name, value) ->
+            manager.setCookie(
+                url,
+                cookieDirective(name, value, persist = name in persistentNames),
+            ) {
+                remaining -= 1
+                if (remaining == 0) {
+                    manager.flush()
+                    onComplete()
+                }
+            }
+        }
+    }
+
     override fun syncCookieFromWebView() {
-        val cookie = CookieManager.getInstance().getCookie(YamiboRoute.Domain.build()) ?: return
+        val manager = CookieManager.getInstance()
+        val url = YamiboRoute.Domain.build()
+        val cookie = manager.getCookie(url) ?: return
         cookieStore.save(cookie)
         yamiboClient.setCookie(cookie, importNox = true)
+        AuthRepository.completeAuthenticationCookies(cookie).forEach { (name, value) ->
+            manager.setCookie(url, cookieDirective(name, value, persist = true))
+        }
+        manager.flush()
     }
 
     override fun currentUser(): ProfilePage? {
@@ -106,7 +138,14 @@ class AndroidAuthRepository(
         }
     }
 
-    private companion object {
-        const val NOX_COOKIE_NAME = "nox_jst_v1"
+    companion object {
+        private const val NOX_COOKIE_NAME = "nox_jst_v1"
+
+        internal fun cookieDirective(name: String, value: String, persist: Boolean): String =
+            if (persist) {
+                "$name=$value; Max-Age=${AuthRepository.PERSISTENT_COOKIE_MAX_AGE_SECONDS}; Path=/; Secure; HttpOnly"
+            } else {
+                "$name=$value; Path=/; Secure"
+            }
     }
 }

@@ -11,9 +11,17 @@ import me.thenano.yamibo.yamibo_app.store.auth.CookieStore
 import me.thenano.yamibo.yamibo_app.store.auth.UserStore
 import me.thenano.yamibo.yamibo_app.store.forum.ForumFavoriteStore
 import me.thenano.yamibo.yamibo_app.util.auth.parseCookieStringToMap
+import platform.Foundation.NSDate
 import platform.Foundation.NSHTTPCookie
+import platform.Foundation.NSHTTPCookieDomain
+import platform.Foundation.NSHTTPCookieExpires
+import platform.Foundation.NSHTTPCookieName
+import platform.Foundation.NSHTTPCookiePath
+import platform.Foundation.NSHTTPCookieSecure
 import platform.Foundation.NSHTTPCookieStorage
+import platform.Foundation.NSHTTPCookieValue
 import platform.Foundation.NSURL
+import platform.WebKit.WKWebsiteDataStore
 import kotlin.time.Duration.Companion.milliseconds
 
 class IOSAuthRepository(
@@ -23,7 +31,7 @@ class IOSAuthRepository(
     private val forumFavoriteStore: ForumFavoriteStore? = null,
 ) : AuthRepository {
     override suspend fun isLoggedIn(): Boolean {
-        return parseCookieStringToMap(cookieStore.load()).containsKey(authCookieKey)
+        return AuthRepository.hasCompleteAuthenticationCookies(cookieStore.load())
     }
 
     override suspend fun fetchStatus(): YamiboResult<Boolean> {
@@ -72,6 +80,25 @@ class IOSAuthRepository(
         onTimeOut()
     }
 
+    override fun restoreCookiesToWebView(onComplete: () -> Unit) {
+        val cookies = persistentAuthenticationCookies(cookieStore.load())
+        if (cookies.isEmpty()) {
+            onComplete()
+            return
+        }
+
+        val storage = NSHTTPCookieStorage.sharedHTTPCookieStorage
+        val webViewStore = WKWebsiteDataStore.defaultDataStore().httpCookieStore
+        var remaining = cookies.size
+        cookies.forEach { cookie ->
+            storage.setCookie(cookie)
+            webViewStore.setCookie(cookie) {
+                remaining -= 1
+                if (remaining == 0) onComplete()
+            }
+        }
+    }
+
     override fun syncCookieFromWebView() {
         val url = NSURL.URLWithString(YamiboRoute.Domain.build()) ?: return
         val cookies = NSHTTPCookieStorage.sharedHTTPCookieStorage.cookiesForURL(url)
@@ -85,6 +112,7 @@ class IOSAuthRepository(
             val cookieHeader = cookieStrings.joinToString("; ")
             cookieStore.save(cookieHeader)
             yamiboClient.setCookie(cookieHeader, importNox = true)
+            restoreCookiesToWebView()
         }
     }
 
@@ -113,5 +141,26 @@ class IOSAuthRepository(
 
     private companion object {
         const val NOX_COOKIE_NAME = "nox_jst_v1"
+    }
+
+    private fun persistentAuthenticationCookies(cookieHeader: String?): List<NSHTTPCookie> {
+        val host = NSURL.URLWithString(YamiboRoute.Domain.build())?.host ?: return emptyList()
+        val expires = NSDate(
+            timeIntervalSinceReferenceDate = NSDate().timeIntervalSinceReferenceDate +
+                AuthRepository.PERSISTENT_COOKIE_MAX_AGE_SECONDS.toDouble(),
+        )
+        return AuthRepository.completeAuthenticationCookies(cookieHeader).mapNotNull { (name, value) ->
+            NSHTTPCookie.cookieWithProperties(
+                mapOf(
+                    NSHTTPCookieName to name,
+                    NSHTTPCookieValue to value,
+                    NSHTTPCookieDomain to host,
+                    NSHTTPCookiePath to "/",
+                    NSHTTPCookieSecure to "TRUE",
+                    NSHTTPCookieExpires to expires,
+                    "HttpOnly" to "TRUE",
+                ),
+            )
+        }
     }
 }
