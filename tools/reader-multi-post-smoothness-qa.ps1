@@ -4,6 +4,12 @@ param(
     [string]$Adb = "",
     [int]$Run = 1,
     [int]$Cycles = 2,
+    [string]$OutputGroup = "",
+    [int]$GestureX = 540,
+    [int]$GestureTopY = 650,
+    [int]$GestureBottomY = 1850,
+    [int]$OverlayTapY = 400,
+    [int]$RetryTapY = 1200,
     [switch]$Instrumentation,
     [switch]$SkipReset,
     [switch]$WarmupOnly
@@ -23,6 +29,9 @@ if (!(Get-Command $adb -ErrorAction SilentlyContinue) -and !(Test-Path $adb)) {
 
 $outputRoot = Join-Path $PSScriptRoot "..\build\qa\reader-multi-post-smoothness"
 $outputRoot = [System.IO.Path]::GetFullPath($outputRoot)
+if ($OutputGroup) {
+    $outputRoot = Join-Path $outputRoot $OutputGroup
+}
 New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
 
 function Invoke-Adb {
@@ -72,7 +81,7 @@ function Reset-ReaderAnchor {
                 Start-Sleep -Milliseconds 300
             }
             # Use the upper content gutter; the center of a short post can be a rating action.
-            Invoke-Adb shell input tap 540 400 | Out-Null
+            Invoke-Adb shell input tap $GestureX $OverlayTapY | Out-Null
             Start-Sleep -Milliseconds 500
             $tree = Get-UiTree "run-$Run-reset-controls"
             $menu = Find-UiNode $tree "☰"
@@ -86,7 +95,7 @@ function Reset-ReaderAnchor {
 
     if (!$catalogFloor) {
         1..4 | ForEach-Object {
-            Invoke-Adb shell input swipe 360 650 360 1900 250 | Out-Null
+            Invoke-Adb shell input swipe $GestureX $GestureTopY $GestureX $GestureBottomY 250 | Out-Null
             Start-Sleep -Milliseconds 150
         }
         $tree = Get-UiTree "run-$Run-reset-catalog-top"
@@ -98,7 +107,7 @@ function Reset-ReaderAnchor {
     Start-Sleep -Seconds 1
     $tree = Get-UiTree "run-$Run-reset-result"
     if (Find-UiNode $tree "重新整理") {
-        Invoke-Adb shell input tap 540 1200 | Out-Null
+        Invoke-Adb shell input tap $GestureX $RetryTapY | Out-Null
         Start-Sleep -Milliseconds 400
         $tree = Get-UiTree "run-$Run-reset-hidden"
     }
@@ -111,11 +120,11 @@ function Invoke-MultiPostScroll {
     param([int]$CycleCount)
     1..$CycleCount | ForEach-Object {
         1..4 | ForEach-Object {
-            Invoke-Adb shell input swipe 540 1850 540 650 350 | Out-Null
+            Invoke-Adb shell input swipe $GestureX $GestureBottomY $GestureX $GestureTopY 350 | Out-Null
             Start-Sleep -Milliseconds 250
         }
         1..4 | ForEach-Object {
-            Invoke-Adb shell input swipe 540 650 540 1850 350 | Out-Null
+            Invoke-Adb shell input swipe $GestureX $GestureTopY $GestureX $GestureBottomY 350 | Out-Null
             Start-Sleep -Milliseconds 250
         }
     }
