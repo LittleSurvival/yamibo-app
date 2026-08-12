@@ -1,0 +1,148 @@
+name: Manual Stop Update Manifests
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: mirror-publish-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  MIRROR_OWNER: LittleSurvival
+  MIRROR_REPO: ymb-apk-release
+  GITEA_SSH_HOST: ${{ vars.GITEA_SSH_HOST }}
+  GITEA_SSH_PORT: ${{ vars.GITEA_SSH_PORT }}
+
+jobs:
+  stop-update:
+    name: Stop updates on ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: github
+            branch: update-release
+          - target: gitee
+            branch: main
+          - target: gitea
+            branch: main
+
+    steps:
+      - name: Start SSH agent
+        if: matrix.target != 'github'
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: |
+            ${{ secrets.GITEE_SSH_PRIVATE_KEY }}
+            ${{ secrets.GITEA_SSH_PRIVATE_KEY }}
+
+      - name: Trust mirror SSH host
+        if: matrix.target != 'github'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          if [ "${{ matrix.target }}" = "gitee" ]; then
+            ssh-keyscan -T 60 gitee.com >> ~/.ssh/known_hosts
+          else
+            gitea_host="${GITEA_SSH_HOST:-gitea.com}"
+            gitea_port="${GITEA_SSH_PORT:-22}"
+            ssh-keyscan -T 60 -p "$gitea_port" "$gitea_host" >> ~/.ssh/known_hosts
+          fi
+
+      - name: Set published manifests to not ready
+        timeout-minutes: 10
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET: ${{ matrix.target }}
+          TARGET_BRANCH: ${{ matrix.branch }}
+          GIT_SSH_COMMAND: >-
+            ssh -o BatchMode=yes
+            -o ConnectTimeout=60
+            -o ServerAliveInterval=15
+            -o ServerAliveCountMax=2
+        run: |
+          set -euo pipefail
+
+          retry_git() {
+            local label="$1"
+            shift
+            local attempt
+            for attempt in 1 2 3; do
+              if timeout --foreground 60s "$@"; then
+                return 0
+              fi
+              if [ "$attempt" -lt 3 ]; then
+                echo "$label failed (attempt $attempt/3); retrying in $((attempt * 5))s..." >&2
+                sleep "$((attempt * 5))"
+              fi
+            done
+            echo "$label failed after 3 attempts" >&2
+            return 1
+          }
+
+          gitea_remote() {
+            local host="${GITEA_SSH_HOST:-gitea.com}"
+            local port="${GITEA_SSH_PORT:-22}"
+            if [ "$port" = "22" ]; then
+              printf 'git@%s:%s/%s.git' "$host" "$MIRROR_OWNER" "$MIRROR_REPO"
+            else
+              printf 'ssh://git@%s:%s/%s/%s.git' "$host" "$port" "$MIRROR_OWNER" "$MIRROR_REPO"
+            fi
+          }
+
+          case "$TARGET" in
+            github)
+              remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+              ;;
+            gitee)
+              remote="git@gitee.com:${MIRROR_OWNER}/${MIRROR_REPO}.git"
+              ;;
+            gitea)
+              remote="$(gitea_remote)"
+              ;;
+            *)
+              echo "Unsupported target: $TARGET" >&2
+              exit 1
+              ;;
+          esac
+
+          dir="$RUNNER_TEMP/stop-update-$TARGET"
+          rm -rf "$dir"
+          retry_git "$TARGET clone" \
+            git clone --depth 1 --branch "$TARGET_BRANCH" "$remote" "$dir"
+
+          python3 - "$dir" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          root = Path(sys.argv[1])
+          for relative_path in ("update/manifest.json", "update/stable.json"):
+              path = root / relative_path
+              if not path.is_file():
+                  raise SystemExit(f"Required published manifest is missing: {relative_path}")
+              manifest = json.loads(path.read_text(encoding="utf-8"))
+              manifest["isReady"] = False
+              path.write_text(
+                  json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+                  encoding="utf-8",
+              )
+          PY
+
+          if git -C "$dir" diff --quiet -- update/manifest.json update/stable.json; then
+            echo "$TARGET manifests are already marked isReady=false"
+            exit 0
+          fi
+
+          git -C "$dir" config user.name "github-actions[bot]"
+          git -C "$dir" config user.email "github-actions[bot]@users.noreply.github.com"
+          git -C "$dir" add update/manifest.json update/stable.json
+          git -C "$dir" commit -m "Stop update manifests"
+          retry_git "$TARGET push" \
+            git -C "$dir" push origin "HEAD:$TARGET_BRANCH"
