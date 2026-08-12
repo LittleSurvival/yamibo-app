@@ -10,7 +10,6 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
 import me.thenano.yamibo.yamibo_app.repository.settings.FavoriteUpdateInterval
-import kotlin.time.Duration.Companion.hours
 import kotlin.time.toJavaDuration
 
 class AndroidFavoriteUpdateScheduler(
@@ -34,13 +33,12 @@ class AndroidFavoriteUpdateScheduler(
     }
 
     override suspend fun schedulePeriodicFavoriteUpdate(interval: FavoriteUpdateInterval) {
-        val intervalHours = interval.hours
-        if (interval.smart || intervalHours == null) {
+        val duration = interval.fixedInterval?.duration
+        if (interval.smart || duration == null) {
             workManager.cancelUniqueWork(UNIQUE_PERIODIC_WORK)
             return
         }
-        val repeat = intervalHours.hours
-        val request = PeriodicWorkRequestBuilder<FavoriteUpdateWorker>(repeat.toJavaDuration())
+        val request = PeriodicWorkRequestBuilder<FavoriteUpdateWorker>(duration.toJavaDuration())
             .setConstraints(defaultConstraints())
             .addTag(WORK_TAG)
             .build()

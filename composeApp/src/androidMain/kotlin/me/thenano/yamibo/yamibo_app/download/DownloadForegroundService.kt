@@ -17,7 +17,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
-import me.thenano.yamibo.yamibo_app.R
+import me.thenano.yamibo.yamibo_app.notification.AndroidNotificationMetadata
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadQueueEntry
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadStatus
 import me.thenano.yamibo.yamibo_app.repository.download.ThreadPageDownloadKey
@@ -81,7 +81,7 @@ class DownloadForegroundService : Service() {
 
     private fun buildNotification(completed: Int, total: Int, text: String): Notification =
         NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(AndroidNotificationMetadata.SMALL_ICON_RES_ID)
             .setContentTitle("Yamibo 下載")
             .setContentText(text)
             .setOnlyAlertOnce(true)

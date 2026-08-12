@@ -12,7 +12,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.MainActivity
-import me.thenano.yamibo.yamibo_app.R
+import me.thenano.yamibo.yamibo_app.notification.AndroidNotificationMetadata
 
 internal class AndroidBackupNotificationRepository(context: Context) {
     private val appContext = context.applicationContext
@@ -24,7 +24,7 @@ internal class AndroidBackupNotificationRepository(context: Context) {
 
     fun buildProgressNotification(text: String): Notification =
         NotificationCompat.Builder(appContext, CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(AndroidNotificationMetadata.SMALL_ICON_RES_ID)
             .setContentTitle("設定與收藏備份")
             .setContentText(text)
             .setOnlyAlertOnce(true)
@@ -40,7 +40,7 @@ internal class AndroidBackupNotificationRepository(context: Context) {
             notificationManager.notify(
                 NOTIFICATION_ID,
                 NotificationCompat.Builder(appContext, CHANNEL_ID)
-                    .setSmallIcon(R.mipmap.ic_launcher)
+                    .setSmallIcon(AndroidNotificationMetadata.SMALL_ICON_RES_ID)
                     .setContentTitle("設定與收藏備份完成")
                     .setContentText(text)
                     .setAutoCancel(true)
@@ -56,7 +56,7 @@ internal class AndroidBackupNotificationRepository(context: Context) {
             notificationManager.notify(
                 NOTIFICATION_ID,
                 NotificationCompat.Builder(appContext, CHANNEL_ID)
-                    .setSmallIcon(R.mipmap.ic_launcher)
+                    .setSmallIcon(AndroidNotificationMetadata.SMALL_ICON_RES_ID)
                     .setContentTitle("設定與收藏備份失敗")
                     .setContentText(text)
                     .setAutoCancel(true)

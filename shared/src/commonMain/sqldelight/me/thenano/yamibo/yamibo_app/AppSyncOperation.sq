@@ -1,0 +1,507 @@
+getInstallation:
+SELECT * FROM AppSyncInstallation
+WHERE singletonId = 1;
+
+insertInstallation:
+INSERT INTO AppSyncInstallation(
+    singletonId,
+    databaseGeneration,
+    accountBinding,
+    deviceId,
+    deviceEpoch,
+    writerNonce,
+    nextSequence,
+    state,
+    lastVerifiedHeartbeatAt,
+    journalBlogId,
+    lastFullDiscoveryAt,
+    automaticEnabled,
+    syncOnAppStart,
+    syncOnForegroundExit,
+    periodicIntervalKey,
+    requestedTriggerGeneration,
+    accountedTriggerGeneration
+) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+updateInstallationIdentity:
+UPDATE AppSyncInstallation
+SET accountBinding = ?,
+    deviceId = ?,
+    deviceEpoch = ?,
+    writerNonce = ?,
+    nextSequence = ?,
+    state = ?,
+    journalBlogId = NULL
+WHERE singletonId = 1;
+
+updateInstallationState:
+UPDATE AppSyncInstallation
+SET state = ?
+WHERE singletonId = 1;
+
+updateInstallationHeartbeat:
+UPDATE AppSyncInstallation
+SET lastVerifiedHeartbeatAt = ?,
+    journalBlogId = ?,
+    state = ?
+WHERE singletonId = 1;
+
+updateDiscoveryTime:
+UPDATE AppSyncInstallation
+SET lastFullDiscoveryAt = ?
+WHERE singletonId = 1;
+
+setAutomaticEnabled:
+UPDATE AppSyncInstallation
+SET automaticEnabled = ?
+WHERE singletonId = 1;
+
+setScheduleSettings:
+UPDATE AppSyncInstallation
+SET syncOnAppStart = ?,
+    syncOnForegroundExit = ?,
+    periodicIntervalKey = ?
+WHERE singletonId = 1;
+
+advanceRequestedTriggerGeneration:
+UPDATE AppSyncInstallation
+SET requestedTriggerGeneration = requestedTriggerGeneration + 1
+WHERE singletonId = 1;
+
+setAccountedTriggerGeneration:
+UPDATE AppSyncInstallation
+SET accountedTriggerGeneration = ?
+WHERE singletonId = 1;
+
+prepareInstallationForCloudReset:
+UPDATE AppSyncInstallation
+SET accountBinding = NULL,
+    state = 'UNBOUND',
+    lastVerifiedHeartbeatAt = NULL,
+    journalBlogId = NULL,
+    lastFullDiscoveryAt = NULL
+WHERE singletonId = 1;
+
+advanceNextSequence:
+UPDATE AppSyncInstallation
+SET nextSequence = nextSequence + 1
+WHERE singletonId = 1;
+
+insertOutboxOperation:
+INSERT INTO AppSyncOutbox(
+    operationId,
+    deviceId,
+    deviceEpoch,
+    sequence,
+    accountBinding,
+    domainId,
+    entityId,
+    entityGeneration,
+    kind,
+    fieldsJson,
+    causalContextJson,
+    createdAtEpochMillis,
+    origin,
+    bulkDeleteAuthorizationId,
+    schemaVersion,
+    lifecycle,
+    acknowledgedAtEpochMillis
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+getOutboxOperation:
+SELECT * FROM AppSyncOutbox
+WHERE operationId = ?;
+
+getPendingOperations:
+SELECT * FROM AppSyncOutbox
+WHERE lifecycle IN ('PENDING_LOCAL', 'PUBLISHED_UNVERIFIED')
+  AND deviceId = (SELECT deviceId FROM AppSyncInstallation WHERE singletonId = 1)
+  AND deviceEpoch = (SELECT deviceEpoch FROM AppSyncInstallation WHERE singletonId = 1)
+ORDER BY sequence ASC;
+
+getAllOutboxOperations:
+SELECT * FROM AppSyncOutbox
+ORDER BY sequence ASC;
+
+countPendingOperations:
+SELECT COUNT(*) FROM AppSyncOutbox
+WHERE lifecycle IN ('PENDING_LOCAL', 'PUBLISHED_UNVERIFIED')
+  AND deviceId = (SELECT deviceId FROM AppSyncInstallation WHERE singletonId = 1)
+  AND deviceEpoch = (SELECT deviceEpoch FROM AppSyncInstallation WHERE singletonId = 1);
+
+markOperationsPublishedUnverified:
+UPDATE AppSyncOutbox
+SET lifecycle = 'PUBLISHED_UNVERIFIED'
+WHERE operationId IN ? AND lifecycle = 'PENDING_LOCAL';
+
+markOperationsAcknowledged:
+UPDATE AppSyncOutbox
+SET lifecycle = 'ACKNOWLEDGED',
+    acknowledgedAtEpochMillis = ?
+WHERE operationId IN ?;
+
+markOperationsCompacted:
+UPDATE AppSyncOutbox
+SET lifecycle = 'COMPACTED'
+WHERE operationId IN ? AND lifecycle = 'ACKNOWLEDGED';
+
+markOperationsDiscardedByForcePull:
+UPDATE AppSyncOutbox
+SET lifecycle = 'DISCARDED_BY_FORCE_PULL'
+WHERE operationId IN ?
+  AND lifecycle IN ('PENDING_LOCAL', 'PUBLISHED_UNVERIFIED');
+
+markReplicaOperationsDiscardedByRebootstrap:
+UPDATE AppSyncOutbox
+SET lifecycle = 'DISCARDED_BY_REBOOTSTRAP'
+WHERE deviceId = ?
+  AND deviceEpoch = ?
+  AND lifecycle IN ('PENDING_LOCAL', 'PUBLISHED_UNVERIFIED');
+
+insertAppliedOperation:
+INSERT OR IGNORE INTO AppSyncAppliedOperation(
+    operationId,
+    deviceId,
+    deviceEpoch,
+    sequence,
+    appliedAtEpochMillis
+) VALUES (?, ?, ?, ?, ?);
+
+isOperationApplied:
+SELECT COUNT(*) FROM AppSyncAppliedOperation
+WHERE operationId = ?;
+
+upsertCausalWatermark:
+INSERT OR REPLACE INTO AppSyncCausalWatermark(replicaKey, sequence)
+VALUES (?, ?);
+
+getCausalWatermark:
+SELECT * FROM AppSyncCausalWatermark
+WHERE replicaKey = ?;
+
+getCausalWatermarks:
+SELECT * FROM AppSyncCausalWatermark
+ORDER BY replicaKey ASC;
+
+clearCausalWatermarks:
+DELETE FROM AppSyncCausalWatermark;
+
+insertConflict:
+INSERT OR IGNORE INTO AppSyncConflictHistory(
+    domainId,
+    entityId,
+    entityGeneration,
+    fieldName,
+    winnerOperationId,
+    loserOperationId,
+    policy,
+    reason,
+    recordedAtEpochMillis
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+getConflicts:
+SELECT * FROM AppSyncConflictHistory
+ORDER BY recordedAtEpochMillis DESC, id DESC;
+
+upsertQuarantine:
+INSERT OR REPLACE INTO AppSyncQuarantine(
+    operationId,
+    encodedOperation,
+    reasonCode,
+    reasonDetail,
+    quarantinedAtEpochMillis,
+    retryAfterSchemaVersion
+) VALUES (?, ?, ?, ?, ?, ?);
+
+getQuarantinedOperations:
+SELECT * FROM AppSyncQuarantine
+ORDER BY quarantinedAtEpochMillis ASC;
+
+deleteQuarantine:
+DELETE FROM AppSyncQuarantine
+WHERE operationId = ?;
+
+acquireRunLease:
+INSERT OR REPLACE INTO AppSyncRunLease(
+    singletonId,
+    ownerId,
+    acquiredAtEpochMillis,
+    expiresAtEpochMillis
+) VALUES (1, ?, ?, ?);
+
+getRunLease:
+SELECT * FROM AppSyncRunLease
+WHERE singletonId = 1;
+
+releaseRunLease:
+DELETE FROM AppSyncRunLease
+WHERE singletonId = 1 AND ownerId = ?;
+
+upsertCheckpoint:
+INSERT OR REPLACE INTO AppSyncCheckpoint(
+    checkpointId,
+    blogId,
+    causalContextJson,
+    payloadFingerprint,
+    state,
+    createdAtEpochMillis,
+    verifiedAtEpochMillis
+) VALUES (?, ?, ?, ?, ?, ?, ?);
+
+getCheckpoint:
+SELECT * FROM AppSyncCheckpoint
+WHERE checkpointId = ?;
+
+getVerifiedCheckpoints:
+SELECT * FROM AppSyncCheckpoint
+WHERE state = 'VERIFIED'
+ORDER BY verifiedAtEpochMillis DESC, checkpointId DESC;
+
+saveBootstrapRollbackSnapshot:
+INSERT OR REPLACE INTO AppSyncBootstrapRollback(
+    singletonId,
+    accountBinding,
+    databaseGeneration,
+    encodedSnapshot,
+    createdAtEpochMillis
+) VALUES (1, ?, ?, ?, ?);
+
+getBootstrapRollbackSnapshot:
+SELECT * FROM AppSyncBootstrapRollback
+WHERE singletonId = 1;
+
+deleteCheckpoint:
+DELETE FROM AppSyncCheckpoint
+WHERE checkpointId = ?;
+
+upsertCheckpointAcknowledgement:
+INSERT OR REPLACE INTO AppSyncCheckpointAcknowledgement(
+    checkpointId,
+    replicaKey,
+    acknowledgedVectorJson,
+    acknowledgedAtEpochMillis
+) VALUES (?, ?, ?, ?);
+
+getCheckpointAcknowledgements:
+SELECT * FROM AppSyncCheckpointAcknowledgement
+WHERE checkpointId = ?
+ORDER BY replicaKey ASC;
+
+insertBulkDeleteAuthorization:
+INSERT INTO AppSyncBulkDeleteAuthorization(
+    authorizationId,
+    domainId,
+    scopeKey,
+    operationCount,
+    expiresAtEpochMillis,
+    consumedAtEpochMillis
+) VALUES (?, ?, ?, ?, ?, NULL);
+
+getBulkDeleteAuthorization:
+SELECT * FROM AppSyncBulkDeleteAuthorization
+WHERE authorizationId = ?;
+
+consumeBulkDeleteAuthorization:
+UPDATE AppSyncBulkDeleteAuthorization
+SET consumedAtEpochMillis = ?
+WHERE authorizationId = ?
+  AND consumedAtEpochMillis IS NULL
+  AND expiresAtEpochMillis >= ?;
+
+upsertReliabilityRun:
+INSERT OR REPLACE INTO AppSyncReliabilityRun(
+    runId,
+    trigger,
+    phase,
+    outcome,
+    eligible,
+    exclusionReason,
+    retryCount,
+    pendingCount,
+    quarantineCount,
+    startedAtEpochMillis,
+    completedAtEpochMillis,
+    nextRetryAtEpochMillis,
+    durationMillis,
+    causalReplicaCount,
+    causalCoverageHash
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+getLatestReliabilityRun:
+SELECT * FROM AppSyncReliabilityRun
+ORDER BY startedAtEpochMillis DESC
+LIMIT 1;
+
+getReliabilityRunsSince:
+SELECT * FROM AppSyncReliabilityRun
+WHERE startedAtEpochMillis >= ?
+ORDER BY startedAtEpochMillis ASC;
+
+upsertRemoteBlog:
+INSERT OR REPLACE INTO AppSyncRemoteBlog(
+    remoteKey,
+    kind,
+    blogId,
+    classId,
+    fingerprint,
+    validatedAtEpochMillis,
+    contentUpdatedAtEpochMillis
+) VALUES (?, ?, ?, ?, ?, ?, ?);
+
+getRemoteBlog:
+SELECT * FROM AppSyncRemoteBlog
+WHERE remoteKey = ?;
+
+getRemoteBlogsByKind:
+SELECT * FROM AppSyncRemoteBlog
+WHERE kind = ?
+ORDER BY remoteKey ASC;
+
+getAllRemoteBlogs:
+SELECT * FROM AppSyncRemoteBlog
+ORDER BY kind ASC, remoteKey ASC;
+
+deleteRemoteBlog:
+DELETE FROM AppSyncRemoteBlog
+WHERE remoteKey = ?;
+
+clearRemoteBlogs:
+DELETE FROM AppSyncRemoteBlog;
+
+upsertRemoteClassLink:
+INSERT OR REPLACE INTO AppSyncRemoteClassLink(accountBinding, classId)
+VALUES (?, ?);
+
+getRemoteClassLink:
+SELECT classId FROM AppSyncRemoteClassLink
+WHERE accountBinding = ?;
+
+getReplicaObservation:
+SELECT * FROM AppSyncReplicaObservation
+WHERE accountBinding = ? AND replicaKey = ?;
+
+getReplicaObservations:
+SELECT * FROM AppSyncReplicaObservation
+WHERE accountBinding = ?
+ORDER BY replicaKey ASC;
+
+upsertReplicaObservation:
+INSERT OR REPLACE INTO AppSyncReplicaObservation(
+    accountBinding,
+    replicaKey,
+    sourceBlogId,
+    fingerprint,
+    publishedThroughSequence,
+    firstObservedUnchangedAtEpochMillis,
+    lastObservedAtEpochMillis
+) VALUES (?, ?, ?, ?, ?, ?, ?);
+
+getRetirementIntents:
+SELECT * FROM AppSyncJournalRetirementIntent
+WHERE accountBinding = ?
+ORDER BY createdAtEpochMillis ASC, replicaKey ASC;
+
+upsertRetirementIntent:
+INSERT OR REPLACE INTO AppSyncJournalRetirementIntent(
+    accountBinding,
+    replicaKey,
+    sourceBlogId,
+    fingerprint,
+    publishedThroughSequence,
+    checkpointId,
+    checkpointFingerprint,
+    checkpointVectorHash,
+    activeSetHash,
+    stage,
+    attempts,
+    lastResultCode,
+    createdAtEpochMillis,
+    updatedAtEpochMillis,
+    completedAtEpochMillis
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+transitionRetirementIntent:
+UPDATE AppSyncJournalRetirementIntent
+SET stage = ?,
+    attempts = attempts + ?,
+    lastResultCode = ?,
+    updatedAtEpochMillis = ?,
+    completedAtEpochMillis = ?
+WHERE accountBinding = ?
+  AND replicaKey = ?
+  AND stage = ?;
+
+getPinnedRetirementCheckpointIds:
+SELECT DISTINCT checkpointId FROM AppSyncJournalRetirementIntent
+WHERE stage != 'ABSORBED';
+
+upsertResolvedEntity:
+INSERT OR REPLACE INTO AppSyncResolvedEntity(
+    entityKey,
+    domainId,
+    entityId,
+    entityGeneration,
+    encodedState,
+    updatedAtEpochMillis
+) VALUES (?, ?, ?, ?, ?, ?);
+
+getResolvedEntities:
+SELECT * FROM AppSyncResolvedEntity
+ORDER BY entityKey ASC;
+
+getResolvedEntitiesByDomain:
+SELECT * FROM AppSyncResolvedEntity
+WHERE domainId = ?
+ORDER BY entityKey ASC;
+
+getResolvedEntitiesByDomainAndEntity:
+SELECT * FROM AppSyncResolvedEntity
+WHERE domainId = ? AND entityId = ?
+ORDER BY entityGeneration ASC;
+
+clearResolvedEntities:
+DELETE FROM AppSyncResolvedEntity;
+
+upsertSyncSettingValue:
+INSERT OR REPLACE INTO AppSyncSettingValue(
+    settingKey,
+    type,
+    value,
+    winnerOperationId,
+    updatedAtEpochMillis
+) VALUES (?, ?, ?, ?, ?);
+
+getSyncSettingValues:
+SELECT
+    settingKey,
+    type,
+    value AS settingValue,
+    winnerOperationId,
+    updatedAtEpochMillis
+FROM AppSyncSettingValue
+ORDER BY settingKey ASC;
+
+getSyncSettingValue:
+SELECT
+    settingKey,
+    type,
+    value AS settingValue,
+    winnerOperationId,
+    updatedAtEpochMillis
+FROM AppSyncSettingValue
+WHERE settingKey = ?;
+
+deleteSyncSettingValue:
+DELETE FROM AppSyncSettingValue
+WHERE settingKey = ?;
+
+clearSyncSettingValues:
+DELETE FROM AppSyncSettingValue;
+
+recordKnownSyncSettingKey:
+INSERT OR IGNORE INTO AppSyncKnownSettingKey(settingKey)
+VALUES (?);
+
+getKnownSyncSettingKeys:
+SELECT settingKey FROM AppSyncKnownSettingKey
+ORDER BY settingKey ASC;

@@ -6,6 +6,7 @@ import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.page.ProfilePage
 import kotlinx.coroutines.delay
 import me.thenano.yamibo.yamibo_app.i18n.i18n
+import me.thenano.yamibo.yamibo_app.network.WKWebViewCookieBridge
 import me.thenano.yamibo.yamibo_app.store.auth.CookieStore
 import me.thenano.yamibo.yamibo_app.store.auth.UserStore
 import me.thenano.yamibo.yamibo_app.store.forum.ForumFavoriteStore
@@ -51,6 +52,8 @@ class IOSAuthRepository(
             is YamiboResult.NoPermission -> {
                 return YamiboResult.Failure(i18n("獲取用戶資料失敗: {}", profileResult.reason))
             }
+
+            is YamiboResult.WafChallenge -> return profileResult
         }
     }
 
@@ -79,7 +82,9 @@ class IOSAuthRepository(
                     cookieStrings.add("${cookie.name}=${cookie.value}")
                 }
             }
-            cookieStore.save(cookieStrings.joinToString("; "))
+            val cookieHeader = cookieStrings.joinToString("; ")
+            cookieStore.save(cookieHeader)
+            yamiboClient.setCookie(cookieHeader, importNox = true)
         }
     }
 
@@ -88,17 +93,25 @@ class IOSAuthRepository(
     }
 
     override suspend fun logOut() {
+        yamiboClient.clearCookies(clearNox = false)
         cookieStore.clear()
         userStore.clear()
         forumFavoriteStore?.clear()
 
-        /** remove cookie from webview */
+        WKWebViewCookieBridge.clearAll(preservingNames = setOf(NOX_COOKIE_NAME))
         val storage = NSHTTPCookieStorage.sharedHTTPCookieStorage
         val cookies = storage.cookies
         if (cookies != null) {
             for (cookie in cookies) {
-                storage.deleteCookie(cookie as NSHTTPCookie)
+                val httpCookie = cookie as NSHTTPCookie
+                if (httpCookie.name != NOX_COOKIE_NAME) {
+                    storage.deleteCookie(httpCookie)
+                }
             }
         }
+    }
+
+    private companion object {
+        const val NOX_COOKIE_NAME = "nox_jst_v1"
     }
 }

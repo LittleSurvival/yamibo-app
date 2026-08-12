@@ -8,6 +8,10 @@ This directory stores the source update manifest, the published update feed cont
 - `stable.json`: generated from `manifest.json` by `./gradlew syncStableManifest` to avoid manual sync mistakes.
 - `changelogs/{versionCode}.changelog`: the GitHub Release body for a specific release, for example `changelogs/1.changelog`.
 
+`update/changelogs` is the single source of truth. During the app build, Gradle stages only
+`1.changelog` as the fallback and the current version's changelog under generated Compose resources;
+generated copies must not be committed under `composeApp/src`.
+
 The source repository versions of `manifest.json` and `stable.json` must always keep:
 
 ```json

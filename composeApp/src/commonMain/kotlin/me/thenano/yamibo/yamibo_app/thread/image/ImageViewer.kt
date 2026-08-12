@@ -29,6 +29,8 @@ import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.thread.reader.debug.DebugRecomposeProbe
 import me.thenano.yamibo.yamibo_app.thread.reader.debug.debugPerfLog
+import me.thenano.yamibo.yamibo_app.util.imageErrorForDiagnostics
+import me.thenano.yamibo.yamibo_app.util.imageSourceForDiagnostics
 import me.thenano.yamibo.yamibo_app.util.normalizeImageUrl
 import me.thenano.yamibo.yamibo_app.util.rememberImageRequest
 import org.jetbrains.compose.resources.painterResource
@@ -111,7 +113,9 @@ fun ImageViewer(
     onRenderedHeightChanged: ((Int) -> Unit)? = null,
     onRenderedAspectRatioChanged: ((Float) -> Unit)? = null,
 ) {
-    DebugRecomposeProbe("ImageViewer", url)
+    val fullUrl = normalizeImageUrl(url)
+    val diagnosticUrl = imageSourceForDiagnostics(fullUrl)
+    DebugRecomposeProbe("ImageViewer", diagnosticUrl)
     var localRetryKey by remember { mutableIntStateOf(0) }
     var showMenu by remember { mutableStateOf(false) }
     val retryKey = localRetryKey + externalRetryKey
@@ -137,7 +141,6 @@ fun ImageViewer(
     val errorSubTextColor = if (isDarkTheme) Color.White.copy(alpha = 0.5f) else colors.textDark.copy(alpha = 0.6f)
     val errorUrlColor = if (isDarkTheme) Color.White.copy(alpha = 0.3f) else colors.brownDeep
 
-    val fullUrl = normalizeImageUrl(url)
     val imageRequest = rememberImageRequest(
         url = fullUrl,
         retryKey = retryKey,
@@ -204,8 +207,8 @@ fun ImageViewer(
         ) {
             if (blockedErrorMessage != null) {
                 ImageErrorContent(
-                    fullUrl = fullUrl,
-                    errorMessage = blockedErrorMessage,
+                    fullUrl = diagnosticUrl,
+                    errorMessage = imageErrorForDiagnostics(blockedErrorMessage, fullUrl),
                     reservedHeight = reservedHeight,
                     errorBgColor = errorBgColor,
                     errorTextColor = errorTextColor,
@@ -241,18 +244,21 @@ fun ImageViewer(
                     }
 
                     is AsyncImagePainter.State.Error -> {
-                        val errorMsg = state.result.throwable.message ?: "Unknown Error"
+                        val errorMsg = imageErrorForDiagnostics(
+                            state.result.throwable.message ?: "Unknown Error",
+                            fullUrl,
+                        )
 
                         LaunchedEffect(fullUrl, retryKey, errorMsg) {
                             if (!hasReportedError) {
                                 hasReportedError = true
-                                debugPerfLog("image_error|url=$fullUrl|retryKey=$retryKey|msg=$errorMsg")
+                                debugPerfLog("image_error|url=$diagnosticUrl|retryKey=$retryKey|msg=$errorMsg")
                                 onError?.invoke(fullUrl, errorMsg)
                             }
                         }
 
                         ImageErrorContent(
-                            fullUrl = fullUrl,
+                            fullUrl = diagnosticUrl,
                             errorMessage = errorMsg,
                             reservedHeight = reservedHeight,
                             errorBgColor = errorBgColor,
@@ -278,7 +284,7 @@ fun ImageViewer(
                         LaunchedEffect(fullUrl, retryKey, onSuccess) {
                             if (!hasReportedSuccess) {
                                 hasReportedSuccess = true
-                                debugPerfLog("image_success|url=$fullUrl|retryKey=$retryKey")
+                                debugPerfLog("image_success|url=$diagnosticUrl|retryKey=$retryKey")
                                 onSuccess?.invoke(fullUrl)
                             }
                         }

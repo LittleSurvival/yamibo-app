@@ -3,6 +3,10 @@ name: Release Android APK
 on:
   workflow_dispatch:
 
+concurrency:
+  group: mirror-publish-${{ github.repository }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -174,15 +178,39 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
-          ssh-keyscan gitee.com >> ~/.ssh/known_hosts
+          ssh-keyscan -T 60 gitee.com >> ~/.ssh/known_hosts
           gitea_host="${GITEA_SSH_HOST:-gitea.com}"
           gitea_port="${GITEA_SSH_PORT:-22}"
-          ssh-keyscan -p "$gitea_port" "$gitea_host" >> ~/.ssh/known_hosts
+          ssh-keyscan -T 60 -p "$gitea_port" "$gitea_host" >> ~/.ssh/known_hosts
 
       - name: Prepare mirror release tags
+        timeout-minutes: 60
         shell: bash
+        env:
+          GIT_SSH_COMMAND: >-
+            ssh -o BatchMode=yes
+            -o ConnectTimeout=60
+            -o ServerAliveInterval=15
+            -o ServerAliveCountMax=2
         run: |
           set -euo pipefail
+
+          retry_git() {
+            local label="$1"
+            shift
+            local attempt
+            for attempt in 1 2 3; do
+              if timeout --foreground 30s "$@"; then
+                return 0
+              fi
+              if [ "$attempt" -lt 3 ]; then
+                echo "$label failed (attempt $attempt/3); retrying in $((attempt * 5))s..." >&2
+                sleep "$((attempt * 5))"
+              fi
+            done
+            echo "$label failed after 3 attempts" >&2
+            return 1
+          }
 
           gitea_remote() {
             local host="${GITEA_SSH_HOST:-gitea.com}"
@@ -211,9 +239,9 @@ jobs:
             git -C "$dir" add update
             git -C "$dir" commit -m "Prepare mirror release tag ${{ steps.meta.outputs.release_title }}"
             git -C "$dir" branch -M main
-            git -C "$dir" push --force origin main
+            retry_git "$name main push" git -C "$dir" push --force origin main
             git -C "$dir" tag -f "${{ steps.meta.outputs.version_code }}"
-            git -C "$dir" push --force origin "${{ steps.meta.outputs.version_code }}"
+            retry_git "$name tag push" git -C "$dir" push --force origin "${{ steps.meta.outputs.version_code }}"
           }
 
           prepare_mirror_tag "gitee" "git@gitee.com:${MIRROR_OWNER}/${MIRROR_REPO}.git"
@@ -221,6 +249,7 @@ jobs:
 
       - name: Publish Gitee release asset
         id: gitee_release
+        timeout-minutes: 60
         shell: bash
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
@@ -235,6 +264,7 @@ jobs:
 
       - name: Publish Gitea release asset
         id: gitea_release
+        timeout-minutes: 60
         shell: bash
         env:
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
@@ -301,9 +331,33 @@ jobs:
           git -C "$dir" push --force origin update-release
 
       - name: Push update folder to mirror repositories
+        timeout-minutes: 60
         shell: bash
+        env:
+          GIT_SSH_COMMAND: >-
+            ssh -o BatchMode=yes
+            -o ConnectTimeout=60
+            -o ServerAliveInterval=15
+            -o ServerAliveCountMax=2
         run: |
           set -euo pipefail
+
+          retry_git() {
+            local label="$1"
+            shift
+            local attempt
+            for attempt in 1 2 3; do
+              if timeout --foreground 30s "$@"; then
+                return 0
+              fi
+              if [ "$attempt" -lt 3 ]; then
+                echo "$label failed (attempt $attempt/3); retrying in $((attempt * 5))s..." >&2
+                sleep "$((attempt * 5))"
+              fi
+            done
+            echo "$label failed after 3 attempts" >&2
+            return 1
+          }
 
           gitea_remote() {
             local host="${GITEA_SSH_HOST:-gitea.com}"
@@ -331,9 +385,9 @@ jobs:
             git -C "$dir" add update
             git -C "$dir" commit -m "Update release manifest"
             git -C "$dir" branch -M main
-            git -C "$dir" push --force origin main
+            retry_git "$name main push" git -C "$dir" push --force origin main
             git -C "$dir" tag -f "${{ steps.meta.outputs.version_code }}"
-            git -C "$dir" push --force origin "${{ steps.meta.outputs.version_code }}"
+            retry_git "$name tag push" git -C "$dir" push --force origin "${{ steps.meta.outputs.version_code }}"
           }
 
           push_mirror "gitee" "git@gitee.com:${MIRROR_OWNER}/${MIRROR_REPO}.git"

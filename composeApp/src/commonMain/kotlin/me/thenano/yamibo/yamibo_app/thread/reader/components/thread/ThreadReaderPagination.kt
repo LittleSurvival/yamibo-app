@@ -1,6 +1,9 @@
 package me.thenano.yamibo.yamibo_app.thread.reader.components.thread
 
 import me.thenano.yamibo.yamibo_app.repository.settings.ThreadReaderMode
+import me.thenano.yamibo.yamibo_app.repository.settings.TouchZoneLayout
+import me.thenano.yamibo.yamibo_app.thread.reader.components.manga.TouchAction
+import me.thenano.yamibo.yamibo_app.thread.reader.components.manga.getTouchAction
 import me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl.HtmlBlock
 import kotlin.math.roundToInt
 
@@ -8,6 +11,31 @@ internal enum class SinglePageTapAction {
     Prev,
     Next,
     Menu,
+}
+
+internal fun resolveThreadReaderTapAction(
+    layout: TouchZoneLayout,
+    xFraction: Float,
+    yFraction: Float,
+    reverseTouchZones: Boolean,
+): SinglePageTapAction? {
+    val action = if (layout == TouchZoneLayout.DISABLED) {
+        SinglePageTapAction.Menu
+    } else {
+        when (getTouchAction(layout, xFraction, yFraction)) {
+            TouchAction.PREV -> SinglePageTapAction.Prev
+            TouchAction.NEXT -> SinglePageTapAction.Next
+            TouchAction.MENU -> SinglePageTapAction.Menu
+            null -> null
+        }
+    }
+    return if (reverseTouchZones) action.reversePreviousAndNext() else action
+}
+
+private fun SinglePageTapAction?.reversePreviousAndNext(): SinglePageTapAction? = when (this) {
+    SinglePageTapAction.Prev -> SinglePageTapAction.Next
+    SinglePageTapAction.Next -> SinglePageTapAction.Prev
+    SinglePageTapAction.Menu, null -> this
 }
 
 internal interface TextBoundarySegmenter {
@@ -148,8 +176,37 @@ internal data class SafeBreakMap(
     val lineBreaks: IntArray,
     val graphemeBreaks: IntArray,
     val forbiddenRanges: List<IntRange>,
+    internal val semanticMeasuredBreaks: IntArray = mergeSortedDistinctBoundaries(
+        paragraphBreaks,
+        sentenceBreaks,
+        forbiddenRanges,
+    ),
+    internal val fallbackMeasuredBreaks: IntArray = mergeSortedDistinctBoundaries(
+        lineBreaks,
+        graphemeBreaks,
+        forbiddenRanges,
+    ),
 ) {
     fun bestBreak(
+        start: Int,
+        maxEndExclusive: Int,
+        preferSentence: Boolean = true,
+    ): Int {
+        val maxEnd = maxEndExclusive.coerceIn(start + 1, textLength)
+        paragraphBreaks.lastValidBoundary(start, maxEnd, forbiddenRanges)?.let { return it }
+        if (preferSentence) {
+            sentenceBreaks.lastValidBoundary(start, maxEnd, forbiddenRanges)?.let { return it }
+        }
+        lineBreaks.lastValidBoundary(start, maxEnd, forbiddenRanges)?.let { return it }
+        return graphemeBreaks.lastValidBoundary(start, maxEnd, forbiddenRanges) ?: maxEnd
+    }
+
+    fun contains(offset: Int): Boolean = offset in 0..textLength
+
+    private fun isInsideForbiddenRange(offset: Int): Boolean =
+        forbiddenRanges.any { range -> offset > range.first && offset < range.last }
+
+    internal fun bestBreakReference(
         start: Int,
         maxEndExclusive: Int,
         preferSentence: Boolean = true,
@@ -177,11 +234,6 @@ internal data class SafeBreakMap(
             ?: maxEnd
     }
 
-    fun contains(offset: Int): Boolean = offset in 0..textLength
-
-    private fun isInsideForbiddenRange(offset: Int): Boolean =
-        forbiddenRanges.any { range -> offset > range.first && offset < range.last }
-
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is SafeBreakMap) return false
@@ -191,7 +243,9 @@ internal data class SafeBreakMap(
             sentenceBreaks.contentEquals(other.sentenceBreaks) &&
             lineBreaks.contentEquals(other.lineBreaks) &&
             graphemeBreaks.contentEquals(other.graphemeBreaks) &&
-            forbiddenRanges == other.forbiddenRanges
+            forbiddenRanges == other.forbiddenRanges &&
+            semanticMeasuredBreaks.contentEquals(other.semanticMeasuredBreaks) &&
+            fallbackMeasuredBreaks.contentEquals(other.fallbackMeasuredBreaks)
     }
 
     override fun hashCode(): Int {
@@ -202,8 +256,49 @@ internal data class SafeBreakMap(
         result = 31 * result + lineBreaks.contentHashCode()
         result = 31 * result + graphemeBreaks.contentHashCode()
         result = 31 * result + forbiddenRanges.hashCode()
+        result = 31 * result + semanticMeasuredBreaks.contentHashCode()
+        result = 31 * result + fallbackMeasuredBreaks.contentHashCode()
         return result
     }
+}
+
+private fun mergeSortedDistinctBoundaries(
+    first: IntArray,
+    second: IntArray,
+    forbiddenRanges: List<IntRange>,
+): IntArray = (first.asSequence() + second.asSequence())
+    .filterNot { offset -> forbiddenRanges.any { range -> offset > range.first && offset < range.last } }
+    .distinct()
+    .sorted()
+    .toList()
+    .toIntArray()
+
+private fun IntArray.lastValidBoundary(
+    start: Int,
+    maxEnd: Int,
+    forbiddenRanges: List<IntRange>,
+): Int? {
+    var low = 0
+    var high = lastIndex
+    var bestIndex = -1
+    while (low <= high) {
+        val middle = (low + high) ushr 1
+        if (this[middle] <= maxEnd) {
+            bestIndex = middle
+            low = middle + 1
+        } else {
+            high = middle - 1
+        }
+    }
+    while (bestIndex >= 0) {
+        val candidate = this[bestIndex]
+        if (candidate <= start) return null
+        if (forbiddenRanges.none { range -> candidate > range.first && candidate < range.last }) {
+            return candidate
+        }
+        bestIndex--
+    }
+    return null
 }
 
 internal fun buildSafeBreakMap(
@@ -445,6 +540,124 @@ internal data class ThreadReaderPaginationInput(
     val textHeightFor: ((HtmlBlock.Text, Int, Int) -> Int)? = null,
 )
 
+internal enum class ThreadReaderPaginationStrategy {
+    Reference,
+    Optimized,
+}
+
+internal data class ThreadReaderPlanningMetricsSnapshot(
+    val normalizedBlockBuilds: Int,
+    val safeBreakPreparations: Int,
+    val candidateMaterializations: Int,
+    val textHeightProbes: Int,
+    val textHeightProbeCacheHits: Int,
+    val postPlanBuilds: Int,
+    val normalizedBlockCacheHits: Int,
+    val postPlanCacheHits: Int,
+)
+
+internal class ThreadReaderPlanningMetrics {
+    internal var normalizedBlockBuilds: Int = 0
+    internal var safeBreakPreparations: Int = 0
+    internal var candidateMaterializations: Int = 0
+    internal var textHeightProbes: Int = 0
+    internal var textHeightProbeCacheHits: Int = 0
+    internal var postPlanBuilds: Int = 0
+    internal var normalizedBlockCacheHits: Int = 0
+    internal var postPlanCacheHits: Int = 0
+
+    internal fun snapshot(): ThreadReaderPlanningMetricsSnapshot = ThreadReaderPlanningMetricsSnapshot(
+        normalizedBlockBuilds = normalizedBlockBuilds,
+        safeBreakPreparations = safeBreakPreparations,
+        candidateMaterializations = candidateMaterializations,
+        textHeightProbes = textHeightProbes,
+        textHeightProbeCacheHits = textHeightProbeCacheHits,
+        postPlanBuilds = postPlanBuilds,
+        normalizedBlockCacheHits = normalizedBlockCacheHits,
+        postPlanCacheHits = postPlanCacheHits,
+    )
+}
+
+internal data class ThreadReaderPlanDescriptor(
+    val pages: List<ThreadReaderPageDescriptor>,
+)
+
+internal data class ThreadReaderPageDescriptor(
+    val postId: Long,
+    val pageIndexInPost: Int,
+    val totalPagesInPost: Int,
+    val estimatedHeightPx: Int,
+    val anchorRange: ThreadReaderAnchorRange,
+    val semanticStableId: String,
+    val slices: List<ThreadReaderSliceDescriptor>,
+)
+
+internal data class ThreadReaderSliceDescriptor(
+    val kind: String,
+    val blockId: String?,
+    val estimatedHeightPx: Int,
+    val startOffset: Int?,
+    val endOffset: Int?,
+    val semanticType: String?,
+    val semanticStart: Int?,
+    val semanticEnd: Int?,
+    val nestedSlices: List<ThreadReaderSliceDescriptor>,
+)
+
+internal fun List<ThreadReaderPlannedPage>.planningDescriptor(): ThreadReaderPlanDescriptor =
+    ThreadReaderPlanDescriptor(
+        pages = map { page ->
+            ThreadReaderPageDescriptor(
+                postId = page.postId,
+                pageIndexInPost = page.pageIndexInPost,
+                totalPagesInPost = page.totalPagesInPost,
+                estimatedHeightPx = page.estimatedHeightPx,
+                anchorRange = page.anchorRange,
+                semanticStableId = page.semanticStableId(),
+                slices = page.slices.map(ThreadReaderPageSlice::planningDescriptor),
+            )
+        },
+    )
+
+private fun ThreadReaderPageSlice.planningDescriptor(): ThreadReaderSliceDescriptor = when (this) {
+    is ThreadReaderPageSlice.Text -> ThreadReaderSliceDescriptor(
+        kind = "Text",
+        blockId = blockId,
+        estimatedHeightPx = estimatedHeightPx,
+        startOffset = startOffset,
+        endOffset = endOffset,
+        semanticType = null,
+        semanticStart = null,
+        semanticEnd = null,
+        nestedSlices = emptyList(),
+    )
+    is ThreadReaderPageSlice.Block -> ThreadReaderSliceDescriptor(
+        kind = "Block",
+        blockId = blockId,
+        estimatedHeightPx = estimatedHeightPx,
+        startOffset = null,
+        endOffset = null,
+        semanticType = semanticType,
+        semanticStart = semanticStart,
+        semanticEnd = semanticEnd,
+        nestedSlices = nestedSlices.map(ThreadReaderPageSlice::planningDescriptor),
+    )
+}
+
+internal data class ThreadReaderPlanningMismatch(
+    val firstDifferentPageIndex: Int,
+    val referencePageCount: Int,
+    val optimizedPageCount: Int,
+    val referencePage: ThreadReaderPageDescriptor?,
+    val optimizedPage: ThreadReaderPageDescriptor?,
+)
+
+private data class TextHeightProbeKey(
+    val block: HtmlBlock.Text,
+    val startOffset: Int,
+    val endOffset: Int,
+)
+
 private data class PendingTextSlice(
     val block: HtmlBlock.Text,
     val breakMap: SafeBreakMap,
@@ -604,6 +817,91 @@ internal fun planFixedHeightReaderPages(
     input: ThreadReaderPaginationInput,
     segmenter: TextBoundarySegmenter = ThreadReaderTextBoundaries.defaultSegmenter,
     locale: String? = null,
+    strategy: ThreadReaderPaginationStrategy = ThreadReaderPaginationStrategy.Optimized,
+    metrics: ThreadReaderPlanningMetrics? = null,
+): List<ThreadReaderPlannedPage> {
+    metrics?.let { it.postPlanBuilds++ }
+    val sourceTextHeightFor = input.textHeightFor
+    val probeCache = if (strategy == ThreadReaderPaginationStrategy.Optimized && sourceTextHeightFor != null) {
+        mutableMapOf<TextHeightProbeKey, Int>()
+    } else {
+        null
+    }
+    val measuredInput = if (sourceTextHeightFor == null) {
+        input
+    } else {
+        input.copy(
+            textHeightFor = { block, start, end ->
+                val key = TextHeightProbeKey(block, start, end)
+                probeCache?.get(key)?.let { cached ->
+                    metrics?.let { it.textHeightProbeCacheHits++ }
+                    return@copy cached
+                }
+                metrics?.let { it.textHeightProbes++ }
+                sourceTextHeightFor(block, start, end).also { measured ->
+                    probeCache?.put(key, measured)
+                }
+            },
+        )
+    }
+    return planFixedHeightReaderPagesCore(measuredInput, segmenter, locale, strategy, metrics)
+}
+
+internal fun planFixedHeightReaderPagesReference(
+    input: ThreadReaderPaginationInput,
+    segmenter: TextBoundarySegmenter = ThreadReaderTextBoundaries.defaultSegmenter,
+    locale: String? = null,
+    metrics: ThreadReaderPlanningMetrics? = null,
+): List<ThreadReaderPlannedPage> = planFixedHeightReaderPages(
+    input = input,
+    segmenter = segmenter,
+    locale = locale,
+    strategy = ThreadReaderPaginationStrategy.Reference,
+    metrics = metrics,
+)
+
+internal fun planFixedHeightReaderPagesDifferential(
+    input: ThreadReaderPaginationInput,
+    segmenter: TextBoundarySegmenter = ThreadReaderTextBoundaries.defaultSegmenter,
+    locale: String? = null,
+    metrics: ThreadReaderPlanningMetrics? = null,
+    onMismatch: (ThreadReaderPlanningMismatch) -> Unit = {},
+): List<ThreadReaderPlannedPage> {
+    val reference = planFixedHeightReaderPagesReference(input, segmenter, locale)
+    val optimized = planFixedHeightReaderPages(input, segmenter, locale, metrics = metrics)
+    return chooseDifferentialPlan(reference, optimized, onMismatch)
+}
+
+internal fun chooseDifferentialPlan(
+    reference: List<ThreadReaderPlannedPage>,
+    optimized: List<ThreadReaderPlannedPage>,
+    onMismatch: (ThreadReaderPlanningMismatch) -> Unit = {},
+): List<ThreadReaderPlannedPage> {
+    val referenceDescriptor = reference.planningDescriptor()
+    val optimizedDescriptor = optimized.planningDescriptor()
+    if (referenceDescriptor == optimizedDescriptor) return optimized
+
+    val pageIndex = (0 until maxOf(referenceDescriptor.pages.size, optimizedDescriptor.pages.size))
+        .firstOrNull { index -> referenceDescriptor.pages.getOrNull(index) != optimizedDescriptor.pages.getOrNull(index) }
+        ?: 0
+    onMismatch(
+        ThreadReaderPlanningMismatch(
+            firstDifferentPageIndex = pageIndex,
+            referencePageCount = referenceDescriptor.pages.size,
+            optimizedPageCount = optimizedDescriptor.pages.size,
+            referencePage = referenceDescriptor.pages.getOrNull(pageIndex),
+            optimizedPage = optimizedDescriptor.pages.getOrNull(pageIndex),
+        )
+    )
+    return reference
+}
+
+private fun planFixedHeightReaderPagesCore(
+    input: ThreadReaderPaginationInput,
+    segmenter: TextBoundarySegmenter,
+    locale: String?,
+    strategy: ThreadReaderPaginationStrategy,
+    metrics: ThreadReaderPlanningMetrics?,
 ): List<ThreadReaderPlannedPage> {
     val maxPageHeight = (input.viewportHeightPx - input.verticalPaddingPx).coerceAtLeast(1)
     val pages = mutableListOf<MutableList<ThreadReaderPageSlice>>()
@@ -642,7 +940,7 @@ internal fun planFixedHeightReaderPages(
     ) {
         val wrapperHeightPx = (input.estimatedLineHeightPx * 2).coerceAtMost(maxPageHeight / 3)
         val childHeightPx = (maxPageHeight - wrapperHeightPx).coerceAtLeast(input.estimatedLineHeightPx)
-        val childPages = planFixedHeightReaderPages(
+        val childPages = planFixedHeightReaderPagesCore(
             input = input.copy(
                 blocks = contentBlocks,
                 viewportHeightPx = childHeightPx,
@@ -650,6 +948,8 @@ internal fun planFixedHeightReaderPages(
             ),
             segmenter = segmenter,
             locale = locale,
+            strategy = strategy,
+            metrics = metrics,
         )
         if (childPages.isEmpty()) {
             appendSlice(
@@ -736,6 +1036,7 @@ internal fun planFixedHeightReaderPages(
     input.blocks.forEachIndexed { blockIndex, block ->
         when (block) {
             is HtmlBlock.Text -> {
+                metrics?.let { it.safeBreakPreparations++ }
                 val breakMap = buildSafeBreakMap(block, segmenter, locale)
                 val firstSliceHeight = estimateTextHeight(
                     input = input,
@@ -759,6 +1060,8 @@ internal fun planFixedHeightReaderPages(
                         availableHeightPx = availableHeight,
                         input = input,
                         block = block,
+                        strategy = strategy,
+                        metrics = metrics,
                     )
                     if (current.isNotEmpty() && measuredBreak != null && !measuredBreak.isSemanticBoundary) {
                         flush()
@@ -857,10 +1160,15 @@ private fun SafeBreakMap.bestBreakWithFill(
     start: Int,
     maxEndExclusive: Int,
     minFillChars: Int,
+    strategy: ThreadReaderPaginationStrategy,
 ): Int {
-    val sentenceEnd = bestBreak(start, maxEndExclusive, preferSentence = true)
+    fun select(preferSentence: Boolean): Int = when (strategy) {
+        ThreadReaderPaginationStrategy.Reference -> bestBreakReference(start, maxEndExclusive, preferSentence)
+        ThreadReaderPaginationStrategy.Optimized -> bestBreak(start, maxEndExclusive, preferSentence)
+    }
+    val sentenceEnd = select(preferSentence = true)
     if (sentenceEnd - start >= minFillChars || sentenceEnd >= textLength) return sentenceEnd
-    val lineEnd = bestBreak(start, maxEndExclusive, preferSentence = false)
+    val lineEnd = select(preferSentence = false)
     return when {
         lineEnd > sentenceEnd && lineEnd - start >= minFillChars -> lineEnd
         else -> sentenceEnd
@@ -877,6 +1185,8 @@ private fun SafeBreakMap.furthestFittingBreak(
     availableHeightPx: Int,
     input: ThreadReaderPaginationInput,
     block: HtmlBlock.Text,
+    strategy: ThreadReaderPaginationStrategy,
+    metrics: ThreadReaderPlanningMetrics?,
 ): FittingTextBreak? {
     if (start >= textLength || availableHeightPx <= 0) return null
     if (input.textHeightFor == null) {
@@ -890,12 +1200,14 @@ private fun SafeBreakMap.furthestFittingBreak(
                 start = start,
                 maxEndExclusive = start + maxChars,
                 minFillChars = (maxChars * 0.72f).toInt().coerceAtLeast(1),
+                strategy = strategy,
             ),
             isSemanticBoundary = true,
         )
     }
 
-    fun furthestFitting(boundaries: Sequence<Int>): Int? {
+    fun furthestFittingReference(boundaries: Sequence<Int>): Int? {
+        metrics?.let { it.candidateMaterializations++ }
         val candidates = boundaries
             .filter { it in (start + 1)..textLength }
             .filterNot(::isInsideForbiddenRangeForMeasuredSearch)
@@ -920,10 +1232,47 @@ private fun SafeBreakMap.furthestFittingBreak(
         return best
     }
 
-    furthestFitting(paragraphBreaks.asSequence() + sentenceBreaks.asSequence())?.let {
+    fun furthestFittingOptimized(candidates: IntArray): Int? {
+        var first = 0
+        var last = candidates.size
+        while (first < last) {
+            val middle = (first + last) ushr 1
+            if (candidates[middle] <= start) first = middle + 1 else last = middle
+        }
+        if (first >= candidates.size) return null
+
+        var low = first
+        var high = candidates.lastIndex
+        var best: Int? = null
+        while (low <= high) {
+            val middle = (low + high) ushr 1
+            val candidate = candidates[middle]
+            if (estimateTextHeight(input, block, start, candidate) <= availableHeightPx) {
+                best = candidate
+                low = middle + 1
+            } else {
+                high = middle - 1
+            }
+        }
+        return best
+    }
+
+    fun select(referenceBoundaries: Sequence<Int>, optimizedBoundaries: IntArray): Int? =
+        when (strategy) {
+            ThreadReaderPaginationStrategy.Reference -> furthestFittingReference(referenceBoundaries)
+            ThreadReaderPaginationStrategy.Optimized -> furthestFittingOptimized(optimizedBoundaries)
+        }
+
+    select(
+        paragraphBreaks.asSequence() + sentenceBreaks.asSequence(),
+        semanticMeasuredBreaks,
+    )?.let {
         return FittingTextBreak(it, isSemanticBoundary = true)
     }
-    furthestFitting(lineBreaks.asSequence() + graphemeBreaks.asSequence())?.let {
+    select(
+        lineBreaks.asSequence() + graphemeBreaks.asSequence(),
+        fallbackMeasuredBreaks,
+    )?.let {
         return FittingTextBreak(it, isSemanticBoundary = false)
     }
     return null
@@ -1060,6 +1409,17 @@ internal data class ThreadReaderMeasuredPackingResult(
 ) {
     val hasOverflow: Boolean get() = rejectedUnits.isNotEmpty()
 }
+
+internal data class ThreadReaderMeasuredPackingDescriptor(
+    val pages: List<ThreadReaderMeasuredPage>,
+    val rejectedUnits: List<ThreadReaderMeasuredUnit>,
+)
+
+internal fun ThreadReaderMeasuredPackingResult.planningDescriptor(): ThreadReaderMeasuredPackingDescriptor =
+    ThreadReaderMeasuredPackingDescriptor(
+        pages = pages,
+        rejectedUnits = rejectedUnits,
+    )
 
 internal fun packMeasuredThreadReaderUnits(
     units: List<ThreadReaderMeasuredUnit>,

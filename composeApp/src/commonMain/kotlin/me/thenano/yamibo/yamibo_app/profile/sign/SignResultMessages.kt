@@ -19,7 +19,10 @@ internal fun YamiboResult<SignRepository.ActionResult>.signActionFeedbackMessage
 ): String = when (this) {
     is YamiboResult.Success -> value.message
     is YamiboResult.NoPermission -> text.noPermissionActionMessage
-    else -> text.localize(message())
+    is YamiboResult.NotLoggedIn,
+    is YamiboResult.Maintenance,
+    is YamiboResult.WafChallenge,
+    is YamiboResult.Failure -> text.localize(message())
 }
 
 internal fun YamiboResult<SignRepository.SignPageInfo>.signInfoErrorMessage(
@@ -27,7 +30,8 @@ internal fun YamiboResult<SignRepository.SignPageInfo>.signInfoErrorMessage(
 ): String? = when (this) {
     is YamiboResult.Success -> null
     is YamiboResult.NotLoggedIn,
-    is YamiboResult.Maintenance -> text.localize(message())
+    is YamiboResult.Maintenance,
+    is YamiboResult.WafChallenge -> text.localize(message())
     is YamiboResult.NoPermission,
     is YamiboResult.Failure -> message()
 }

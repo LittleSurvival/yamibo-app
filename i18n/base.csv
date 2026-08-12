@@ -1,828 +1,965 @@
 source,en,zh-tw,zh-cn
-"/ 最後更新","/ Last updated","/ 最後更新","/ 最后更新"
-"#標籤漫畫","#hashtagcomics","#標籤漫畫","#标签漫画"
-"- 沒有更多內容了 -","- No more content -","- 沒有更多內容了 -","- 没有更多内容了 -"
-"- 評論區結束 -","- End of comment section -","- 評論區結束 -","- 评论区结束 -"
-"1 週","1 week","1 週","1 周"
-"App 內打開","Open in app","App 內打開","App 内打开"
-"App 啟動時清除緩存","Clear cache when app starts","App 啟動時清除緩存","App 启动时清除缓存"
-"TODO: 回覆定位跳轉尚未接入","TODO: The reply positioning jump has not been accessed yet","TODO: 回覆定位跳轉尚未接入","TODO: 回复定位跳转尚未接入"
-"TODO: 消息互動尚未接入","TODO: Message interaction has not been connected yet","TODO: 消息互動尚未接入","TODO: 消息互动尚未接入"
-"Tag 漫畫","Tag comics","Tag 漫畫","Tag 漫画"
-"Ta的主題","Their threads","Ta的主題","Ta的主题"
-"Ta的回覆","Their replies","Ta的回覆","Ta的回复"
-"Ta的資料","Their profile","Ta的資料","Ta的资料"
-"WebView 打開","WebView open","WebView 打開","WebView 打开"
-"tip：長按可詳細編輯收藏路徑","Tip: Long press to edit the favorite path in detail","tip：長按可詳細編輯收藏路徑","tip：长按可详细编辑收藏路径"
-"上一個分頁","Previous tab","上一個分頁","上一个分页"
-"上一話","Previous episode","上一話","上一话"
-"上一頁","Previous page","上一頁","上一页"
-"上一頁 / 下一頁","Previous page / Next page","上一頁 / 下一頁","上一页 / 下一页"
-"下一個分頁","Next tab","下一個分頁","下一个分页"
-"下一等級","Next level","下一等級","下一等级"
-"下一話","Next chapter","下一話","下一话"
-"下一頁","Next page","下一頁","下一页"
-"下載圖片失敗","Failed to download image","下載圖片失敗","下载图片失败"
-"下載失敗","Download failed","下載失敗","下载失败"
-"不顯示","Do not show","不顯示","不显示"
-"中斷","Interrupt","中斷","中断"
-"中斷同步","Interrupt synchronization","中斷同步","中断同步"
-"主題","Theme","主題","主题"
-"今天狀態：已簽到","Today's status: Signed in","今天狀態：已簽到","今天状态：已签到"
-"今天狀態：未簽到","Today's status: Not signed in","今天狀態：未簽到","今天状态：未签到"
-"今日已簽","Signed today","今日已簽","今日已签"
-"今日已簽到","Signed in today","今日已簽到","今日已签到"
-"今日不再提醒","Don't remind today","今日不再提醒","今日不再提醒"
-"今天尚未完成每日簽到。","You haven't completed today's daily check-in.","今天尚未完成每日簽到。","今天尚未完成每日签到。"
-"作品與章節","Works and Chapters","作品與章節","作品与章节"
-"你確定要將百合會收藏同步到本地嗎","Are you sure you want to synchronize Yamibo favorites to your local computer?","你確定要將百合會收藏同步到本地嗎","你确定要将百合会收藏同步到本地吗"
-"你今天還沒簽到","You haven't checked in today","你今天還沒簽到","你今天还没签到"
-"使用外部瀏覽器開啟","Open using an external browser","使用外部瀏覽器開啟","使用外部浏览器开启"
-"更新","Updates","更新","更新"
-"收藏更新","Favorite updates","收藏更新","收藏更新"
-"刷新週期: {}","Refresh cycle: {}","刷新週期: {}","刷新周期: {}"
-"篩選","Filter","篩選","筛选"
-"全域刷新","Global refresh","全域刷新","全局刷新"
-"刷新週期已改為 {}","Refresh cycle changed to {}","刷新週期已改為 {}","刷新周期已改为 {}"
-"全域刷新收藏更新","Global refresh favorite updates","全域刷新收藏更新","全局刷新收藏更新"
-"{}天前","{} days ago","{}天前","{}天前"
-"{}小時前","{} hours ago","{}小時前","{}小时前"
-"{}分鐘前","{} minutes ago","{}分鐘前","{}分钟前"
-"我的消息","My messages","我的消息","我的消息"
-"我的提醒","My notices","我的提醒","我的提醒"
-"消息","Messages","消息","消息"
-"收藏","Favorites","收藏","收藏"
-"我的","Me","我的","我的"
-"首頁","Home","首頁","首页"
-"紀錄","History","紀錄","记录"
-"取消","Cancel","取消","取消"
-"收藏更新完成","Favorite update completed","收藏更新完成","收藏更新完成"
-"保存失敗","Save failed","保存失敗","保存失败"
-"保留現有資料，只加入不存在的收藏與狀態","Keep existing data and only add missing favorites and state","保留現有資料，只加入不存在的收藏與狀態","保留现有资料，只加入不存在的收藏与状态"
-"保留系統列背景","Keep system column background","保留系統列背景","保留系统列背景"
-"個人主頁","Personal homepage","個人主頁","个人主页"
-"個人簽名","Personal signature","個人簽名","个人签名"
-"備份檔案","Backup files","備份檔案","备份文件"
-"備份資料夾","Backup folder","備份資料夾","备份文件夹"
-"僅移除當下目錄","Remove only current directory","僅移除當下目錄","仅移除当下目录"
-"儲存失敗","Save failed","儲存失敗","储存失败"
-"儲存空間使用情形","Storage usage","儲存空間使用情形","储存空间使用情形"
-"內容區","Content area","內容區","内容区"
-"內容寬度","Content width","內容寬度","内容宽度"
-"再按一次退出應用","Press again to exit the app","再按一次退出應用","再按一次退出应用"
-"分享圖片","Share pictures","分享圖片","分享图片"
-"分數","Fraction","分數","分数"
-"分組:","Group:","分組:","分组:"
-"分類","Classification","分類","分类"
-"刪除收藏失敗","Failed to delete favorites","刪除收藏失敗","删除收藏失败"
-"刪除類別","Delete category","刪除類別","删除类别"
-"刷新週期","Refresh cycle","刷新週期","刷新周期"
-"剛剛","Just now","剛剛","刚刚"
-"加為好友","Add as friend","加為好友","加为好友"
-"勾選大類，或點進去選擇小集合","Check the major categories, or click in to select small collections","勾選大類，或點進去選擇小集合","勾选大类，或点进去选择小集合"
-"區間","Interval","區間","区间"
-"取消全部收藏嗎","Cancel all favorites?","取消全部收藏嗎","取消全部收藏吗"
-"取消後會移除目前這個收藏項目。","Cancellation will remove the current favorite item.","取消後會移除目前這個收藏項目。","取消后会移除目前这个收藏项目。"
-"取消收藏失敗","Failed to cancel favorite","取消收藏失敗","取消收藏失败"
-"只刪本地","Only delete local","只刪本地","只删本地"
-"合併新增","Merge and add","合併新增","合并新增"
-"同步到哪個類別","Which category to sync to?","同步到哪個類別","同步到哪个类别"
-"同步到百合會","Sync to Yamibo","同步到百合會","同步到百合会"
-"同步到百合會收藏嗎","Sync to Yamibo favorites?","同步到百合會收藏嗎","同步到百合会收藏吗"
-"同步失敗","Sync failed","同步失敗","同步失败"
-"同步已中斷","Sync interrupted","同步已中斷","同步已中断"
-"同步百合會收藏","Sync Yamibo favorites","同步百合會收藏","同步百合会收藏"
-"同步移除百合會收藏嗎","Remove from Yamibo favorites simultaneously?","同步移除百合會收藏嗎","同步移除百合会收藏吗"
-"同步花費時間","Synchronization takes time","同步花費時間","同步花费时间"
-"同步過程發生錯誤","An error occurred during synchronization","同步過程發生錯誤","同步过程发生错误"
-"回復","Reply","回復","回复"
-"回復成功","Reply successful","回復成功","回复成功"
-"回覆","Reply","回覆","回复"
-"圓餅圖","Pie chart","圓餅圖","圆饼图"
-"圖片載入中","Picture loading","圖片載入中","图片载入中"
-"圖表","Chart","圖表","图表"
-"在右下角以小字顯示目前頁內閱讀進度。","Show the current in-page reading progress in small text at the bottom right.","在右下角以小字顯示目前頁內閱讀進度。","在右下角以小字显示目前页内阅读进度。"
-"在應用內開啟連結","Open link within app","在應用內開啟連結","在应用内打开链接"
-"在瀏覽器開啟","Open in browser","在瀏覽器開啟","在浏览器开启"
-"在狀態列與底部導覽列後方使用閱讀背景，避免透明系統列蓋住內容。","Use a reading background behind the status bar and bottom navigation bar to prevent transparent system bars from covering the content.","在狀態列與底部導覽列後方使用閱讀背景，避免透明系統列蓋住內容。","在状态列与底部导览列后方使用阅读背景，避免透明系统列盖住内容。"
-"在線成員","Online members","在線成員","在线成员"
-"在線時間","Online time","在線時間","在线时间"
-"外部瀏覽器","External browser","外部瀏覽器","外部浏览器"
-"好友請求已送出","Friend request sent","好友請求已送出","好友请求已送出"
-"如果這個 app 對你有幫助，可以透過以下方式支持開發與維護。","If this app is helpful to you, you can support its development and maintenance in the following ways.","如果這個 app 對你有幫助，可以透過以下方式支持開發與維護。","如果这个 app 对你有帮助，可以透过以下方式支持开发与维护。"
-"子版區","Sub-forum","子版區","子版区"
-"字體大小","Font size","字體大小","字体大小"
-"學歷","Educational qualifications","學歷","学历"
-"完全移除收藏時詢問同步刪除","Ask for simultaneous deletion when completely removing favorites","完全移除收藏時詢問同步刪除","完全移除收藏时询问同步删除"
-"完全移除收藏預設動作","Completely remove favorite preset actions","完全移除收藏預設動作","完全移除收藏预设动作"
-"完全覆蓋","Overwrite completely","完全覆蓋","完全覆盖"
-"完成 Cloudflare 驗證後，程式會在簽到成功後一路補到不能再補。","After completing the Cloudflare verification, the program will fill in all the time after successful sign-in until it can no longer be filled in.","完成 Cloudflare 驗證後，程式會在簽到成功後一路補到不能再補。","完成 Cloudflare 验证后，程式会在签到成功后一路补到不能再补。"
-"定位失敗","Positioning failed","定位失敗","定位失败"
-"定期自動備份","Scheduled automatic backup","定期自動備份","定期自动备份"
-"將重新檢查所有收藏並建立新的更新任務。網站維護中可能會產生大量錯誤記錄。","All favorites will be rechecked and new update tasks created. A large number of error records may be generated during website maintenance.","將重新檢查所有收藏並建立新的更新任務。網站維護中可能會產生大量錯誤記錄。","将重新检查所有收藏并建立新的更新任务。网站维护中可能会产生大量错误记录。"
-"對象","Object","對象","对象"
-"小說","Novel","小說","小说"
-"尚未取得簽到資訊","Sign-in information has not been obtained yet","尚未取得簽到資訊","尚未取得签到资讯"
-"尚未開始同步","Sync has not started yet","尚未開始同步","尚未开始同步"
-"尚無收藏資料","No favorites yet","尚無收藏資料","尚无收藏资料"
-"尚無閱讀時數資料","No reading hours data yet","尚無閱讀時數資料","尚无阅读时数资料"
-"已中斷收藏更新檢查","Favorite update check interrupted","已中斷收藏更新檢查","已中断收藏更新检查"
-"已保存筆記","Note saved","已保存筆記","已保存笔记"
-"已儲存圖片至相簿","Saved picture to album","已儲存圖片至相簿","已储存图片至相簿"
-"已刪除收藏","Favorites deleted","已刪除收藏","已删除收藏"
-"已刪除筆記","Note deleted","已刪除筆記","已删除笔记"
-"已刪除這筆紀錄","This record has been deleted","已刪除這筆紀錄","已删除这笔纪录"
-"已刷新閱讀歷史紀錄","Reading history has been refreshed","已刷新閱讀歷史紀錄","已刷新阅读历史纪录"
-"已加入大類","Already added to major categories","已加入大類","已加入大类"
-"已加入收藏，預設存入未分類","Already added to favorites, default saved to uncategorized","已加入收藏，預設存入未分類","已加入收藏，预设存入未分类"
-"已加入本地收藏，但找不到同步目標。","Added to local favorites, but sync target not found.","已加入本地收藏，但找不到同步目標。","已加入本地收藏，但找不到同步目标。"
-"已加入本地收藏，預設存入未分類","Already added to local favorites, default saved to uncategorized","已加入本地收藏，預設存入未分類","已加入本地收藏，预设存入未分类"
-"已匯入到本地","Imported to local","已匯入到本地","已汇入到本地"
-"已取消收藏更新檢查","Favorite update check canceled","已取消收藏更新檢查","已取消收藏更新检查"
-"已同步至百合會","Already synced to Yamibo","已同步至百合會","已同步至百合会"
-"已就緒","Ready","已就緒","已就绪"
-"已從所有位置移除收藏","Favorites removed from all locations","已從所有位置移除收藏","已从所有位置移除收藏"
-"已新增書籤","Bookmark added","已新增書籤","已新增书签"
-"已更新收藏路徑","Favorite path updated","已更新收藏路徑","已更新收藏路径"
-"已標為已讀","Marked as read","已標為已讀","已标为已读"
-"已標為未讀","Marked as unread","已標為未讀","已标为未读"
-"已清除所有緩存","All cache cleared","已清除所有緩存","已清除所有缓存"
-"已清除閱讀紀錄","Reading history cleared","已清除閱讀紀錄","已清除阅读纪录"
-"已移除書籤","Bookmark removed","已移除書籤","已移除书签"
-"已移除當下目錄收藏","Current directory favorites removed","已移除當下目錄收藏","已移除当下目录收藏"
-"已簽","Signed","已簽","已签"
-"已經是第一話","Already the first episode","已經是第一話","已经是第一话"
-"已複製作者名稱","Author name copied","已複製作者名稱","已复制作者名称"
-"已複製圖片","Image copied","已複製圖片","已复制图片"
-"已複製標題","Title copied","已複製標題","已复制标题"
-"已設為封面","Already set as cover","已設為封面","已设为封面"
-"已讀/總數","Read/total","已讀/總數","已读/总数"
-"已讀完所有章節","Read all chapters","已讀完所有章節","已读完所有章节"
-"已選擇","Selected","已選擇","已选择"
-"建新類別","Create new category","建新類別","建新类别"
-"建立、載入與管理本地備份檔案","Create, restore, and manage local backup files","建立、載入與管理本地備份檔案","建立、载入与管理本地备份文件"
-"建立備份","Create backup","建立備份","建立备份"
-"建立備份失敗","Failed to create backup","建立備份失敗","建立备份失败"
-"建立類別失敗","Failed to create category","建立類別失敗","建立类别失败"
-"建議處理","Recommended treatment","建議處理","建议处理"
-"必須處理","Must be dealt with","必須處理","必须处理"
-"性別","Gender","性別","性别"
-"我是YamiboApp的作者TheNano，這是一個個人獨立開發的第三方開源App<br>","I am TheNano, the author of YamiboApp. This is a third-party open-source app developed independently by an individual.<br>","我是YamiboApp的作者TheNano，這是一個個人獨立開發的第三方開源App<br>","我是YamiboApp的作者TheNano，这是一个个人独立开发的第三方开源App<br>"
-"我的主題","My threads","我的主題","我的主题"
-"我的回覆","My replies","我的回覆","我的回复"
-"我的打卡動態","My check-in status","我的打卡動態","我的打卡动态"
-"我的空間","My space","我的空間","我的空间"
-"我的訪客","My visitors","我的訪客","我的访客"
-"我的資料","My profile","我的資料","我的资料"
-"我的足跡","My footprints","我的足跡","我的足迹"
-"手動刷新資訊","Manually refresh information","手動刷新資訊","手动刷新资讯"
-"手動更新","Manual update","手動更新","手动更新"
-"手動模式下只保存這個偏好；半自動模式才會真的自動補簽。","In manual mode, only this preference is saved; in semi-automatic mode, the missed check-in will be automatically filled.","手動模式下只保存這個偏好；半自動模式才會真的自動補簽。","手动模式下只保存这个偏好；半自动模式才会真的自动补签。"
-"打卡統計","Check-in statistics","打卡統計","打卡统计"
-"打開簽到頁 WebView","Open the check-in page WebView","打開簽到頁 WebView","打开签到页 WebView"
-"打開進度","Open progress","打開進度","打开进度"
-"找不到指定的樓層，已跳轉至最接近的樓層","The specified floor cannot be found. Jumped to the nearest floor.","找不到指定的樓層，已跳轉至最接近的樓層","找不到指定的楼层，已跳转至最接近的楼层"
-"找不到這個同步任務。","The synchronization task cannot be found.","找不到這個同步任務。","找不到这个同步任务。"
-"投票成功，正在刷新頁面...","The vote was successful, refreshing the page...","投票成功，正在刷新頁面...","投票成功，正在刷新页面..."
-"折線圖","Line chart","折線圖","折线图"
-"推薦閱讀的日志","Recommended reading diary","推薦閱讀的日志","推荐阅读的日志"
-"搜尋中...","Searching...","搜尋中...","搜寻中..."
-"搜尋失敗","Search failed","搜尋失敗","搜寻失败"
-"搜尋收藏","Search favorites","搜尋收藏","搜寻收藏"
-"搜尋收藏標題...","Search for favorite titles...","搜尋收藏標題...","搜寻收藏标题..."
-"搜尋標題或連結...","Search title or link...","搜尋標題或連結...","搜寻标题或链接..."
-"搜尋無結果","No results found","搜尋無結果","搜寻无结果"
-"支持App開發","Support app development","支持App開發","支持App开发"
-"收藏刪除","Delete favorite","收藏刪除","收藏删除"
-"收藏功能開發中","Favorite function is under development","收藏功能開發中","收藏功能开发中"
-"收藏更新中斷","Favorite update interrupted","收藏更新中斷","收藏更新中断"
-"收藏更新失敗","Favorite update failed","收藏更新失敗","收藏更新失败"
-"收藏更新已中斷","Favorite update has been interrupted","收藏更新已中斷","收藏更新已中断"
-"收藏更新檢查週期","Favorite update check cycle","收藏更新檢查週期","收藏更新检查周期"
-"收藏模塊比率","Favorite module ratio","收藏模塊比率","收藏模块比率"
-"收藏選單","Favorites menu","收藏選單","收藏选单"
-"收藏顯示","Favorite display","收藏顯示","收藏显示"
-"新增、編輯、刪除或調整你的收藏類別","Add, edit, delete or adjust your favorite categories","新增、編輯、刪除或調整你的收藏類別","新增、编辑、删除或调整你的收藏类别"
-"新增收藏時詢問同步","Ask for synchronization when adding a favorite","新增收藏時詢問同步","新增收藏时询问同步"
-"新增收藏預設動作","Added new favorite preset actions","新增收藏預設動作","新增收藏预设动作"
-"新增書籤","Add bookmark","新增書籤","新增书签"
-"新增筆記","Add new note","新增筆記","新增笔记"
-"新增類別","Add category","新增類別","新增类别"
-"方向切換距離","Direction switch distance","方向切換距離","方向切换距离"
-"日志評論","Log comments","日志評論","日志评论"
-"日誌","Blog","日誌","日志"
-"星星按鈕可直接收藏，長按可指定小集合","The star button can be directly collected, and a long press can be used to specify a small favorite.","星星按鈕可直接收藏，長按可指定小集合","星星按钮可直接收藏，长按可指定小集合"
-"是否要刪除所有路徑下的收藏","Do you want to delete favorites under all paths?","是否要刪除所有路徑下的收藏","是否要删除所有路径下的收藏"
-"智能更新策略尚未接入，暫停週期背景檢查。","The smart update policy has not been accessed yet, and the periodic background check is suspended.","智能更新策略尚未接入，暫停週期背景檢查。","智能更新策略尚未接入，暂停周期背景检查。"
-"暫不支持跳轉到公告頁","Jumping to the announcement page is not supported yet.","暫不支持跳轉到公告頁","暂不支持跳转到公告页"
-"暫無評論","No comments","暫無評論","暂无评论"
-"更新檢查被系統中斷","Update check was interrupted by the system","更新檢查被系統中斷","更新检查被系统中断"
-"更新頁不需要網路載入","The update page does not require network loading","更新頁不需要網路載入","更新页不需要网络加载"
-"書櫃","Bookcase","書櫃","书柜"
-"最後一次同步時間","Last sync time","最後一次同步時間","最后一次同步时间"
-"最後訪問","Last visited","最後訪問","最后访问"
-"最新發表的日志","Latest published logs","最新發表的日志","最新发表的日志"
-"最近閱讀","Recently read","最近閱讀","最近阅读"
-"未加入大類","Not added to major categories","未加入大類","未加入大类"
-"未登入，請先登入後再收藏","Not logged in, please log in first before adding it to favorites","未登入，請先登入後再收藏","未登入，请先登入后再收藏"
-"本周時數","Hours of the week","本周時數","本周时数"
-"本帖評分","Rate this post","本帖評分","本帖评分"
-"本月時數","Hours of the month","本月時數","本月时数"
-"本月簽到表格","Sign-in form for this month","本月簽到表格","本月签到表格"
-"查看標籤列表","View tag list","查看標籤列表","查看标签列表"
-"查看進度","View progress","查看進度","查看进度"
-"標為已讀","Mark as read","標為已讀","标为已读"
-"標為未讀","Mark as unread","標為未讀","标为未读"
-"標籤列表","Tag list","標籤列表","标签列表"
-"檢查版本、下載安裝檔與打開安裝流程","Check versions, download installer files, and open the installation flow","檢查版本、下載安裝檔與打開安裝流程","检查版本、下载安装文件与打开安装流程"
-"檢查通知權限、電池最佳化與背景同步所需的系統設定。","Check system settings required for notification permissions, battery optimization, and background sync.","檢查通知權限、電池最佳化與背景同步所需的系統設定。","检查通知权限、电池优化与背景同步所需的系统设定。"
-"正在取得收藏頁","Getting favorites","正在取得收藏頁","正在取得收藏页"
-"正在同步到百合會...","Synchronizing to Yamibo...","正在同步到百合會...","正在同步到百合会..."
-"正在定位連結","Locating link","正在定位連結","正在定位链接"
-"正在建立同步任務","Creating synchronization task","正在建立同步任務","正在建立同步任务"
-"正在從百合會移除收藏...","Removing favorites from Yamibo...","正在從百合會移除收藏...","正在从百合会移除收藏..."
-"正在檢查收藏更新","Checking for favorites updates","正在檢查收藏更新","正在检查收藏更新"
-"正在簽到...","Checking in...","正在簽到...","正在签到..."
-"正在計算中...","Calculating...","正在計算中...","正在计算中..."
-"正在載入上一個分頁...","Loading previous tab...","正在載入上一個分頁...","正在载入上一个分页..."
-"正在載入下一個分頁...","Loading next tab...","正在載入下一個分頁...","正在载入下一个分页..."
-"正在載入好友申請表單","Loading friend request form","正在載入好友申請表單","正在载入好友申请表单"
-"此連結暫不支援 App 內開啟","This link does not support opening within the app.","此連結暫不支援 App 內開啟","此链接暂不支持在 App 内打开"
-"每日簽到","Daily check-in","每日簽到","每日签到"
-"點擊簽到","Tap to check in","點擊簽到","点击签到"
-"沒有偵測到更新","No updates detected","沒有偵測到更新","没有侦测到更新"
-"沒有可用的好友分組","No friend groups available","沒有可用的好友分組","没有可用的好友分组"
-"沒有可繼續的收藏更新任務","There is no favorite update task to continue","沒有可繼續的收藏更新任務","没有可继续的收藏更新任务"
-"沒有找到Ta的主題","Their topic was not found","沒有找到Ta的主題","没有找到Ta的主题"
-"沒有找到Ta的回復","No reply found from Ta","沒有找到Ta的回復","没有找到Ta的回复"
-"沒有找到Ta的日志","Their log was not found","沒有找到Ta的日志","没有找到Ta的日志"
-"沒有找到主題","Topic not found","沒有找到主題","没有找到主题"
-"沒有找到回復","No reply found","沒有找到回復","没有找到回复"
-"沒有找到圖片","No picture found","沒有找到圖片","没有找到图片"
-"沒有找到在線成員","No online members found","沒有找到在線成員","没有找到在线成员"
-"沒有找到好友","No friends found","沒有找到好友","没有找到好友"
-"沒有找到好友的日志","No friend's log found","沒有找到好友的日志","没有找到好友的日志"
-"沒有找到提醒","Reminder not found","沒有找到提醒","没有找到提醒"
-"沒有找到搜尋結果","No search results found","沒有找到搜尋結果","没有找到搜寻结果"
-"沒有找到日志","No log found","沒有找到日志","没有找到日志"
-"沒有找到標籤","Tag not found","沒有找到標籤","没有找到标签"
-"沒有找到消息","No message found","沒有找到消息","没有找到消息"
-"沒有找到訪客","No visitor found","沒有找到訪客","没有找到访客"
-"沒有找到評論","No comments found","沒有找到評論","没有找到评论"
-"沒有找到足跡","No footprints found","沒有找到足跡","没有找到足迹"
-"注冊時間","Registration time","注冊時間","注册时间"
-"浮動跳轉按鈕","Floating jump button","浮動跳轉按鈕","浮动跳转按钮"
-"清除閱讀紀錄","Clear reading history","清除閱讀紀錄","清除阅读纪录"
-"準備定位","Prepare for positioning","準備定位","准备定位"
-"滑動時顯示","Show while scrolling","滑動時顯示","滑动时显示"
-"漫畫模式","Comic mode","漫畫模式","漫画模式"
-"無法精準定位該評論","Unable to pinpoint this comment","無法精準定位該評論","无法精准定位该评论"
-"無法載入上一頁","Unable to load previous page","無法載入上一頁","无法载入上一页"
-"無法載入下一頁","Unable to load next page","無法載入下一頁","无法载入下一页"
-"無法載入閱讀目錄","Unable to load reading directory","無法載入閱讀目錄","无法载入阅读目录"
-"無法辨識此連結","This link is not recognized","無法辨識此連結","无法识别此链接"
-"狀態","State","狀態","状态"
-"獲取登入資訊失敗，請重新登入","Failed to obtain login information, please log in again","獲取登入資訊失敗，請重新登入","获取登入资讯失败，请重新登入"
-"用戶","User","用戶","用户"
-"用戶組","User group","用戶組","用户组"
-"略過刪除確認","Skip deletion confirmation","略過刪除確認","略过删除确认"
-"登入狀態已失效，請重新登入","Login session has expired. Please sign in again","登入狀態已失效，請重新登入","登入状态已失效，请重新登入"
-"登入頁面","Login page","登入頁面","登入页面"
-"發布","Release","發布","发布"
-"發帖成功","Posted successfully","發帖成功","发帖成功"
-"發日志","Post a log","發日志","发日志"
-"發消息","Send message","發消息","发消息"
-"發現新版本","New version found","發現新版本","发现新版本"
-"發表回復","Leave a Reply","發表回復","发表回复"
-"發表帖子","Post","發表帖子","发表帖子"
-"發送","Send","發送","发送"
-"發送中","Sending","發送中","发送中"
-"發送回覆","Send reply","發送回覆","发送回覆"
-"百合會收藏已同步到本地","Yamibo favorites have been synced to local","百合會收藏已同步到本地","百合会收藏已同步到本地"
-"百合會維護中...現在不是簽到的好時機呢","Yamibo is under maintenance... Now is not a good time to sign in.","百合會維護中...現在不是簽到的好時機呢","百合会维护中...现在不是签到的好时机呢"
-"目前無法啟動背景同步，請在 App 前景時重試。","Background sync cannot be started at this time, please try again with the app in the foreground.","目前無法啟動背景同步，請在 App 前景時重試。","目前无法启动背景同步，请在 App 前景时重试。"
-"目前無法定位跳轉位置","Unable to locate the target position right now","目前無法定位跳轉位置","目前无法定位跳转位置"
-"目前無法自動簽到，請改用手動模式","Automatic check-in is currently unavailable, please use manual mode instead","目前無法自動簽到，請改用手動模式","目前无法自动签到，请改用手动模式"
-"目前選取的收藏中，至少有一項存在於多個收藏路徑。","At least one item in the currently selected favorites exists in multiple favorite paths.","目前選取的收藏中，至少有一項存在於多個收藏路徑。","目前选取的收藏中，至少有一项存在于多个收藏路径。"
-"目前還沒有收藏","There are no favorites yet","目前還沒有收藏","目前还没有收藏"
-"目前還沒有閱讀歷史紀錄","There is no reading history yet","目前還沒有閱讀歷史紀錄","目前还没有阅读历史纪录"
-"目錄","Table of contents","目錄","目录"
-"直方圖","Histogram","直方圖","直方图"
-"確定","OK","確定","确定"
-"確定要取消收藏嗎","Are you sure you want to remove this favorite?","確定要取消收藏嗎","确定要取消收藏吗"
-"移動","Move","移動","移动"
-"移除原始條目","Remove original entry","移除原始條目","移除原始条目"
-"移除收藏失敗","Failed to remove favorites","移除收藏失敗","移除收藏失败"
-"移除書籤","Remove bookmark","移除書籤","移除书签"
-"稍後","Later","稍後","稍后"
-"積分","Points","積分","积分"
-"立即清除所有緩存","Clear all caches now","立即清除所有緩存","立即清除所有缓存"
-"章節","Chapter","章節","章节"
-"章節列表","Chapter list","章節列表","章节列表"
-"筆記","Notes","筆記","笔记"
-"管理收藏類別","Manage favorite categories","管理收藏類別","管理收藏类别"
-"管理組","Management group","管理組","管理组"
-"管理類別","Management category","管理類別","管理类别"
-"篩選類別","Filter categories","篩選類別","筛选类别"
-"簡繁轉換","Conversion between Simplified and Traditional Chinese","簡繁轉換","简繁转换"
-"簽到模式","Check-in mode","簽到模式","签到模式"
-"簽到行為","Check-in behavior","簽到行為","签到行为"
-"簽到資訊","Sign-in information","簽到資訊","签到资讯"
-"簽到頁載入失敗","Sign-in page failed to load","簽到頁載入失敗","签到页载入失败"
-"系統列","System bars","系統列","系统列"
-"系統目前不允許啟動背景同步，請在 App 前景時重試。","The system currently does not allow background synchronization to be initiated. Please try again with the app in the foreground.","系統目前不允許啟動背景同步，請在 App 前景時重試。","系统目前不允许启动背景同步，请在 App 前景时重试。"
-"編輯","Edit","編輯","编辑"
-"編輯筆記","Edit notes","編輯筆記","编辑笔记"
-"編輯集合","Edit collection","編輯集合","编辑集合"
-"編輯類別","Edit categories","編輯類別","编辑类别"
-"總是顯示","Always show","總是顯示","总是显示"
-"總時數","Total hours","總時數","总时数"
-"總積分","Total points","總積分","总积分"
-"繁體中文","Traditional Chinese","繁體中文","繁体中文"
-"繼續","Continue","繼續","继续"
-"繼續同步","Continue syncing","繼續同步","继续同步"
-"繼續閱讀","Continue reading","繼續閱讀","继续阅读"
-"置頂","Pin to top","置頂","置顶"
-"背景同步任務已中斷，可重新同步。","The background synchronization task has been interrupted and can be resynchronized.","背景同步任務已中斷，可重新同步。","背景同步任务已中断，可重新同步。"
-"自動備份","Automatic backup","自動備份","自动备份"
-"自動生成格式：YamiboApp-YYYYMMDD-HHmmss.yamibobak","Auto-generated format: YamiboApp-YYYYMMDD-HHmmss.yamibobak","自動生成格式：YamiboApp-YYYYMMDD-HHmmss.yamibobak","自动生成格式：YamiboApp-YYYYMMDD-HHmmss.yamibobak"
-"自動進行補簽","Automatic re-signing","自動進行補簽","自动进行补签"
-"自定義頭銜","Custom title","自定義頭銜","自定义头衔"
-"若收藏尚未同步，可使用右上角 ⋮ > 同步百合會收藏 同步","If favorites have not been synced yet, use top-right menu > Sync Yamibo favorites.","若收藏尚未同步，可使用右上角 ⋮ > 同步百合會收藏 同步","若收藏尚未同步，可使用右上角 ⋮ > 同步百合会收藏 同步"
-"若等待過久可重新載入","If you wait too long, you can reload it.","若等待過久可重新載入","若等待过久可重新载入"
-"處理中...","Processing...","處理中...","处理中..."
-"補簽","Re-signing","補簽","补签"
-"複製","Copy","複製","复制"
-"複製文字","Copy text","複製文字","复制文字"
-"複製連結","Copy link","複製連結","复制链接"
-"複製連結地址","Copy link address","複製連結地址","复制链接地址"
-"複製連結文字","Copy link text","複製連結文字","复制链接文字"
-"要將此收藏同步到百合會嗎？","Do you want to sync this favorite to Yamibo?","要將此收藏同步到百合會嗎？","要将此收藏同步到百合会吗？"
-"要將此收藏從百合會網站移除嗎？","Do you want to remove this favorite from the Yamibo website?","要將此收藏從百合會網站移除嗎？","要将此收藏从百合会网站移除吗？"
-"觸控分區","Touch area","觸控分區","触控分区"
-"記住這次選擇","Remember this choice","記住這次選擇","记住这次选择"
-"設定功能開發中","Setting function is under development","設定功能開發中","设定功能开发中"
-"設為封面","Set as cover","設為封面","设为封面"
-"評分","Score","評分","评分"
-"評分成功，刷新後更新評分/點評狀態","Rating successful, update rating/review status after refreshing","評分成功，刷新後更新評分/點評狀態","评分成功，刷新后更新评分/点评状态"
-"評分理由","Reason for rating","評分理由","评分理由"
-"評論","Comment","評論","评论"
-"評論中...","Commenting...","評論中...","评论中..."
-"該樓頂/底部","Top/bottom of this post","該樓頂/底部","该楼顶/底部"
-"該頁頂/底部","Top/bottom of this page","該頁頂/底部","该页顶/底部"
-"說明","Description","說明","说明"
-"請保持 App 在前景後再開始同步。","Please keep the app in the foreground before starting sync.","請保持 App 在前景後再開始同步。","请保持 App 在前景后再开始同步。"
-"請先允許通知權限，背景同步才會顯示在通知欄。","Please allow notification permission first; background sync will then appear in the notification bar.","請先允許通知權限，背景同步才會顯示在通知欄。","请先允许通知权限，背景同步才会显示在通知栏。"
-"請先打開簽到頁 WebView 讓程式抓到頁面內容，或使用下方按鈕手動刷新。","Please open the check-in page WebView first to let the program capture the page content, or use the button below to refresh manually.","請先打開簽到頁 WebView 讓程式抓到頁面內容，或使用下方按鈕手動刷新。","请先打开签到页 WebView 让程式抓到页面内容，或使用下方按钮手动刷新。"
-"請先登入後再搜尋","Please log in first before searching","請先登入後再搜尋","请先登入后再搜寻"
-"請先登入後再發送消息","Please log in first before sending message","請先登入後再發送消息","请先登入后再发送消息"
-"請先登入後再評論","Please log in first before commenting","請先登入後再評論","请先登入后再评论"
-"請先輸入類別名稱","Please enter the category name first","請先輸入類別名稱","请先输入类别名称"
-"請稍後再試","Please try again later","請稍後再試","请稍后再试"
-"請輸入內容","Please enter content","請輸入內容","请输入内容"
-"請輸入內容...","Please enter content...","請輸入內容...","请输入内容..."
-"請輸入評論內容","Please enter the comment content","請輸入評論內容","请输入评论内容"
-"請輸入類別名稱","Please enter a category name","請輸入類別名稱","请输入类别名称"
-"讀取失敗","Read failed","讀取失敗","读取失败"
-"跳到頂部","Jump to top","跳到頂部","跳到顶部"
-"跳轉","Jump","跳轉","跳转"
-"跳轉到收藏","Jump to favorites","跳轉到收藏","跳转到收藏"
-"跳轉到首頁","Jump to homepage","跳轉到首頁","跳转到首页"
-"跳過","Skip","跳過","跳过"
-"載入備份","Restore backup","載入備份","载入备份"
-"載入失敗","Loading failed","載入失敗","载入失败"
-"載入更多評論","Loading more comments","載入更多評論","载入更多评论"
-"輕觸區域","Touch area","輕觸區域","轻触区域"
-"輸入內容...","Enter content...","輸入內容...","输入内容..."
-"輸入本地筆記...","Enter local note...","輸入本地筆記...","输入本地笔记..."
-"輸入關鍵字或帖子連結","Enter keyword or post link","輸入關鍵字或帖子連結","输入关键字或帖子链接"
-"輸入頁碼","Enter page number","輸入頁碼","输入页码"
-"這個集合還沒有內容","This collection has no content yet","這個集合還沒有內容","这个集合还没有内容"
-"這裡會顯示最近一次收藏同步的狀態與進度。同步開始後，你也可以從這裡重新打開進度畫面。","The status and progress of the latest favorite synchronization will be displayed here. Once the sync has started, you can also reopen the progress screen from here.","這裡會顯示最近一次收藏同步的狀態與進度。同步開始後，你也可以從這裡重新打開進度畫面。","这里会显示最近一次收藏同步的状态与进度。同步开始后，你也可以从这里重新打开进度画面。"
-"通知與背景同步設定","Notification and background synchronization settings","通知與背景同步設定","通知与背景同步设定"
-"連結選項","Link options","連結選項","链接选项"
-"選單","Menu","選單","选单"
-"選擇頁面","Select page","選擇頁面","选择页面"
-"選擇類別","Select category","選擇類別","选择类别"
-"邀請","Invite","邀請","邀请"
-"邀請閱讀","Invitation to read","邀請閱讀","邀请阅读"
-"還原備份失敗","Failed to restore backup","還原備份失敗","还原备份失败"
-"重新檢查","Recheck","重新檢查","重新检查"
-"重新載入","Reload","重新載入","重新载入"
-"重試","Try again","重試","重试"
-"錯誤","Error","錯誤","错误"
-"長條圖","Bar chart","長條圖","长条图"
-"開啟後，刪除收藏時不再跳出確認視窗。","After turning it on, the confirmation window will no longer pop up when deleting favorites.","開啟後，刪除收藏時不再跳出確認視窗。","开启后，删除收藏时不再跳出确认窗口。"
-"開啟後，收藏將完全消失時會詢問是否同步從百合會移除。","After turning it on, when a favorite is completely removed, you will be asked whether to also remove it from Yamibo.","開啟後，收藏將完全消失時會詢問是否同步從百合會移除。","开启后，收藏将完全消失时会询问是否同步从百合会移除。"
-"開啟後，新建收藏時會詢問是否同步到百合會。","After turning it on, when creating a new favorite, you will be asked whether to synchronize it to Yamibo.","開啟後，新建收藏時會詢問是否同步到百合會。","开启后，新建收藏时会询问是否同步到百合会。"
-"開啟替代頁","Open alternative page","開啟替代頁","开启替代页"
-"開始全域刷新收藏更新","Start global refresh of favorite updates","開始全域刷新收藏更新","开始全域刷新收藏更新"
-"開始刷新","Start refreshing","開始刷新","开始刷新"
-"開始閱讀","Start reading","開始閱讀","开始阅读"
-"閱畢","Finished reading","閱畢","阅毕"
-"閱讀中","Reading","閱讀中","阅读中"
-"閱讀圖表","Reading charts","閱讀圖表","阅读图表"
-"閱讀時數","Reading hours","閱讀時數","阅读时数"
-"閱讀標記","Read mark","閱讀標記","阅读标记"
-"閱讀模式","Reading mode","閱讀模式","阅读模式"
-"閱讀統計","Reading statistics","閱讀統計","阅读统计"
-"閱讀進度","Reading progress","閱讀進度","阅读进度"
-"關閉這個畫面不會中止同步，你之後仍可從收藏頁或設定頁重新查看進度。","Closing this screen will not abort synchronization, and you can still check the progress again later from the Favorites page or Settings page.","關閉這個畫面不會中止同步，你之後仍可從收藏頁或設定頁重新查看進度。","关闭这个画面不会中止同步，你之后仍可从收藏页或设定页重新查看进度。"
-"附件選項","Attachment options","附件選項","附件选项"
-"隨便看看","Browse random blogs","隨便看看","随便看看"
-"隱藏","Hide","隱藏","隐藏"
-"頁數","Number of pages","頁數","页数"
-"預覽","Preview","預覽","预览"
-"預覽更新彈窗","Preview update prompt","預覽更新彈窗","预览更新弹窗"
-"顏色","Color","顏色","颜色"
-"顏色主題","Color theme","顏色主題","颜色主题"
-"類別名稱","Category name","類別名稱","类别名称"
-"顯示收藏更新檢查進度與結果","Display favorite update check progress and results","顯示收藏更新檢查進度與結果","显示收藏更新检查进度与结果"
-"顯示百合會收藏同步進度","Display Yamibo favorites synchronization progress","顯示百合會收藏同步進度","显示百合会收藏同步进度"
-"顯示閱讀進度提示","Show reading progress indicator","顯示閱讀進度提示","显示阅读进度提示"
-"點擊展開 / 收起","Click to expand/collapse","點擊展開 / 收起","点击展开 / 收起"
-"點擊跳轉到評論區","Click to jump to the comment area","點擊跳轉到評論區","点击跳转到评论区"
-"點評","Comment","點評","点评"
-"點評成功，刷新後更新評分/點評狀態","The review is successful, and the rating/review status will be updated after refreshing.","點評成功，刷新後更新評分/點評狀態","点评成功，刷新后更新评分/点评状态"
-"（無標題）","(untitled)","（無標題）","（无标题）"
-"💡 tips : 標籤頁面類似常規漫畫App, 推薦用於收藏漫畫","💡 tips: The tab page is similar to a regular comic app, recommended for collecting comics","💡 tips : 標籤頁面類似常規漫畫App, 推薦用於收藏漫畫","💡 tips : 标签页面类似常规漫画App, 推荐用于收藏漫画"
-"💬 點評","Comment","💬 點評","💬 点评"
-"合成/加入集合","Merge/add to collection","合成/加入集合","合成/加入集合"
-"加入集合","Add to collection","加入集合","加入集合"
-"目前沒有可加入的集合","There are no collections to add to","目前沒有可加入的集合","目前没有可加入的集合"
-"已加入集合","Added to collection","已加入集合","已加入集合"
-"帖子詳情為空，已保留收藏列表標題：{}","Thread details are empty, kept the favorite list title: {}","帖子詳情為空，已保留收藏列表標題：{}","帖子详情为空，已保留收藏列表标题：{}"
-"載入中...","Loading...","載入中...","载入中..."
-"前往簽到","Go to check-in","前往簽到","前往签到"
-"關閉彈窗後，今天內不會再次彈出提醒。關閉此設定後，每次開啟 app 都會提醒。","After dismissing the popup, it won't appear again today. If disabled, the reminder will show every time you open the app.","關閉彈窗後，今天內不會再次彈出提醒。關閉此設定後，每次開啟 app 都會提醒。","关闭弹窗后，今天内不会再次弹出提醒。关闭此设定后，每次开启 app 都会提醒。"
-"(附言為可選，{} 會看到這條附言，最多 10 個字)","(Postscript is optional, {} will see this postscript, up to 10 characters)","(附言為可選，{} 會看到這條附言，最多 10 個字)","(附言为可选，{} 会看到这条附言，最多 10 个字)"
-"1 天","1 day","1 天","1 天"
-"?","?","?","?"
-"Tag Manga 章節數","Tag Manga chapters","Tag Manga 章節數","Tag Manga 章节数"
-"Thread","Thread","Thread","Thread"
-"Thread 頁數","Thread pages","Thread 頁數","Thread 页数"
-"{} ({})","{} ({})","{} ({})","{} ({})"
-"{} / {} 積分","{} / {} points","{} / {} 積分","{} / {} 积分"
-"{} · 下載中 {}，等待 {}，失敗 {}","{} · Downloading {}, Waiting {}, Failed {}","{} · 下載中 {}，等待 {}，失敗 {}","{} · 下载中 {}，等待 {}，失败 {}"
-"{} 張圖片 · {}","{} images · {}","{} 張圖片 · {}","{} 张图片 · {}"
-"{} 積分","{} points","{} 積分","{} 积分"
-"{} 項 · {} 張圖片 · {}","{} items · {} images · {}","{} 項 · {} 張圖片 · {}","{} 项 · {} 张图片 · {}"
-"下載","Download","下載","下载"
-"下載中","Downloading","下載中","下载中"
-"下載佇列","Download queue","下載佇列","下载队列"
-"下載內容","Download content","下載內容","下载内容"
-"下載內容會存放在設定與收藏備份指定的資料夾。","Downloaded content will be stored in the folder specified in settings and backup.","下載內容會存放在設定與收藏備份指定的資料夾。","下载内容会存放在设定与收藏备份指定的文件夹。"
-"下載內容管理","Download management","下載內容管理","下载内容管理"
-"下載全部分頁","Download all tabs","下載全部分頁","下载全部分页"
-"下載圖片","Download image","下載圖片","下载图片"
-"下載圖片 {}/{}","Downloading image {} of {}","下載圖片 {}/{}","下载图片 {}/{}"
-"下載完成","Download complete","下載完成","下载完成"
-"下載完成：第 {} 頁","Downloaded: page {}","下載完成：第 {} 頁","下载完成：第 {} 页"
-"下載完整 Thread","Download entire thread","下載完整 Thread","下载完整 Thread"
-"下載文字","Download text","下載文字","下载文字"
-"下載時間","Download time","下載時間","下载时间"
-"下載會保存整頁帖子與原始圖片。","Download saves the entire page of posts and original images.","下載會保存整頁帖子與原始圖片。","下载会保存整页帖子与原始图片。"
-"下載此章","Download this chapter","下載此章","下载此章"
-"下載狀態需處理","Download status needs handling","下載狀態需處理","下载状态需处理"
-"下載目前分頁","Download current tab","下載目前分頁","下载目前分页"
-"下載目前頁","Download current page","下載目前頁","下载目前页"
-"下載管理","Download manager","下載管理","下载管理"
-"下載除最後一頁的所有頁面","Download all pages except the last one","下載除最後一頁的所有頁面","下载除最后一页的所有页面"
-"不輸入將使用自動生成名稱","If left blank, an auto-generated name will be used","不輸入將使用自動生成名稱","不输入将使用自动生成名称"
-"保存此頁所有帖子與圖片","Save all posts and images on this page","保存此頁所有帖子與圖片","保存此页所有帖子与图片"
-"保留可能持續更新的最後一頁在線閱讀","Keep the last page for online reading as it may be updated","保留可能持續更新的最後一頁在線閱讀","保留可能持续更新的最后一页在线阅读"
-"備份名稱","Backup name","備份名稱","备份名称"
-"儲存中","Saving","儲存中","储存中"
-"全部 ({})","All ({})","全部 ({})","全部 ({})"
-"全部評分","All ratings","全部評分","全部评分"
-"共 {} 項，Thread {} 頁，標籤漫畫 {} 章，圖片 {} 張","Total {} items, {} thread pages, {} tag manga chapters, {} images","共 {} 項，Thread {} 頁，標籤漫畫 {} 章，圖片 {} 張","共 {} 项，Thread {} 页，标签漫画 {} 章，图片 {} 张"
-"刪除 {}","Delete {}","刪除 {}","删除 {}"
-"刷新失敗: {}","Refresh failed: {}","刷新失敗: {}","刷新失败: {}"
-"刷新已下載頁面","Refresh downloaded pages","刷新已下載頁面","刷新已下载页面"
-"前往下載管理","Go to download manager","前往下載管理","前往下载管理"
-"前往設定","Go to settings","前往設定","前往设定"
-"加入下載失敗","Failed to add to download","加入下載失敗","加入下载失败"
-"加為好友失敗：{}","Failed to add friend: {}","加為好友失敗：{}","加为好友失败：{}"
-"動態抓取封面","Dynamic cover fetching","動態抓取封面","动态抓取封面"
-"參與人數 {}","Participants: {}","參與人數 {}","参与人数 {}"
-"參與投票的會員","Members who voted","參與投票的會員","参与投票的会员"
-"取消佇列並刪除所有已下載頁","Cancel queue and delete all downloaded pages","取消佇列並刪除所有已下載頁","取消队列并删除所有已下载页"
-"只刪除此頁離線內容","Delete only offline content of this page","只刪除此頁離線內容","只删除此页离线内容"
-"可刷新","Refreshable","可刷新","可刷新"
-"可在外觀新增字體","You can add fonts in appearance settings","可在外觀新增字體","可在外观新增字体"
-"可在閱讀頁使用下載按鈕加入目前頁或完整 Thread。","Use the download button on the reading page to add the current page or entire thread.","可在閱讀頁使用下載按鈕加入目前頁或完整 Thread。","可在阅读页使用下载按钮加入目前页或完整 Thread。"
-"回復已發表，請刷新頁面查看","Reply posted, please refresh to view.","回復已發表，請刷新頁面查看","回复已发表，请刷新页面查看"
-"圖片張數","Number of images","圖片張數","图片张数"
-"圖片約佔 {}","Images take up about {}","圖片約佔 {}","图片约占 {}"
-"失敗 {}","Failed {}","失敗 {}","失败 {}"
-"套用","Apply","套用","套用"
-"字體","Font","字體","字体"
-"安裝更新","Install update","安裝更新","安装更新"
-"容量","Size","容量","容量"
-"將全部頁面加入背景佇列","Add all pages to background queue","將全部頁面加入背景佇列","将全部页面加入背景队列"
-"將從網站重新抓取此章圖片，成功後覆蓋本地下載；失敗會保留舊內容。","Re-download chapter images from the site; on success overwrite local downloads; if failed keep old content.","將從網站重新抓取此章圖片，成功後覆蓋本地下載；失敗會保留舊內容。","将从网站重新抓取此章图片，成功后覆盖本地下载；失败会保留旧内容。"
-"將從網站重新抓取目前頁，成功後覆蓋舊的下載內容。失敗時會保留原下載。","Re-download current page from the site; overwrite old download on success, keep original on failure.","將從網站重新抓取目前頁，成功後覆蓋舊的下載內容。失敗時會保留原下載。","将从网站重新抓取目前页，成功后覆盖旧的下载内容。失败时会保留原下载。"
-"尚未設定下載資料夾","Download folder not set","尚未設定下載資料夾","尚未设定下载文件夹"
-"尚未選擇備份資料夾","Backup folder not selected","尚未選擇備份資料夾","尚未选择备份文件夹"
-"已下載","Downloaded","已下載","已下载"
-"已下載 {}","Downloaded {}","已下載 {}","已下载 {}"
-"已使用 {}，{} 個備份檔","Used {}, {} backup files","已使用 {}，{} 個備份檔","已使用 {}，{} 个备份档"
-"已刪除全部更新紀錄","All update records deleted","已刪除全部更新紀錄","已删除全部更新纪录"
-"已刪除字體：{}","Deleted font: {}","已刪除字體：{}","已删除字体：{}"
-"已刷新下載內容","Downloaded content refreshed","已刷新下載內容","已刷新下载内容"
-"已加入下載佇列","Added to download queue","已加入下載佇列","已加入下载队列"
-"已加入完整 Thread 下載","Added entire thread to downloads","已加入完整 Thread 下載","已加入完整 Thread 下载"
-"已加入除最後一頁外的下載","Added download except last page","已加入除最後一頁外的下載","已加入除最后一页外的下载"
-"已建立備份：{}","Backup created: {}","已建立備份：{}","已建立备份：{}"
-"已暫停","Paused","已暫停","已暂停"
-"已清除下載內容","Downloads cleared","已清除下載內容","已清除下载内容"
-"已清除全部閱讀紀錄","All reading history cleared","已清除全部閱讀紀錄","已清除全部阅读纪录"
-"已清除整個 Thread 下載","Entire thread download cleared","已清除整個 Thread 下載","已清除整个 Thread 下载"
-"已清除整個標籤下載","Entire tag download cleared","已清除整個標籤下載","已清除整个标签下载"
-"已清除此章下載","Chapter download cleared","已清除此章下載","已清除此章下载"
-"已清除目前分頁下載","Current tab download cleared","已清除目前分頁下載","已清除目前分页下载"
-"已清除目前頁下載","Current page download cleared","已清除目前頁下載","已清除目前页下载"
-"已讀 {}%","Read {}%","已讀 {}%","已读 {}%"
-"已載入字體：{}","Font loaded: {}","已載入字體：{}","已载入字体：{}"
-"已選擇備份資料夾","Backup folder selected","已選擇備份資料夾","已选择备份文件夹"
-"已重新整理下載","Downloads refreshed","已重新整理下載","已重新整理下载"
-"已重新載入下載內容","Downloaded content reloaded","已重新載入下載內容","已重新载入下载内容"
-"帖子已發表，請刷新頁面查看","Post published, please refresh to view.","帖子已發表，請刷新頁面查看","帖子已发表，请刷新页面查看"
-"建立","Create","建立","建立"
-"建議從網站刷新此下載頁","It is recommended to refresh this download page from the website.","建議從網站刷新此下載頁","建议从网站刷新此下载页"
-"排序: {} {}","Sort: {} {}","排序: {} {}","排序: {} {}"
-"提醒頻率","Reminder frequency","提醒頻率","提醒频率"
-"提醒點擊直接進入簽到頁面","Reminder tap goes directly to sign-in page","提醒點擊直接進入簽到頁面","提醒点击直接进入签到页面"
-"收藏夾","Favorites","收藏夾","收藏夹"
-"收藏夾：{}","Favorites: {}","收藏夾：{}","收藏夹：{}"
-"新版已可下載。你可以立即下載更新，或前往發布頁手動更新。","New version available for download. You can download now or go to the release page to update manually.","新版已可下載。你可以立即下載更新，或前往發布頁手動更新。","新版已可下载。你可以立即下载更新，或前往发布页手动更新。"
-"暫停","Pause","暫停","暂停"
-"更新範圍","Update scope","更新範圍","更新范围"
-"最多自動備份檔案數量：{}","Max auto backup files: {}","最多自動備份檔案數量：{}","最多自动备份文件数量：{}"
-"未下載","Not downloaded","未下載","未下载"
-"未知版塊","Unknown forum","未知版塊","未知版块"
-"查看下載佇列、已下載內容與清除/重新載入操作。","View download queue, downloaded content, and clear/reload operations.","查看下載佇列、已下載內容與清除/重新載入操作。","查看下载队列、已下载内容与清除/重新载入操作。"
-"查看全部評分","View all ratings","查看全部評分","查看全部评分"
-"查看投票參與人","View poll participants","查看投票參與人","查看投票参与人"
-"條漫模式","Vertical comic mode","條漫模式","条漫模式"
-"標籤","Tag","標籤","标签"
-"標籤漫畫","Tag manga","標籤漫畫","标签漫画"
-"標籤漫畫下載","Tag manga download","標籤漫畫下載","标签漫画下载"
-"標籤漫畫章節","Tag manga chapters","標籤漫畫章節","标签漫画章节"
-"正在下載更新... ({} MB / {} MB)","Downloading update... ({} MB / {} MB)","正在下載更新... ({} MB / {} MB)","正在下载更新... ({} MB / {} MB)"
-"正在下載更新... ({} MB / 未知)","Downloading update... ({} MB / unknown)","正在下載更新... ({} MB / 未知)","正在下载更新... ({} MB / 未知)"
-"正在取得內容","Fetching content","正在取得內容","正在取得内容"
-"正在載入...","Loading...","正在載入...","正在载入..."
-"正在載入更新日誌...","Loading changelog...","正在載入更新日誌...","正在载入更新日志..."
-"此選項暫無投票參與人","No participants for this option","此選項暫無投票參與人","此选项暂无投票参与人"
-"此頁可能有新回覆","This page may have new replies","此頁可能有新回覆","此页可能有新回复"
-"每天 1 次","Once a day","每天 1 次","每天 1 次"
-"每天 2 次","2 times a day","每天 2 次","每天 2 次"
-"每天 3 次","3 times a day","每天 3 次","每天 3 次"
-"每天 4 次","4 times a day","每天 4 次","每天 4 次"
-"每天 5 次","5 times a day","每天 5 次","每天 5 次"
-"每天 6 次","6 times a day","每天 6 次","每天 6 次"
-"永不","Never","永不","永不"
-"沒有找到目前版本的更新日誌。","No changelog found for the current version.","沒有找到目前版本的更新日誌。","没有找到目前版本的更新日志。"
-"沒有符合篩選的下載內容","No downloads match the filter","沒有符合篩選的下載內容","没有符合筛选的下载内容"
-"添加 {} 為好友，附言:","Add {} as friend, note:","添加 {} 為好友，附言:","添加 {} 为好友，附言:"
-"清空現有設定與收藏狀態後再還原","Clear existing settings and favorites state before restoring","清空現有設定與收藏狀態後再還原","清空现有设定与收藏状态后再还原"
-"清除","Clear","清除","清除"
-"清除全部閱讀紀錄","Clear all reading history","清除全部閱讀紀錄","清除全部阅读纪录"
-"清除圖片、頁面與其他暫存資料，釋放目前已使用的儲存空間。\n目前緩存大小：{}","Clear images, pages and other temporary data, freeing up used storage space.\nCurrent cache size: {}","清除圖片、頁面與其他暫存資料，釋放目前已使用的儲存空間。\n目前緩存大小：{}","清除图片、页面与其他暂存资料，释放目前已使用的储存空间。\n目前缓存大小：{}"
-"清除失敗","Clear failed","清除失敗","清除失败"
-"清除整個 Thread","Clear entire thread","清除整個 Thread","清除整个 Thread"
-"清除整個 Thread 下載","Clear entire thread download","清除整個 Thread 下載","清除整个 Thread 下载"
-"清除整個標籤","Clear entire tag","清除整個標籤","清除整个标签"
-"清除整個標籤下載","Clear entire tag download","清除整個標籤下載","清除整个标签下载"
-"清除此章下載","Clear chapter download","清除此章下載","清除此章下载"
-"清除目前分頁下載","Clear current tab download","清除目前分頁下載","清除目前分页下载"
-"清除目前頁下載","Clear current page download","清除目前頁下載","清除目前页下载"
-"準備中","Preparing","準備中","准备中"
-"為此作品鎖定閱讀模式","Lock reading mode for this work","為此作品鎖定閱讀模式","为此作品锁定阅读模式"
-"無法選擇備份資料夾","Unable to select backup folder","無法選擇備份資料夾","无法选择备份文件夹"
-"版塊","Forum","版塊","版块"
-"版塊 {}","Forum {}","版塊 {}","版块 {}"
-"版塊：{}","Forum: {}","版塊：{}","版块：{}"
-"版本","Version","版本","版本"
-"理由","Reason","理由","理由"
-"由標籤條漫模式鎖定","Locked by tag vertical comic mode","由標籤條漫模式鎖定","由标签条漫模式锁定"
-"百合會論壇 Yamibo App 字體預覽","Yamibo Forum Yamibo App font preview","百合會論壇 Yamibo App 字體預覽","百合会论坛 Yamibo App 字体预览"
-"目前沒有下載任務","No download tasks","目前沒有下載任務","目前没有下载任务"
-"目前沒有可統計的儲存內容","No storable content to count","目前沒有可統計的儲存內容","目前没有可统计的储存内容"
-"目前沒有已下載內容","No downloaded content","目前沒有已下載內容","目前没有已下载内容"
-"目前範圍會檢查 {} 個收藏","Current scope will check {} favorites","目前範圍會檢查 {} 個收藏","目前范围会检查 {} 个收藏"
-"空閒","Idle","空閒","空闲"
-"立即更新","Update now","立即更新","立即更新"
-"第 {} 部分","Part {}","第 {} 部分","第 {} 部分"
-"等待中","Waiting","等待中","等待中"
-"等待中 {}","Waiting {}","等待中 {}","等待中 {}"
-"管理","Manage","管理","管理"
-"範圍","Scope","範圍","范围"
-"篩選下載內容","Filter downloads","篩選下載內容","筛选下载内容"
-"篩選收藏","Filter favorites","篩選收藏","筛选收藏"
-"篩選更新結果","Filter update results","篩選更新結果","筛选更新结果"
-"簽到成功","Check-in successful","簽到成功","签到成功"
-"系統消息","System message","系統消息","系统消息"
-"系統預設","System default","系統預設","系统预设"
-"結果: {}","Result: {}","結果: {}","结果: {}"
-"總大小","Total size","總大小","总大小"
-"置頂帖","Pinned post","置頂帖","置顶帖"
-"背景簽到提醒排程","Background check-in reminder schedule","背景簽到提醒排程","背景签到提醒排程"
-"設定與收藏備份","Settings & favorites backup","設定與收藏備份","设定与收藏备份"
-"距離{}還有 {} 積分","{} points away from {}","距離{}還有 {} 積分","距离{}还有 {} 积分"
-"跳到底部","Jump to bottom","跳到底部","跳到底部"
-"載入 .ttf 或 .otf 字體後，可分別套用到 App 介面與小說閱讀器。","After loading .ttf or .otf fonts, they can be applied to the app interface and novel reader respectively.","載入 .ttf 或 .otf 字體後，可分別套用到 App 介面與小說閱讀器。","载入 .ttf 或 .otf 字体后，可分别套用到 App 界面与小说阅读器。"
-"載入下載內容失敗","Loading downloads failed","載入下載內容失敗","载入下载内容失败"
-"載入字體","Load font","載入字體","载入字体"
-"選擇 App 字體","Select app font","選擇 App 字體","选择 App 字体"
-"選擇資料夾","Select folder","選擇資料夾","选择文件夹"
-"選擇還原方式","Select restore method","選擇還原方式","选择还原方式"
-"選擇閱讀器字體","Select reader font","選擇閱讀器字體","选择阅读器字体"
-"還原完成：收藏 {}，設定 {}，閱讀紀錄 {}","Restore complete: favorites {}, settings {}, reading history {}","還原完成：收藏 {}，設定 {}，閱讀紀錄 {}","还原完成：收藏 {}，设定 {}，阅读纪录 {}"
-"重新整理下載內容","Refresh downloads","重新整理下載內容","重新整理下载内容"
-"重新整理下載失敗：{}","Refresh downloads failed: {}","重新整理下載失敗：{}","重新整理下载失败：{}"
-"重新整理最後一頁","Refresh last page","重新整理最後一頁","重新整理最后一页"
-"重新整理此章","Refresh this chapter","重新整理此章","重新整理此章"
-"重新載入失敗：{}","Reload failed: {}","重新載入失敗：{}","重新载入失败：{}"
-"重試下載","Retry download","重試下載","重试下载"
-"重試失敗","Retry failed","重試失敗","重试失败"
-"開始自動簽到...","Starting automatic check-in...","開始自動簽到...","开始自动签到..."
-"離線頁可刷新","Offline page refreshable","離線頁可刷新","离线页可刷新"
-"顯示收藏數量","Show favorites count","顯示收藏數量","显示收藏数量"
-"點擊選擇字體並預覽效果","Tap to select font and preview effect","點擊選擇字體並預覽效果","点击选择字体并预览效果"
-"點擊開屏簽到提醒後，跳過個人中心，直接打開簽到網頁。","After tapping the check-in reminder, skip the user center and open the check-in page directly.","點擊開屏簽到提醒後，跳過個人中心，直接打開簽到網頁。","点击开屏签到提醒后，跳过个人中心，直接打开签到网页。"
-"RSS","RSS","RSS","RSS"
-"RSS 訂閱","RSS subscriptions","RSS 訂閱","RSS 订阅"
-"全部刷新","Refresh all","全部刷新","全部刷新"
-"RSS 訂閱已刷新","RSS subscriptions refreshed","RSS 訂閱已刷新","RSS 订阅已刷新"
-"尚未保存任何搜尋目錄","No saved search directories yet","尚未保存任何搜尋目錄","尚未保存任何搜索目录"
-"RSS 已刷新，新增 {} 筆","RSS refreshed with {} new results","RSS 已刷新，新增 {} 筆","RSS 已刷新，新增 {} 笔"
-"RSS 訂閱已刪除","RSS subscription deleted","RSS 訂閱已刪除","RSS 订阅已删除"
-"{} 新","{} new","{} 新","{} 新"
-"啟用","Enable","啟用","启用"
-"刷新中","Refreshing","刷新中","刷新中"
-"上次刷新成功","Last refresh succeeded","上次刷新成功","上次刷新成功"
-"上次刷新失敗","Last refresh failed","上次刷新失敗","上次刷新失败"
-"尚未刷新","Not refreshed yet","尚未刷新","尚未刷新"
-"共 {} 筆","{} total","共 {} 筆","共 {} 笔"
-"保存搜尋為 RSS 目錄","Save search as RSS directory","保存搜尋為 RSS 目錄","保存搜索为 RSS 目录"
-"收藏搜尋為 RSS 訂閱","Favorite search as RSS subscription","收藏搜尋為 RSS 訂閱","收藏搜索为 RSS 订阅"
-"目錄名稱","Directory name","目錄名稱","目录名称"
-"訂閱名稱","Subscription name","訂閱名稱","订阅名称"
-"RSS 目錄已保存","RSS directory saved","RSS 目錄已保存","RSS 目录已保存"
-"已收藏為 RSS 訂閱","Favorited as RSS subscription","已收藏為 RSS 訂閱","已收藏为 RSS 订阅"
-"已收藏此 RSS 訂閱","This RSS subscription is already favorited","已收藏此 RSS 訂閱","已收藏此 RSS 订阅"
-"保存為目錄","Save as directory","保存為目錄","保存为目录"
-"收藏為 RSS 訂閱","Favorite as RSS subscription","收藏為 RSS 訂閱","收藏为 RSS 订阅"
-"RSS 訂閱不存在","RSS subscription does not exist","RSS 訂閱不存在","RSS 订阅不存在"
-"RSS 目錄","RSS directory","RSS 目錄","RSS 目录"
-"RSS 搜尋目錄","RSS search directory","RSS 搜尋目錄","RSS 搜索目录"
-"RSS搜尋目錄","RSS search directory","RSS搜尋目錄","RSS搜索目录"
-"RSS搜尋目錄(#{})","RSS search directory (#{})","RSS搜尋目錄(#{})","RSS搜索目录(#{})"
-"RSS 已刷新","RSS refreshed","RSS 已刷新","RSS 已刷新"
-"RSS 有新的帖子","RSS has new threads","RSS 有新的帖子","RSS 有新的帖子"
-"RSS 內容已更新","RSS content updated","RSS 內容已更新","RSS 内容已更新"
-"RSS 新增 {} 個帖子","RSS added {} threads","RSS 新增 {} 個帖子","RSS 新增 {} 个帖子"
-"搜尋關鍵字不能為空白","Search keyword cannot be blank","搜尋關鍵字不能為空白","搜索关键字不能为空"
-"{} 個新搜尋結果","{} new search results","{} 個新搜尋結果","{} 个新搜索结果"
-"{} 個訂閱目錄","{} subscription directories","{} 個訂閱目錄","{} 个订阅目录"
-"重新命名 RSS 目錄","Rename RSS directory","重新命名 RSS 目錄","重新命名 RSS 目录"
-"RSS 目錄已重新命名","RSS directory renamed","RSS 目錄已重新命名","RSS 目录已重新命名"
-"RSS 訂閱不存在或無法載入","RSS subscription does not exist or cannot be loaded","RSS 訂閱不存在或無法載入","RSS 订阅不存在或无法载入"
-"RSS 漫畫下載","RSS manga download","RSS 漫畫下載","RSS 漫画下载"
-"RSS 漫畫章節","RSS manga chapter","RSS 漫畫章節","RSS 漫画章节"
-"清除整個 RSS 下載","Clear all RSS downloads","清除整個 RSS 下載","清除整个 RSS 下载"
-"已清除整個 RSS 下載","Cleared all RSS downloads","已清除整個 RSS 下載","已清除整个 RSS 下载"
-"已重新整理此章","Chapter refreshed","已重新整理此章","已重新整理此章"
-"重新命名","Rename","重新命名","重新命名"
-"設為標籤封面","Set as tag cover","設為標籤封面","设为标签封面"
-"設為RSS封面","Set as RSS cover","設為RSS封面","设为RSS封面"
-"已設為標籤封面","Set as tag cover","已設為標籤封面","已设为标签封面"
-"已設為RSS封面","Set as RSS cover","已設為RSS封面","已设为RSS封面"
-"{} 個收藏夾，{} 個收藏項目","{} folders and {} favorite items","{} 個收藏夾，{} 個收藏項目","{} 个收藏夹，{} 个收藏项目"
-"分享哪些收藏夾","Choose folders to share","分享哪些收藏夾","分享哪些收藏夹"
-"分享收藏夾","Share favorite folders","分享收藏夾","分享收藏夹"
-"分享檔案","Share file","分享檔案","分享文件"
-"加入到哪些收藏夾","Choose target folders","加入到哪些收藏夾","加入到哪些收藏夹"
-"加入既有收藏夾","Add to existing folders","加入既有收藏夾","加入既有收藏夹"
-"匯出","Export","匯出","导出"
-"匯出收藏夾失敗","Failed to export favorite folders","匯出收藏夾失敗","导出收藏夹失败"
-"將建立一個 JSON 收藏分享檔案。","A JSON favorite share file will be created.","將建立一個 JSON 收藏分享檔案。","将建立一个 JSON 收藏分享文件。"
-"可儲存為檔案，或直接分享給其他 App。","Save it as a file, or share it directly to another app.","可儲存為檔案，或直接分享給其他 App。","可储存为文件，或直接分享给其他 App。"
-"儲存檔案","Save file","儲存檔案","储存文件"
-"找不到可分享檔案的 App","No app is available to share this file","找不到可分享檔案的 App","找不到可分享文件的 App"
-"另有 {} 個收藏夾","{} more folders","另有 {} 個收藏夾","另有 {} 个收藏夹"
-"已匯出 {}","Exported {}","已匯出 {}","已导出 {}"
-"已載入：新增 {} 項，重用 {} 項，跳過 {} 項","Imported: {} created, {} reused, {} skipped","已載入：新增 {} 項，重用 {} 項，跳過 {} 項","已载入：新增 {} 项，重用 {} 项，跳过 {} 项"
-"建立新收藏夾","Create new folders","建立新收藏夾","建立新收藏夹"
-"收藏分享檔案格式錯誤","Favorite share file format is invalid","收藏分享檔案格式錯誤","收藏分享文件格式错误"
-"沒有可分享的收藏夾","No favorite folders to share","沒有可分享的收藏夾","没有可分享的收藏夹"
-"沒有可加入的收藏夾","No favorite folders to add to","沒有可加入的收藏夾","没有可加入的收藏夹"
-"請選擇要分享的收藏夾","Select favorite folders to share","請選擇要分享的收藏夾","请选择要分享的收藏夹"
-"請選擇要加入的收藏夾","Select favorite folders to add to","請選擇要加入的收藏夾","请选择要加入的收藏夹"
-"載入收藏夾","Load favorite folders","載入收藏夾","载入收藏夹"
-"載入收藏夾失敗","Failed to load favorite folders","載入收藏夾失敗","载入收藏夹失败"
-"重複 {} / 不支援 {} / 無效 {}","Duplicates {} / unsupported {} / invalid {}","重複 {} / 不支援 {} / 無效 {}","重复 {} / 不支持 {} / 无效 {}"
-"HTTP {}，可能是登入狀態或圖片 Referer 已失效","HTTP {}; login state or image Referer may be invalid","HTTP {}，可能是登入狀態或圖片 Referer 已失效","HTTP {}，可能是登录状态或图片 Referer 已失效"
-"HTTP 404，圖片來源不存在或已被移除","HTTP 404; the image source does not exist or was removed","HTTP 404，圖片來源不存在或已被移除","HTTP 404，图片来源不存在或已被移除"
-"圖片請求沒有回傳可用錯誤原因","The image request did not return a usable error reason","圖片請求沒有回傳可用錯誤原因","图片请求没有返回可用错误原因"
-"{}失敗：{}","{} failed: {}","{}失敗：{}","{}失败：{}"
-"儲存圖片失敗：{}","Failed to save image: {}","儲存圖片失敗：{}","储存图片失败：{}"
-"圖片已下載，但無法取得原始檔案或 Bitmap","The image was downloaded, but the original file or bitmap could not be read","圖片已下載，但無法取得原始檔案或 Bitmap","图片已下载，但无法取得原始文件或 Bitmap"
-"系統相簿無法開啟輸出串流","The system photo album could not open an output stream","系統相簿無法開啟輸出串流","系统相簿无法开启输出串流"
-"系統相簿無法建立檔案","The system photo album could not create a file","系統相簿無法建立檔案","系统相簿无法建立文件"
-"分享圖片失敗：找不到可分享圖片的 App","Failed to share image: no app can share this image","分享圖片失敗：找不到可分享圖片的 App","分享图片失败：找不到可分享图片的 App"
-"分享圖片失敗：{}","Failed to share image: {}","分享圖片失敗：{}","分享图片失败：{}"
-"系統無法開啟分享畫面","The system could not open the share sheet","系統無法開啟分享畫面","系统无法开启分享画面"
-"系統相簿寫入失敗","The system photo album write failed","系統相簿寫入失敗","系统相簿写入失败"
-"未知錯誤","Unknown error","未知錯誤","未知错误"
-"下載圖片失敗：{}","Failed to download image: {}","下載圖片失敗：{}","下载图片失败：{}"
-"下載圖片失敗：圖片已下載但無法轉換成 PNG","Failed to download image: the image was downloaded but could not be converted to PNG","下載圖片失敗：圖片已下載但無法轉換成 PNG","下载图片失败：图片已下载但无法转换成 PNG"
-"複製圖片失敗：圖片資料無法轉換為系統圖片","Failed to copy image: image data could not be converted to a system image","複製圖片失敗：圖片資料無法轉換為系統圖片","复制图片失败：图片资料无法转换为系统图片"
-"分享圖片失敗：圖片資料無法轉換為系統圖片","Failed to share image: image data could not be converted to a system image","分享圖片失敗：圖片資料無法轉換為系統圖片","分享图片失败：图片资料无法转换为系统图片"
-"儲存圖片失敗：圖片資料無法轉換為系統圖片","Failed to save image: image data could not be converted to a system image","儲存圖片失敗：圖片資料無法轉換為系統圖片","储存图片失败：图片资料无法转换为系统图片"
-"已加入收藏，但同步失敗：{}","Added to favorites, but sync failed: {}","已加入收藏，但同步失敗：{}","已加入收藏，但同步失败：{}"
-"已加入本地收藏，但同步到百合會失敗：{}","Added to local favorites, but sync to Yamibo failed: {}","已加入本地收藏，但同步到百合會失敗：{}","已加入本地收藏，但同步到百合会失败：{}"
-"本帖隱藏內容需要積分: {}","Hidden content requires points: {}","本帖隱藏內容需要積分: {}","本帖隐藏内容需要积分: {}"
-"操作","Actions","操作","操作"
-"複製本章","Copy Chapter","複製本章","复制本章"
-"將當前章節的內容複製到剪貼簿。","Copy the current chapter content to the clipboard.","將當前章節的內容複製到剪貼簿。","将当前章节的内容复制到剪贴板。"
-"已複製本章內容","Chapter content copied","已複製本章內容","已复制本章内容"
-"暫無內容可複製","No content to copy","暫無內容可複製","暂无内容可复制"
-"本地小說","Local Novels","本地小說","本地小说"
-"還沒有本地小說","No local novels yet","還沒有本地小說","还没有本地小说"
-"導入小說","Import Novel","導入小說","导入小说"
-"導入成功","Import successful","導入成功","导入成功"
-"導入失敗：{}","Import failed: {}","導入失敗：{}","导入失败：{}"
-"不支援的檔案格式，請選擇 TXT 或 EPUB","Unsupported file format, please select TXT or EPUB","不支援的檔案格式，請選擇 TXT 或 EPUB","不支持的文件格式，请选择 TXT 或 EPUB"
-"刪除本地小說","Delete Local Novel","刪除本地小說","删除本地小说"
-"確定要刪除「{}」嗎？此操作無法復原。","Are you sure you want to delete \"{}\"? This cannot be undone.","確定要刪除「{}」嗎？此操作無法復原。","确定要删除「{}」吗？此操作无法复原。"
-"已刪除","Deleted","已刪除","已删除"
-"上一章","Previous Chapter","上一章","上一章"
-"下一章","Next Chapter","下一章","下一章"
-"選擇章節","Select Chapter","選擇章節","选择章节"
-"關閉","Close","關閉","关闭"
-"取消","Cancel","取消","取消"
-"返回","Back","返回","返回"
-"管理","Manage","管理","管理"
-"完成","Done","完成","完成"
-"批量刪除","Batch Delete","批量刪除","批量删除"
-"已選擇 {} 項","{} selected","已選擇 {} 項","已选择 {} 项"
-"已刪除 {} 項","Deleted {} items","已刪除 {} 項","已删除 {} 项"
-"確定要刪除所選的 {} 本小說嗎？此操作無法復原。","Are you sure you want to delete the selected {} novels? This cannot be undone.","確定要刪除所選的 {} 本小說嗎？此操作無法復原。","确定要删除所选的 {} 本小说吗？此操作无法复原。" / 最後更新 ,/Last updated, / 最後更新 , / 最后更新 
+ / 最後更新 ,/Last updated, / 最後更新 , / 最后更新 
+#標籤漫畫,#hashtagcomics,#標籤漫畫,#标签漫画
+(附言為可選，{} 會看到這條附言，最多 10 個字),"(Postscript is optional, {} will see this postscript, up to 10 characters)",(附言為可選，{} 會看到這條附言，最多 10 個字),(附言为可选，{} 会看到这条附言，最多 10 个字)
+- 沒有更多內容了 -,- No more content -,- 沒有更多內容了 -,- 没有更多内容了 -
+- 評論區結束 -,- End of comment section -,- 評論區結束 -,- 评论区结束 -
+/ 最後更新,/ Last updated,/ 最後更新,/ 最后更新
+1 天,1 day,1 天,1 天
+1 週,1 week,1 週,1 周
+?,?,?,?
+App 內打開,Open in app,App 內打開,App 内打开
+App 啟動時清除緩存,Clear cache when app starts,App 啟動時清除緩存,App 启动时清除缓存
+HTTP 404，圖片來源不存在或已被移除,HTTP 404; the image source does not exist or was removed,HTTP 404，圖片來源不存在或已被移除,HTTP 404，图片来源不存在或已被移除
+HTTP {}，可能是登入狀態或圖片 Referer 已失效,HTTP {}; login state or image Referer may be invalid,HTTP {}，可能是登入狀態或圖片 Referer 已失效,HTTP {}，可能是登录状态或图片 Referer 已失效
+Journal 清理,Journal cleanup,Journal 清理,Journal 清理
+Journal 清理程序等待下一次重新驗證：{},Journal cleanup is waiting for the next verification: {},Journal 清理程序等待下一次重新驗證：{},Journal 清理程序等待下一次重新验证：{}
+RSS,RSS,RSS,RSS
+RSS 內容已更新,RSS content updated,RSS 內容已更新,RSS 内容已更新
+RSS 已刷新,RSS refreshed,RSS 已刷新,RSS 已刷新
+RSS 已刷新，新增 {} 筆,RSS refreshed with {} new results,RSS 已刷新，新增 {} 筆,RSS 已刷新，新增 {} 笔
+RSS 搜尋目錄,RSS search directory,RSS 搜尋目錄,RSS 搜索目录
+RSS 搜尋進度,RSS search progress,RSS 搜尋進度,RSS 搜索进度
+RSS 新增 {} 個帖子,RSS added {} threads,RSS 新增 {} 個帖子,RSS 新增 {} 个帖子
+RSS 有新的帖子,RSS has new threads,RSS 有新的帖子,RSS 有新的帖子
+RSS 漫畫下載,RSS manga download,RSS 漫畫下載,RSS 漫画下载
+RSS 漫畫章節,RSS manga chapter,RSS 漫畫章節,RSS 漫画章节
+RSS 目錄,RSS directory,RSS 目錄,RSS 目录
+RSS 目錄已保存,RSS directory saved,RSS 目錄已保存,RSS 目录已保存
+RSS 目錄已重新命名,RSS directory renamed,RSS 目錄已重新命名,RSS 目录已重新命名
+RSS 目錄進度,RSS catalog progress,RSS 目錄進度,RSS 目录进度
+RSS 訂閱,RSS subscriptions,RSS 訂閱,RSS 订阅
+RSS 訂閱不存在,RSS subscription does not exist,RSS 訂閱不存在,RSS 订阅不存在
+RSS 訂閱不存在或無法載入,RSS subscription does not exist or cannot be loaded,RSS 訂閱不存在或無法載入,RSS 订阅不存在或无法载入
+RSS 訂閱已刪除,RSS subscription deleted,RSS 訂閱已刪除,RSS 订阅已删除
+RSS 訂閱已刷新,RSS subscriptions refreshed,RSS 訂閱已刷新,RSS 订阅已刷新
+RSS搜尋目錄,RSS search directory,RSS搜尋目錄,RSS搜索目录
+RSS搜尋目錄(#{}),RSS search directory (#{}),RSS搜尋目錄(#{}),RSS搜索目录(#{})
+RSS收藏,RSS favorites,RSS收藏,RSS收藏
+TODO: 回覆定位跳轉尚未接入,TODO: The reply positioning jump has not been accessed yet,TODO: 回覆定位跳轉尚未接入,TODO: 回复定位跳转尚未接入
+TODO: 消息互動尚未接入,TODO: Message interaction has not been connected yet,TODO: 消息互動尚未接入,TODO: 消息互动尚未接入
+Tag Manga 章節數,Tag Manga chapters,Tag Manga 章節數,Tag Manga 章节数
+Tag 漫畫,Tag comics,Tag 漫畫,Tag 漫画
+Ta的主題,Their threads,Ta的主題,Ta的主题
+Ta的回覆,Their replies,Ta的回覆,Ta的回复
+Ta的資料,Their profile,Ta的資料,Ta的资料
+Thread,Thread,Thread,Thread
+Thread 頁數,Thread pages,Thread 頁數,Thread 页数
+WebView 打開,WebView open,WebView 打開,WebView 打开
+tip：長按可詳細編輯收藏路徑,Tip: Long press to edit the favorite path in detail,tip：長按可詳細編輯收藏路徑,tip：长按可详细编辑收藏路径
+{} ({}),{} ({}),{} ({}),{} ({})
+{} / {} 積分,{} / {} points,{} / {} 積分,{} / {} 积分
+{} · 下載中 {}，等待 {}，失敗 {},"{} · Downloading {}, Waiting {}, Failed {}",{} · 下載中 {}，等待 {}，失敗 {},{} · 下载中 {}，等待 {}，失败 {}
+{} 個收藏夾，{} 個收藏項目,{} folders and {} favorite items,{} 個收藏夾，{} 個收藏項目,{} 个收藏夹，{} 个收藏项目
+{} 個新搜尋結果,{} new search results,{} 個新搜尋結果,{} 个新搜索结果
+{} 個訂閱目錄,{} subscription directories,{} 個訂閱目錄,{} 个订阅目录
+{} 張圖片 · {},{} images · {},{} 張圖片 · {},{} 张图片 · {}
+{} 新,{} new,{} 新,{} 新
+{} 秒後可確認,Confirm in {} seconds,{} 秒後可確認,{} 秒后可确认
+{} 積分,{} points,{} 積分,{} 积分
+{} 項 · {} 張圖片 · {},{} items · {} images · {},{} 項 · {} 張圖片 · {},{} 项 · {} 张图片 · {}
+{}分鐘前,{} minutes ago,{}分鐘前,{}分钟前
+{}天前,{} days ago,{}天前,{}天前
+{}失敗：{},{} failed: {},{}失敗：{},{}失败：{}
+{}小時前,{} hours ago,{}小時前,{}小时前
+{}：{},{}: {},{}：{},{}：{}
+一般帖子,Normal threads,一般帖子,一般帖子
+上一個分頁,Previous tab,上一個分頁,上一个分页
+上一批收藏正在加入下載佇列,The previous favorite batch is still being queued,上一批收藏正在加入下載佇列,上一批收藏正在加入下载队列
+上一步,Previous,上一步,上一步
+上一章,Previous Chapter,上一章,上一章
+上一話,Previous episode,上一話,上一话
+上一頁,Previous page,上一頁,上一页
+上一頁 / 下一頁,Previous page / Next page,上一頁 / 下一頁,上一页 / 下一页
+上傳目前資料,Upload current data,上傳目前資料,上传当前数据
+上傳至雲端,Upload to cloud,上傳至雲端,上传至云端
+上次刷新失敗,Last refresh failed,上次刷新失敗,上次刷新失败
+上次刷新成功,Last refresh succeeded,上次刷新成功,上次刷新成功
+下一個分頁,Next tab,下一個分頁,下一个分页
+下一步,Next,下一步,下一步
+下一章,Next Chapter,下一章,下一章
+下一等級,Next level,下一等級,下一等级
+下一話,Next chapter,下一話,下一话
+下一頁,Next page,下一頁,下一页
+下載,Download,下載,下载
+下載中,Downloading,下載中,下载中
+下載佇列,Download queue,下載佇列,下载队列
+下載內容,Download content,下載內容,下载内容
+下載內容會存放在本地資料備份指定的資料夾。,Downloaded content is stored in the folder selected under Local data backup.,下載內容會存放在本地資料備份指定的資料夾。,下载内容会存放在本地数据备份指定的文件夹。
+下載內容會存放在設定與收藏備份指定的資料夾。,Downloaded content will be stored in the folder specified in settings and backup.,下載內容會存放在設定與收藏備份指定的資料夾。,下载内容会存放在设定与收藏备份指定的文件夹。
+下載內容管理,Download management,下載內容管理,下载内容管理
+下載全部分頁,Download all tabs,下載全部分頁,下载全部分页
+下載圖片,Download image,下載圖片,下载图片
+下載圖片 {}/{},Downloading image {} of {},下載圖片 {}/{},下载图片 {}/{}
+下載圖片失敗,Failed to download image,下載圖片失敗,下载图片失败
+下載圖片失敗：{},Failed to download image: {},下載圖片失敗：{},下载图片失败：{}
+下載圖片失敗：圖片已下載但無法轉換成 PNG,Failed to download image: the image was downloaded but could not be converted to PNG,下載圖片失敗：圖片已下載但無法轉換成 PNG,下载图片失败：图片已下载但无法转换成 PNG
+下載失敗,Download failed,下載失敗,下载失败
+下載完成,Download complete,下載完成,下载完成
+下載完成：第 {} 頁,Downloaded: page {},下載完成：第 {} 頁,下载完成：第 {} 页
+下載完整 Thread,Download entire thread,下載完整 Thread,下载完整 Thread
+下載文字,Download text,下載文字,下载文字
+下載方式,Download mode,下載方式,下载方式
+下載時間,Download time,下載時間,下载时间
+下載會保存整頁帖子與原始圖片。,Download saves the entire page of posts and original images.,下載會保存整頁帖子與原始圖片。,下载会保存整页帖子与原始图片。
+下載此章,Download this chapter,下載此章,下载此章
+下載狀態需處理,Download status needs handling,下載狀態需處理,下载状态需处理
+下載目前分頁,Download current tab,下載目前分頁,下载目前分页
+下載目前頁,Download current page,下載目前頁,下载目前页
+下載管理,Download manager,下載管理,下载管理
+下載除最後一頁以外的全部頁,Download all pages except the last page,下載除最後一頁以外的全部頁,下载除最后一页以外的全部页
+下載除最後一頁的所有頁面,Download all pages except the last one,下載除最後一頁的所有頁面,下载除最后一页的所有页面
+不支援的檔案格式，請選擇 TXT 或 EPUB,"Unsupported file format, please select TXT or EPUB",不支援的檔案格式，請選擇 TXT 或 EPUB,不支持的文件格式，请选择 TXT 或 EPUB
+不輸入將使用自動生成名稱,"If left blank, an auto-generated name will be used",不輸入將使用自動生成名稱,不输入将使用自动生成名称
+不顯示,Do not show,不顯示,不显示
+中斷,Interrupt,中斷,中断
+中斷同步,Interrupt synchronization,中斷同步,中断同步
+主題,Theme,主題,主题
+今天尚未完成每日簽到。,You haven't completed today's daily check-in.,今天尚未完成每日簽到。,今天尚未完成每日签到。
+今天狀態：已簽到,Today's status: Signed in,今天狀態：已簽到,今天状态：已签到
+今天狀態：未簽到,Today's status: Not signed in,今天狀態：未簽到,今天状态：未签到
+今日不再提醒,Don't remind today,今日不再提醒,今日不再提醒
+今日已簽,Signed today,今日已簽,今日已签
+今日已簽到,Signed in today,今日已簽到,今日已签到
+介面已就緒，雲端同步功能將由新架構提供,The interface is ready; cloud sync will be provided by the new architecture,介面已就緒，雲端同步功能將由新架構提供,界面已就绪，云端同步功能将由新架构提供
+以雲端備份替換全部同步資料，下一步會再次確認。,Replace all synchronized data with the cloud backup. You will be asked to confirm again.,以雲端備份替換全部同步資料，下一步會再次確認。,使用云端备份替换全部同步数据。下一步会再次确认。
+作品與章節,Works and Chapters,作品與章節,作品与章节
+你今天還沒簽到,You haven't checked in today,你今天還沒簽到,你今天还没签到
+你確定要將百合會收藏同步到本地嗎,Are you sure you want to synchronize Yamibo favorites to your local computer?,你確定要將百合會收藏同步到本地嗎,你确定要将百合会收藏同步到本地吗
+使用外部瀏覽器開啟,Open using an external browser,使用外部瀏覽器開啟,使用外部浏览器开启
+供應端暫停,Provider paused,供應端暫停,服务端暂停
+保存失敗,Save failed,保存失敗,保存失败
+保存搜尋為 RSS 目錄,Save search as RSS directory,保存搜尋為 RSS 目錄,保存搜索为 RSS 目录
+保存此頁所有帖子與圖片,Save all posts and images on this page,保存此頁所有帖子與圖片,保存此页所有帖子与图片
+保存為目錄,Save as directory,保存為目錄,保存为目录
+保留可能持續更新的最後一頁在線閱讀,Keep the last page for online reading as it may be updated,保留可能持續更新的最後一頁在線閱讀,保留可能持续更新的最后一页在线阅读
+保留本地收藏,Keep local favorite,保留本地收藏,保留本地收藏
+保留現有資料，只加入不存在的收藏與狀態,Keep existing data and only add missing favorites and state,保留現有資料，只加入不存在的收藏與狀態,保留现有资料，只加入不存在的收藏与状态
+保留系統列背景,Keep system column background,保留系統列背景,保留系统列背景
+保留較新的本機或雲端紀錄，不讓舊紀錄覆蓋新紀錄。,Keep the newer local or cloud record so older records cannot overwrite newer ones.,保留較新的本機或雲端紀錄，不讓舊紀錄覆蓋新紀錄。,保留较新的本地或云端记录，避免旧记录覆盖新记录。
+個人主頁,Personal homepage,個人主頁,个人主页
+個人簽名,Personal signature,個人簽名,个人签名
+備份名稱,Backup name,備份名稱,备份名称
+備份收藏、設定、歷史進度與更新紀錄,"Back up favorites, settings, reading progress, and update records",備份收藏、設定、歷史進度與更新紀錄,备份收藏、设置、历史进度与更新记录
+備份檔案,Backup files,備份檔案,备份文件
+備份範圍包含收藏、設定、筆記、書籤、歷史進度與更新紀錄。,"Backup includes favorites, settings, notes, bookmarks, reading progress, and update records.",備份範圍包含收藏、設定、筆記、書籤、歷史進度與更新紀錄。,备份范围包含收藏、设置、笔记、书签、历史进度与更新记录。
+備份資料夾,Backup folder,備份資料夾,备份文件夹
+僅在一般同步無法解決資料差異時使用。確認前會重新比較本機與雲端。,Use only when ordinary sync cannot resolve a data difference. Local and cloud data are compared again before confirmation.,僅在一般同步無法解決資料差異時使用。確認前會重新比較本機與雲端。,仅在常规同步无法解决数据差异时使用。确认前会重新比较本地与云端。
+僅移除當下目錄,Remove only current directory,僅移除當下目錄,仅移除当下目录
+僅解除本地收藏,Remove local favorite only,僅解除本地收藏,仅移除本地收藏
+儲存中,Saving,儲存中,储存中
+儲存圖片失敗：{},Failed to save image: {},儲存圖片失敗：{},储存图片失败：{}
+儲存圖片失敗：圖片資料無法轉換為系統圖片,Failed to save image: image data could not be converted to a system image,儲存圖片失敗：圖片資料無法轉換為系統圖片,储存图片失败：图片资料无法转换为系统图片
+儲存失敗,Save failed,儲存失敗,储存失败
+儲存檔案,Save file,儲存檔案,储存文件
+儲存空間使用情形,Storage usage,儲存空間使用情形,储存空间使用情形
+內容區,Content area,內容區,内容区
+內容寬度,Content width,內容寬度,内容宽度
+全域刷新,Global refresh,全域刷新,全局刷新
+全域刷新收藏更新,Global refresh favorite updates,全域刷新收藏更新,全局刷新收藏更新
+全部 ({}),All ({}),全部 ({}),全部 ({})
+全部下載,Download all,全部下載,全部下载
+全部刷新,Refresh all,全部刷新,全部刷新
+全部評分,All ratings,全部評分,全部评分
+共 {} 筆,{} total,共 {} 筆,共 {} 笔
+共 {} 項，Thread {} 頁，標籤漫畫 {} 章，圖片 {} 張,"Total {} items, {} thread pages, {} tag manga chapters, {} images",共 {} 項，Thread {} 頁，標籤漫畫 {} 章，圖片 {} 張,共 {} 项，Thread {} 页，标签漫画 {} 章，图片 {} 张
+再按一次退出應用,Press again to exit the app,再按一次退出應用,再按一次退出应用
+再次確認清除雲端資料,Confirm cloud data deletion again,再次確認清除雲端資料,再次确认清除云端数据
+分享哪些收藏夾,Choose folders to share,分享哪些收藏夾,分享哪些收藏夹
+分享圖片,Share pictures,分享圖片,分享图片
+分享圖片失敗：{},Failed to share image: {},分享圖片失敗：{},分享图片失败：{}
+分享圖片失敗：圖片資料無法轉換為系統圖片,Failed to share image: image data could not be converted to a system image,分享圖片失敗：圖片資料無法轉換為系統圖片,分享图片失败：图片资料无法转换为系统图片
+分享圖片失敗：找不到可分享圖片的 App,Failed to share image: no app can share this image,分享圖片失敗：找不到可分享圖片的 App,分享图片失败：找不到可分享图片的 App
+分享收藏夾,Share favorite folders,分享收藏夾,分享收藏夹
+分享檔案,Share file,分享檔案,分享文件
+分數,Fraction,分數,分数
+分組:,Group:,分組:,分组:
+分類,Classification,分類,分类
+分類更新範圍,Category update scope,分類更新範圍,分类更新范围
+刪除 {},Delete {},刪除 {},删除 {}
+刪除收藏失敗,Failed to delete favorites,刪除收藏失敗,删除收藏失败
+刪除本地小說,Delete Local Novel,刪除本地小說,删除本地小说
+刪除類別,Delete category,刪除類別,删除类别
+刷新中,Refreshing,刷新中,刷新中
+刷新失敗: {},Refresh failed: {},刷新失敗: {},刷新失败: {}
+刷新已下載頁面,Refresh downloaded pages,刷新已下載頁面,刷新已下载页面
+刷新週期,Refresh cycle,刷新週期,刷新周期
+刷新週期: {},Refresh cycle: {},刷新週期: {},刷新周期: {}
+刷新週期已改為 {},Refresh cycle changed to {},刷新週期已改為 {},刷新周期已改为 {}
+前往下載管理,Go to download manager,前往下載管理,前往下载管理
+前往簽到,Go to check-in,前往簽到,前往签到
+前往設定,Go to settings,前往設定,前往设定
+剛剛,Just now,剛剛,刚刚
+加入下載佇列失敗：{},Failed to queue downloads: {},加入下載佇列失敗：{},加入下载队列失败：{}
+加入下載失敗,Failed to add to download,加入下載失敗,加入下载失败
+加入到哪些收藏夾,Choose target folders,加入到哪些收藏夾,加入到哪些收藏夹
+加入既有收藏夾,Add to existing folders,加入既有收藏夾,加入既有收藏夹
+加入集合,Add to collection,加入集合,加入集合
+加為好友,Add as friend,加為好友,加为好友
+加為好友失敗：{},Failed to add friend: {},加為好友失敗：{},加为好友失败：{}
+動態抓取封面,Dynamic cover fetching,動態抓取封面,动态抓取封面
+勾選大類，或點進去選擇小集合,"Check the major categories, or click in to select small collections",勾選大類，或點進去選擇小集合,勾选大类，或点进去选择小集合
+匯出,Export,匯出,导出
+匯出收藏夾失敗,Failed to export favorite folders,匯出收藏夾失敗,导出收藏夹失败
+區間,Interval,區間,区间
+參與人數 {},Participants: {},參與人數 {},参与人数 {}
+參與投票的會員,Members who voted,參與投票的會員,参与投票的会员
+反轉觸控區域,Reverse touch zones,反轉觸控區域,反转触控区域
+取消,Cancel,取消,取消
+取消佇列並刪除所有已下載頁,Cancel queue and delete all downloaded pages,取消佇列並刪除所有已下載頁,取消队列并删除所有已下载页
+取消全部收藏嗎,Cancel all favorites?,取消全部收藏嗎,取消全部收藏吗
+取消後會移除目前這個收藏項目。,Cancellation will remove the current favorite item.,取消後會移除目前這個收藏項目。,取消后会移除目前这个收藏项目。
+取消收藏失敗,Failed to cancel favorite,取消收藏失敗,取消收藏失败
+另有 {} 個收藏夾,{} more folders,另有 {} 個收藏夾,另有 {} 个收藏夹
+只刪本地,Only delete local,只刪本地,只删本地
+只刪除此頁離線內容,Delete only offline content of this page,只刪除此頁離線內容,只删除此页离线内容
+可儲存為檔案，或直接分享給其他 App。,"Save it as a file, or share it directly to another app.",可儲存為檔案，或直接分享給其他 App。,可储存为文件，或直接分享给其他 App。
+可刷新,Refreshable,可刷新,可刷新
+可在外觀新增字體,You can add fonts in appearance settings,可在外觀新增字體,可在外观新增字体
+可在閱讀頁使用下載按鈕加入目前頁或完整 Thread。,Use the download button on the reading page to add the current page or entire thread.,可在閱讀頁使用下載按鈕加入目前頁或完整 Thread。,可在阅读页使用下载按钮加入目前页或完整 Thread。
+合併,Merge,合併,合并
+合併新增,Merge and add,合併新增,合并新增
+合成/加入集合,Merge/add to collection,合成/加入集合,合成/加入集合
+同步中,Syncing,同步中,同步中
+同步到哪個類別,Which category to sync to?,同步到哪個類別,同步到哪个类别
+同步到百合會,Sync to Yamibo,同步到百合會,同步到百合会
+同步到百合會收藏嗎,Sync to Yamibo favorites?,同步到百合會收藏嗎,同步到百合会收藏吗
+同步失敗,Sync failed,同步失敗,同步失败
+同步完成：接收 {}、確認 {},Sync complete: received {}; acknowledged {},同步完成：接收 {}、確認 {},同步完成：接收 {}、确认 {}
+同步就緒,Sync ready,同步就緒,同步就绪
+同步已中斷,Sync interrupted,同步已中斷,同步已中断
+同步核心尚未啟用,Sync core is not enabled,同步核心尚未啟用,同步核心尚未启用
+同步核心尚未連接,Sync core is not connected,同步核心尚未連接,同步核心尚未连接
+同步核心目前無法使用,The sync core is currently unavailable,同步核心目前無法使用,同步核心目前无法使用
+同步狀態,Sync status,同步狀態,同步状态
+同步發生未預期錯誤，已保留待同步操作並排定重試,An unexpected sync error occurred; pending operations were preserved and a retry was scheduled,同步發生未預期錯誤，已保留待同步操作並排定重試,同步发生意外错误，已保留待同步操作并安排重试
+同步百合會收藏,Sync Yamibo favorites,同步百合會收藏,同步百合会收藏
+同步移除百合會收藏嗎,Remove from Yamibo favorites simultaneously?,同步移除百合會收藏嗎,同步移除百合会收藏吗
+同步範圍,Sync scope,同步範圍,同步范围
 同步至百合會失敗：{},Failed to sync to Yamibo: {},同步至百合會失敗：{},同步至百合会失败：{}
-百合會已收藏，但未取得收藏識別碼,Bookmarked on Yamibo but no favorite ID was returned,百合會已收藏，但未取得收藏識別碼,百合会已收藏，但未获取收藏标识码
-百合會收藏識別碼不可用。請到收藏頁使用「同步百合會收藏」重新對齊識別碼後再試。,The Yamibo favorite ID is unavailable. Use Sync Yamibo Favorites on the Favorites page to realign IDs before retrying.,百合會收藏識別碼不可用。請到收藏頁使用「同步百合會收藏」重新對齊識別碼後再試。,百合会收藏标识码不可用。请到收藏页使用“同步百合会收藏”重新对齐标识码后再试。
-正在收藏本版...,Bookmarking this forum...,正在收藏本版...,正在收藏本版...
-已收藏本版,Forum bookmarked,已收藏本版,已收藏本版
-正在解除本版收藏...,Removing forum bookmark...,正在解除本版收藏...,正在解除本版收藏...
-已解除本版收藏,Forum bookmark removed,已解除本版收藏,已解除本版收藏
+同步花費時間,Synchronization takes time,同步花費時間,同步花费时间
+同步設定、收藏與閱讀紀錄,"Sync settings, favorites, and reading history",同步設定、收藏與閱讀紀錄,同步设置、收藏与阅读记录
+同步詳情,Sync details,同步詳情,同步详情
+同步資料,Sync data,同步資料,同步数据
+同步資料已隔離；手動同步不會修改本機資料,Sync data is quarantined; manual sync will not modify local data,同步資料已隔離；手動同步不會修改本機資料,同步数据已隔离；手动同步不会修改本地数据
+同步資料已隔離；重新檢查不會修改本機資料,Sync data is quarantined; rechecking will not modify local data,同步資料已隔離；重新檢查不會修改本機資料,同步数据已隔离；重新检查不会修改本地数据
+同步過程發生錯誤,An error occurred during synchronization,同步過程發生錯誤,同步过程发生错误
+啟用,Enable,啟用,启用
+回復,Reply,回復,回复
+回復已發表，請刷新頁面查看,"Reply posted, please refresh to view.",回復已發表，請刷新頁面查看,回复已发表，请刷新页面查看
+回復成功,Reply successful,回復成功,回复成功
+回覆,Reply,回覆,回复
+圓餅圖,Pie chart,圓餅圖,圆饼图
+圖片已下載，但無法取得原始檔案或 Bitmap,"The image was downloaded, but the original file or bitmap could not be read",圖片已下載，但無法取得原始檔案或 Bitmap,图片已下载，但无法取得原始文件或 Bitmap
+圖片張數,Number of images,圖片張數,图片张数
+圖片約佔 {},Images take up about {},圖片約佔 {},图片约占 {}
+圖片請求沒有回傳可用錯誤原因,The image request did not return a usable error reason,圖片請求沒有回傳可用錯誤原因,图片请求没有返回可用错误原因
+圖片載入中,Picture loading,圖片載入中,图片载入中
+圖片閱讀進度,Image reading progress,圖片閱讀進度,图片阅读进度
+圖表,Chart,圖表,图表
+在右下角以小字顯示目前頁內閱讀進度。,Show the current in-page reading progress in small text at the bottom right.,在右下角以小字顯示目前頁內閱讀進度。,在右下角以小字显示目前页内阅读进度。
+在應用內開啟連結,Open link within app,在應用內開啟連結,在应用内打开链接
+在瀏覽器開啟,Open in browser,在瀏覽器開啟,在浏览器开启
+在狀態列與底部導覽列後方使用閱讀背景，避免透明系統列蓋住內容。,Use a reading background behind the status bar and bottom navigation bar to prevent transparent system bars from covering the content.,在狀態列與底部導覽列後方使用閱讀背景，避免透明系統列蓋住內容。,在状态列与底部导览列后方使用阅读背景，避免透明系统列盖住内容。
+在線成員,Online members,在線成員,在线成员
+在線時間,Online time,在線時間,在线时间
+執行中,Running,執行中,执行中
+外部瀏覽器,External browser,外部瀏覽器,外部浏览器
+失敗 {},Failed {},失敗 {},失败 {}
+套用,Apply,套用,套用
+好友請求已送出,Friend request sent,好友請求已送出,好友请求已送出
+如果這個 app 對你有幫助，可以透過以下方式支持開發與維護。,"If this app is helpful to you, you can support its development and maintenance in the following ways.",如果這個 app 對你有幫助，可以透過以下方式支持開發與維護。,如果这个 app 对你有帮助，可以透过以下方式支持开发与维护。
+子版區,Sub-forum,子版區,子版区
+字體,Font,字體,字体
+字體大小,Font size,字體大小,字体大小
+學歷,Educational qualifications,學歷,学历
+安全載入完成，套用 {} 筆操作,Safe load complete; applied {} operations,安全載入完成，套用 {} 筆操作,安全加载完成，应用了 {} 条操作
+安全載入完成，套用 {} 筆操作；保留 {} 筆無法解析來源的舊 RSS 閱讀紀錄於本機,Safe load completed with {} operation(s); {} unresolved legacy RSS reading record(s) remain local,安全載入完成，套用 {} 筆操作；保留 {} 筆無法解析來源的舊 RSS 閱讀紀錄於本機,安全加载完成，应用 {} 条操作；{} 条无法解析来源的旧 RSS 阅读记录保留在本地
+安裝更新,Install update,安裝更新,安装更新
+完全移除收藏時詢問同步刪除,Ask for simultaneous deletion when completely removing favorites,完全移除收藏時詢問同步刪除,完全移除收藏时询问同步删除
+完全移除收藏預設動作,Completely remove favorite preset actions,完全移除收藏預設動作,完全移除收藏预设动作
+完全覆蓋,Overwrite completely,完全覆蓋,完全覆盖
+完成,Done,完成,完成
+完成 Cloudflare 驗證後，程式會在簽到成功後一路補到不能再補。,"After completing the Cloudflare verification, the program will fill in all the time after successful sign-in until it can no longer be filled in.",完成 Cloudflare 驗證後，程式會在簽到成功後一路補到不能再補。,完成 Cloudflare 验证后，程式会在签到成功后一路补到不能再补。
+定位失敗,Positioning failed,定位失敗,定位失败
+定期自動備份,Scheduled automatic backup,定期自動備份,定期自动备份
+容量,Size,容量,容量
+將全部頁面加入背景佇列,Add all pages to background queue,將全部頁面加入背景佇列,将全部页面加入背景队列
+將建立一個 JSON 收藏分享檔案。,A JSON favorite share file will be created.,將建立一個 JSON 收藏分享檔案。,将建立一个 JSON 收藏分享文件。
+將從網站重新抓取此章圖片，成功後覆蓋本地下載；失敗會保留舊內容。,Re-download chapter images from the site; on success overwrite local downloads; if failed keep old content.,將從網站重新抓取此章圖片，成功後覆蓋本地下載；失敗會保留舊內容。,将从网站重新抓取此章图片，成功后覆盖本地下载；失败会保留旧内容。
+將從網站重新抓取目前頁，成功後覆蓋舊的下載內容。失敗時會保留原下載。,"Re-download current page from the site; overwrite old download on success, keep original on failure.",將從網站重新抓取目前頁，成功後覆蓋舊的下載內容。失敗時會保留原下載。,将从网站重新抓取目前页，成功后覆盖旧的下载内容。失败时会保留原下载。
+將當前章節的內容複製到剪貼簿。,Copy the current chapter content to the clipboard.,將當前章節的內容複製到剪貼簿。,将当前章节的内容复制到剪贴板。
+將重新檢查所有收藏並建立新的更新任務。網站維護中可能會產生大量錯誤記錄。,All favorites will be rechecked and new update tasks created. A large number of error records may be generated during website maintenance.,將重新檢查所有收藏並建立新的更新任務。網站維護中可能會產生大量錯誤記錄。,将重新检查所有收藏并建立新的更新任务。网站维护中可能会产生大量错误记录。
+對象,Object,對象,对象
+導入失敗：{},Import failed: {},導入失敗：{},导入失败：{}
+導入小說,Import Novel,導入小說,导入小说
+導入成功,Import successful,導入成功,导入成功
+小說,Novel,小說,小说
+小說帖子,Novel threads,小說帖子,小说帖子
+尚未保存任何搜尋目錄,No saved search directories yet,尚未保存任何搜尋目錄,尚未保存任何搜索目录
+尚未刷新,Not refreshed yet,尚未刷新,尚未刷新
+尚未取得簽到資訊,Sign-in information has not been obtained yet,尚未取得簽到資訊,尚未取得签到资讯
+尚未啟用,Not enabled,尚未啟用,尚未启用
+尚未提供,Not available yet,尚未提供,尚未提供
+尚未檢查,Not checked yet,尚未檢查,尚未检查
+尚未設定下載資料夾,Download folder not set,尚未設定下載資料夾,尚未设定下载文件夹
+尚未連接,Not connected,尚未連接,尚未连接
+尚未選擇備份資料夾,Backup folder not selected,尚未選擇備份資料夾,尚未选择备份文件夹
+尚未開始同步,Sync has not started yet,尚未開始同步,尚未开始同步
+尚無收藏資料,No favorites yet,尚無收藏資料,尚无收藏资料
+尚無紀錄,No records yet,尚無紀錄,暂无记录
+尚無閱讀時數資料,No reading hours data yet,尚無閱讀時數資料,尚无阅读时数资料
+展開同步詳情,Expand sync details,展開同步詳情,展开同步详情
+已下載,Downloaded,已下載,已下载
+已下載 {},Downloaded {},已下載 {},已下载 {}
+已中斷收藏更新檢查,Favorite update check interrupted,已中斷收藏更新檢查,已中断收藏更新检查
+已使用 {}，{} 個備份檔,"Used {}, {} backup files",已使用 {}，{} 個備份檔,已使用 {}，{} 个备份档
+已保存筆記,Note saved,已保存筆記,已保存笔记
+已儲存圖片至相簿,Saved picture to album,已儲存圖片至相簿,已储存图片至相簿
+已刪除,Deleted,已刪除,已删除
+已刪除 {} 項,Deleted {} items,已刪除 {} 項,已删除 {} 项
+已刪除全部更新紀錄,All update records deleted,已刪除全部更新紀錄,已删除全部更新纪录
+已刪除字體：{},Deleted font: {},已刪除字體：{},已删除字体：{}
+已刪除收藏,Favorites deleted,已刪除收藏,已删除收藏
+已刪除筆記,Note deleted,已刪除筆記,已删除笔记
+已刪除這筆紀錄,This record has been deleted,已刪除這筆紀錄,已删除这笔纪录
+已刷新下載內容,Downloaded content refreshed,已刷新下載內容,已刷新下载内容
+已刷新閱讀歷史紀錄,Reading history has been refreshed,已刷新閱讀歷史紀錄,已刷新阅读历史纪录
+已加入 {} 項，失敗 {} 項，跳過 {} 項,"Queued {} item(s), failed {}, skipped {}",已加入 {} 項，失敗 {} 項，跳過 {} 項,已加入 {} 项，失败 {} 项，跳过 {} 项
+已加入下載佇列,Added to download queue,已加入下載佇列,已加入下载队列
+已加入下載佇列 {} 項,Queued {} download item(s),已加入下載佇列 {} 項,已加入下载队列 {} 项
+已加入大類,Already added to major categories,已加入大類,已加入大类
+已加入完整 Thread 下載,Added entire thread to downloads,已加入完整 Thread 下載,已加入完整 Thread 下载
+已加入收藏，但同步失敗：{},"Added to favorites, but sync failed: {}",已加入收藏，但同步失敗：{},已加入收藏，但同步失败：{}
+已加入收藏，預設存入未分類,"Already added to favorites, default saved to uncategorized",已加入收藏，預設存入未分類,已加入收藏，预设存入未分类
+已加入本地收藏，但同步到百合會失敗：{},"Added to local favorites, but sync to Yamibo failed: {}",已加入本地收藏，但同步到百合會失敗：{},已加入本地收藏，但同步到百合会失败：{}
+已加入本地收藏，但找不到同步目標。,"Added to local favorites, but sync target not found.",已加入本地收藏，但找不到同步目標。,已加入本地收藏，但找不到同步目标。
+已加入本地收藏，預設存入未分類,"Already added to local favorites, default saved to uncategorized",已加入本地收藏，預設存入未分類,已加入本地收藏，预设存入未分类
+已加入除最後一頁外的下載,Added download except last page,已加入除最後一頁外的下載,已加入除最后一页外的下载
+已加入集合,Added to collection,已加入集合,已加入集合
+已匯入到本地,Imported to local,已匯入到本地,已汇入到本地
+已匯出 {},Exported {},已匯出 {},已导出 {}
+已取消收藏更新檢查,Favorite update check canceled,已取消收藏更新檢查,已取消收藏更新检查
+已同步至百合會,Already synced to Yamibo,已同步至百合會,已同步至百合会
+已啟用,Enabled,已啟用,已启用
+已完成一個非活躍 Journal 的安全清理,Safely cleaned up one inactive Journal,已完成一個非活躍 Journal 的安全清理,已完成一个非活跃 Journal 的安全清理
+已就緒,Ready,已就緒,已就绪
+已建立備份：{},Backup created: {},已建立備份：{},已建立备份：{}
+已從所有位置移除收藏,Favorites removed from all locations,已從所有位置移除收藏,已从所有位置移除收藏
 已從百合會取消收藏,Removed from Yamibo favorites,已從百合會取消收藏,已从百合会取消收藏
-建立備份時發生錯誤,An error occurred while creating the backup,建立備份時發生錯誤,建立备份时发生错误
-最近閱讀 ,Recently read,最近閱讀 ,最近阅读 
-正在建立備份,Creating backup,正在建立備份,正在建立备份
-標籤漫畫章節數,Tag manga chapters,標籤漫畫章節數,标签漫画章节数
+已排定 App 啟動同步,App startup sync scheduled,已排定 App 啟動同步,已安排 App 启动同步
+已排定自動同步,Automatic sync scheduled,已排定自動同步,已安排自动同步
+已排定離開前台同步,Foreground exit sync scheduled,已排定離開前台同步,已安排离开前台同步
+已收斂,Converged,已收斂,已收敛
+已收藏本版,Forum bookmarked,已收藏本版,已收藏本版
+已收藏此 RSS 訂閱,This RSS subscription is already favorited,已收藏此 RSS 訂閱,已收藏此 RSS 订阅
+已收藏為 RSS 訂閱,Favorited as RSS subscription,已收藏為 RSS 訂閱,已收藏为 RSS 订阅
+已新增書籤,Bookmark added,已新增書籤,已新增书签
+已暫停,Paused,已暫停,已暂停
+已更新收藏路徑,Favorite path updated,已更新收藏路徑,已更新收藏路径
+已有同步工作執行中,A sync is already running,已有同步工作執行中,已有同步任务执行中
+已有同步或 Journal 維護工作執行中,A sync or Journal maintenance task is already running,已有同步或 Journal 維護工作執行中,已有同步或 Journal 维护任务执行中
+已標為已讀,Marked as read,已標為已讀,已标为已读
+已標為未讀,Marked as unread,已標為未讀,已标为未读
+已清除 {} 筆雲端同步資料；本機資料已排入安全重建,Deleted {} cloud sync records; local data is queued for safe rebuilding,已清除 {} 筆雲端同步資料；本機資料已排入安全重建,已清除 {} 条云端同步数据；本地数据已排入安全重建
+已清除 {} 筆雲端連結紀錄；下次同步會重新驗證最新索引,Deleted {} cached cloud links; the latest index will be verified on the next sync,已清除 {} 筆雲端連結紀錄；下次同步會重新驗證最新索引,已清除 {} 条云端链接记录；下次同步会重新验证最新索引
+已清除下載內容,Downloads cleared,已清除下載內容,已清除下载内容
+已清除全部閱讀紀錄,All reading history cleared,已清除全部閱讀紀錄,已清除全部阅读纪录
+已清除所有緩存,All cache cleared,已清除所有緩存,已清除所有缓存
+已清除整個 RSS 下載,Cleared all RSS downloads,已清除整個 RSS 下載,已清除整个 RSS 下载
+已清除整個 Thread 下載,Entire thread download cleared,已清除整個 Thread 下載,已清除整个 Thread 下载
+已清除整個標籤下載,Entire tag download cleared,已清除整個標籤下載,已清除整个标签下载
+已清除此章下載,Chapter download cleared,已清除此章下載,已清除此章下载
+已清除目前分頁下載,Current tab download cleared,已清除目前分頁下載,已清除目前分页下载
+已清除目前頁下載,Current page download cleared,已清除目前頁下載,已清除目前页下载
+已清除閱讀紀錄,Reading history cleared,已清除閱讀紀錄,已清除阅读纪录
+已移除書籤,Bookmark removed,已移除書籤,已移除书签
+已移除當下目錄收藏,Current directory favorites removed,已移除當下目錄收藏,已移除当下目录收藏
+已簽,Signed,已簽,已签
+已經是第一話,Already the first episode,已經是第一話,已经是第一话
+已自動刷新 {} 項可更新內容,Auto-refreshed {} updatable item(s),已自動刷新 {} 項可更新內容,已自动刷新 {} 项可更新内容
+已複製作者名稱,Author name copied,已複製作者名稱,已复制作者名称
+已複製圖片,Image copied,已複製圖片,已复制图片
+已複製本章內容,Chapter content copied,已複製本章內容,已复制本章内容
+已複製標題,Title copied,已複製標題,已复制标题
+已解除本地收藏，百合會收藏仍可能存在,Local favorite removed; the Yamibo favorite may still exist,已解除本地收藏，百合會收藏仍可能存在,已移除本地收藏，百合会收藏可能仍然存在
+已解除本版收藏,Forum bookmark removed,已解除本版收藏,已解除本版收藏
+已設為RSS封面,Set as RSS cover,已設為RSS封面,已设为RSS封面
+已設為封面,Already set as cover,已設為封面,已设为封面
+已設為標籤封面,Set as tag cover,已設為標籤封面,已设为标签封面
+已讀 {}%,Read {}%,已讀 {}%,已读 {}%
+已讀/總數,Read/total,已讀/總數,已读/总数
+已讀完所有章節,Read all chapters,已讀完所有章節,已读完所有章节
+已載入字體：{},Font loaded: {},已載入字體：{},已载入字体：{}
+已載入：新增 {} 項，重用 {} 項，跳過 {} 項,"Imported: {} created, {} reused, {} skipped",已載入：新增 {} 項，重用 {} 項，跳過 {} 項,已载入：新增 {} 项，重用 {} 项，跳过 {} 项
+已選 {} 項，包含 {} 個集合；集合展開 {} 項，去重後 {} 項。,"Selected {} item(s), including {} collection(s); collections expand to {} item(s), {} after deduplication.",已選 {} 項，包含 {} 個集合；集合展開 {} 項，去重後 {} 項。,已选 {} 项，包含 {} 个集合；集合展开 {} 项，去重后 {} 项。
+已選擇,Selected,已選擇,已选择
+已選擇 {} 項,{} selected,已選擇 {} 項,已选择 {} 项
+已選擇備份資料夾,Backup folder selected,已選擇備份資料夾,已选择备份文件夹
+已重新整理下載,Downloads refreshed,已重新整理下載,已重新整理下载
+已重新整理此章,Chapter refreshed,已重新整理此章,已重新整理此章
+已重新載入下載內容,Downloaded content reloaded,已重新載入下載內容,已重新载入下载内容
+已關閉,Disabled,已關閉,已关闭
+已驗證 {} 個 Journal，尚無可清理項目,Verified {} Journals; none are ready for cleanup,已驗證 {} 個 Journal，尚無可清理項目,已验证 {} 个 Journal，暂无可清理项目
+帖子、標籤漫畫與 RSS 收藏都走既有的全部下載流程。,"Threads, tag manga, and RSS favorites all use the existing download-all flow.",帖子、標籤漫畫與 RSS 收藏都走既有的全部下載流程。,帖子、标签漫画与 RSS 收藏都走既有的全部下载流程。
+帖子已發表，請刷新頁面查看,"Post published, please refresh to view.",帖子已發表，請刷新頁面查看,帖子已发表，请刷新页面查看
+帖子詳情為空，已保留收藏列表標題：{},"Thread details are empty, kept the favorite list title: {}",帖子詳情為空，已保留收藏列表標題：{},帖子详情为空，已保留收藏列表标题：{}
 帖子頁數,Post pages,帖子頁數,帖子页数
+建新類別,Create new category,建新類別,建新类别
+建立,Create,建立,建立
+建立、載入與管理本地備份檔案,"Create, restore, and manage local backup files",建立、載入與管理本地備份檔案,建立、载入与管理本地备份文件
+建立備份,Create backup,建立備份,建立备份
+建立備份失敗,Failed to create backup,建立備份失敗,建立备份失败
+建立備份時發生錯誤,An error occurred while creating the backup,建立備份時發生錯誤,建立备份时发生错误
+建立新收藏夾,Create new folders,建立新收藏夾,建立新收藏夹
+建立類別失敗,Failed to create category,建立類別失敗,建立类别失败
+建議從網站刷新此下載頁,It is recommended to refresh this download page from the website.,建議從網站刷新此下載頁,建议从网站刷新此下载页
+建議處理,Recommended treatment,建議處理,建议处理
+強制上傳本機資料,Force push local data,強制上傳本機資料,强制上传本地数据
+強制載入完成：已套用 {} 項差異,Force pull complete: applied {} differences,強制載入完成：已套用 {} 項差異,强制加载完成：已应用 {} 项差异
+強制載入雲端資料,Force pull cloud data,強制載入雲端資料,强制载入云端数据
+待上傳操作,Pending uploads,待上傳操作,待上传操作
+從雲端套用,Applied from cloud,從雲端套用,从云端应用
+必須處理,Must be dealt with,必須處理,必须处理
+忽略 {},Dismissed {},忽略 {},忽略 {}
+性別,Gender,性別,性别
+我是YamiboApp的作者TheNano，這是一個個人獨立開發的第三方開源App<br>,"I am TheNano, the author of YamiboApp. This is a third-party open-source app developed independently by an individual.<br>",我是YamiboApp的作者TheNano，這是一個個人獨立開發的第三方開源App<br>,我是YamiboApp的作者TheNano，这是一个个人独立开发的第三方开源App<br>
+我的,Me,我的,我的
+我的主題,My threads,我的主題,我的主题
+我的回覆,My replies,我的回覆,我的回复
+我的打卡動態,My check-in status,我的打卡動態,我的打卡动态
+我的提醒,My notices,我的提醒,我的提醒
+我的消息,My messages,我的消息,我的消息
+我的空間,My space,我的空間,我的空间
+我的訪客,My visitors,我的訪客,我的访客
+我的資料,My profile,我的資料,我的资料
+我的足跡,My footprints,我的足跡,我的足迹
+手動刷新資訊,Manually refresh information,手動刷新資訊,手动刷新资讯
+手動更新,Manual update,手動更新,手动更新
+手動模式下只保存這個偏好；半自動模式才會真的自動補簽。,"In manual mode, only this preference is saved; in semi-automatic mode, the missed check-in will be automatically filled.",手動模式下只保存這個偏好；半自動模式才會真的自動補簽。,手动模式下只保存这个偏好；半自动模式才会真的自动补签。
+打卡統計,Check-in statistics,打卡統計,打卡统计
+打開簽到頁 WebView,Open the check-in page WebView,打開簽到頁 WebView,打开签到页 WebView
+打開進度,Open progress,打開進度,打开进度
+批量下載收藏,Batch download favorites,批量下載收藏,批量下载收藏
+批量刪除,Batch Delete,批量刪除,批量删除
+找不到可分享檔案的 App,No app is available to share this file,找不到可分享檔案的 App,找不到可分享文件的 App
+找不到指定的樓層，已跳轉至最接近的樓層,The specified floor cannot be found. Jumped to the nearest floor.,找不到指定的樓層，已跳轉至最接近的樓層,找不到指定的楼层，已跳转至最接近的楼层
+找不到本地收藏，未送出百合會解除收藏請求,Local favorite not found; no Yamibo removal request was sent,找不到本地收藏，未送出百合會解除收藏請求,找不到本地收藏，未发送百合会移除收藏请求
+找不到這個同步任務。,The synchronization task cannot be found.,找不到這個同步任務。,找不到这个同步任务。
+投票成功，正在刷新頁面...,"The vote was successful, refreshing the page...",投票成功，正在刷新頁面...,投票成功，正在刷新页面...
+折線圖,Line chart,折線圖,折线图
+排序: {} {},Sort: {} {},排序: {} {},排序: {} {}
+推薦閱讀的日志,Recommended reading diary,推薦閱讀的日志,推荐阅读的日志
+提醒頻率,Reminder frequency,提醒頻率,提醒频率
+提醒點擊直接進入簽到頁面,Reminder tap goes directly to sign-in page,提醒點擊直接進入簽到頁面,提醒点击直接进入签到页面
+搜尋中...,Searching...,搜尋中...,搜寻中...
+搜尋失敗,Search failed,搜尋失敗,搜寻失败
+搜尋收藏,Search favorites,搜尋收藏,搜寻收藏
+搜尋收藏標題...,Search for favorite titles...,搜尋收藏標題...,搜寻收藏标题...
+搜尋標題或連結...,Search title or link...,搜尋標題或連結...,搜寻标题或链接...
+搜尋無結果,No results found,搜尋無結果,搜寻无结果
+搜尋關鍵字不能為空白,Search keyword cannot be blank,搜尋關鍵字不能為空白,搜索关键字不能为空
+操作,Actions,操作,操作
+支持App開發,Support app development,支持App開發,支持App开发
+收合同步詳情,Collapse sync details,收合同步詳情,收合同步详情
+收藏,Favorites,收藏,收藏
+收藏分享檔案格式錯誤,Favorite share file format is invalid,收藏分享檔案格式錯誤,收藏分享文件格式错误
+收藏分類,Favorite category,收藏分類,收藏分类
+收藏分類歸屬,Favorite category assignment,收藏分類歸屬,收藏分类归属
+收藏刪除,Delete favorite,收藏刪除,收藏删除
+收藏功能開發中,Favorite function is under development,收藏功能開發中,收藏功能开发中
+收藏夾,Favorites,收藏夾,收藏夹
+收藏夾：{},Favorites: {},收藏夾：{},收藏夹：{}
+收藏搜尋為 RSS 訂閱,Favorite search as RSS subscription,收藏搜尋為 RSS 訂閱,收藏搜索为 RSS 订阅
+收藏更新,Favorite updates,收藏更新,收藏更新
+收藏更新中斷,Favorite update interrupted,收藏更新中斷,收藏更新中断
+收藏更新失敗,Favorite update failed,收藏更新失敗,收藏更新失败
+收藏更新完成,Favorite update completed,收藏更新完成,收藏更新完成
+收藏更新已中斷,Favorite update has been interrupted,收藏更新已中斷,收藏更新已中断
+收藏更新檢查週期,Favorite update check cycle,收藏更新檢查週期,收藏更新检查周期
+收藏模塊比率,Favorite module ratio,收藏模塊比率,收藏模块比率
+收藏為 RSS 訂閱,Favorite as RSS subscription,收藏為 RSS 訂閱,收藏为 RSS 订阅
+收藏選單,Favorites menu,收藏選單,收藏选单
+收藏集合,Favorite collection,收藏集合,收藏集合
+收藏集合歸屬,Favorite collection assignment,收藏集合歸屬,收藏集合归属
+收藏項目,Favorite item,收藏項目,收藏项目
+收藏顯示,Favorite display,收藏顯示,收藏显示
+文章閱讀進度,Thread reading progress,文章閱讀進度,文章阅读进度
+新增 {},Added {},新增 {},新增 {}
+新增、編輯、刪除或調整你的收藏類別,"Add, edit, delete or adjust your favorite categories",新增、編輯、刪除或調整你的收藏類別,新增、编辑、删除或调整你的收藏类别
+新增收藏時詢問同步,Ask for synchronization when adding a favorite,新增收藏時詢問同步,新增收藏时询问同步
+新增收藏預設動作,Added new favorite preset actions,新增收藏預設動作,新增收藏预设动作
+新增書籤,Add bookmark,新增書籤,新增书签
+新增筆記,Add new note,新增筆記,新增笔记
+新增類別,Add category,新增類別,新增类别
+新版已可下載。你可以立即下載更新，或前往發布頁手動更新。,New version available for download. You can download now or go to the release page to update manually.,新版已可下載。你可以立即下載更新，或前往發布頁手動更新。,新版已可下载。你可以立即下载更新，或前往发布页手动更新。
+方向切換距離,Direction switch distance,方向切換距離,方向切换距离
+日志評論,Log comments,日志評論,日志评论
+日誌,Blog,日誌,日志
+星星按鈕可直接收藏，長按可指定小集合,"The star button can be directly collected, and a long press can be used to specify a small favorite.",星星按鈕可直接收藏，長按可指定小集合,星星按钮可直接收藏，长按可指定小集合
+是否要刪除所有路徑下的收藏,Do you want to delete favorites under all paths?,是否要刪除所有路徑下的收藏,是否要删除所有路径下的收藏
+智能更新策略尚未接入，暫停週期背景檢查。,"The smart update policy has not been accessed yet, and the periodic background check is suspended.",智能更新策略尚未接入，暫停週期背景檢查。,智能更新策略尚未接入，暂停周期背景检查。
+暫不支持跳轉到公告頁,Jumping to the announcement page is not supported yet.,暫不支持跳轉到公告頁,暂不支持跳转到公告页
+暫停,Pause,暫停,暂停
+暫無內容可複製,No content to copy,暫無內容可複製,暂无内容可复制
+暫無評論,No comments,暫無評論,暂无评论
+更新,Updates,更新,更新
+更新 {},Updated {},更新 {},更新 {}
+更新檢查後自動刷新離線頁,Auto-refresh offline pages after update checks,更新檢查後自動刷新離線頁,更新检查后自动刷新离线页
+更新檢查被系統中斷,Update check was interrupted by the system,更新檢查被系統中斷,更新检查被系统中断
+更新範圍,Update scope,更新範圍,更新范围
+更新頁不需要網路載入,The update page does not require network loading,更新頁不需要網路載入,更新页不需要网络加载
+書櫃,Bookcase,書櫃,书柜
+書籤,Bookmark,書籤,书签
+最多自動備份檔案數量：{},Max auto backup files: {},最多自動備份檔案數量：{},最多自动备份文件数量：{}
+最後一次同步時間,Last sync time,最後一次同步時間,最后一次同步时间
+最後訪問,Last visited,最後訪問,最后访问
+最後驗證,Last verified,最後驗證,最后验证
+最新發表的日志,Latest published logs,最新發表的日志,最新发表的日志
+最近更新,Recent updates,最近更新,最近更新
+最近結果,Recent result,最近結果,最近结果
+最近閱讀,Recently read,最近閱讀,最近阅读
+最近閱讀 ,Recently read,最近閱讀 ,最近阅读 
+有資料需要檢查,Data needs review,有資料需要檢查,有数据需要检查
+未下載,Not downloaded,未下載,未下载
+未加入大類,Not added to major categories,未加入大類,未加入大类
+未登入，請先登入後再收藏,"Not logged in, please log in first before adding it to favorites",未登入，請先登入後再收藏,未登入，请先登入后再收藏
+未知版塊,Unknown forum,未知版塊,未知版块
+未知錯誤,Unknown error,未知錯誤,未知错误
+本周時數,Hours of the week,本周時數,本周时数
+本地小說,Local Novels,本地小說,本地小说
+本地資料備份,Local data backup,本地資料備份,本地数据备份
+本帖評分,Rate this post,本帖評分,本帖评分
+本帖隱藏內容需要積分: {},Hidden content requires points: {},本帖隱藏內容需要積分: {},本帖隐藏内容需要积分: {}
+本月時數,Hours of the month,本月時數,本月时数
+本月簽到表格,Sign-in form for this month,本月簽到表格,本月签到表格
+本機或雲端資料已變更，請重新檢視差異後再確認,Local or cloud data changed; review the differences again before confirming,本機或雲端資料已變更，請重新檢視差異後再確認,本地或云端数据已变更，请重新查看差异后再确认
+本機與雲端目前沒有差異。,There is currently no difference between local and cloud data.,本機與雲端目前沒有差異。,本地与云端目前没有差异。
+本機變更,Local changes,本機變更,本地更改
+本機資料將成為權威；雲端獨有資料會被明確刪除。,Local data will become authoritative; cloud-only data will be explicitly deleted.,本機資料將成為權威；雲端獨有資料會被明確刪除。,本地数据将成为权威；云端独有数据会被明确删除。
+本次將處理 {} 項收藏。,This will process {} favorite item(s).,本次將處理 {} 項收藏。,本次将处理 {} 项收藏。
+查看下載佇列、已下載內容與清除/重新載入操作。,"View download queue, downloaded content, and clear/reload operations.",查看下載佇列、已下載內容與清除/重新載入操作。,查看下载队列、已下载内容与清除/重新载入操作。
+查看全部評分,View all ratings,查看全部評分,查看全部评分
+查看投票參與人,View poll participants,查看投票參與人,查看投票参与人
+查看標籤列表,View tag list,查看標籤列表,查看标签列表
+查看進度,View progress,查看進度,查看进度
+條漫模式,Vertical comic mode,條漫模式,条漫模式
+標為已讀,Mark as read,標為已讀,标为已读
+標為已讀 {},Marked {} as read,標為已讀 {},标记 {} 条为已读
+標為未讀,Mark as unread,標為未讀,标为未读
+標籤,Tag,標籤,标签
+標籤列表,Tag list,標籤列表,标签列表
+標籤漫畫,Tag manga,標籤漫畫,标签漫画
+標籤漫畫下載,Tag manga download,標籤漫畫下載,标签漫画下载
+標籤漫畫章節,Tag manga chapters,標籤漫畫章節,标签漫画章节
+標籤漫畫章節數,Tag manga chapters,標籤漫畫章節數,标签漫画章节数
+標籤漫畫進度,Tagged manga progress,標籤漫畫進度,标签漫画进度
+標籤目錄進度,Tag catalog progress,標籤目錄進度,标签目录进度
+檢查版本、下載安裝檔與打開安裝流程,"Check versions, download installer files, and open the installation flow",檢查版本、下載安裝檔與打開安裝流程,检查版本、下载安装文件与打开安装流程
+檢查通知權限、電池最佳化與背景同步所需的系統設定。,"Check system settings required for notification permissions, battery optimization, and background sync.",檢查通知權限、電池最佳化與背景同步所需的系統設定。,检查通知权限、电池优化与背景同步所需的系统设定。
+正在下載更新... ({} MB / {} MB),Downloading update... ({} MB / {} MB),正在下載更新... ({} MB / {} MB),正在下载更新... ({} MB / {} MB)
+正在下載更新... ({} MB / 未知),Downloading update... ({} MB / unknown),正在下載更新... ({} MB / 未知),正在下载更新... ({} MB / 未知)
+正在加入下載佇列 {} 項,Queuing {} download item(s),正在加入下載佇列 {} 項,正在加入下载队列 {} 项
+正在取得內容,Fetching content,正在取得內容,正在取得内容
+正在取得收藏頁,Getting favorites,正在取得收藏頁,正在取得收藏页
+正在同步到百合會...,Synchronizing to Yamibo...,正在同步到百合會...,正在同步到百合会...
+正在同步操作紀錄,Syncing operation records,正在同步操作紀錄,正在同步操作记录
+正在執行強制上傳並驗證雲端結果,Force uploading and verifying the cloud result,正在執行強制上傳並驗證雲端結果,正在执行强制上传并验证云端结果
+正在安全載入雲端紀錄，本階段不會上傳本機資料,Safely loading cloud records; local data will not be uploaded during this phase,正在安全載入雲端紀錄，本階段不會上傳本機資料,正在安全加载云端记录，本阶段不会上传本地数据
+正在定位連結,Locating link,正在定位連結,正在定位链接
+正在建立備份,Creating backup,正在建立備份,正在建立备份
+正在建立同步任務,Creating synchronization task,正在建立同步任務,正在建立同步任务
+正在從百合會移除收藏...,Removing favorites from Yamibo...,正在從百合會移除收藏...,正在从百合会移除收藏...
+正在收藏本版...,Bookmarking this forum...,正在收藏本版...,正在收藏本版...
+正在檢查收藏更新,Checking for favorites updates,正在檢查收藏更新,正在检查收藏更新
+正在比較資料...,Comparing data...,正在比較資料...,正在比较数据...
+正在簽到...,Checking in...,正在簽到...,正在签到...
+正在解除本版收藏...,Removing forum bookmark...,正在解除本版收藏...,正在解除本版收藏...
+正在計算中...,Calculating...,正在計算中...,正在计算中...
+正在載入...,Loading...,正在載入...,正在载入...
+正在載入上一個分頁...,Loading previous tab...,正在載入上一個分頁...,正在载入上一个分页...
+正在載入下一個分頁...,Loading next tab...,正在載入下一個分頁...,正在载入下一个分页...
+正在載入並套用已驗證的雲端狀態,Loading and applying the verified cloud state,正在載入並套用已驗證的雲端狀態,正在加载并应用已验证的云端状态
+正在載入好友申請表單,Loading friend request form,正在載入好友申請表單,正在载入好友申请表单
+正在載入更新日誌...,Loading changelog...,正在載入更新日誌...,正在载入更新日志...
+正在驗證並清除雲端同步資料,Verifying and deleting cloud sync data,正在驗證並清除雲端同步資料,正在验证并清除云端同步数据
+此平台尚未提供背景同步,Background sync is not available on this platform,此平台尚未提供背景同步,此平台尚未提供后台同步
+此連結暫不支援 App 內開啟,This link does not support opening within the app.,此連結暫不支援 App 內開啟,此链接暂不支持在 App 内打开
+此選項暫無投票參與人,No participants for this option,此選項暫無投票參與人,此选项暂无投票参与人
+此頁可能有新回覆,This page may have new replies,此頁可能有新回覆,此页可能有新回复
+每天 1 次,Once a day,每天 1 次,每天 1 次
+每天 2 次,2 times a day,每天 2 次,每天 2 次
+每天 3 次,3 times a day,每天 3 次,每天 3 次
+每天 4 次,4 times a day,每天 4 次,每天 4 次
+每天 5 次,5 times a day,每天 5 次,每天 5 次
+每天 6 次,6 times a day,每天 6 次,每天 6 次
+每日簽到,Daily check-in,每日簽到,每日签到
+每次同步都包含全部設定、收藏與閱讀紀錄。,"Every sync includes all settings, favorites, and reading history.",每次同步都包含全部設定、收藏與閱讀紀錄。,每次同步都包含全部设置、收藏与阅读记录。
+永不,Never,永不,永不
+沒有偵測到更新,No updates detected,沒有偵測到更新,没有侦测到更新
+沒有可下載的收藏,No downloadable favorites,沒有可下載的收藏,没有可下载的收藏
+沒有可分享的收藏夾,No favorite folders to share,沒有可分享的收藏夾,没有可分享的收藏夹
+沒有可加入的收藏夾,No favorite folders to add to,沒有可加入的收藏夾,没有可加入的收藏夹
+沒有可用的好友分組,No friend groups available,沒有可用的好友分組,没有可用的好友分组
+沒有可繼續的收藏更新任務,There is no favorite update task to continue,沒有可繼續的收藏更新任務,没有可继续的收藏更新任务
+沒有找到Ta的主題,Their topic was not found,沒有找到Ta的主題,没有找到Ta的主题
+沒有找到Ta的回復,No reply found from Ta,沒有找到Ta的回復,没有找到Ta的回复
+沒有找到Ta的日志,Their log was not found,沒有找到Ta的日志,没有找到Ta的日志
+沒有找到主題,Topic not found,沒有找到主題,没有找到主题
+沒有找到回復,No reply found,沒有找到回復,没有找到回复
+沒有找到圖片,No picture found,沒有找到圖片,没有找到图片
+沒有找到在線成員,No online members found,沒有找到在線成員,没有找到在线成员
+沒有找到好友,No friends found,沒有找到好友,没有找到好友
+沒有找到好友的日志,No friend's log found,沒有找到好友的日志,没有找到好友的日志
+沒有找到提醒,Reminder not found,沒有找到提醒,没有找到提醒
+沒有找到搜尋結果,No search results found,沒有找到搜尋結果,没有找到搜寻结果
+沒有找到日志,No log found,沒有找到日志,没有找到日志
+沒有找到標籤,Tag not found,沒有找到標籤,没有找到标签
+沒有找到消息,No message found,沒有找到消息,没有找到消息
+沒有找到目前版本的更新日誌。,No changelog found for the current version.,沒有找到目前版本的更新日誌。,没有找到目前版本的更新日志。
+沒有找到訪客,No visitor found,沒有找到訪客,没有找到访客
+沒有找到評論,No comments found,沒有找到評論,没有找到评论
+沒有找到足跡,No footprints found,沒有找到足跡,没有找到足迹
+沒有符合篩選的下載內容,No downloads match the filter,沒有符合篩選的下載內容,没有符合筛选的下载内容
+注冊時間,Registration time,注冊時間,注册时间
+浮動跳轉按鈕,Floating jump button,浮動跳轉按鈕,浮动跳转按钮
+消息,Messages,消息,消息
+添加 {} 為好友，附言:,"Add {} as friend, note:",添加 {} 為好友，附言:,添加 {} 为好友，附言:
+清空現有設定與收藏狀態後再還原,Clear existing settings and favorites state before restoring,清空現有設定與收藏狀態後再還原,清空现有设定与收藏状态后再还原
+清除,Clear,清除,清除
+清除全部閱讀紀錄,Clear all reading history,清除全部閱讀紀錄,清除全部阅读纪录
 清除圖片、頁面與其他暫存資料，釋放目前已使用的儲存空間。,清除圖片、頁面與其他暫存資料，釋放目前已使用的儲存空間。,清除圖片、頁面與其他暫存資料，釋放目前已使用的儲存空間。,清除圖片、頁面與其他暫存資料，釋放目前已使用的儲存空間。
 "清除圖片、頁面與其他暫存資料，釋放目前已使用的儲存空間。
 目前緩存大小：{}","清除圖片、頁面與其他暫存資料，釋放目前已使用的儲存空間。
 目前緩存大小：{}","清除圖片、頁面與其他暫存資料，釋放目前已使用的儲存空間。
 目前緩存大小：{}","清除圖片、頁面與其他暫存資料，釋放目前已使用的儲存空間。
 目前緩存大小：{}"
-目前緩存大小：{},目前緩存大小：{},目前緩存大小：{},目前緩存大小：{}
-RSS收藏,RSS favorites,RSS收藏,RSS收藏
-一般帖子,Normal threads,一般帖子,一般帖子
-上一步,Previous,上一步,上一步
-下一步,Next,下一步,下一步
-下載方式,Download mode,下載方式,下载方式
-全部下載,Download all,全部下載,全部下载
-下載除最後一頁以外的全部頁,Download all pages except the last page,下載除最後一頁以外的全部頁,下载除最后一页以外的全部页
-小說帖子,Novel threads,小說帖子,小说帖子
-已加入 {} 項，失敗 {} 項，跳過 {} 項,"Queued {} item(s), failed {}, skipped {}",已加入 {} 項，失敗 {} 項，跳過 {} 項,已加入 {} 项，失败 {} 项，跳过 {} 项
-已加入下載佇列 {} 項,Queued {} download item(s),已加入下載佇列 {} 項,已加入下载队列 {} 项
-正在加入下載佇列 {} 項,Queuing {} download item(s),正在加入下載佇列 {} 項,正在加入下载队列 {} 项
-上一批收藏正在加入下載佇列,The previous favorite batch is still being queued,上一批收藏正在加入下載佇列,上一批收藏正在加入下载队列
-加入下載佇列失敗：{},Failed to queue downloads: {},加入下載佇列失敗：{},加入下载队列失败：{}
-已選 {} 項，包含 {} 個集合；集合展開 {} 項，去重後 {} 項。,"Selected {} item(s), including {} collection(s); collections expand to {} item(s), {} after deduplication.",已選 {} 項，包含 {} 個集合；集合展開 {} 項，去重後 {} 項。,已选 {} 项，包含 {} 个集合；集合展开 {} 项，去重后 {} 项。
-帖子、標籤漫畫與 RSS 收藏都走既有的全部下載流程。,"Threads, tag manga, and RSS favorites all use the existing download-all flow.",帖子、標籤漫畫與 RSS 收藏都走既有的全部下載流程。,帖子、标签漫画与 RSS 收藏都走既有的全部下载流程。
-批量下載收藏,Batch download favorites,批量下載收藏,批量下载收藏
-更新檢查後自動刷新離線頁,Auto-refresh offline pages after update checks,更新檢查後自動刷新離線頁,更新检查后自动刷新离线页
-本次將處理 {} 項收藏。,This will process {} favorite item(s).,本次將處理 {} 項收藏。,本次将处理 {} 项收藏。
-沒有可下載的收藏,No downloadable favorites,沒有可下載的收藏,没有可下载的收藏
-請先設定備份資料夾,Please set the backup folder first,請先設定備份資料夾,请先设置备份文件夹
-請至少選擇一種收藏類型,Please select at least one favorite type,請至少選擇一種收藏類型,请至少选择一种收藏类型
-重新整理後自動更新離線內容,Auto-update offline content after refresh,重新整理後自動更新離線內容,重新整理后自动更新离线内容
-開啟後，只會自動刷新已確認可更新的離線頁面。,"When enabled, only offline pages confirmed as updatable are refreshed automatically.",開啟後，只會自動刷新已確認可更新的離線頁面。,开启后，只会自动刷新已确认可更新的离线页面。
-開啟後，重新整理已下載內容時會沿用目前目標刷新離線資料。,"When enabled, refreshing downloaded content keeps the current target for offline refreshes.",開啟後，重新整理已下載內容時會沿用目前目標刷新離線資料。,开启后，重新整理已下载内容时会沿用当前目标刷新离线资料。
-開始下載,Start download,開始下載,开始下载
-已自動刷新 {} 項可更新內容,Auto-refreshed {} updatable item(s),已自動刷新 {} 項可更新內容,已自动刷新 {} 项可更新内容
-保留本地收藏,Keep local favorite,保留本地收藏,保留本地收藏
-僅解除本地收藏,Remove local favorite only,僅解除本地收藏,仅移除本地收藏
-已解除本地收藏，百合會收藏仍可能存在,Local favorite removed; the Yamibo favorite may still exist,已解除本地收藏，百合會收藏仍可能存在,已移除本地收藏，百合会收藏可能仍然存在
-無法從百合會解除收藏,Unable to remove Yamibo favorite,無法從百合會解除收藏,无法移除百合会收藏
-找不到本地收藏，未送出百合會解除收藏請求,Local favorite not found; no Yamibo removal request was sent,找不到本地收藏，未送出百合會解除收藏請求,找不到本地收藏，未发送百合会移除收藏请求
+清除圖片、頁面與其他暫存資料，釋放目前已使用的儲存空間。\n目前緩存大小：{},"Clear images, pages and other temporary data, freeing up used storage space.\nCurrent cache size: {}",清除圖片、頁面與其他暫存資料，釋放目前已使用的儲存空間。\n目前緩存大小：{},清除图片、页面与其他暂存资料，释放目前已使用的储存空间。\n目前缓存大小：{}
+清除失敗,Clear failed,清除失敗,清除失败
+清除整個 RSS 下載,Clear all RSS downloads,清除整個 RSS 下載,清除整个 RSS 下载
+清除整個 Thread,Clear entire thread,清除整個 Thread,清除整个 Thread
+清除整個 Thread 下載,Clear entire thread download,清除整個 Thread 下載,清除整个 Thread 下载
+清除整個標籤,Clear entire tag,清除整個標籤,清除整个标签
+清除整個標籤下載,Clear entire tag download,清除整個標籤下載,清除整个标签下载
+清除此章下載,Clear chapter download,清除此章下載,清除此章下载
+清除目前分頁下載,Clear current tab download,清除目前分頁下載,清除目前分页下载
+清除目前頁下載,Clear current page download,清除目前頁下載,清除目前页下载
+清除閱讀紀錄,Clear reading history,清除閱讀紀錄,清除阅读纪录
+清除雲端資料,Delete cloud data,清除雲端資料,清除云端数据
+清除雲端連結紀錄快取,Clear cloud link cache,清除雲端連結紀錄快取,清除云端链接记录缓存
+準備中,Preparing,準備中,准备中
+準備定位,Prepare for positioning,準備定位,准备定位
+滑動時顯示,Show while scrolling,滑動時顯示,滑动时显示
+漫畫模式,Comic mode,漫畫模式,漫画模式
+為此作品鎖定閱讀模式,Lock reading mode for this work,為此作品鎖定閱讀模式,为此作品锁定阅读模式
 無法取得這個看板的收藏識別碼，請重新整理後再試。,Unable to get this forum's favorite ID. Refresh and try again.,無法取得這個看板的收藏識別碼，請重新整理後再試。,无法取得此版块的收藏标识码，请刷新后重试。
+無法從百合會解除收藏,Unable to remove Yamibo favorite,無法從百合會解除收藏,无法移除百合会收藏
+無法精準定位該評論,Unable to pinpoint this comment,無法精準定位該評論,无法精准定位该评论
+無法載入上一頁,Unable to load previous page,無法載入上一頁,无法载入上一页
+無法載入下一頁,Unable to load next page,無法載入下一頁,无法载入下一页
+無法載入閱讀目錄,Unable to load reading directory,無法載入閱讀目錄,无法载入阅读目录
+無法辨識此連結,This link is not recognized,無法辨識此連結,无法识别此链接
+無法選擇備份資料夾,Unable to select backup folder,無法選擇備份資料夾,无法选择备份文件夹
+版塊,Forum,版塊,版块
+版塊 {},Forum {},版塊 {},版块 {}
+版塊更新範圍,Forum update scope,版塊更新範圍,版块更新范围
+版塊：{},Forum: {},版塊：{},版块：{}
+版本,Version,版本,版本
+狀態,State,狀態,状态
+獲取登入資訊失敗，請重新登入,"Failed to obtain login information, please log in again",獲取登入資訊失敗，請重新登入,获取登入资讯失败，请重新登入
+理由,Reason,理由,理由
+用戶,User,用戶,用户
+用戶組,User group,用戶組,用户组
+由標籤條漫模式鎖定,Locked by tag vertical comic mode,由標籤條漫模式鎖定,由标签条漫模式锁定
+略過刪除確認,Skip deletion confirmation,略過刪除確認,略过删除确认
+略過無法對應的輔助紀錄 {},Skipped {} unmatched auxiliary records,略過無法對應的輔助紀錄 {},略过无法对应的辅助记录 {}
+登入暫停,Paused for login,登入暫停,因登录暂停
+登入狀態不足，Journal 清理已暫停,Login is unavailable; Journal cleanup is paused,登入狀態不足，Journal 清理已暫停,登录状态不可用，Journal 清理已暂停
+登入狀態已失效，請重新登入,Login session has expired. Please sign in again,登入狀態已失效，請重新登入,登入状态已失效，请重新登入
+登入狀態已過期，請先刷新登入狀態,Login has expired; refresh your login status first,登入狀態已過期，請先刷新登入狀態,登录状态已过期，请先刷新登录状态
+登入狀態已過期；重新整理登入後會先載入仍存活的雲端資料,Login has expired; after refreshing it the app will first load any surviving cloud data,登入狀態已過期；重新整理登入後會先載入仍存活的雲端資料,登录状态已过期；刷新登录后会先加载仍存在的云端数据
+登入狀態需要刷新,Login needs to be refreshed,登入狀態需要刷新,登录状态需要刷新
+登入頁面,Login page,登入頁面,登入页面
+發布,Release,發布,发布
+發帖成功,Posted successfully,發帖成功,发帖成功
+發日志,Post a log,發日志,发日志
+發消息,Send message,發消息,发消息
+發現 {} 個安全清理候選；目前為只觀察模式,Found {} safe cleanup candidates; currently in observation-only mode,發現 {} 個安全清理候選；目前為只觀察模式,发现 {} 个安全清理候选；目前为仅观察模式
+發現新版本,New version found,發現新版本,发现新版本
+發表回復,Leave a Reply,發表回復,发表回复
+發表帖子,Post,發表帖子,发表帖子
+發送,Send,發送,发送
+發送中,Sending,發送中,发送中
+發送回覆,Send reply,發送回覆,发送回覆
+百合會已收藏，但未取得收藏識別碼,Bookmarked on Yamibo but no favorite ID was returned,百合會已收藏，但未取得收藏識別碼,百合会已收藏，但未获取收藏标识码
+百合會收藏已同步到本地,Yamibo favorites have been synced to local,百合會收藏已同步到本地,百合会收藏已同步到本地
+百合會收藏識別碼不可用。請到收藏頁使用「同步百合會收藏」重新對齊識別碼後再試。,The Yamibo favorite ID is unavailable. Use Sync Yamibo Favorites on the Favorites page to realign IDs before retrying.,百合會收藏識別碼不可用。請到收藏頁使用「同步百合會收藏」重新對齊識別碼後再試。,百合会收藏标识码不可用。请到收藏页使用“同步百合会收藏”重新对齐标识码后再试。
+百合會維護中...現在不是簽到的好時機呢,Yamibo is under maintenance... Now is not a good time to sign in.,百合會維護中...現在不是簽到的好時機呢,百合会维护中...现在不是签到的好时机呢
+百合會論壇 Yamibo App 字體預覽,Yamibo Forum Yamibo App font preview,百合會論壇 Yamibo App 字體預覽,百合会论坛 Yamibo App 字体预览
+目前沒有下載任務,No download tasks,目前沒有下載任務,目前没有下载任务
+目前沒有可加入的集合,There are no collections to add to,目前沒有可加入的集合,目前没有可加入的集合
+目前沒有可統計的儲存內容,No storable content to count,目前沒有可統計的儲存內容,目前没有可统计的储存内容
+目前沒有已下載內容,No downloaded content,目前沒有已下載內容,目前没有已下载内容
+目前無法啟動背景同步，請在 App 前景時重試。,"Background sync cannot be started at this time, please try again with the app in the foreground.",目前無法啟動背景同步，請在 App 前景時重試。,目前无法启动背景同步，请在 App 前景时重试。
+目前無法定位跳轉位置,Unable to locate the target position right now,目前無法定位跳轉位置,目前无法定位跳转位置
+目前無法自動簽到，請改用手動模式,"Automatic check-in is currently unavailable, please use manual mode instead",目前無法自動簽到，請改用手動模式,目前无法自动签到，请改用手动模式
+目前範圍會檢查 {} 個收藏,Current scope will check {} favorites,目前範圍會檢查 {} 個收藏,目前范围会检查 {} 个收藏
+目前緩存大小：{},目前緩存大小：{},目前緩存大小：{},目前緩存大小：{}
+目前選取的收藏中，至少有一項存在於多個收藏路徑。,At least one item in the currently selected favorites exists in multiple favorite paths.,目前選取的收藏中，至少有一項存在於多個收藏路徑。,目前选取的收藏中，至少有一项存在于多个收藏路径。
+目前還沒有收藏,There are no favorites yet,目前還沒有收藏,目前还没有收藏
+目前還沒有閱讀歷史紀錄,There is no reading history yet,目前還沒有閱讀歷史紀錄,目前还没有阅读历史纪录
+目錄,Table of contents,目錄,目录
+目錄名稱,Directory name,目錄名稱,目录名称
+直方圖,Histogram,直方圖,直方图
+確定,OK,確定,确定
+確定要刪除「{}」嗎？此操作無法復原。,"Are you sure you want to delete \{}\""? This cannot be undone.""",確定要刪除「{}」嗎？此操作無法復原。,确定要删除「{}」吗？此操作无法复原。
+確定要刪除所選的 {} 本小說嗎？此操作無法復原。,Are you sure you want to delete the selected {} novels? This cannot be undone.,確定要刪除所選的 {} 本小說嗎？此操作無法復原。,确定要删除所选的 {} 本小说吗？此操作无法复原。 / 最後更新 ,/Last updated, / 最後更新 , / 最后更新 
+確定要取消收藏嗎,Are you sure you want to remove this favorite?,確定要取消收藏嗎,确定要取消收藏吗
+確定要清除雲端同步資料嗎？,Are you sure you want to delete the cloud sync data?,確定要清除雲端同步資料嗎？,确定要清除云端同步数据吗？
+確認強制上傳,Confirm force push,確認強制上傳,确认强制上传
+確認強制載入,Confirm force pull,確認強制載入,确认强制载入
+確認清除,Confirm deletion,確認清除,确认清除
+移動,Move,移動,移动
+移除原始條目,Remove original entry,移除原始條目,移除原始条目
+移除收藏失敗,Failed to remove favorites,移除收藏失敗,移除收藏失败
+移除書籤,Remove bookmark,移除書籤,移除书签
+稍後,Later,稍後,稍后
+積分,Points,積分,积分
+空閒,Idle,空閒,空闲
+立即同步,Sync now,立即同步,立即同步
+立即更新,Update now,立即更新,立即更新
+立即清除所有緩存,Clear all caches now,立即清除所有緩存,立即清除所有缓存
+章節,Chapter,章節,章节
+章節列表,Chapter list,章節列表,章节列表
+第 {} 部分,Part {},第 {} 部分,第 {} 部分
+筆記,Notes,筆記,笔记
+等待中,Waiting,等待中,等待中
+等待中 {},Waiting {},等待中 {},等待中 {}
+等待安全載入,Waiting for safe load,等待安全載入,等待安全加载
+等待重試,Waiting to retry,等待重試,等待重试
+管理,Manage,管理,管理
+管理收藏類別,Manage favorite categories,管理收藏類別,管理收藏类别
+管理組,Management group,管理組,管理组
+管理類別,Management category,管理類別,管理类别
+範圍,Scope,範圍,范围
+篩選,Filter,篩選,筛选
+篩選下載內容,Filter downloads,篩選下載內容,筛选下载内容
+篩選收藏,Filter favorites,篩選收藏,筛选收藏
+篩選更新結果,Filter update results,篩選更新結果,筛选更新结果
+篩選類別,Filter categories,篩選類別,筛选类别
+簡繁轉換,Conversion between Simplified and Traditional Chinese,簡繁轉換,简繁转换
+簽到成功,Check-in successful,簽到成功,签到成功
+簽到模式,Check-in mode,簽到模式,签到模式
+簽到行為,Check-in behavior,簽到行為,签到行为
+簽到資訊,Sign-in information,簽到資訊,签到资讯
+簽到頁載入失敗,Sign-in page failed to load,簽到頁載入失敗,签到页载入失败
+系統列,System bars,系統列,系统列
+系統消息,System message,系統消息,系统消息
+系統無法開啟分享畫面,The system could not open the share sheet,系統無法開啟分享畫面,系统无法开启分享画面
+系統目前不允許啟動背景同步，請在 App 前景時重試。,The system currently does not allow background synchronization to be initiated. Please try again with the app in the foreground.,系統目前不允許啟動背景同步，請在 App 前景時重試。,系统目前不允许启动背景同步，请在 App 前景时重试。
+系統相簿寫入失敗,The system photo album write failed,系統相簿寫入失敗,系统相簿写入失败
+系統相簿無法建立檔案,The system photo album could not create a file,系統相簿無法建立檔案,系统相簿无法建立文件
+系統相簿無法開啟輸出串流,The system photo album could not open an output stream,系統相簿無法開啟輸出串流,系统相簿无法开启输出串流
+系統預設,System default,系統預設,系统预设
+紀錄,History,紀錄,记录
+結果: {},Result: {},結果: {},结果: {}
+編輯,Edit,編輯,编辑
+編輯筆記,Edit notes,編輯筆記,编辑笔记
+編輯集合,Edit collection,編輯集合,编辑集合
+編輯類別,Edit categories,編輯類別,编辑类别
+總大小,Total size,總大小,总大小
+總是顯示,Always show,總是顯示,总是显示
+總時數,Total hours,總時數,总时数
+總積分,Total points,總積分,总积分
+繁體中文,Traditional Chinese,繁體中文,繁体中文
+繼續,Continue,繼續,继续
+繼續同步,Continue syncing,繼續同步,继续同步
+繼續閱讀,Continue reading,繼續閱讀,继续阅读
+置頂,Pin to top,置頂,置顶
+置頂帖,Pinned post,置頂帖,置顶帖
+背景同步任務已中斷，可重新同步。,The background synchronization task has been interrupted and can be resynchronized.,背景同步任務已中斷，可重新同步。,背景同步任务已中断，可重新同步。
+背景同步尚未提供,Background sync is not available yet,背景同步尚未提供,后台同步尚未提供
+背景同步已停止，請開啟雲端同步頁面檢查資料,Background sync has stopped. Open the cloud sync page to review the data.,背景同步已停止，請開啟雲端同步頁面檢查資料,后台同步已停止，请打开云同步页面检查数据
+背景簽到提醒排程,Background check-in reminder schedule,背景簽到提醒排程,背景签到提醒排程
+自動備份,Automatic backup,自動備份,自动备份
+自動同步,Automatic sync,自動同步,自动同步
+自動同步已關閉,Automatic sync is disabled,自動同步已關閉,自动同步已关闭
+自動同步排程設定已更新,Automatic sync schedule updated,自動同步排程設定已更新,自动同步计划设置已更新
+自動生成格式：YamiboApp-YYYYMMDD-HHmmss.yamibobak,Auto-generated format: YamiboApp-YYYYMMDD-HHmmss.yamibobak,自動生成格式：YamiboApp-YYYYMMDD-HHmmss.yamibobak,自动生成格式：YamiboApp-YYYYMMDD-HHmmss.yamibobak
+自動進行補簽,Automatic re-signing,自動進行補簽,自动进行补签
+自定義頭銜,Custom title,自定義頭銜,自定义头衔
+若收藏尚未同步，可使用右上角 ⋮ > 同步百合會收藏 同步,"If favorites have not been synced yet, use top-right menu > Sync Yamibo favorites.",若收藏尚未同步，可使用右上角 ⋮ > 同步百合會收藏 同步,若收藏尚未同步，可使用右上角 ⋮ > 同步百合会收藏 同步
+若等待過久可重新載入,"If you wait too long, you can reload it.",若等待過久可重新載入,若等待过久可重新载入
+處理中...,Processing...,處理中...,处理中...
+補簽,Re-signing,補簽,补签
+複製,Copy,複製,复制
+複製圖片失敗：圖片資料無法轉換為系統圖片,Failed to copy image: image data could not be converted to a system image,複製圖片失敗：圖片資料無法轉換為系統圖片,复制图片失败：图片资料无法转换为系统图片
+複製文字,Copy text,複製文字,复制文字
+複製本章,Copy Chapter,複製本章,复制本章
+複製連結,Copy link,複製連結,复制链接
+複製連結地址,Copy link address,複製連結地址,复制链接地址
+複製連結文字,Copy link text,複製連結文字,复制链接文字
+要將此收藏同步到百合會嗎？,Do you want to sync this favorite to Yamibo?,要將此收藏同步到百合會嗎？,要将此收藏同步到百合会吗？
+要將此收藏從百合會網站移除嗎？,Do you want to remove this favorite from the Yamibo website?,要將此收藏從百合會網站移除嗎？,要将此收藏从百合会网站移除吗？
+覆蓋,Overwrite,覆蓋,覆盖
+解除收藏失敗，且收藏識別碼重新整理失敗，請稍後再試。,Removal failed and the favorite ID could not be refreshed. Please try again later.,解除收藏失敗，且收藏識別碼重新整理失敗，請稍後再試。,移除收藏失败，且收藏标识码刷新失败，请稍后重试。
 解除收藏失敗，已重新整理收藏識別碼，請再試一次。,Removal failed. The favorite ID was refreshed; please try again.,解除收藏失敗，已重新整理收藏識別碼，請再試一次。,移除收藏失败，已刷新收藏标识码，请重试。
 解除收藏失敗，重新整理後仍無法取得收藏識別碼。,Removal failed and the favorite ID is still unavailable after refresh.,解除收藏失敗，重新整理後仍無法取得收藏識別碼。,移除收藏失败，刷新后仍无法取得收藏标识码。
-解除收藏失敗，且收藏識別碼重新整理失敗，請稍後再試。,Removal failed and the favorite ID could not be refreshed. Please try again later.,解除收藏失敗，且收藏識別碼重新整理失敗，請稍後再試。,移除收藏失败，且收藏标识码刷新失败，请稍后重试。
+觸控分區,Touch area,觸控分區,触控分区
+訂閱名稱,Subscription name,訂閱名稱,订阅名称
+記住這次選擇,Remember this choice,記住這次選擇,记住这次选择
+設定、收藏與閱讀紀錄會以操作紀錄自動合併；不會以空白或舊快照覆蓋雲端。,"Settings, favorites, and reading history are merged as operations; empty or stale snapshots never replace cloud data.",設定、收藏與閱讀紀錄會以操作紀錄自動合併；不會以空白或舊快照覆蓋雲端。,设置、收藏与阅读记录会以操作记录自动合并；不会以空白或旧快照覆盖云端。
+設定功能開發中,Setting function is under development,設定功能開發中,设定功能开发中
+設定與收藏備份,Settings & favorites backup,設定與收藏備份,设定与收藏备份
+設為RSS封面,Set as RSS cover,設為RSS封面,设为RSS封面
+設為封面,Set as cover,設為封面,设为封面
+設為標籤封面,Set as tag cover,設為標籤封面,设为标签封面
+評分,Score,評分,评分
+評分成功，刷新後更新評分/點評狀態,"Rating successful, update rating/review status after refreshing",評分成功，刷新後更新評分/點評狀態,评分成功，刷新后更新评分/点评状态
+評分理由,Reason for rating,評分理由,评分理由
+評論,Comment,評論,评论
+評論中...,Commenting...,評論中...,评论中...
+該樓頂/底部,Top/bottom of this post,該樓頂/底部,该楼顶/底部
+該頁頂/底部,Top/bottom of this page,該頁頂/底部,该页顶/底部
+詳細備註,Detail notes,詳細備註,详细备注
+說明,Description,說明,说明
+請保持 App 在前景後再開始同步。,Please keep the app in the foreground before starting sync.,請保持 App 在前景後再開始同步。,请保持 App 在前景后再开始同步。
+請先允許通知權限，背景同步才會顯示在通知欄。,Please allow notification permission first; background sync will then appear in the notification bar.,請先允許通知權限，背景同步才會顯示在通知欄。,请先允许通知权限，背景同步才会显示在通知栏。
+請先打開簽到頁 WebView 讓程式抓到頁面內容，或使用下方按鈕手動刷新。,"Please open the check-in page WebView first to let the program capture the page content, or use the button below to refresh manually.",請先打開簽到頁 WebView 讓程式抓到頁面內容，或使用下方按鈕手動刷新。,请先打开签到页 WebView 让程式抓到页面内容，或使用下方按钮手动刷新。
+請先登入後再搜尋,Please log in first before searching,請先登入後再搜尋,请先登入后再搜寻
+請先登入後再發送消息,Please log in first before sending message,請先登入後再發送消息,请先登入后再发送消息
+請先登入後再評論,Please log in first before commenting,請先登入後再評論,请先登入后再评论
+請先設定備份資料夾,Please set the backup folder first,請先設定備份資料夾,请先设置备份文件夹
+請先輸入類別名稱,Please enter the category name first,請先輸入類別名稱,请先输入类别名称
+請稍後再試,Please try again later,請稍後再試,请稍后再试
+請至少選擇一種收藏類型,Please select at least one favorite type,請至少選擇一種收藏類型,请至少选择一种收藏类型
+請輸入內容,Please enter content,請輸入內容,请输入内容
+請輸入內容...,Please enter content...,請輸入內容...,请输入内容...
+請輸入評論內容,Please enter the comment content,請輸入評論內容,请输入评论内容
+請輸入類別名稱,Please enter a category name,請輸入類別名稱,请输入类别名称
+請選擇要分享的收藏夾,Select favorite folders to share,請選擇要分享的收藏夾,请选择要分享的收藏夹
+請選擇要加入的收藏夾,Select favorite folders to add to,請選擇要加入的收藏夾,请选择要加入的收藏夹
+讀取失敗,Read failed,讀取失敗,读取失败
+距離{}還有 {} 積分,{} points away from {},距離{}還有 {} 積分,距离{}还有 {} 积分
+跳到底部,Jump to bottom,跳到底部,跳到底部
+跳到頂部,Jump to top,跳到頂部,跳到顶部
+跳轉,Jump,跳轉,跳转
+跳轉到收藏,Jump to favorites,跳轉到收藏,跳转到收藏
+跳轉到首頁,Jump to homepage,跳轉到首頁,跳转到首页
+跳過,Skip,跳過,跳过
+載入 .ttf 或 .otf 字體後，可分別套用到 App 介面與小說閱讀器。,"After loading .ttf or .otf fonts, they can be applied to the app interface and novel reader respectively.",載入 .ttf 或 .otf 字體後，可分別套用到 App 介面與小說閱讀器。,载入 .ttf 或 .otf 字体后，可分别套用到 App 界面与小说阅读器。
+載入下載內容失敗,Loading downloads failed,載入下載內容失敗,载入下载内容失败
+載入中...,Loading...,載入中...,载入中...
+載入備份,Restore backup,載入備份,载入备份
+載入失敗,Loading failed,載入失敗,载入失败
+載入字體,Load font,載入字體,载入字体
+載入收藏夾,Load favorite folders,載入收藏夾,载入收藏夹
+載入收藏夾失敗,Failed to load favorite folders,載入收藏夾失敗,载入收藏夹失败
+載入更多評論,Loading more comments,載入更多評論,载入更多评论
+載入雲端備份,Load cloud backup,載入雲端備份,载入云端备份
+輕觸區域,Touch area,輕觸區域,轻触区域
+輸入內容...,Enter content...,輸入內容...,输入内容...
+輸入本地筆記...,Enter local note...,輸入本地筆記...,输入本地笔记...
+輸入關鍵字或帖子連結,Enter keyword or post link,輸入關鍵字或帖子連結,输入关键字或帖子链接
+輸入頁碼,Enter page number,輸入頁碼,输入页码
+返回,Back,返回,返回
+這個集合還沒有內容,This collection has no content yet,這個集合還沒有內容,这个集合还没有内容
+這是最後確認。清除後無法從雲端復原。,This is the final confirmation. Deleted data cannot be recovered from the cloud.,這是最後確認。清除後無法從雲端復原。,这是最后确认。清除后无法从云端恢复。
+這裡會顯示最近一次收藏同步的狀態與進度。同步開始後，你也可以從這裡重新打開進度畫面。,"The status and progress of the latest favorite synchronization will be displayed here. Once the sync has started, you can also reopen the progress screen from here.",這裡會顯示最近一次收藏同步的狀態與進度。同步開始後，你也可以從這裡重新打開進度畫面。,这里会显示最近一次收藏同步的状态与进度。同步开始后，你也可以从这里重新打开进度画面。
+通知與背景同步設定,Notification and background synchronization settings,通知與背景同步設定,通知与背景同步设定
+連結選項,Link options,連結選項,链接选项
+進階資料操作,Advanced data operations,進階資料操作,高级数据操作
+選單,Menu,選單,选单
+選擇 App 字體,Select app font,選擇 App 字體,选择 App 字体
+選擇套用方式,Choose how to apply,選擇套用方式,选择应用方式
+選擇章節,Select Chapter,選擇章節,选择章节
+選擇資料夾,Select folder,選擇資料夾,选择文件夹
+選擇還原方式,Select restore method,選擇還原方式,选择还原方式
+選擇閱讀器字體,Select reader font,選擇閱讀器字體,选择阅读器字体
+選擇頁面,Select page,選擇頁面,选择页面
+選擇類別,Select category,選擇類別,选择类别
+邀請,Invite,邀請,邀请
+邀請閱讀,Invitation to read,邀請閱讀,邀请阅读
+還原備份失敗,Failed to restore backup,還原備份失敗,还原备份失败
+還原完成：收藏 {}，設定 {}，歷史進度 {}，更新紀錄 {},"Restore complete: {} favorites, {} settings, {} history/progress records, {} update records",還原完成：收藏 {}，設定 {}，歷史進度 {}，更新紀錄 {},还原完成：收藏 {}，设置 {}，历史进度 {}，更新记录 {}
+還原完成：收藏 {}，設定 {}，閱讀紀錄 {},"Restore complete: favorites {}, settings {}, reading history {}",還原完成：收藏 {}，設定 {}，閱讀紀錄 {},还原完成：收藏 {}，设定 {}，阅读纪录 {}
+還沒有本地小說,No local novels yet,還沒有本地小說,还没有本地小说
+重新命名,Rename,重新命名,重新命名
+重新命名 RSS 目錄,Rename RSS directory,重新命名 RSS 目錄,重新命名 RSS 目录
+重新整理下載內容,Refresh downloads,重新整理下載內容,重新整理下载内容
+重新整理下載失敗：{},Refresh downloads failed: {},重新整理下載失敗：{},重新整理下载失败：{}
+重新整理後自動更新離線內容,Auto-update offline content after refresh,重新整理後自動更新離線內容,重新整理后自动更新离线内容
+重新整理最後一頁,Refresh last page,重新整理最後一頁,重新整理最后一页
+重新整理此章,Refresh this chapter,重新整理此章,重新整理此章
+重新檢查,Recheck,重新檢查,重新检查
+重新檢查雲端備份,Check cloud backup again,重新檢查雲端備份,重新检查云端备份
+重新載入,Reload,重新載入,重新载入
+重新載入失敗：{},Reload failed: {},重新載入失敗：{},重新载入失败：{}
+重複 {} / 不支援 {} / 無效 {},Duplicates {} / unsupported {} / invalid {},重複 {} / 不支援 {} / 無效 {},重复 {} / 不支持 {} / 无效 {}
+重試,Try again,重試,重试
+重試下載,Retry download,重試下載,重试下载
+重試失敗,Retry failed,重試失敗,重试失败
+錯誤,Error,錯誤,错误
+長條圖,Bar chart,長條圖,长条图
+開啟 {},Enabled {},開啟 {},开启 {}
+開啟後，刪除收藏時不再跳出確認視窗。,"After turning it on, the confirmation window will no longer pop up when deleting favorites.",開啟後，刪除收藏時不再跳出確認視窗。,开启后，删除收藏时不再跳出确认窗口。
+開啟後，只會自動刷新已確認可更新的離線頁面。,"When enabled, only offline pages confirmed as updatable are refreshed automatically.",開啟後，只會自動刷新已確認可更新的離線頁面。,开启后，只会自动刷新已确认可更新的离线页面。
+開啟後，收藏將完全消失時會詢問是否同步從百合會移除。,"After turning it on, when a favorite is completely removed, you will be asked whether to also remove it from Yamibo.",開啟後，收藏將完全消失時會詢問是否同步從百合會移除。,开启后，收藏将完全消失时会询问是否同步从百合会移除。
+開啟後，新建收藏時會詢問是否同步到百合會。,"After turning it on, when creating a new favorite, you will be asked whether to synchronize it to Yamibo.",開啟後，新建收藏時會詢問是否同步到百合會。,开启后，新建收藏时会询问是否同步到百合会。
+開啟後，重新整理已下載內容時會沿用目前目標刷新離線資料。,"When enabled, refreshing downloaded content keeps the current target for offline refreshes.",開啟後，重新整理已下載內容時會沿用目前目標刷新離線資料。,开启后，重新整理已下载内容时会沿用当前目标刷新离线资料。
+開啟替代頁,Open alternative page,開啟替代頁,开启替代页
+開始下載,Start download,開始下載,开始下载
+開始全域刷新收藏更新,Start global refresh of favorite updates,開始全域刷新收藏更新,开始全域刷新收藏更新
+開始刷新,Start refreshing,開始刷新,开始刷新
+開始自動簽到...,Starting automatic check-in...,開始自動簽到...,开始自动签到...
+開始閱讀,Start reading,開始閱讀,开始阅读
+閱畢,Finished reading,閱畢,阅毕
+閱讀中,Reading,閱讀中,阅读中
+閱讀圖表,Reading charts,閱讀圖表,阅读图表
+閱讀時數,Reading hours,閱讀時數,阅读时数
+閱讀時間,Reading time,閱讀時間,阅读时间
+閱讀標記,Read mark,閱讀標記,阅读标记
+閱讀模式,Reading mode,閱讀模式,阅读模式
+閱讀統計,Reading statistics,閱讀統計,阅读统计
+閱讀進度,Reading progress,閱讀進度,阅读进度
+關閉,Close,關閉,关闭
+關閉 {},Disabled {},關閉 {},关闭 {}
+關閉彈窗後，今天內不會再次彈出提醒。關閉此設定後，每次開啟 app 都會提醒。,"After dismissing the popup, it won't appear again today. If disabled, the reminder will show every time you open the app.",關閉彈窗後，今天內不會再次彈出提醒。關閉此設定後，每次開啟 app 都會提醒。,关闭弹窗后，今天内不会再次弹出提醒。关闭此设定后，每次开启 app 都会提醒。
+關閉這個畫面不會中止同步，你之後仍可從收藏頁或設定頁重新查看進度。,"Closing this screen will not abort synchronization, and you can still check the progress again later from the Favorites page or Settings page.",關閉這個畫面不會中止同步，你之後仍可從收藏頁或設定頁重新查看進度。,关闭这个画面不会中止同步，你之后仍可从收藏页或设定页重新查看进度。
+附件選項,Attachment options,附件選項,附件选项
+隔離,Quarantined,隔離,隔离
+隨便看看,Browse random blogs,隨便看看,随便看看
+隱藏,Hide,隱藏,隐藏
+離線頁可刷新,Offline page refreshable,離線頁可刷新,离线页可刷新
+雲端備份,Cloud backup,雲端備份,云端备份
+雲端備份狀態,Cloud backup status,雲端備份狀態,云端备份状态
+雲端同步,Cloud sync,雲端同步,云端同步
+雲端同步警告,Cloud sync alerts,雲端同步警告,云同步警告
+雲端同步需要檢查,Cloud sync needs review,雲端同步需要檢查,云同步需要检查
+雲端暫時無法使用,Cloud is temporarily unavailable,雲端暫時無法使用,云端暂时无法使用
+雲端清除未完整確認：{}；下次會先安全載入再繼續,Cloud deletion was not fully confirmed: {}; the next run will safely load data before continuing,雲端清除未完整確認：{}；下次會先安全載入再繼續,云端清除未完整确认：{}；下次会先安全加载再继续
+雲端資料將成為權威；未上傳的本機差異會被捨棄。,Cloud data will become authoritative; unuploaded local differences will be discarded.,雲端資料將成為權威；未上傳的本機差異會被捨棄。,云端数据将成为权威；未上传的本地差异会被舍弃。
+需要安全載入,Safe load required,需要安全載入,需要安全加载
+頁數,Number of pages,頁數,页数
+預覽,Preview,預覽,预览
+預覽更新彈窗,Preview update prompt,預覽更新彈窗,预览更新弹窗
+顏色,Color,顏色,颜色
+顏色主題,Color theme,顏色主題,颜色主题
+類別名稱,Category name,類別名稱,类别名称
+顯示收藏數量,Show favorites count,顯示收藏數量,显示收藏数量
+顯示收藏更新檢查進度與結果,Display favorite update check progress and results,顯示收藏更新檢查進度與結果,显示收藏更新检查进度与结果
+顯示百合會收藏同步進度,Display Yamibo favorites synchronization progress,顯示百合會收藏同步進度,显示百合会收藏同步进度
+顯示閱讀進度提示,Show reading progress indicator,顯示閱讀進度提示,显示阅读进度提示
+顯示需要使用者處理的雲端同步問題,Shows cloud sync issues that need your attention,顯示需要使用者處理的雲端同步問題,显示需要用户处理的云同步问题
+首頁,Home,首頁,首页
+點擊展開 / 收起,Click to expand/collapse,點擊展開 / 收起,点击展开 / 收起
+點擊簽到,Tap to check in,點擊簽到,点击签到
+點擊跳轉到評論區,Click to jump to the comment area,點擊跳轉到評論區,点击跳转到评论区
+點擊選擇字體並預覽效果,Tap to select font and preview effect,點擊選擇字體並預覽效果,点击选择字体并预览效果
+點擊開屏簽到提醒後，跳過個人中心，直接打開簽到網頁。,"After tapping the check-in reminder, skip the user center and open the check-in page directly.",點擊開屏簽到提醒後，跳過個人中心，直接打開簽到網頁。,点击开屏签到提醒后，跳过个人中心，直接打开签到网页。
+點評,Comment,點評,点评
+點評成功，刷新後更新評分/點評狀態,"The review is successful, and the rating/review status will be updated after refreshing.",點評成功，刷新後更新評分/點評狀態,点评成功，刷新后更新评分/点评状态
+（無標題）,(untitled),（無標題）,（无标题）
+，另有 {} 筆,", {} more",，另有 {} 筆,，另有 {} 条
+"💡 tips : 標籤頁面類似常規漫畫App, 推薦用於收藏漫畫","💡 tips: The tab page is similar to a regular comic app, recommended for collecting comics","💡 tips : 標籤頁面類似常規漫畫App, 推薦用於收藏漫畫","💡 tips : 标签页面类似常规漫画App, 推荐用于收藏漫画"
+💬 點評,Comment,💬 點評,💬 点评

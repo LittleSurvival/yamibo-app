@@ -20,7 +20,7 @@ class DatabaseSignStatusStore(db: Database) : SignStatusStore {
     private val queries = db.signDailyRecordQueries
 
     private fun scopedKey(uid: String): String =
-        "${uid}_${currentLocalDateKey()}"
+        signStatusStorageKey(uid, currentLocalDateKey())
 
     override fun getToday(uid: String): SignStatusRecord? =
         queries.getByDateKey(scopedKey(uid)).executeAsOneOrNull()?.let { record ->
@@ -41,3 +41,6 @@ class DatabaseSignStatusStore(db: Database) : SignStatusStore {
         )
     }
 }
+
+internal fun signStatusStorageKey(uid: String, localDateKey: String): String =
+    "${uid}_${localDateKey}"

@@ -17,7 +17,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
-import io.github.littlesurvival.YamiboClient
+import io.github.littlesurvival.core.YamiboResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -37,6 +37,8 @@ import me.thenano.yamibo.yamibo_app.confirmation.AppConfirmationController
 import me.thenano.yamibo.yamibo_app.feedback.AppFeedbackController
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.navigation.rememberRestorableNavigator
+import me.thenano.yamibo.yamibo_app.network.AndroidYamiboClientProvider
+import me.thenano.yamibo.yamibo_app.notification.dismissActiveSignReminder
 import me.thenano.yamibo.yamibo_app.profile.settings.access.AndroidBackgroundAccessRepository
 import me.thenano.yamibo.yamibo_app.profile.settings.backup.AndroidBackupScheduler
 import me.thenano.yamibo.yamibo_app.profile.settings.sign.AndroidSignReminderScheduler
@@ -45,6 +47,10 @@ import me.thenano.yamibo.yamibo_app.repository.localnovel.AndroidLocalNovelRepos
 import me.thenano.yamibo.yamibo_app.repository.localnovel.PlatformFileOperations
 import me.thenano.yamibo.yamibo_app.repository.appupdate.DefaultAppUpdateRepository
 import me.thenano.yamibo.yamibo_app.repository.backup.BackupRepositoryImpl
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncService
+import me.thenano.yamibo.yamibo_app.appsync.AndroidAppSyncBackgroundScheduler
+import me.thenano.yamibo.yamibo_app.appsync.AndroidAppSyncLifecycleBridge
+import me.thenano.yamibo.yamibo_app.appsync.AppSyncLifecycleController
 import me.thenano.yamibo.yamibo_app.repository.chineseconversion.createChineseConversionRepository
 import me.thenano.yamibo.yamibo_app.repository.contentcover.ContentCoverRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.download.AndroidDownloadStorageProvider
@@ -78,6 +84,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         AndroidAppForegroundTracker.markForeground(true)
+        AndroidAppSyncLifecycleBridge.onActivityStarted()
     }
 
     override fun onNewIntent(intent: android.content.Intent) {
@@ -88,12 +95,14 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(intent: android.content.Intent?) {
         if (intent?.getBooleanExtra(EXTRA_FROM_NOTIFICATION_SIGN_IN, false) == true) {
+            dismissActiveSignReminder(this)
             showSignWebViewTrigger.value = true
             intent.putExtra(EXTRA_FROM_NOTIFICATION_SIGN_IN, false)
         }
     }
 
     override fun onStop() {
+        AndroidAppSyncLifecycleBridge.onActivityStopped(isChangingConfigurations)
         AndroidAppForegroundTracker.markForeground(false)
         super.onStop()
     }
@@ -148,11 +157,40 @@ class MainActivity : ComponentActivity() {
             val cookieStore = remember { AndroidCookieStore(context) }
             val userStore = remember { AndroidUserStore(context) }
             val forumFavoriteStore = remember { AndroidForumFavoriteStore(context) }
-            val settingsStore = remember { AndroidSettingsStore(context) }
+            val rawSettingsStore = remember { AndroidSettingsStore(context) }
+
+            /** Repository Logic */
+            val yamiboClient = remember { AndroidYamiboClientProvider.get(context) }
+            val authRepository = remember {
+                AndroidAuthRepository(cookieStore, userStore, yamiboClient, forumFavoriteStore)
+            }
+            val dbFactory = remember { DatabaseFactory(context) }
+            val appDatabase = remember { Database(dbFactory.createDriver()) }
+            val appSyncService = remember {
+                AppSyncService(
+                    db = appDatabase,
+                    settingsStore = rawSettingsStore,
+                    authRepository = authRepository,
+                )
+            }
+            val settingsStore = remember {
+                appSyncService.operationRecordingSettingsStore(appDatabase, rawSettingsStore)
+            }
             val appSettingsRepository = remember { AppSettingsRepository(settingsStore) }
             val novelReaderSettingsRepository = remember { NovelReaderSettingsRepository(settingsStore) }
             val mangaReaderSettingsRepository = remember { MangaReaderSettingsRepository(settingsStore) }
             val imageReaderModeOverrideRepository = remember { SettingsImageReaderModeOverrideRepository(settingsStore) }
+            DisposableEffect(
+                appSyncService,
+                appSettingsRepository,
+                novelReaderSettingsRepository,
+                mangaReaderSettingsRepository,
+            ) {
+                appSyncService.registerSyncableSettings(
+                    listOf(appSettingsRepository, novelReaderSettingsRepository, mangaReaderSettingsRepository),
+                )
+                onDispose { }
+            }
             @SuppressLint("RememberReturnType")
             val fontRepository = remember {
                 DefaultFontRepository(
@@ -162,13 +200,6 @@ class MainActivity : ComponentActivity() {
                     platform = AndroidFontPlatform(context),
                 )
             }
-
-            /** Repository Logic */
-            val yamiboClient = remember { YamiboClient(timeoutMillis = 60_000L) }
-            val authRepository = remember {
-                AndroidAuthRepository(cookieStore, userStore, yamiboClient, forumFavoriteStore)
-            }
-            val dbFactory = remember { DatabaseFactory(context) }
             val diskCacheFactory = remember {
                 DiskCacheFactory(
                     dbFactory,
@@ -184,12 +215,12 @@ class MainActivity : ComponentActivity() {
             val blogRepository = remember { BlogRepositoryImpl(cookieStore, yamiboClient, diskCacheFactory) }
             val chineseConversionRepository = remember { createChineseConversionRepository() }
             val tagRepository = remember { AndroidTagRepository(cookieStore, yamiboClient, diskCacheFactory) }
-            val favoriteRepository = remember { AndroidLocalFavoriteRepository(dbFactory) }
-            val detailNoteRepository = remember { AndroidDetailNoteRepository(dbFactory) }
-            val bookMarkRepository = remember { AndroidLocalBookMarkRepository(dbFactory) }
+            val favoriteRepository = remember { appSyncService.favoriteStoreRepository(appDatabase) }
+            val detailNoteRepository = remember { appSyncService.detailNoteRepository(appDatabase) }
+            val bookMarkRepository = remember { appSyncService.bookMarkRepository(appDatabase) }
             val chapterStateRepository = remember { AndroidLocalChapterStateRepository(dbFactory) }
             val remoteFavoriteRepository = remember { AndroidFavoriteRepository(cookieStore, yamiboClient) }
-            val favoriteSyncDatabase = remember { Database(dbFactory.createDriver()) }
+            val favoriteSyncDatabase = appDatabase
             val favoriteSyncRepository = remember {
                 FavoriteSyncRepositoryImpl(
                     db = favoriteSyncDatabase,
@@ -200,7 +231,7 @@ class MainActivity : ComponentActivity() {
                 )
             }
             val rssSearchSubscriptionRepository = remember {
-                RssSearchSubscriptionRepositoryImpl(
+                appSyncService.rssSearchSubscriptionRepository(
                     db = favoriteSyncDatabase,
                     authRepository = authRepository,
                     forumRepository = forumRepository,
@@ -213,7 +244,7 @@ class MainActivity : ComponentActivity() {
                 )
             }
             val favoriteUpdateRepository = remember {
-                FavoriteUpdateRepositoryImpl(
+                appSyncService.favoriteUpdateRepository(
                     db = favoriteSyncDatabase,
                     localFavoriteRepository = favoriteRepository,
                     threadRepository = threadRepository,
@@ -223,10 +254,32 @@ class MainActivity : ComponentActivity() {
             }
             val backgroundTaskRepository = remember { AndroidBackgroundTaskRepository(context) }
             @SuppressLint("RememberReturnType")
-            val favoriteSyncRunner = remember { FavoriteSyncRunner(favoriteSyncRepository, backgroundTaskRepository) }
+            val favoriteSyncRunner = remember {
+                FavoriteSyncRunner(
+                    repository = favoriteSyncRepository,
+                    backgroundTaskRepository = backgroundTaskRepository,
+                    prepareRemoteAccess = {
+                        when (val result = remoteFavoriteRepository.fetchFavorites()) {
+                            is YamiboResult.Success -> null
+                            else -> i18n(result.message())
+                        }
+                    },
+                )
+            }
             val favoriteUpdateScheduler = remember { AndroidFavoriteUpdateScheduler(context) }
             @SuppressLint("RememberReturnType")
-            val favoriteUpdateRunner = remember { FavoriteUpdateRunner(favoriteUpdateRepository, favoriteUpdateScheduler) }
+            val favoriteUpdateRunner = remember {
+                FavoriteUpdateRunner(
+                    repository = favoriteUpdateRepository,
+                    scheduler = favoriteUpdateScheduler,
+                    prepareRemoteAccess = {
+                        when (val result = remoteFavoriteRepository.fetchFavorites()) {
+                            is YamiboResult.Success -> null
+                            else -> i18n(result.message())
+                        }
+                    },
+                )
+            }
             val backupStorageProvider = remember { AndroidBackupStorageProvider(context, appSettingsRepository) }
             val backupRepository = remember {
                 BackupRepositoryImpl(
@@ -236,6 +289,26 @@ class MainActivity : ComponentActivity() {
                     storageProvider = backupStorageProvider,
                     appVersionCode = AppVersion.VersionCode.toInt(),
                 )
+            }
+            DisposableEffect(appSyncService, backupRepository) {
+                appSyncService.registerLocalSnapshotSource(backupRepository)
+                onDispose { }
+            }
+            val appSyncBackgroundScheduler = remember {
+                AndroidAppSyncBackgroundScheduler(context)
+            }
+            @SuppressLint("RememberReturnType")
+            val appSyncLifecycleController = remember(
+                appSyncService,
+                appSyncBackgroundScheduler,
+            ) {
+                AppSyncLifecycleController(appSyncService, appSyncBackgroundScheduler)
+            }
+            DisposableEffect(appSyncLifecycleController) {
+                AndroidAppSyncLifecycleBridge.attach(appSyncLifecycleController)
+                onDispose {
+                    AndroidAppSyncLifecycleBridge.detach(appSyncLifecycleController)
+                }
             }
             val downloadRepository = remember {
                 DownloadRepositoryImpl(
@@ -265,7 +338,9 @@ class MainActivity : ComponentActivity() {
             val inAppLinkNavigationRepository = remember {
                 DefaultInAppLinkNavigationRepository(threadRepository, novelCacheRepository)
             }
-            val readHistoryRepository = remember { AndroidReadHistoryRepository(dbFactory) }
+            val readHistoryRepository = remember {
+                appSyncService.readHistoryRepository(AndroidReadHistoryRepository(appDatabase))
+            }
             val contentCoverRepository = remember {
                 ContentCoverRepositoryImpl(Database(dbFactory.createDriver()))
             }
@@ -295,6 +370,8 @@ class MainActivity : ComponentActivity() {
                 LocalAppTaskManager provides appTaskManager,
                 LocalNavigator provides navigator,
                 LocalAuthRepository provides authRepository,
+                LocalAppSyncService provides appSyncService,
+                LocalAppSyncBackgroundScheduler provides appSyncBackgroundScheduler,
                 LocalAppUpdateRepository provides appUpdateRepository,
                 LocalForumRepository provides forumRepository,
                 LocalThreadRepository provides threadRepository,
@@ -368,7 +445,9 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                App()
+                YamiboWafRecoveryRoot(yamiboClient) {
+                    App()
+                }
             }
         }
     }

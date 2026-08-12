@@ -1,0 +1,32 @@
+CREATE TABLE LocalNovel (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fileType TEXT NOT NULL DEFAULT 'txt',
+    title TEXT NOT NULL,
+    author TEXT NOT NULL DEFAULT '',
+    fileUri TEXT NOT NULL,
+    coverPath TEXT,
+    totalChars INTEGER NOT NULL DEFAULT 0,
+    encoding TEXT NOT NULL DEFAULT 'UTF-8',
+    totalChapters INTEGER NOT NULL DEFAULT 0,
+    epubExtractDir TEXT,
+    createdAt INTEGER NOT NULL,
+    lastReadAt INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE LocalNovelChapter (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    novelId INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    chapterIndex INTEGER NOT NULL,
+    startOffset INTEGER NOT NULL DEFAULT 0,
+    endOffset INTEGER NOT NULL DEFAULT 0,
+    internalPath TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (novelId) REFERENCES LocalNovel(id) ON DELETE CASCADE
+);
+
+CREATE TABLE LocalNovelProgress (
+    novelId INTEGER PRIMARY KEY,
+    chapterId INTEGER NOT NULL DEFAULT 0,
+    charOffset INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (novelId) REFERENCES LocalNovel(id) ON DELETE CASCADE
+);

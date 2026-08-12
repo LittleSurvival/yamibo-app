@@ -29,8 +29,11 @@ Run manually with:
 The task is also wired before normal Kotlin compile, Compose resource generation,
 Android `preBuild`, `assembleDebug`, `assembleRelease`, and `installDebug`.
 
-`glossary.csv` is intentionally three-language and is the source of truth for
-app UI translations. Do not add UI strings to `composeResources/values*/strings.xml`;
+`glossary.csv` is the primary three-language source for app UI translations, while
+`base.csv` supplies fallback translations and repairs stale Simplified Chinese
+mirrors. For `zh-cn`, a glossary value that merely repeats its `zh-tw` value yields
+to a distinct non-empty base translation; explicit glossary Simplified translations
+remain authoritative. Do not add UI strings to `composeResources/values*/strings.xml`;
 Compose resources are reserved for non-i18n assets such as images and icons.
 
 ```csv

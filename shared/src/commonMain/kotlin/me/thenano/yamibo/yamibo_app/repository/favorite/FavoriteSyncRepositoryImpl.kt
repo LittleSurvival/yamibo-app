@@ -12,6 +12,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.repository.AuthRepository
@@ -29,7 +32,7 @@ import me.thenano.yamibo.yamibo_app.repository.ThreadRepository
 import me.thenano.yamibo.yamibo_app.repository.contentcover.findThreadCoverCandidate
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
 import me.thenano.yamibo.yamibo_app.util.time.epochMillisOrNull
-import me.thenano.yamibo.yamiboapp.FavoriteSyncTask
+import me.thenano.yamibo.yamibo_app.FavoriteSyncTask
 import kotlin.random.Random
 
 class FavoriteSyncRepositoryImpl(
@@ -205,6 +208,18 @@ class FavoriteSyncRepositoryImpl(
     }
 
     override suspend fun runImport(runId: String) {
+        try {
+            runImportUntilComplete(runId)
+        } catch (cancelled: CancellationException) {
+            withContext(NonCancellable) {
+                markRunInterrupted(runId, i18n("同步已取消。"))
+            }
+        } finally {
+            interruptRequestedRunIds.remove(runId)
+        }
+    }
+
+    private suspend fun runImportUntilComplete(runId: String) {
         interruptRequestedRunIds.remove(runId)
         val initial = taskQueries.getByRunId(runId).executeAsOneOrNull()?.toSnapshot() ?: return
         if (shouldStop(runId)) {
@@ -311,6 +326,11 @@ class FavoriteSyncRepositoryImpl(
                     return
                 }
 
+                is YamiboResult.WafChallenge -> {
+                    interruptRun(current, result.message())
+                    return
+                }
+
                 is YamiboResult.Failure -> {
                     failRun(current.copy(failedCount = current.failedCount + 1), truncateFavoriteMessage(result.reason))
                     return
@@ -413,6 +433,11 @@ class FavoriteSyncRepositoryImpl(
                             return
                         }
 
+                        is YamiboResult.WafChallenge -> {
+                            interruptRun(current, threadResult.message())
+                            return
+                        }
+
                         is YamiboResult.Failure -> {
                             warnings += importFailureMessage(remoteItem, threadResult.reason)
                             current = updateSnapshot(
@@ -438,6 +463,10 @@ class FavoriteSyncRepositoryImpl(
             appendLog(logs, i18n("有 {} 項收藏已曾同步過至 {}，不進行重複同步", count, path))
         }
         current = updateSnapshot(current, warnings = warnings, logs = logs)
+        if (shouldStop(runId)) {
+            interruptRun(current, i18n("同步已取消。"))
+            return
+        }
 
         val formHash = when (val formHashResult = ensureFormHash()) {
             is YamiboResult.Success -> formHashResult.value
@@ -453,6 +482,11 @@ class FavoriteSyncRepositoryImpl(
 
             is YamiboResult.Maintenance -> {
                 failRun(current, i18n("百合會目前維護中，請稍後再試。"))
+                return
+            }
+
+            is YamiboResult.WafChallenge -> {
+                interruptRun(current, formHashResult.message())
                 return
             }
 
@@ -512,6 +546,11 @@ class FavoriteSyncRepositoryImpl(
                     return
                 }
 
+                is YamiboResult.WafChallenge -> {
+                    interruptRun(current, addResult.message())
+                    return
+                }
+
                 is YamiboResult.Failure -> {
                     warnings += uploadFailureMessage(title, threadId, addResult.reason)
                     current = updateSnapshot(
@@ -521,6 +560,11 @@ class FavoriteSyncRepositoryImpl(
                     )
                 }
             }
+        }
+
+        if (shouldStop(runId)) {
+            interruptRun(current, i18n("同步已取消。"))
+            return
         }
 
         if (current.uploadedCount > 0) {
@@ -544,6 +588,11 @@ class FavoriteSyncRepositoryImpl(
             }
         }
 
+        if (shouldStop(runId)) {
+            interruptRun(current, i18n("同步已取消。"))
+            return
+        }
+
         val completedAt = currentTimeMillis()
         val completed = current.copy(
             status = FavoriteSyncStatus.COMPLETED,
@@ -557,7 +606,6 @@ class FavoriteSyncRepositoryImpl(
         )
         persistSnapshot(completed)
         stateFlow.value = FavoriteSyncState.Completed(completed)
-        interruptRequestedRunIds.remove(runId)
     }
 
     override suspend fun removeLocalFavoriteItem(itemId: Long, removeRemote: Boolean): FavoriteSyncDeleteResult {
@@ -679,6 +727,7 @@ class FavoriteSyncRepositoryImpl(
             is YamiboResult.NotLoggedIn,
             is YamiboResult.NoPermission,
             is YamiboResult.Maintenance,
+            is YamiboResult.WafChallenge,
             is YamiboResult.Failure -> authResult
         }
     }
@@ -768,7 +817,11 @@ class FavoriteSyncRepositoryImpl(
         return truncateFavoriteMessage(i18n("無法同步到百合會 {}：{}", formatPostLabel(threadId, title), reason))
     }
 
-    private fun shouldStop(runId: String): Boolean = runId in interruptRequestedRunIds
+    private fun shouldStop(runId: String): Boolean {
+        if (runId in interruptRequestedRunIds) return true
+        val snapshot = taskQueries.getByRunId(runId).executeAsOneOrNull()?.toSnapshot() ?: return false
+        return snapshot.status != FavoriteSyncStatus.RUNNING
+    }
 
     private fun currentSnapshotOrNull(): FavoriteSyncSnapshot? {
         return when (val current = stateFlow.value) {
@@ -808,7 +861,6 @@ class FavoriteSyncRepositoryImpl(
         )
         persistSnapshot(interrupted)
         stateFlow.value = FavoriteSyncState.Interrupted(interrupted)
-        interruptRequestedRunIds.remove(snapshot.runId)
     }
 
     private fun failRun(snapshot: FavoriteSyncSnapshot, reason: String) {
@@ -881,7 +933,7 @@ class FavoriteSyncRepositoryImpl(
         }
     }
 
-    private fun me.thenano.yamibo.yamiboapp.LocalFavoriteItem.asThreadIdOrNull(): ThreadId? {
+    private fun me.thenano.yamibo.yamibo_app.LocalFavoriteItem.asThreadIdOrNull(): ThreadId? {
         return when (FavoriteStoreRepository.FavoriteTargetType.fromStorage(targetType)) {
             FavoriteStoreRepository.FavoriteTargetType.ThreadNormal,
             FavoriteStoreRepository.FavoriteTargetType.ThreadNovel -> ThreadId(targetId.toInt())

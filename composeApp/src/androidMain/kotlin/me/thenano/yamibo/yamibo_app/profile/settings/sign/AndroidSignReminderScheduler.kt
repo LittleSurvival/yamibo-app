@@ -6,13 +6,15 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import me.thenano.yamibo.yamibo_app.notification.dismissActiveSignReminder
 import me.thenano.yamibo.yamibo_app.repository.settings.SignReminderFrequency
 import java.util.concurrent.TimeUnit
 
 import androidx.work.workDataOf
 
 class AndroidSignReminderScheduler(context: Context) : SignReminderScheduler {
-    private val workManager = WorkManager.getInstance(context.applicationContext)
+    private val appContext = context.applicationContext
+    private val workManager = WorkManager.getInstance(appContext)
 
     override suspend fun schedule(frequency: SignReminderFrequency) {
         val minutes = getIntervalMinutes(frequency)
@@ -45,6 +47,10 @@ class AndroidSignReminderScheduler(context: Context) : SignReminderScheduler {
 
     override suspend fun cancel() {
         workManager.cancelAllWorkByTag(WORK_TAG)
+    }
+
+    override suspend fun dismissActiveReminder() {
+        dismissActiveSignReminder(appContext)
     }
 
     private fun getIntervalMinutes(frequency: SignReminderFrequency): Long? {

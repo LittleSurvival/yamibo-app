@@ -10,7 +10,7 @@ import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.repository.ContentCoverRepository
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
-import me.thenano.yamibo.yamiboapp.ContentCover
+import me.thenano.yamibo.yamibo_app.ContentCover
 
 class ContentCoverRepositoryImpl(
     private val db: Database,

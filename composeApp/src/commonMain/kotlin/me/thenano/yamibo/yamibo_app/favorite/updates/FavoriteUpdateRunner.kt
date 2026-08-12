@@ -17,6 +17,7 @@ import kotlin.time.Duration.Companion.milliseconds
 class FavoriteUpdateRunner(
     private val repository: FavoriteUpdateRepository,
     private val scheduler: FavoriteUpdateScheduler,
+    private val prepareRemoteAccess: suspend () -> String? = { null },
 ) {
     sealed interface LaunchResult {
         data class Started(val runId: String) : LaunchResult
@@ -48,11 +49,18 @@ class FavoriteUpdateRunner(
             return LaunchResult.Started(latest.runId)
         }
 
+        prepareRemoteAccess()?.let { reason ->
+            return LaunchResult.Rejected(reason = reason)
+        }
         val runId = repository.startRun()
         return startFavoriteUpdateTask(runId)
     }
 
     suspend fun resumeInterruptedUpdate(): LaunchResult? {
+        val resumable = repository.getLatestSnapshot() ?: return null
+        prepareRemoteAccess()?.let { reason ->
+            return LaunchResult.Rejected(reason = reason, runId = resumable.runId)
+        }
         val runId = repository.resumeInterruptedRun() ?: return null
         return startFavoriteUpdateTask(runId)
     }

@@ -314,18 +314,27 @@ object HtmlParser {
                             }
                         }
                         "rt" -> {
-                            // Handled by the parent <ruby>; ignore standalone rt to avoid duplicate text.
+                            /**
+                             * Handled by the parent <ruby>; ignore standalone rt to avoid duplicate text.
+                             */
                         }
                         "rp" -> {
-                            // Browser fallback parentheses are not shown in native ruby rendering.
+                            /**
+                             * Browser fallback parentheses are not shown in native ruby rendering.
+                             */
                         }
                         "a" -> {
-                            val href = node.attr("href")
+                            val cloudflareEmail = decodeCloudflareEmail(node.attr("data-cfemail"))
+                            val href = cloudflareEmail?.let { "mailto:$it" } ?: node.attr("href")
                             val prevLink = currentLinkHref
                             if (href.isNotBlank()) currentLinkHref = href
                             
                             val start = globalBuilder.length
-                            node.childNodes().forEach { parseNode(it, parentAlign) }
+                            if (cloudflareEmail != null) {
+                                appendTextNodeText(cloudflareEmail)
+                            } else {
+                                node.childNodes().forEach { parseNode(it, parentAlign) }
+                            }
                             val end = globalBuilder.length
                             
                             if (href.isNotBlank() && start < end) {
@@ -364,7 +373,7 @@ object HtmlParser {
                         else -> { node.childNodes().forEach { parseNode(it, parentAlign) } }
                     }
                 }
-                else -> { /* Other node types, ignore */ }
+                else -> { /** Other node types, ignore */ }
             }
         }
 
@@ -372,6 +381,20 @@ object HtmlParser {
         commitText()
 
         return blocks
+    }
+
+    private fun decodeCloudflareEmail(encoded: String): String? {
+        if (encoded.length < 4 || encoded.length % 2 != 0) return null
+
+        return runCatching {
+            val bytes = encoded.chunked(2).map { it.toInt(16) }
+            val key = bytes.first()
+            bytes.drop(1)
+                .map { (it xor key).toByte() }
+                .toByteArray()
+                .decodeToString()
+                .takeIf { it.isNotBlank() }
+        }.getOrNull()
     }
 
     private fun parseAttachment(node: Element): ParsedAttachment? {

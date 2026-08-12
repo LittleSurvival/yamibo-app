@@ -1,0 +1,14 @@
+ALTER TABLE AppSyncInstallation
+ADD COLUMN syncOnAppStart INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE AppSyncInstallation
+ADD COLUMN syncOnForegroundExit INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE AppSyncInstallation
+ADD COLUMN periodicIntervalKey TEXT NOT NULL DEFAULT '6h';
+
+ALTER TABLE AppSyncInstallation
+ADD COLUMN requestedTriggerGeneration INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE AppSyncInstallation
+ADD COLUMN accountedTriggerGeneration INTEGER NOT NULL DEFAULT 0;

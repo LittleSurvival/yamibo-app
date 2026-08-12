@@ -47,6 +47,7 @@ class ForumFavoriteSynchronizer(
             is YamiboResult.Failure -> repairIdAfterRemoveFailure(forumId, result)
             is YamiboResult.NotLoggedIn,
             is YamiboResult.NoPermission,
+            is YamiboResult.WafChallenge,
             is YamiboResult.Maintenance -> result
         }
     }
@@ -75,6 +76,7 @@ class ForumFavoriteSynchronizer(
                 is YamiboResult.NotLoggedIn,
                 is YamiboResult.NoPermission,
                 is YamiboResult.Maintenance,
+                is YamiboResult.WafChallenge,
                 is YamiboResult.Failure -> return result
             }
         }

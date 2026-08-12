@@ -23,7 +23,9 @@ import kotlinx.coroutines.launch
 import me.thenano.yamibo.yamibo_app.*
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme.colors
 import me.thenano.yamibo.yamibo_app.event.AppEventBus
+import me.thenano.yamibo.yamibo_app.event.AppEvent
 import me.thenano.yamibo.yamibo_app.event.events.LoginSuccessEvent
+import me.thenano.yamibo.yamibo_app.event.events.SignStatusChangedEvent
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.localnovel.ILocalNovelBookshelfScreen
 import me.thenano.yamibo.yamibo_app.message.IMessageCenterScreen
@@ -33,16 +35,39 @@ import me.thenano.yamibo.yamibo_app.profile.about.IAboutScreen
 import me.thenano.yamibo.yamibo_app.profile.download.IDownloadQueueScreen
 import me.thenano.yamibo.yamibo_app.profile.settings.ISettingsScreen
 import me.thenano.yamibo.yamibo_app.profile.settings.backup.IBackupSettingsScreen
+import me.thenano.yamibo.yamibo_app.profile.settings.cloud.IAppSyncSettingsScreen
 import me.thenano.yamibo.yamibo_app.profile.sign.ISignInfoScreen
 import me.thenano.yamibo.yamibo_app.profile.sign.ISignWebView
 import me.thenano.yamibo.yamibo_app.profile.sign.signActionFeedbackMessage
+import me.thenano.yamibo.yamibo_app.profile.sign.shouldEmitSignStatusChanged
 import me.thenano.yamibo.yamibo_app.profile.support.ISupportAppDevelopmentScreen
+import me.thenano.yamibo.yamibo_app.repository.SignRepository
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadQueueEntry
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadStatus
 import me.thenano.yamibo.yamibo_app.repository.settings.SignInMode
 
 internal fun shouldShowDownloadBadge(queue: List<DownloadQueueEntry>): Boolean =
     queue.any { entry -> entry.status == DownloadStatus.Queued || entry.status == DownloadStatus.Downloading }
+
+internal enum class PassiveSignButtonState {
+    Signed,
+    Available,
+}
+
+internal fun resolvePassiveSignButtonState(signRepository: SignRepository): PassiveSignButtonState =
+    if (signRepository.getKnownSignedToday() == true) {
+        PassiveSignButtonState.Signed
+    } else {
+        PassiveSignButtonState.Available
+    }
+
+internal fun isProfileSignRefreshEvent(event: AppEvent): Boolean =
+    event == LoginSuccessEvent || event == SignStatusChangedEvent
+
+private fun PassiveSignButtonState.label(): String = when (this) {
+    PassiveSignButtonState.Signed -> i18n("今日已簽到")
+    PassiveSignButtonState.Available -> i18n("點擊簽到")
+}
 
 @Composable
 fun ProfilePage(
@@ -72,11 +97,7 @@ fun ProfilePage(
             if (userInfo == null) {
                 i18n("點擊簽到")
             } else {
-                when (signRepository.getKnownSignedToday()) {
-                    true -> i18n("今日已簽到")
-                    false -> i18n("點擊簽到")
-                    null -> i18n("載入中...")
-                }
+                resolvePassiveSignButtonState(signRepository).label()
             }
         )
     }
@@ -90,39 +111,15 @@ fun ProfilePage(
             signButtonTitle = i18n("點擊簽到")
             return
         }
-        val knownSignedToday = signRepository.getKnownSignedToday()
-        if (knownSignedToday != null) {
-            signButtonTitle = if (knownSignedToday) i18n("今日已簽到") else i18n("點擊簽到")
-            return
-        }
-        signButtonTitle = i18n("載入中...")
-        coroutineScope.launch {
-            val cachedPageInfo = signRepository.getCachedPageInfo()
-            signButtonTitle = when {
-                signRepository.isSignedToday() -> i18n("今日已簽到")
-                cachedPageInfo?.hasSignedToday == false -> i18n("點擊簽到")
-                else -> {
-                    when (val result = signRepository.fetchPageInfo()) {
-                        is YamiboResult.Success -> {
-                            if (result.value.hasSignedToday) i18n("今日已簽到") else i18n("點擊簽到")
-                        }
-                        is YamiboResult.Failure -> {
-                            when {
-                                signRepository.getCachedPageInfo()?.hasSignedToday == true -> i18n("今日已簽到")
-                                else -> i18n("點擊簽到")
-                            }
-                        }
-                        else -> i18n("點擊簽到")
-                    }
-                }
-            }
-        }
+        signButtonTitle = resolvePassiveSignButtonState(signRepository).label()
     }
 
     LaunchedEffect(Unit) {
         AppEventBus.events.collect { event ->
-            if (event == LoginSuccessEvent) {
-                userInfo = authRepository.currentUser()
+            if (isProfileSignRefreshEvent(event)) {
+                if (event == LoginSuccessEvent) {
+                    userInfo = authRepository.currentUser()
+                }
                 signRefreshKey += 1
             }
         }
@@ -185,6 +182,7 @@ fun ProfilePage(
                                             signButtonTitle = i18n("正在簽到...")
                                             authRepository.syncCookieFromWebView()
                                             signRepository.markTodaySigned()
+                                            AppEventBus.emit(SignStatusChangedEvent)
                                             when (signRepository.fetchPageInfo()) {
                                                 is YamiboResult.Success -> {
                                                     signRefreshKey += 1
@@ -211,13 +209,17 @@ fun ProfilePage(
                                     onCfCleared = {
                                         coroutineScope.launch {
                                             var snackbarMessage: String?
-                                            when (val result = signRepository.runAutoSign(allowRepair)) {
+                                            val result = signRepository.runAutoSign(allowRepair)
+                                            when (result) {
                                                 is YamiboResult.Success -> {
                                                     signRefreshKey += 1
                                                     snackbarMessage = result.value.message
                                                 }
 
                                                 else -> snackbarMessage = result.signActionFeedbackMessage()
+                                            }
+                                            if (shouldEmitSignStatusChanged(result)) {
+                                                AppEventBus.emit(SignStatusChangedEvent)
                                             }
                                             isSigning = false
                                             refreshSignStatus()
@@ -287,7 +289,13 @@ fun ProfilePage(
             )
 
             EntryCard(
-                title = i18n("設定與收藏備份"),
+                title = i18n("雲端同步"),
+                icon = YamiboIcons.CloudSync,
+                onClick = { navigator.navigate(IAppSyncSettingsScreen()) }
+            )
+
+            EntryCard(
+                title = i18n("本地資料備份"),
                 icon = YamiboIcons.Backup,
                 onClick = { navigator.navigate(IBackupSettingsScreen()) }
             )

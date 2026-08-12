@@ -9,19 +9,18 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import me.thenano.yamibo.yamibo_app.repository.settings.BackupInterval
-import kotlin.time.Duration.Companion.hours
 import kotlin.time.toJavaDuration
 
 class AndroidBackupScheduler(context: Context) : BackupScheduler {
     private val workManager = WorkManager.getInstance(context.applicationContext)
 
     override suspend fun schedule(interval: BackupInterval) {
-        val hours = interval.hours
-        if (hours == null) {
+        val duration = interval.fixedInterval?.duration
+        if (duration == null) {
             workManager.cancelUniqueWork(UNIQUE_PERIODIC_WORK)
             return
         }
-        val request = PeriodicWorkRequestBuilder<BackupWorker>(hours.hours.toJavaDuration())
+        val request = PeriodicWorkRequestBuilder<BackupWorker>(duration.toJavaDuration())
             .setConstraints(defaultConstraints())
             .addTag(WORK_TAG)
             .build()

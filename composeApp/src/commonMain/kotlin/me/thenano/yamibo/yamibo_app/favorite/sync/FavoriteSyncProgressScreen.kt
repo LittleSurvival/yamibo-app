@@ -144,6 +144,7 @@ fun FavoriteSyncStatusCard(
     onDismiss: (() -> Unit)? = null,
     onInterrupt: (() -> Unit)? = null,
     messageMaxHeight: Dp = 180.dp,
+    contentMaxHeight: Dp? = null,
 ) {
     val colors = YamiboTheme.colors
     val favoriteRepository = LocalFavoriteRepository.current
@@ -168,6 +169,7 @@ fun FavoriteSyncStatusCard(
     }
     val lastSyncTimestamp = snapshot.lastCompletedAt ?: snapshot.updatedAt
     var categoryName by remember(snapshot.targetCategoryId) { mutableStateOf<String?>(null) }
+    val contentScrollState = rememberScrollState()
 
     LaunchedEffect(snapshot.targetCategoryId) {
         categoryName = withContext(Dispatchers.Default) {
@@ -182,7 +184,17 @@ fun FavoriteSyncStatusCard(
         border = BorderStroke(1.dp, colors.brownPrimary.copy(alpha = 0.18f)),
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier
+                .then(
+                    if (contentMaxHeight != null) {
+                        Modifier
+                            .heightIn(max = contentMaxHeight)
+                            .verticalScroll(contentScrollState)
+                    } else {
+                        Modifier
+                    },
+                )
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Row(

@@ -5,20 +5,19 @@ android-minSdk = "24"
 android-targetSdk = "36"
 androidx-activity = "1.11.0"
 androidx-lifecycle = "2.10.0"
-composeHotReload = "1.0.0"
-composeMultiplatform = "1.10.3"
-kotlin = "2.3.20"
-kotlinx-coroutines = "1.10.2"
-kotlinx-serialization-json = "1.10.0"
+composeHotReload = "1.2.0"
+composeMultiplatform = "1.11.1"
+kotlin = "2.4.10"
+kotlinx-coroutines = "1.11.0"
+kotlinx-serialization-json = "1.11.0"
 ksoup = "0.2.6"
-ktor = "3.4.2"
-ktorClientCore = "3.4.2"
-coil3 = "3.4.0"
+ktor = "3.5.2"
+coil3 = "3.5.0"
 securityCrypto = "1.1.0"
-yamiboApi = "1.1.20"
-androidx-work = "2.11.0"
-sqldelight = "2.2.1"
-okio = "3.17.0"
+yamiboApi = "1.1.27"
+androidx-work = "2.11.2"
+sqldelight = "2.3.2"
+okio = "3.18.1"
 opencc4j = "1.14.0"
 
 [libraries]
@@ -31,14 +30,16 @@ androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization-json" }
 ksoup = { module = "com.fleeksoft.ksoup:ksoup", version.ref = "ksoup" }
-ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negotiation", version.ref = "ktorClientCore" }
-ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktorClientCore" }
-ktor-client-darwin = { module = "io.ktor:ktor-client-darwin", version.ref = "ktorClientCore" }
-ktor-client-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "ktorClientCore" }
-ktor-serialization-kotlinx-json = { module = "io.ktor:ktor-serialization-kotlinx-json", version.ref = "ktorClientCore" }
+ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negotiation", version.ref = "ktor" }
+ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
+ktor-client-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktor" }
+ktor-client-darwin = { module = "io.ktor:ktor-client-darwin", version.ref = "ktor" }
+ktor-client-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "ktor" }
+ktor-serialization-kotlinx-json = { module = "io.ktor:ktor-serialization-kotlinx-json", version.ref = "ktor" }
 coil3-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil3" }
 coil3-gif = { module = "io.coil-kt.coil3:coil-gif", version.ref = "coil3" }
 coil3-network-ktor3 = { module = "io.coil-kt.coil3:coil-network-ktor3", version.ref = "coil3" }
+coil3-svg = { module = "io.coil-kt.coil3:coil-svg", version.ref = "coil3" }
 yamibo-api = { module = "io.github.littlesurvival:yamibo-api", version.ref = "yamiboApi" }
 sqldelight-android-driver = { module = "app.cash.sqldelight:android-driver", version.ref = "sqldelight" }
 sqldelight-native-driver = { module = "app.cash.sqldelight:native-driver", version.ref = "sqldelight" }

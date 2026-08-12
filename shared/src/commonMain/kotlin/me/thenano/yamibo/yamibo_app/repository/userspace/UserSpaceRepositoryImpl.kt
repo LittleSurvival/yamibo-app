@@ -54,7 +54,7 @@ class UserSpaceRepositoryImpl(
 
     override suspend fun fetchMyBlogs(userId: UserId?, page: Int): YamiboResult<UserSpaceBlogPage> {
         yamiboClient.setCookie(cookieStore.load() ?: "")
-        return yamiboClient.fetchUserSpaceMyBlogs(userId, page)
+        return yamiboClient.fetchUserSpaceMyBlogs(userId = userId, page = page)
             .cacheSuccess(blogCache, UserSpaceRepository.TypedPageCacheKey("my", userId?.value, page).toCacheKey())
     }
 

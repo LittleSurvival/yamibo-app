@@ -14,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
@@ -21,7 +22,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.zIndex
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -30,6 +30,9 @@ import coil3.PlatformContext
 import coil3.compose.setSingletonImageLoaderFactory
 import coil3.memory.MemoryCache
 import coil3.network.ktor3.KtorNetworkFetcherFactory
+import coil3.svg.SvgDecoder
+import io.github.littlesurvival.YamiboClient
+import io.github.littlesurvival.waf.YamiboWafChallengeHost
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -43,6 +46,9 @@ import me.thenano.yamibo.yamibo_app.confirmation.AppConfirmationResult
 import me.thenano.yamibo.yamibo_app.feedback.AppFeedbackController
 import me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration
 import me.thenano.yamibo.yamibo_app.feedback.AppFeedbackResult
+import me.thenano.yamibo.yamibo_app.event.AppEventBus
+import me.thenano.yamibo.yamibo_app.event.events.SignStatusChangedEvent
+import me.thenano.yamibo.yamibo_app.factory.HttpClientFactory
 import me.thenano.yamibo.yamibo_app.home.HomePageScreen
 import me.thenano.yamibo.yamibo_app.i18n.AppLocaleProvider
 import me.thenano.yamibo.yamibo_app.i18n.i18n
@@ -51,6 +57,8 @@ import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.navigation.NavAction
 import me.thenano.yamibo.yamibo_app.profile.settings.update.AppUpdatePromptContent
 import me.thenano.yamibo.yamibo_app.profile.sign.ISignWebView
+import me.thenano.yamibo.yamibo_app.profile.sign.shouldDismissSignReminderFor
+import me.thenano.yamibo.yamibo_app.profile.sign.shouldEmitSignStatusChanged
 import me.thenano.yamibo.yamibo_app.profile.sign.signActionFeedbackMessage
 import me.thenano.yamibo.yamibo_app.repository.AuthRepository
 import me.thenano.yamibo.yamibo_app.repository.SignRepository
@@ -71,6 +79,39 @@ internal val showSignWebViewTrigger = mutableStateOf(false)
 private const val APP_FEEDBACK_Z_INDEX = Float.MAX_VALUE
 
 @Composable
+fun YamiboWafRecoveryRoot(
+    client: YamiboClient,
+    content: @Composable () -> Unit,
+) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var isForeground by remember(lifecycleOwner) {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+    }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> isForeground = true
+                Lifecycle.Event.ON_PAUSE,
+                Lifecycle.Event.ON_STOP,
+                Lifecycle.Event.ON_DESTROY -> isForeground = false
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        YamiboWafChallengeHost(
+            client = client,
+            isForeground = isForeground,
+            modifier = Modifier.fillMaxSize(),
+        )
+        content()
+    }
+}
+
+@Composable
 fun HomeScreenContent(
     onNewMessageStatusChange: (Boolean) -> Unit = {},
 ) {
@@ -88,7 +129,10 @@ fun App() {
                         .build()
                 }
                 .components {
-                    add(KtorNetworkFetcherFactory())
+                    // Coil lazily retains this client for the singleton ImageLoader, allowing the
+                    // in-memory WAF cookie to be reused without another app-level singleton.
+                    add(KtorNetworkFetcherFactory(httpClient = { HttpClientFactory.create() }))
+                    add(SvgDecoder.Factory())
                 }
                 .build()
             }
@@ -99,6 +143,7 @@ fun App() {
     val appSettingsRepository = LocalAppSettingsRepository.current
     val authRepository = LocalAuthRepository.current
     val signRepository = LocalSignRepository.current
+    val signReminderScheduler = LocalSignReminderScheduler.current
     val appUpdateRepository = LocalAppUpdateRepository.current
     val fontRepository = LocalFontRepository.current
     val feedbackController = LocalAppFeedbackController.current
@@ -118,9 +163,17 @@ fun App() {
     var completedPushTopId by remember { mutableStateOf(stack.lastOrNull()?.id) }
     var showSignReminder by remember { mutableStateOf(false) }
     var launchUpdateRelease by remember { mutableStateOf<AppUpdateRelease?>(null) }
+    LaunchedEffect(signReminderScheduler) {
+        AppEventBus.events.collect { event ->
+            if (shouldDismissSignReminderFor(event)) {
+                signReminderScheduler.dismissActiveReminder()
+            }
+        }
+    }
     LaunchedEffect(Unit) {
         val threshold = appSettingsRepository.appUpdateLaunchCheckThreshold.getValue()
-        val intervalMillis = threshold.hours?.times(60L * 60L * 1000L) ?: return@LaunchedEffect
+        val intervalMillis = threshold.fixedInterval?.duration?.inWholeMilliseconds
+            ?: return@LaunchedEffect
         val now = currentTimeMillis()
         val lastCheckAt = appSettingsRepository.appUpdateLastCheckAt.getValue().toLongOrNull() ?: 0L
         if (now - lastCheckAt >= intervalMillis) {
@@ -599,6 +652,7 @@ private fun navigateToSignWebViewOrProfile(
                             appTaskManager.launch(AppTaskKey("sign:manual-complete")) {
                                 authRepository.syncCookieFromWebView()
                                 signRepository.markTodaySigned()
+                                AppEventBus.emit(SignStatusChangedEvent)
                                 signRepository.fetchPageInfo()
                                 feedbackController.post(i18n("簽到成功"))
                             }
@@ -616,7 +670,11 @@ private fun navigateToSignWebViewOrProfile(
                         onCfCleared = {
                             appTaskManager.launch(AppTaskKey("sign:auto")) {
                                 feedbackController.post(i18n("開始自動簽到..."))
-                                feedbackController.post(signRepository.runAutoSign(allowRepair).signActionFeedbackMessage())
+                                val result = signRepository.runAutoSign(allowRepair)
+                                if (shouldEmitSignStatusChanged(result)) {
+                                    AppEventBus.emit(SignStatusChangedEvent)
+                                }
+                                feedbackController.post(result.signActionFeedbackMessage())
                             }
                         },
                         onMaintenanceObserved = {

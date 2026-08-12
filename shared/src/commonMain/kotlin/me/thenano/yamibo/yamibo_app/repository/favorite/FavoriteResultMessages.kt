@@ -26,6 +26,7 @@ internal fun YamiboResult<*>.favoriteSyncFailureMessage(
     is YamiboResult.NotLoggedIn -> messages.notLoggedIn
     is YamiboResult.NoPermission -> message()
     is YamiboResult.Maintenance -> messages.maintenance
+    is YamiboResult.WafChallenge -> message()
     is YamiboResult.Failure -> truncateFavoriteMessage(message())
     is YamiboResult.Success -> error("Success result has no failure message")
 }
@@ -48,6 +49,7 @@ internal fun YamiboResult<*>.favoriteUpdateFailureReason(
     is YamiboResult.NotLoggedIn -> messages.notLoggedIn(itemTitle)
     is YamiboResult.NoPermission -> message()
     is YamiboResult.Maintenance -> messages.maintenance(itemTitle)
+    is YamiboResult.WafChallenge -> message()
     is YamiboResult.Failure -> message()
     is YamiboResult.Success -> error("Success result has no failure reason")
 }

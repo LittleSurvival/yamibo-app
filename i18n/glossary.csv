@@ -1,851 +1,857 @@
 source,en,zh-tw,zh-cn
-Login,Login,登入,登录
-Save,Save,儲存,保存
-Cancel,Cancel,取消,取消
-Settings,Settings,設定,设置
-Profile,Profile,個人資料,个人资料
-Password,Password,密碼,密码
-User,User,使用者,用户
-Message,Message,訊息,消息
-messages,messages,訊息,消息
-Hello,Hello,你好,你好
-Home,Home,首頁,首页
-History,History,紀錄,记录
-Favorites,Favorites,收藏,收藏
-Language,Language,語言,语言
-Search,Search,搜尋,搜索
-Delete,Delete,刪除,删除
-Close,Close,關閉,关闭
-All,All,全部,全部
-百合會論壇,Yamibo Forum,百合會論壇,百合会论坛
+ / 最後更新 , / Last updated, / 最後更新 , / 最后更新
+#標籤漫畫,#Tag comics,#標籤漫畫,#标签漫画
+&gt;-简称征集中-&lt;/div&gt;,&gt;-Short name pending-&lt;/div&gt;,&gt;-简称征集中-&lt;/div&gt;,&gt;-简称征集中-&lt;/div&gt;
+&gt;目录&lt;/div&gt;,&gt;Table of contents&lt;/div&gt;,&gt;目录&lt;/div&gt;,&gt;目录&lt;/div&gt;
+- 沒有更多內容了 -,- No more content -,- 沒有更多內容了 -,- 没有更多内容了 -
+- 評論區結束 -,- End of comments -,- 評論區結束 -,- 评论区结束 -
+-简称征集中-,-Short name pending-,-简称征集中-,-简称征集中-
 12 小時,12 hours,12 小時,12 小时
 24 小時,24 hours,24 小時,24 小时
 3 天,3 days,3 天,3 天
+30 天,30 days,30 天,30 天
 6 小時,6 hours,6 小時,6 小时
 7 天,7 days,7 天,7 天
-不自動檢查,Do not auto-check,不自動檢查,不自动检查
-必要權限已具備，但還有 {} 項建議設定，可降低背景同步被系統中止的機率。,"Required permissions are granted, but {} recommended settings can reduce the chance of background sync being stopped by the system.",必要權限已具備，但還有 {} 項建議設定，可降低背景同步被系統中止的機率。,必要权限已具备，但还有 {} 项建议设置，可降低后台同步被系统中止的概率。
-目前缺少 {} 項必要權限。處理完後，背景同步通知才能正常顯示。,{} required permissions are missing. Background sync notifications will work properly after they are granted.,目前缺少 {} 項必要權限。處理完後，背景同步通知才能正常顯示。,目前缺少 {} 项必要权限。处理完成后，后台同步通知才能正常显示。
-默認,Default,默認,默认
-簡體,Simplified Chinese,簡體,简体
-繁體,Traditional Chinese,繁體,繁体
-全部,All,全部,全部
-取消,Cancel,取消,取消
-清空全選,Clear selection,清空全選,清空全选
-關閉,Close,關閉,关闭
-目前第 {} / {} 頁,Page {} of {},目前第 {} / {} 頁,目前第 {} / {} 页
-刪除,Delete,刪除,删除
-停用,Disabled,停用,停用
-{} · {} 次下載,{} · {} downloads,{} · {} 次下載,{} · {} 次下载
-{} 項收藏,{} favorites,{} 項收藏,{} 项收藏
-{} 項,{} items,{} 項,{} 项
-、,", ",、,、
-第 {} 頁,Page {},第 {} 頁,第 {} 页
-第{}頁,Page {},第{}頁,第{}页
-{}/{} 頁,{}/{} pages,{}/{} 頁,{}/{} 页
-全選,Select all,全選,全选
-已加入本地收藏，{},Added to local favorites: {},已加入本地收藏，{},已加入本地收藏，{}
-已加入收藏，{},Added to favorites: {},已加入收藏，{},已加入收藏，{}
-"已加入本地收藏，但同步到百合會失敗：{}","Added locally, but Yamibo sync failed: {}","已加入本地收藏，但同步到百合會失敗：{}","已加入本地收藏，但同步到百合会失败：{}"
-"已加入收藏，但同步失敗：{}","Added to favorites, but sync failed: {}","已加入收藏，但同步失敗：{}","已加入收藏，但同步失败：{}"
-直屬收藏 {} 筆，集合內收藏 {} 筆。,{} direct favorites and {} favorites inside collections.,直屬收藏 {} 筆，集合內收藏 {} 筆。,直属收藏 {} 个，集合内收藏 {} 个。
-「{}」目前包含 {} 筆收藏與 {} 個集合。,"{} currently contains {} favorites and {} collections.",「{}」目前包含 {} 筆收藏與 {} 個集合。,“{}”目前包含 {} 个收藏与 {} 个集合。
-{}類別不可刪除,The {} category cannot be deleted,{}類別不可刪除,{}类别不可删除
-已刪除 {} 項紀錄,Deleted {} history records,已刪除 {} 項紀錄,已删除 {} 项记录
-固定網格,Fixed grid,固定網格,固定网格
-橫排卡片,Row cards,橫排卡片,横排卡片
-橫排卡片(無封面),Row cards (no cover),橫排卡片(無封面),横排卡片（无封面）
-瀑布貼齊,Staggered grid,瀑布貼齊,瀑布流
-這個項目目前收藏在：{},This item is currently saved in: {},這個項目目前收藏在：{},这个项目目前收藏在：{}
-最後更新 {},Last updated {},最後更新 {},最后更新 {}
-排列: {},Layout: {},排列: {},排列: {}
-將當前所有收藏移動到{},Move all current favorites to {},將當前所有收藏移動到{},将当前所有收藏移动到{}
-{} 個集合,{} collections,{} 個集合,{} 个集合
-已刪除 {} 項，{} 項失敗,"Deleted {} items, {} failed",已刪除 {} 項，{} 項失敗,已删除 {} 项，{} 项失败
-排序: {}{},Sort: {}{},排序: {}{},排序: {}{}
-收藏順序,Favorite order,收藏順序,收藏顺序
-版區,Forum,版區,版区
-最後一次閱讀,Last read,最後一次閱讀,最后一次阅读
-名稱,Name,名稱,名称
-更新時間,Update time,更新時間,更新时间
-{}時 {}分 {}秒,{}h {}m {}s,{}時 {}分 {}秒,{}时 {}分 {}秒
-{}分 {}秒,{}m {}s,{}分 {}秒,{}分 {}秒
-{}秒,{}s,{}秒,{}秒
-目標類別：{},Target category: {},目標類別：{},目标类别：{}
-手動刷新,Manual refresh,手動刷新,手动刷新
-智能更新（TODO）,Smart update (TODO),智能更新（TODO）,智能更新（TODO）
-偵測到 {} 個更新,Detected {} updates,偵測到 {} 個更新,检测到 {} 个更新
-分類: {},Category: {},分類: {},分类: {}
-排序: {},Sort: {},排序: {},排序: {}
-刷新失敗：{},Refresh failed: {},刷新失敗：{},刷新失败：{}
-最近閱讀 {},Recently read {},最近閱讀 {},最近阅读 {}
-今日 {},Today {},今日 {},今日 {}
-語言,Language,語言,语言
+90 天,90 days,90 天,90 天
+<title>百合会每日维护</title>,<title>Yamibo Daily Maintenance</title>,<title>百合会每日维护</title>,<title>百合会每日维护</title>
+All,All,全部,全部
+Android 的背景同步依賴前景通知。開始同步後，只要通知已成功出現，再縮小 App 也能持續執行。,"Android background sync relies on foreground notifications. After starting sync, as long as the notification appears successfully, the app will continue running even when minimized.",Android 的背景同步依賴前景通知。開始同步後，只要通知已成功出現，再縮小 App 也能持續執行。,Android 的后台同步依赖前台通知。开始同步后，只要通知成功显示，将应用退到后台也能持续执行。
+App 內打開,Open in app,App 內打開,应用内打开
+App 啟動時同步,Sync on app start,App 啟動時同步,App 启动时同步
+App 啟動時清除緩存,Clear cache on app launch,App 啟動時清除緩存,App 启动时清除缓存
+App 更新,App updates,App 更新,App 更新
+App 系統設定,App system settings,App 系統設定,App 系统设置
+App 通知開關,App notification toggle,App 通知開關,App 通知开关
+Cancel,Cancel,取消,取消
+Close,Close,關閉,关闭
+Delete,Delete,刪除,删除
 English,English,English,English
-介面語言,Interface Language,介面語言,界面语言
-简体中文,Simplified Chinese,簡體中文,简体中文
-繁體中文,Traditional Chinese,繁體中文,繁体中文
-總積分 {},Total points {},總積分 {},总积分 {}
-收藏,Favorites,收藏,收藏
-紀錄,History,紀錄,记录
-首頁,Home,首頁,首页
-消息,Messages,消息,消息
-我的,Profile,我的,我的
-捲動(連續),Continuous scroll,捲動(連續),滚动（连续）
-捲動(留空),Scroll with gaps,捲動(留空),滚动（留空）
-單頁(左至右),Single page (left to right),單頁(左至右),单页（左至右）
-單頁(右至左),Single page (right to left),單頁(右至左),单页（右至左）
-單頁(上至下),Single page (top to bottom),單頁(上至下),单页（上至下）
-邊緣式,Edge style,邊緣式,边缘式
+Favorites,Favorites,收藏,收藏
+Hello,Hello,你好,你好
+History,History,紀錄,记录
+Home,Home,首頁,首页
 Kindle式,Kindle style,Kindle式,Kindle式
+Language,Language,語言,语言
+Login,Login,登入,登录
 L式,L-shaped,L式,L式
-左右式,Left / right,左右式,左右式
-刷新週期已改為 {},Refresh interval changed to {},刷新週期已改為 {},刷新周期已改为 {}
-刷新週期: {},Refresh interval: {},刷新週期: {},刷新周期: {}
-登入資訊過期，請重新登入,Login expired. Please sign in again.,登入資訊過期，請重新登入,登录信息过期，请重新登录
-伺服器正在維護中,The server is under maintenance.,伺服器正在維護中,服务器正在维护中
-查無登入資料，請重新登入,No login data found. Please sign in again.,查無登入資料，請重新登入,查无登录资料，请重新登录
-獲取用戶資料失敗: {},Failed to load profile: {},獲取用戶資料失敗: {},获取用户资料失败: {}
-名稱不能為空白,Name cannot be blank,名稱不能為空白,名称不能为空
-名稱「{}」已被類別使用,"Name ""{}"" is already used by a category",名稱「{}」已被類別使用,名称“{}”已被类别使用
-名稱「{}」已被集合使用,"Name ""{}"" is already used by a collection",名稱「{}」已被集合使用,名称“{}”已被集合使用
-此收藏已同步到百合會。,This favorite is already synced to Yamibo.,此收藏已同步到百合會。,此收藏已同步到百合会。
-同步已取消。,Sync canceled.,同步已取消。,同步已取消。
-刪除失敗,Delete failed,刪除失敗,删除失败
-百合會目前維護中，請稍後再試。,Yamibo is under maintenance. Please try again later.,百合會目前維護中，請稍後再試。,百合会目前维护中，请稍后再试。
-這筆收藏缺少網站 favorite id，暫時無法同步刪除網站端資料。,"This favorite has no website favorite ID, so website-side deletion is not available yet.",這筆收藏缺少網站 favorite id，暫時無法同步刪除網站端資料。,这笔收藏缺少网站收藏ID，暂时无法同步删除网站端数据。
-目前未登入百合會，無法同步刪除網站收藏。,"Not signed in to Yamibo, so website favorites cannot be deleted.",目前未登入百合會，無法同步刪除網站收藏。,目前未登录百合会，无法同步删除网站收藏。
-有 {} 項收藏已曾同步過至 {}，不進行重複同步,{} favorites were already synced to {} and will not be synced again,有 {} 項收藏已曾同步過至 {}，不進行重複同步,有 {} 项收藏已同步过至 {}，不进行重复同步
-網站收藏列表出現重複帖子：{},Duplicate thread found in website favorites: {},網站收藏列表出現重複帖子：{},网站收藏列表出现重复帖子：{}
-已取得 {} 項收藏,Fetched {} favorites,已取得 {} 項收藏,已取得 {} 项收藏
-頁數 正在取得收藏頁,Fetching favorite pages,頁數 正在取得收藏頁,页数：正在获取收藏页
-登入狀態已更新，但仍無法取得 formHash。,"Login state was refreshed, but formHash is still unavailable.",登入狀態已更新，但仍無法取得 formHash。,登录状态已更新，但仍无法获取 formHash。
-無法匯入帖子 {}：{},Failed to import thread {}: {},無法匯入帖子 {}：{},无法导入帖子 {}：{}
-匯入網站帖子,Importing website threads,匯入網站帖子,导入网站帖子
-找不到要同步的收藏。,Favorite item not found.,找不到要同步的收藏。,找不到要同步的收藏。
+Message,Message,訊息,消息
+Password,Password,密碼,密码
+Profile,Profile,個人資料,个人资料
+RSS搜尋目錄,RSS search directory,RSS搜尋目錄,RSS搜索目录
+RSS搜尋目錄(#{}),RSS search directory (#{}),RSS搜尋目錄(#{}),RSS搜索目录(#{})清除圖片、頁面與其他暫存資料，釋放目前已使用的儲存空間。,"Clear images, pages, and other temporary data to free storage.",清除圖片、頁面與其他暫存資料，釋放目前已使用的儲存空間。,清除图片、页面与其他暂存资料，释放目前已使用的存储空间。
+Save,Save,儲存,保存
+Search,Search,搜尋,搜索
+Settings,Settings,設定,设置
+TODO: 回覆定位跳轉尚未接入,TODO: Reply positioning jump not yet implemented,TODO: 回覆定位跳轉尚未接入,TODO: 回复定位跳转尚未接入
+TODO: 消息互動尚未接入,TODO: Message interaction not yet implemented,TODO: 消息互動尚未接入,TODO: 消息互动尚未接入
+Tag 內容已更新,Tag content was updated,Tag 內容已更新,Tag 内容已更新
+Tag 新增 {} 個帖子,Tag added {} threads,Tag 新增 {} 個帖子,Tag 新增 {} 个帖子
+Tag 有新的帖子,Tag has new threads,Tag 有新的帖子,Tag 有新的帖子
+Tag 漫畫,Tag comics,Tag 漫畫,Tag 漫画
+Tag 頁數變動過大，可能有多個新帖子,Tag page count changed too much; there may be multiple new threads,Tag 頁數變動過大，可能有多個新帖子,Tag 页数变动过大，可能有多个新帖子
+Tag 頁面載入失敗,Failed to load tag page,Tag 頁面載入失敗,Tag 页面加载失败
+Ta的主題,Their threads,Ta的主題,Ta的主题
+Ta的回覆,Their replies,Ta的回覆,Ta的回复
+Ta的日志,Their blogs,Ta的日志,Ta的日志
+Ta的資料,Their profile,Ta的資料,Ta的资料
+User,User,使用者,用户
+WebView 打開,Open in WebView,WebView 打開,WebView 打开
 [{}/{}] 已載入 #{} {},[{}/{}] Loaded #{} {},[{}/{}] 已載入 #{} {},[{}/{}] 已载入 #{} {}
-收藏項目缺少帖子 ID：{},Favorite item is missing a thread ID: {},收藏項目缺少帖子 ID：{},收藏项目缺少帖子 ID：{}
-目前未登入百合會，無法同步收藏。,"Not signed in to Yamibo, so favorites cannot be synced.",目前未登入百合會，無法同步收藏。,目前未登录百合会，无法同步收藏。
-目前未登入百合會，請重新登入後再同步。,Not signed in to Yamibo. Sign in again and retry sync.,目前未登入百合會，請重新登入後再同步。,目前未登录百合会，请重新登录后再同步。
-頁數 {}/{} 頁,Page {}/{},頁數 {}/{} 頁,页数 {}/{} 页
-準備同步任務,Preparing sync task,準備同步任務,准备同步任务
-重新對齊網站收藏資料失敗：{},Failed to reconcile website favorites: {},重新對齊網站收藏資料失敗：{},重新对齐网站收藏数据失败：{}
-百合會目前維護中。,Yamibo is under maintenance.,百合會目前維護中。,百合会目前维护中。
-目前未登入百合會。,Not signed in to Yamibo.,目前未登入百合會。,目前未登录百合会。
+app dev by thenano,app developed by thenano,app dev by thenano,app dev by thenano
+iOS 最多只能在進入背景後維持一小段時間執行。若系統掛起 App，收藏同步仍可能中斷。,"iOS can only run in the background for a short period. If the system suspends the app, favorite sync may still be interrupted.",iOS 最多只能在進入背景後維持一小段時間執行。若系統掛起 App，收藏同步仍可能中斷。,iOS 进入后台后最多只能维持短时间运行。若系统挂起应用，收藏同步仍可能中断。
+iOS 目前沒有 Android 那種常駐前景通知與長時間背景同步能力。,iOS currently does not have Android's persistent foreground notifications and long-duration background sync capabilities.,iOS 目前沒有 Android 那種常駐前景通知與長時間背景同步能力。,iOS 目前没有 Android 那种常驻前台通知与长时间后台同步能力。
+messages,messages,訊息,消息
+tip：長按可詳細編輯收藏路徑,Tip: Long press to edit favorite path in detail,tip：長按可詳細編輯收藏路徑,tip：长按可详细编辑收藏路径
+{} - Ta的主題,{} - Threads,{} - Ta的主題,{} - Ta的主题
+{} - Ta的日志,{} - Blogs,{} - Ta的日志,{} - Ta的日志
+{} · {} 次下載,{} · {} downloads,{} · {} 次下載,{} · {} 次下载
+{} 個集合,{} collections,{} 個集合,{} 个集合
+{} 天,{} days,{} 天,{} 天
+{} 小時,{} hours,{} 小時,{} 小时
+{} 已完成 {} 次補簽。,{} completed {} make-up sign-ins.,{} 已完成 {} 次補簽。,{} 已完成 {} 次补签。
+{} 週,{} weeks,{} 週,{} 周
+{} 項,{} items,{} 項,{} 项
+{} 項收藏,{} favorites,{} 項收藏,{} 项收藏
+{} 點,{} points,{} 點,{} 点
+{}/{} 頁,{}/{} pages,{}/{} 頁,{}/{} 页
+{}分 {}秒,{}m {}s,{}分 {}秒,{}分 {}秒
+{}分鐘前,{} minutes ago,{}分鐘前,{}分钟前
+{}天前,{} days ago,{}天前,{}天前
+{}小時前,{} hours ago,{}小時前,{}小时前
+{}時 {}分 {}秒,{}h {}m {}s,{}時 {}分 {}秒,{}时 {}分 {}秒
+{}的資料,{} profile,{}的資料,{}的资料
+{}秒,{}s,{}秒,{}秒
+{}類別不可刪除,The {} category cannot be deleted,{}類別不可刪除,{}类别不可删除
+} 頁,} pages,} 頁,} 页
+}」結束,} ends,}」結束,}”结束
+}」開始,} starts,}」開始,}”开始
+、,", ",、,、
+「{}」目前包含 {} 筆收藏與 {} 個集合。,{} currently contains {} favorites and {} collections.,「{}」目前包含 {} 筆收藏與 {} 個集合。,“{}”目前包含 {} 个收藏与 {} 个集合。
+「{}」結束,{} ends,「{}」結束,“{}”结束
+「{}」開始,{} starts,「{}」開始,“{}”开始
+一,One,一,一
+一年,One year,一年,一年
+三,Three,三,三
+上一個分頁,Previous page,上一個分頁,上一页
+上一話,Previous chapter,上一話,上一话
+上一頁,Previous page,上一頁,上一页
+上一頁 / 下一頁,Previous page / next page,上一頁 / 下一頁,上一页 / 下一页
+下一個分頁,Next page,下一個分頁,下一页
+下一話,Next chapter,下一話,下一话
+下一頁,Next page,下一頁,下一页
+下次不再提示,Don’t prompt again next time,下次不再提示,下次不再提示
+下載圖片失敗,Failed to download image,下載圖片失敗,下载图片失败
+下載失敗,Download failed,下載失敗,下载失败
+下載失敗：{},Download failed: {},下載失敗：{},下载失败：{}
+下載完成，已打開系統安裝流程。,Download complete. System installation has been started.,下載完成，已打開系統安裝流程。,下载完成，已打开系统安装流程。
+下載更新,Download update,下載更新,下载更新
+不自動檢查,Do not auto-check,不自動檢查,不自动检查
+中斷,Interrupt,中斷,中断
+中斷同步,Interrupt sync,中斷同步,中断同步
+主題,Theme,主題,主题
+主題色、配色與整體顯示風格,"Theme color, palette, and overall display style",主題色、配色與整體顯示風格,主题色、配色与整体显示风格
+二,Two,二,二
+五,Five,五,五
+今天,Today,今天,今天
+今天尚未完成每日簽到。,Daily sign-in is not completed today.,今天尚未完成每日簽到。,今天尚未完成每日签到。
+今天尚未簽到時，在 app 啟動後提醒你前往簽到。,"If you have not signed in today, you will be reminded to sign in after the app launches.",今天尚未簽到時，在 app 启动後提醒你前往簽到。,今天尚未签到时，在应用启动后提醒你前往签到。
+今天已經打卡過了。,Already signed in today.,今天已經打卡過了。,今天已经打卡过了。
+今天狀態：已簽到,Today's status: Signed in,今天狀態：已簽到,今天状态：已签到
+今天狀態：未簽到,Today's status: Not signed in,今天狀態：未簽到,今天状态：未签到
+今日,Today,今日,今日
+今日 {},Today {},今日 {},今日 {}
+今日已簽,Signed today,今日已簽,今日已签
+今日已簽到,Signed in today,今日已簽到,今日已签到
+介面語言,Interface Language,介面語言,界面语言
+伺服器正在維護中,The server is under maintenance.,伺服器正在維護中,服务器正在维护中
+作品,Work,作品,作品
+作品與章節,Works and chapters,作品與章節,作品与章节
+作者新增 {} 則內容,Author added {} posts,作者新增 {} 則內容,作者新增 {} 则内容
+作者更新內容,Author updated content,作者更新內容,作者更新内容
+作者有新的內容,Author has new content,作者有新的內容,作者有新的内容
+你今天還沒簽到,You have not signed in today,你今天還沒簽到,你今天还没签到
+你確定要將百合會收藏同步到本地嗎,Are you sure you want to sync Yamibo favorites to local?,你確定要將百合會收藏同步到本地嗎,你确定要将百合会收藏同步到本地吗
+使用外部瀏覽器開啟,Open with external browser,使用外部瀏覽器開啟,使用外部浏览器打开
+來源：{},Source: {},來源：{},来源：{}
+保存,Save,保存,保存
+保存失敗,Save failed,保存失敗,保存失败
+保留本地收藏,Keep local favorite,保留本地收藏,保留本地收藏
+保留系統列背景,Keep system bar background,保留系統列背景,保留系统栏背景
+個人主頁,Personal homepage,個人主頁,个人主页
+個人簽名,Personal signature,個人簽名,个人签名
+個人資料,Profile,個人資料,个人资料
+停用,Disabled,停用,停用
+偵測到 {} 個更新,Detected {} updates,偵測到 {} 個更新,检测到 {} 个更新
+傳統白,Classic white,傳統白,传统白
+傳統黑,Classic black,傳統黑,传统黑
+僅移除當下目錄,Remove current directory only,僅移除當下目錄,仅移除当前目录
+僅解除本地收藏,Remove local favorite only,僅解除本地收藏,仅移除本地收藏
+儲存,Save,儲存,储存
+儲存失敗,Save failed,儲存失敗,保存失败
+儲存空間,Storage,儲存空間,存储空间
+儲存空間使用情形,Storage usage,儲存空間使用情形,存储空间使用情况
+內容區,Content area,內容區,内容区
+內容寬度,Content width,內容寬度,内容宽度
+全域刷新,Global refresh,全域刷新,全局刷新
+全域刷新收藏更新,Global refresh favorite updates,全域刷新收藏更新,全局刷新收藏更新
+全手動簽到,Fully manual sign-in,全手動簽到,全手动签到
+全選,Select all,全選,全选
+全部,All,全部,全部
+公告,Announcement,公告,公告
+六,Six,六,六
+其他,Other,其他,其他
+再按一次退出應用,Press again to exit the app,再按一次退出應用,再按一次退出应用
+出生地,Place of birth,出生地,出生地
+分享,Share,分享,分享
+分享圖片,Share image,分享圖片,分享图片
+分享日志,Share blog,分享日志,分享日志
+分數,Score,分數,分数
+分類,Category,分類,分类
+分類: {},Category: {},分類: {},分类: {}
+切換介面語言,Change app interface language,切換介面語言,切换界面语言
+判斷討論區類型,Checking forum type,判斷討論區類型,判断讨论区类型
+刪除,Delete,刪除,删除
+刪除失敗,Delete failed,刪除失敗,删除失败
+刪除收藏失敗,Failed to delete favorites,刪除收藏失敗,删除收藏失败
+刪除類別,Delete category,刪除類別,删除类别
+刷新,Refresh,刷新,刷新
+刷新失敗: {}，嘗試讀取緩存,Refresh failed: {}. Trying cache,刷新失敗: {}，嘗試讀取緩存,刷新失败: {}，尝试读取缓存
+刷新失敗：{},Refresh failed: {},刷新失敗：{},刷新失败：{}
+刷新週期,Refresh cycle,刷新週期,刷新周期
+刷新週期: {},Refresh interval: {},刷新週期: {},刷新周期: {}
+刷新週期已改為 {},Refresh interval changed to {},刷新週期已改為 {},刷新周期已改为 {}
+前天,The day before yesterday,前天,前天
+前往,Go to,前往,前往
+前往簽到,Go to sign-in,前往簽到,前往签到
+剛剛,Just now,剛剛,刚刚
+加為好友,Add as friend,加為好友,加为好友
+勾選大類，或點進去選擇小集合,"Check main categories, or tap in to select sub-collections",勾選大類，或點進去選擇小集合,勾选大类，或点进去选择小集合
+匯入網站帖子,Importing website threads,匯入網站帖子,导入网站帖子
+區間,Interval,區間,区间
+半自動簽到,Semi-automatic sign-in,半自動簽到,半自动签到
+反轉觸控區域,Reverse touch zones,反轉觸控區域,反转触控区域
+取得小說作者資訊,Loading novel author info,取得小說作者資訊,获取小说作者信息
+取消,Cancel,取消,取消
+取消全部收藏,Remove all favorites,取消全部收藏,取消全部收藏
+取消全部收藏嗎,Remove all favorites?,取消全部收藏嗎,取消全部收藏吗
+取消後會移除目前這個收藏項目。,Canceling will remove the current favorite item.,取消後會移除目前這個收藏項目。,取消后会移除当前这个收藏项目。
+取消收藏失敗,Failed to remove favorite,取消收藏失敗,取消收藏失败
+只刪本地,Delete local only,只刪本地,只删本地
+只加入部分集合,Added to partial collections only,只加入部分集合,只加入部分集合
+只存本地,Save local only,只存本地,只存本地
+可能有多筆新內容,There may be multiple new items,可能有多筆新內容,可能有多条新内容
+可補簽：{},Make-up sign options: {},可補簽：{},可补签：{}
+合成集合,Merge collections,合成集合,合并集合
+同步到哪個類別,Which category to sync to?,同步到哪個類別,同步到哪个类别
+同步到百合會,Sync to Yamibo,同步到百合會,同步到百合会
+同步到百合會收藏嗎,Sync to Yamibo favorites?,同步到百合會收藏嗎,同步到百合会收藏吗
+同步失敗,Sync failed,同步失敗,同步失败
+同步完成,Sync completed,同步完成,同步完成
+同步已中斷,Sync interrupted,同步已中斷,同步已中断
+同步已取消,Sync canceled,同步已取消,同步已取消
+同步已取消。,Sync canceled.,同步已取消。,同步已取消。
 同步期間網站收藏頁數發生變動，建議再同步一次。,The website favorite page count changed during sync. It is recommended to sync again.,同步期間網站收藏頁數發生變動，建議再同步一次。,同步期间网站收藏页数发生变动，建议再同步一次。
-開始同步,Starting sync,開始同步,开始同步
+同步百合會收藏,Sync Yamibo favorites,同步百合會收藏,同步百合会收藏
 同步目標類別不存在，請重新選擇。,The sync target category no longer exists. Please select again.,同步目標類別不存在，請重新選擇。,同步目标类别不存在，请重新选择。
-這種類型的收藏目前不支援同步到百合會。,This favorite type cannot be synced to Yamibo yet.,這種類型的收藏目前不支援同步到百合會。,这种类型的收藏目前不支持同步到百合会。
-未命名帖子,Untitled thread,未命名帖子,未命名帖子
-無法同步到百合會 {}：{},Failed to sync to Yamibo {}: {},無法同步到百合會 {}：{},无法同步到百合会 {}：{}
+同步移除,Sync removal,同步移除,同步移除
+同步移除百合會收藏嗎,Sync remove Yamibo favorite?,同步移除百合會收藏嗎,同步移除百合会收藏吗
+同步至百合會失敗：{},Failed to sync to Yamibo: {},同步至百合會失敗：{},同步至百合會失敗：{}
+同步花費時間,Sync duration,同步花費時間,同步耗时
+同步過程發生錯誤,An error occurred during synchronization,同步過程發生錯誤,同步过程发生错误
+名稱,Name,名稱,名称
+名稱「{}」已被集合使用,"Name ""{}"" is already used by a collection",名稱「{}」已被集合使用,名称“{}”已被集合使用
+名稱「{}」已被類別使用,"Name ""{}"" is already used by a category",名稱「{}」已被類別使用,名称“{}”已被类别使用
+名稱不能為空白,Name cannot be blank,名稱不能為空白,名称不能为空
+向前掃描評論頁 {},Scanning previous comment page {},向前掃描評論頁 {},向前扫描评论页 {}
+否,No,否,否
+啟動 app 後在背景檢查更新；未超過間隔不會發出網路請求。,Checks for updates in the background after app launch; no network requests are sent before the interval elapses.,啟動 app 後在背景檢查更新；未超過間隔不會發出網路請求。,启动应用后在后台检查更新；未超过间隔不会发出网络请求。
+啟動時簽到提醒,Launch sign-in reminder,啟動時簽到提醒,启动时签到提醒
+啟動檢查更新間隔,Launch update check interval,啟動檢查更新間隔,启动检查更新间隔
+單頁(上至下),Single page (top to bottom),單頁(上至下),单页（上至下）
+單頁(右至左),Single page (right to left),單頁(右至左),单页（右至左）
+單頁(左至右),Single page (left to right),單頁(左至右),单页（左至右）
+四,Four,四,四
+回復,Reply,回復,回复
+回復成功,Reply successful,回復成功,回复成功
+回覆,Reply,回覆,回复
+固定網格,Fixed grid,固定網格,固定网格
+圓餅圖,Pie chart,圓餅圖,饼图
+圖片,Images,圖片,图片
+圖片載入中,Loading image,圖片載入中,图片加载中
+圖片載入失敗,Image loading failed,圖片載入失敗,图片加载失败
+圖表,Chart,圖表,图表
+在應用內開啟連結,Open link in app,在應用內開啟連結,在应用内打开链接
+在瀏覽器開啟,Open in browser,在瀏覽器開啟,在浏览器打开
+在狀態列與底部導覽列後方使用閱讀背景，避免透明系統列蓋住內容。,Use a reading background behind the status bar and bottom navigation bar to prevent transparent system bars from covering content.,在狀態列與底部導覽列後方使用閱讀背景，避免透明系統列蓋住內容。,在状态栏与底部导航栏后方使用阅读背景，避免透明系统栏盖住内容。
+在線成員,Online members,在線成員,在线成员
+在線時間,Online time,在線時間,在线时间
+在首頁版塊列表上方顯示百合會活動與推薦橫幅。,Display Yamibo event and recommendation banners above the home forum list.,在首頁版塊列表上方顯示百合會活動與推薦橫幅。,在首页版块列表上方显示百合会活动与推荐横幅。
+外觀,Appearance,外觀,外观
+外部瀏覽器,External browser,外部瀏覽器,外部浏览器
+多選刪除,Bulk delete,多選刪除,多选删除
+好友的日志,Friends' blogs,好友的日志,好友的日志
+子版區,Sub-forum,子版區,子版区
+字體大小,Font size,字體大小,字体大小
+字體大小、行距與版面寬度,"Font size, line spacing, and content width",字體大小、行距與版面寬度,字体大小、行距与版面宽度
+學歷,Education,學歷,学历
+宋体,SimSun,宋体,宋体
+完全移除收藏時詢問同步刪除,Ask to sync deletion when fully removing favorites,完全移除收藏時詢問同步刪除,完全移除收藏时询问同步删除
+完全移除收藏預設動作,Fully remove favorite default actions,完全移除收藏預設動作,完全移除收藏默认动作
+完成,Finish,完成,完成
+完成 Cloudflare 驗證後，程式會在簽到成功後一路補到不能再補。,"After completing Cloudflare verification, the app will automatically perform all available make-up sign-ins after a successful sign-in.",完成 Cloudflare 驗證後，程式會在簽到成功後一路補到不能再補。,完成 Cloudflare 验证后，程序会在签到成功后自动补签至无法继续补签。
+定位中,Positioning,定位中,定位中
+定位失敗,Positioning failed,定位失敗,定位失败
+將當前所有收藏移動到{},Move all current favorites to {},將當前所有收藏移動到{},将当前所有收藏移动到{}
+將重新檢查所有收藏並建立新的更新任務。網站維護中可能會產生大量錯誤記錄。,All favorites will be rechecked and new update tasks created. A large number of error logs may be generated during website maintenance.,將重新檢查所有收藏並建立新的更新任務。網站維護中可能會產生大量錯誤記錄。,将重新检查所有收藏并建立新的更新任务。网站维护中可能会产生大量错误记录。
+尋找作者正文位置,Finding author post position,尋找作者正文位置,寻找作者正文位置
+尋找評論所屬正文,Finding parent author post for comment,尋找評論所屬正文,寻找评论所属正文
+對象,Target,對象,对象
+小說,Novel,小說,小说
+小說閱讀器,Novel Reader,小說閱讀器,小说阅读器
+尚未加入,Not yet joined,尚未加入,尚未加入
+尚未取得簽到資訊,Sign-in information not yet obtained,尚未取得簽到資訊,尚未获取签到信息
+尚未檢查更新,Updates not checked yet,尚未檢查更新,尚未检查更新
+尚未通過簽到頁的 Cloudflare 驗證，請先在 WebView 完成驗證。,Cloudflare verification for the sign-in page is not complete. Please finish it in WebView first.,尚未通過簽到頁的 Cloudflare 驗證，請先在 WebView 完成驗證。,尚未通过签到页的 Cloudflare 验证，请先在 WebView 完成验证。
+尚未開始同步,Sync not started yet,尚未開始同步,尚未开始同步
+尚無收藏資料,No favorites yet,尚無收藏資料,暂无收藏数据
+尚無閱讀時數資料,No reading hours data yet,尚無閱讀時數資料,暂无阅读时长数据
+屏蔽,Block,屏蔽,屏蔽
+左右式,Left / right,左右式,左右式
+已中斷收藏更新檢查,Favorite update check interrupted,已中斷收藏更新檢查,已中断收藏更新检查
+已保存筆記,Note saved,已保存筆記,已保存笔记
+已儲存圖片至相簿,Saved image to album,已儲存圖片至相簿,已保存图片至相册
+已刪除 {} 項紀錄,Deleted {} history records,已刪除 {} 項紀錄,已删除 {} 项记录
+已刪除 {} 項，{} 項失敗,"Deleted {} items, {} failed",已刪除 {} 項，{} 項失敗,已删除 {} 项，{} 项失败
+已刪除收藏,Favorites deleted,已刪除收藏,已删除收藏
+已刪除筆記,Note deleted,已刪除筆記,已删除笔记
+已刪除這筆紀錄,This record has been deleted,已刪除這筆紀錄,已删除这条记录
+已刷新閱讀歷史紀錄,Reading history has been refreshed,已刷新閱讀歷史紀錄,已刷新阅读历史记录
+已加入大類,Added to main category,已加入大類,已加入大类
+已加入收藏,Added to favorites,已加入收藏,已加入收藏
+已加入收藏，{},Added to favorites: {},已加入收藏，{},已加入收藏，{}
+已加入收藏，但同步失敗：{},"Added to favorites, but sync failed: {}",已加入收藏，但同步失敗：{},已加入收藏，但同步失败：{}
+已加入收藏，預設存入未分類,"Added to favorites, default saved to uncategorized",已加入收藏，預設存入未分類,已加入收藏，默认存入未分类
+已加入本地收藏,Added to local favorites,已加入本地收藏,已加入本地收藏
+已加入本地收藏，{},Added to local favorites: {},已加入本地收藏，{},已加入本地收藏，{}
+已加入本地收藏，但同步到百合會失敗：{},"Added locally, but Yamibo sync failed: {}",已加入本地收藏，但同步到百合會失敗：{},已加入本地收藏，但同步到百合会失败：{}
+已加入本地收藏，但找不到同步目標。,"Added to local favorites, but sync target not found.",已加入本地收藏，但找不到同步目標。,已加入本地收藏，但找不到同步目标。
+已加入本地收藏，預設存入未分類,"Added to local favorites, default saved to uncategorized",已加入本地收藏，預設存入未分類,已加入本地收藏，默认存入未分类
+已匯入到本地,Imported to local,已匯入到本地,已导入到本地
+已取得,Obtained,已取得,已取得
+已取得 {} 項收藏,Fetched {} favorites,已取得 {} 項收藏,已取得 {} 项收藏
+已取消同步,Sync canceled,已取消同步,已取消同步
+已取消所有收藏,All favorites removed,已取消所有收藏,已取消所有收藏
+已取消收藏,Favorite removed,已取消收藏,已取消收藏
+已取消收藏更新檢查,Favorite update check canceled,已取消收藏更新檢查,已取消收藏更新检查
 已同步到百合會。,Synced to Yamibo.,已同步到百合會。,已同步到百合会。
 已同步到百合會，但暫時無法回填收藏順序，下一次同步會補齊。,"Synced to Yamibo, but the favorite order could not be backfilled yet. It will be fixed on the next sync.",已同步到百合會，但暫時無法回填收藏順序，下一次同步會補齊。,已同步到百合会，但暂时无法回填收藏顺序，下一次同步会补齐。
 已同步到百合會，但暫時無法回填收藏順序：{},"Synced to Yamibo, but the favorite order could not be backfilled: {}",已同步到百合會，但暫時無法回填收藏順序：{},已同步到百合会，但暂时无法回填收藏顺序：{}
-作者更新內容,Author updated content,作者更新內容,作者更新内容
-作者有新的內容,Author has new content,作者有新的內容,作者有新的内容
-作者新增 {} 則內容,Author added {} posts,作者新增 {} 則內容,作者新增 {} 则内容
-更新檢查已取消,Update check canceled,更新檢查已取消,更新检查已取消
-更新檢查完成,Update check completed,更新檢查完成,更新检查完成
-繼續檢查收藏更新,Continuing favorite update check,繼續檢查收藏更新,继续检查收藏更新
-更新檢查已中斷,Update check interrupted,更新檢查已中斷,更新检查已中断
+已同步至百合會,Already synced to Yamibo,已同步至百合會,已同步至百合会
+已就緒,Ready,已就緒,已就绪
+已建立集合,Collection created,已建立集合,已建立集合
+已從所有位置移除收藏,Favorite removed from all locations,已從所有位置移除收藏,已从所有位置移除收藏
+已從百合會取消收藏,Removed from Yamibo favorites,已從百合會取消收藏,已從百合會取消收藏
+已忽略版本 {},Version {} ignored,已忽略版本 {},已忽略版本 {}
+已收藏本版,Forum bookmarked,已收藏本版,已收藏本版
+已新增書籤,Bookmark added,已新增書籤,已新增书签
+已新增集合,Collection added,已新增集合,已新增集合
+已更新收藏位置,Favorite location updated,已更新收藏位置,已更新收藏位置
+已更新收藏路徑,Favorite path updated,已更新收藏路徑,已更新收藏路径
+已更新集合,Collection updated,已更新集合,已更新集合
+已標為已讀,Marked as read,已標為已讀,已标为已读
+已標為未讀,Marked as unread,已標為未讀,已标为未读
+已清除所有緩存,All cache cleared,已清除所有緩存,已清除所有缓存
+已清除閱讀紀錄,Reading history cleared,已清除閱讀紀錄,已清除阅读记录
+已移除收藏,Favorite removed,已移除收藏,已移除收藏
+已移除書籤,Bookmark removed,已移除書籤,已移除书签
+已移除當下目錄收藏,Current directory favorite removed,已移除當下目錄收藏,已移除当前目录收藏
+已簽,Signed,已簽,已签
+已經是第一話,Already the first chapter,已經是第一話,已经是第一话
+已经打过卡,Already checked in,已经打过卡,已经打过卡
+已複製作者名稱,Author name copied,已複製作者名稱,已复制作者名称
+已複製圖片,Image copied,已複製圖片,已复制图片
+已複製標題,Title copied,已複製標題,已复制标题
+已解散集合,Collection disbanded,已解散集合,已解散集合
+已解除本地收藏，百合會收藏仍可能存在,Local favorite removed; the Yamibo favorite may still exist,已解除本地收藏，百合會收藏仍可能存在,已移除本地收藏，百合会收藏可能仍然存在
+已解除本版收藏,Forum bookmark removed,已解除本版收藏,已解除本版收藏
+已設為RSS封面,Set as RSS cover,已設為RSS封面,已设为RSS封面
+已設為封面,Set as cover,已設為封面,已设为封面
+已設為標籤封面,Set as tag cover,已設為標籤封面,已设为标签封面
+已讀/總數,Read/total,已讀/總數,已读/总数
+已讀完所有章節,Read all chapters,已讀完所有章節,已读完所有章节
 已載入 {} 個追蹤項目,Loaded {} tracked items,已載入 {} 個追蹤項目,已载入 {} 个追踪项目
 已載入 {} 個追蹤項目，從第 {} 項繼續,"Loaded {} tracked items, resuming from item {}",已載入 {} 個追蹤項目，從第 {} 項繼續,已载入 {} 个追踪项目，从第 {} 项继续
-百合會維護中，無法檢查 {},"Yamibo is under maintenance, cannot check {}",百合會維護中，無法檢查 {},百合会维护中，无法检查 {}
-可能有多筆新內容,There may be multiple new items,可能有多筆新內容,可能有多条新内容
-登入狀態已失效，無法檢查 {},"Login expired, cannot check {}",登入狀態已失效，無法檢查 {},登录状态已失效，无法检查 {}
-準備檢查收藏更新,Preparing favorite update check,準備檢查收藏更新,准备检查收藏更新
-新增 {} 則回覆,Added {} replies,新增 {} 則回覆,新增 {} 则回复
-Tag 內容已更新,Tag content was updated,Tag 內容已更新,Tag 内容已更新
-Tag 頁面載入失敗,Failed to load tag page,Tag 頁面載入失敗,Tag 页面加载失败
-Tag 有新的帖子,Tag has new threads,Tag 有新的帖子,Tag 有新的帖子
-Tag 新增 {} 個帖子,Tag added {} threads,Tag 新增 {} 個帖子,Tag 新增 {} 个帖子
-Tag 頁數變動過大，可能有多個新帖子,Tag page count changed too much; there may be multiple new threads,Tag 頁數變動過大，可能有多個新帖子,Tag 页数变动过大，可能有多个新帖子
+已通過驗證，但找不到簽到按鈕，請改用手動模式。,"Verification passed, but the sign-in button was not found. Please use manual mode.",已通過驗證，但找不到簽到按鈕，請改用手動模式。,已通过验证，但找不到签到按钮，请改用手动模式。
+已選 {} 項,{} selected,已選 {} 項,已选 {} 项
+已選擇,Selected,已選擇,已选择
+帖子,Post,帖子,帖子
+帖子/論壇頁面,Thread/forum pages,帖子/論壇頁面,帖子/论坛页面
 帖子內容已更新,Thread content was updated,帖子內容已更新,帖子内容已更新
 帖子有新的內容,Thread has new content,帖子有新的內容,帖子有新的内容
-無法精準定位，已開啟小說頁,Precise location failed; opened the novel page,無法精準定位，已開啟小說頁,无法精准定位，已开启小说页
-取得小說作者資訊,Loading novel author info,取得小說作者資訊,获取小说作者信息
-尋找作者正文位置,Finding author post position,尋找作者正文位置,寻找作者正文位置
-尋找評論所屬正文,Finding parent author post for comment,尋找評論所屬正文,寻找评论所属正文
-確認作者頁 {} / {},Confirming author page {} / {},確認作者頁 {} / {},确认作者页 {} / {}
-讀取 findpost 定位頁,Reading findpost location page,讀取 findpost 定位頁,读取 findpost 定位页
-判斷討論區類型,Checking forum type,判斷討論區類型,判断讨论区类型
-解析連結,Parsing link,解析連結,解析链接
-向前掃描評論頁 {},Scanning previous comment page {},向前掃描評論頁 {},向前扫描评论页 {}
-搜尋作者頁 {} / {},Searching author page {} / {},搜尋作者頁 {} / {},搜索作者页 {} / {}
-讀取帖子首頁,Reading thread home page,讀取帖子首頁,读取帖子首页
-操作完成,Action completed,操作完成,操作完成
-今天已經打卡過了。,Already signed in today.,今天已經打卡過了。,今天已经打卡过了。
-尚未通過簽到頁的 Cloudflare 驗證，請先在 WebView 完成驗證。,Cloudflare verification for the sign-in page is not complete. Please finish it in WebView first.,尚未通過簽到頁的 Cloudflare 驗證，請先在 WebView 完成驗證。,尚未通过签到页的 Cloudflare 验证，请先在 WebView 完成验证。
-{} 已完成 {} 次補簽。,{} completed {} make-up sign-ins.,{} 已完成 {} 次補簽。,{} 已完成 {} 次补签。
-已通過驗證，但找不到簽到按鈕，請改用手動模式。,"Verification passed, but the sign-in button was not found. Please use manual mode.",已通過驗證，但找不到簽到按鈕，請改用手動模式。,已通过验证，但找不到签到按钮，请改用手动模式。
-圖片,Images,圖片,图片
-其他,Other,其他,其他
-帖子/論壇頁面,Thread/forum pages,帖子/論壇頁面,帖子/论坛页面
-用戶空間/日志,User space/blogs,用戶空間/日志,用户空间/日志
-載入第 {} 頁失敗: {},Failed to load page {}: {},載入第 {} 頁失敗: {},载入第 {} 页失败: {}
-發表於 {},Posted at {},發表於 {},发表于 {}
-重新整理帖子失敗：{},Failed to refresh thread: {},重新整理帖子失敗：{},重新整理帖子失败：{}
-最後更新於 {},Last updated at {},最後更新於 {},最后更新于 {}
-正在與{}聊天中......,Chatting with {}...,正在與{}聊天中......,正在与{}聊天中......
-篩選,Filter,篩選,筛选
-載入錯誤：{},Load error: {},載入錯誤：{},载入错误：{}
-多選刪除,Bulk delete,多選刪除,多选删除
-搜尋,Search,搜尋,搜索
-搜尋標題...,Search title...,搜尋標題...,搜索标题...
-閱讀歷史,Reading History,閱讀歷史,阅读历史
+帖子頁數,Post pages,帖子頁數,帖子页数
+平台限制,Platform restrictions,平台限制,平台限制
+廠商背景限制說明,Manufacturer background restrictions,廠商背景限制說明,厂商后台限制说明
+建新類別,Create new category,建新類別,新建类别
+建立備份時發生錯誤,An error occurred while creating the backup,建立備份時發生錯誤,建立備份時發生錯誤
+建立類別失敗,Failed to create category,建立類別失敗,建立类别失败
+建議處理,Recommended action,建議處理,建议处理
+必要權限已具備，但還有 {} 項建議設定，可降低背景同步被系統中止的機率。,"Required permissions are granted, but {} recommended settings can reduce the chance of background sync being stopped by the system.",必要權限已具備，但還有 {} 項建議設定，可降低背景同步被系統中止的機率。,必要权限已具备，但还有 {} 项建议设置，可降低后台同步被系统中止的概率。
+必須處理,Required,必須處理,必须处理
+性別,Gender,性別,性别
+我是YamiboApp的作者TheNano，這是一個第三方個人獨立開發的開源App,"I am TheNano, author of YamiboApp. This is an open-source app independently developed by a third-party individual.",我是YamiboApp的作者TheNano，這是一個第三方個人獨立開發的開源App,我是YamiboApp的作者TheNano，这是一个第三方个人独立开发的开源App
+我的,Profile,我的,我的
+我的主題,My threads,我的主題,我的主题
+我的回覆,My replies,我的回覆,我的回复
+我的好友,My friends,我的好友,我的好友
+我的打卡动态,My check-in status,我的打卡动态,我的打卡动态
+我的打卡動態,My check-in status,我的打卡動態,我的打卡动态
+我的提醒,My notifications,我的提醒,我的提醒
+我的收藏,My favorites,我的收藏,我的收藏
+我的日志,My blogs,我的日志,我的日志
+我的消息,My messages,我的消息,我的消息
+我的空間,My space,我的空間,我的空间
+我的訪客,My visitors,我的訪客,我的访客
+我的資料,My profile,我的資料,我的资料
+我的足跡,My footprints,我的足跡,我的足迹
+手動刷新,Manual refresh,手動刷新,手动刷新
+手動刷新資訊,Manually refresh information,手動刷新資訊,手动刷新信息
+手動模式下只保存這個偏好；半自動模式才會真的自動補簽。,"In manual mode, only this preference is saved; automatic make-up sign-ins only work in semi-automatic mode.",手動模式下只保存這個偏好；半自動模式才會真的自動補簽。,手动模式下只保存这个偏好；半自动模式才会真正自动补签。
+打卡公告,Check-in announcement,打卡公告,打卡公告
+打卡成功,Check-in successful,打卡成功,打卡成功
+打卡統計,Check-in statistics,打卡統計,打卡统计
+打開簽到頁 WebView,Open sign-in page WebView,打開簽到頁 WebView,打开签到页 WebView
+打開進度,Open progress,打開進度,打开进度
+找不到指定的樓層，已跳轉至最接近的樓層,Specified floor not found. Jumped to nearest floor.,找不到指定的樓層，已跳轉至最接近的樓層,找不到指定的楼层，已跳转至最接近的楼层
+找不到要同步的收藏。,Favorite item not found.,找不到要同步的收藏。,找不到要同步的收藏。
+找不到這個同步任務。,Sync task not found.,找不到這個同步任務。,找不到这个同步任务。
 找到 {} 個相關內容,Found {} related items,找到 {} 個相關內容,找到 {} 个相关内容
 找到 {} 筆搜尋結果,Found {} search results,找到 {} 筆搜尋結果,找到 {} 条搜索结果
-已選 {} 項,{} selected,已選 {} 項,已选 {} 项
-檢查版本、下載 APK 與打開安裝流程,"Check versions, download APKs, and start installation",檢查版本、下載 APK 與打開安裝流程,检查版本、下载 APK 与打开安装流程
-App 更新,App updates,App 更新,App 更新
-主題色、配色與整體顯示風格,"Theme color, palette, and overall display style",主題色、配色與整體顯示風格,主题色、配色与整体显示风格
-外觀,Appearance,外觀,外观
-檢查通知權限、電池最佳化與背景同步所需設定,"Notification permissions, battery optimization, and background sync setup",檢查通知權限、電池最佳化與背景同步所需設定,检查通知权限、电池优化与后台同步所需设置
-通知與背景同步,Notifications & Background Sync,通知與背景同步,通知与后台同步
-管理類別、整理排序與收藏互動設定,"Manage categories, sorting, and favorite interaction settings",管理類別、整理排序與收藏互動設定,管理类别、整理排序与收藏互动设置
+投票失敗: {},Vote failed: {},投票失敗: {},投票失败: {}
+投票成功，正在刷新頁面...,Vote successful. Refreshing page...,投票成功，正在刷新頁面...,投票成功，正在刷新页面...
+折線圖,Line chart,折線圖,折线图
+捲動(留空),Scroll with gaps,捲動(留空),滚动（留空）
+捲動(連續),Continuous scroll,捲動(連續),滚动（连续）
+授予,Grant,授予,授予
+排列: {},Layout: {},排列: {},排列: {}
+排列方式,Arrangement,排列方式,排列方式
+排名,Ranking,排名,排名
+排序,Sort,排序,排序
+排序: {},Sort: {},排序: {},排序: {}
+排序: {}{},Sort: {}{},排序: {}{},排序: {}{}
+排序方式,Sort by,排序方式,排序方式
+推薦閱讀的日志,Recommended reading blogs,推薦閱讀的日志,推荐阅读的日志
+提交,Submit,提交,提交
+提交中...,Submitting...,提交中...,提交中...
+提交投票,Submit vote,提交投票,提交投票
+提示信息,Prompt message,提示信息,提示信息
+提醒,Reminder,提醒,提醒
+搜尋,Search,搜尋,搜索
+搜尋中...,Searching...,搜尋中...,搜索中...
+搜尋作者頁 {} / {},Searching author page {} / {},搜尋作者頁 {} / {},搜索作者页 {} / {}
+搜尋失敗,Search failed,搜尋失敗,搜索失败
+搜尋帖子...,Search posts...,搜尋帖子...,搜索帖子...
+搜尋收藏,Search favorites,搜尋收藏,搜索收藏
+搜尋收藏標題...,Search favorite titles...,搜尋收藏標題...,搜索收藏标题...
+搜尋標題...,Search title...,搜尋標題...,搜索标题...
+搜尋標題或連結...,Search title or link...,搜尋標題或連結...,搜索标题或链接...
+搜尋無結果,No results found,搜尋無結果,搜索无结果
+摘要,Summary,摘要,摘要
+操作完成,Action completed,操作完成,操作完成
+收藏,Favorites,收藏,收藏
+收藏位置已更新,Favorite location updated,收藏位置已更新,收藏位置已更新
+收藏刪除,Favorite deletion,收藏刪除,收藏删除
+收藏功能開發中,Favorite function is under development,收藏功能開發中,收藏功能开发中
+收藏同步,Favorite synchronization,收藏同步,收藏同步
+收藏同步偏好,Favorite sync preferences,收藏同步偏好,收藏同步偏好
+收藏日志,Favorite log,收藏日志,收藏日志
+收藏更新,Favorite updates,收藏更新,收藏更新
+收藏更新中斷,Favorite update interrupted,收藏更新中斷,收藏更新中断
+收藏更新失敗,Favorite update failed,收藏更新失敗,收藏更新失败
+收藏更新完成,Favorite update completed,收藏更新完成,收藏更新完成
+收藏更新已中斷,Favorite update has been interrupted,收藏更新已中斷,收藏更新已中断
+收藏更新檢查週期,Favorite update check cycle,收藏更新檢查週期,收藏更新检查周期
+收藏本版,Bookmark this forum,收藏本版,收藏本版
+收藏模塊比率,Favorite module ratio,收藏模塊比率,收藏模块比率
 收藏管理,Favorites,收藏管理,收藏管理
-切換介面語言,Change app interface language,切換介面語言,切换界面语言
-閱讀模式與觸控區域設定,Reading mode and touch zone settings,閱讀模式與觸控區域設定,阅读模式与触控区域设置
-漫畫閱讀器,Manga Reader,漫畫閱讀器,漫画阅读器
-字體大小、行距與版面寬度,"Font size, line spacing, and content width",字體大小、行距與版面寬度,字体大小、行距与版面宽度
-小說閱讀器,Novel Reader,小說閱讀器,小说阅读器
+收藏選單,Favorites menu,收藏選單,收藏菜单
+收藏項目缺少帖子 ID：{},Favorite item is missing a thread ID: {},收藏項目缺少帖子 ID：{},收藏项目缺少帖子 ID：{}
+收藏順序,Favorite order,收藏順序,收藏顺序
+收藏顯示,Favorite display,收藏顯示,收藏显示
+文字大小,Text size,文字大小,文字大小
+文字排版,Text layout,文字排版,文字排版
+新增 {} 則回覆,Added {} replies,新增 {} 則回覆,新增 {} 则回复
+新增、編輯、刪除或調整你的收藏類別,"Add, edit, delete or adjust your favorite categories",新增、編輯、刪除或調整你的收藏類別,新增、编辑、删除或调整你的收藏类别
+新增收藏時詢問同步,Ask to sync when adding a favorite,新增收藏時詢問同步,新增收藏时询问同步
+新增收藏預設動作,New favorite default actions,新增收藏預設動作,新增收藏默认动作
+新增書籤,Add bookmark,新增書籤,新增书签
+新增筆記,Add new note,新增筆記,新增笔记
+新增集合,Add new collection,新增集合,新增集合
+新增類別,Add category,新增類別,新增类别
+新版已可下載。你可以立即下載更新，或稍後到設定中的 App 更新頁處理。,"A new version is available. You can download the update now, or go to Settings > App updates later.",新版已可下載。你可以立即下載更新，或稍後到設定中的 App 更新頁處理。,新版已可下载。你可以立即下载更新，或稍后到设置中的 App 更新页处理。
+新版本 {} 正在準備中,Version {} is being prepared,新版本 {} 正在準備中,新版本 {} 正在准备中
+日,Day,日,日
+日志,Blog,日志,日志
+日志評論,Blog comments,日志評論,日志评论
+日曆月份：{},Calendar month: {},日曆月份：{},日历月份：{}
+日誌,Blog,日誌,日志
+星星按鈕可直接收藏，長按可指定小集合,Tap the star button to favorite directly; long press to assign to a collection.,星星按鈕可直接收藏，長按可指定小集合,星星按钮可直接收藏，长按可指定小集合
+昨天,Yesterday,昨天,昨天
+是,Yes,是,是
+是否要刪除所有路徑下的收藏,Do you want to delete favorites under all paths?,是否要刪除所有路徑下的收藏,是否要删除所有路径下的收藏
+智能更新策略尚未接入，暫停週期背景檢查。,Smart update strategy not yet implemented. Periodic background checks are paused.,智能更新策略尚未接入，暫停週期背景檢查。,智能更新策略尚未接入，暂停周期后台检查。
+智能更新（TODO）,Smart update (TODO),智能更新（TODO）,智能更新（TODO）
+暫不支持跳轉到公告頁,Jumping to the announcement page is not supported yet.,暫不支持跳轉到公告頁,暂不支持跳转到公告页
+暫無評論,No comments yet,暫無評論,暂无评论
+更多,More,更多,更多
+更新,Update,更新,更新
+更新日誌,Update log,更新日誌,更新日志
+更新時間,Update time,更新時間,更新时间
+更新檔案尚未發布完成，請稍後再試。來源：{},Update files are not fully published yet. Please try again later. Source: {},更新檔案尚未發布完成，請稍後再試。來源：{},更新文件尚未发布完成，请稍后再试。来源：{}
+更新檢查完成,Update check completed,更新檢查完成,更新检查完成
+更新檢查已中斷,Update check interrupted,更新檢查已中斷,更新检查已中断
+更新檢查已取消,Update check canceled,更新檢查已取消,更新检查已取消
+更新檢查被系統中斷,Update check interrupted by system,更新檢查被系統中斷,更新检查被系统中断
+更新資訊來自 manifest；牆內使用者可優先使用 Gitee/Gitea 鏡像源。,Update information comes from manifest. Mainland users can prioritize Gitee/Gitea mirror sources.,更新資訊來自 manifest；牆內使用者可優先使用 Gitee/Gitea 鏡像源。,更新信息来自 manifest；墙内用户可优先使用 Gitee/Gitea 镜像源。
+更新頁不需要網路載入,The update page does not require network loading,更新頁不需要網路載入,更新页不需要网络加载
+書櫃,Bookcase,書櫃,书柜
+最後一次同步時間,Last sync time,最後一次同步時間,最后一次同步时间
+最後一次閱讀,Last read,最後一次閱讀,最后一次阅读
+最後更新 {},Last updated {},最後更新 {},最后更新 {}
+最後更新於 {},Last updated at {},最後更新於 {},最后更新于 {}
+最後章節：{},Last chapter: {},最後章節：{},最后章节：{}
+最後編輯於 {},Last edited at {},最後編輯於 {},最后编辑于 {}
+最後訪問,Last visited,最後訪問,最后访问
+最新發表的日志,Latest published blogs,最新發表的日志,最新发表的日志
+最近閱讀 ,Recently read,最近閱讀 ,最近阅读
+最近閱讀 {},Recently read {},最近閱讀 {},最近阅读 {}
+有 {} 項收藏已曾同步過至 {}，不進行重複同步,{} favorites were already synced to {} and will not be synced again,有 {} 項收藏已曾同步過至 {}，不進行重複同步,有 {} 项收藏已同步过至 {}，不进行重复同步
+未加入大類,Not added to main category,未加入大類,未加入大类
+未命名帖子,Untitled thread,未命名帖子,未命名帖子
+未登入，請先登入後再收藏,Not logged in. Please log in first before adding favorites.,未登入，請先登入後再收藏,未登录，请先登录后再收藏
+本周 7 天,7 days this week,本周 7 天,本周 7 天
+本周時數,Hours this week,本周時數,本周时长
+本帖評分,Rate this post,本帖評分,本帖评分
+本帖隱藏內容需要積分: {},Hidden content requires score: {},本帖隱藏內容需要積分: {},本帖隐藏内容需要积分: {}
+本月,This month,本月,本月
+本月時數,Hours this month,本月時數,本月时长
+本月簽到表格,Monthly sign-in calendar,本月簽到表格,本月签到表格
+查無登入資料，請重新登入,No login data found. Please sign in again.,查無登入資料，請重新登入,查无登录资料，请重新登录
+查看,View,查看,查看
+查看標籤列表,View tag list,查看標籤列表,查看标签列表
+查看進度,View progress,查看進度,查看进度
+標為已讀,Mark as read,標為已讀,标为已读
+標為未讀,Mark as unread,標為未讀,标为未读
+標籤列表,Tag list,標籤列表,标签列表
+標籤漫畫章節數,Tag manga chapters,標籤漫畫章節數,标签漫画章节数
+橫排卡片,Row cards,橫排卡片,横排卡片
+橫排卡片(無封面),Row cards (no cover),橫排卡片(無封面),横排卡片（无封面）
+檢查中...,Checking...,檢查中...,检查中...
+檢查更新,Check for updates,檢查更新,检查更新
+檢查更新失敗,Update check failed,檢查更新失敗,检查更新失败
+檢查版本、下載 APK 與打開安裝流程,"Check versions, download APKs, and start installation",檢查版本、下載 APK 與打開安裝流程,检查版本、下载 APK 与打开安装流程
+檢查通知權限、電池最佳化與背景同步所需的系統設定。,"Check system settings required for notification permissions, battery optimization, and background sync.",檢查通知權限、電池最佳化與背景同步所需的系統設定。,检查通知权限、电池优化与后台同步所需的系统设置。
+檢查通知權限、電池最佳化與背景同步所需設定,"Notification permissions, battery optimization, and background sync setup",檢查通知權限、電池最佳化與背景同步所需設定,检查通知权限、电池优化与后台同步所需设置
+正在下載更新...,Downloading update...,正在下載更新...,正在下载更新...
+正在取得收藏頁,Loading favorites page,正在取得收藏頁,正在获取收藏页
+正在同步到百合會...,Syncing to Yamibo...,正在同步到百合會...,正在同步到百合会...
+正在定位連結,Locating link,正在定位連結,正在定位链接
+正在建立備份,Creating backup,正在建立備份,正在建立備份
+正在建立同步任務,Creating sync task,正在建立同步任務,正在建立同步任务
+正在從百合會移除收藏...,Removing favorites from Yamibo...,正在從百合會移除收藏...,正在从百合会移除收藏...
+正在收藏本版...,Bookmarking this forum...,正在收藏本版...,正在收藏本版...
+正在檢查收藏更新,Checking for favorites updates,正在檢查收藏更新,正在检查收藏更新
+正在檢查更新,Checking for updates,正在檢查更新,正在检查更新
+正在簽到...,Signing in...,正在簽到...,正在签到...
+正在與{}聊天中......,Chatting with {}...,正在與{}聊天中......,正在与{}聊天中......
+正在解除本版收藏...,Removing forum bookmark...,正在解除本版收藏...,正在解除本版收藏...
+正在計算中...,Calculating...,正在計算中...,正在计算中...
+正在載入上一個分頁...,Loading previous page...,正在載入上一個分頁...,正在载入上一页...
+正在載入下一個分頁...,Loading next page...,正在載入下一個分頁...,正在载入下一页...
+正在載入選項,Loading options,正在載入選項,正在载入选项
+此收藏已同步到百合會。,This favorite is already synced to Yamibo.,此收藏已同步到百合會。,此收藏已同步到百合会。
+此連結暫不支援 App 內開啟,This link does not support opening in-app yet.,此連結暫不支援 App 內開啟,此链接暂不支持应用内打开
+每日簽到,Daily sign-in,每日簽到,每日签到
 每日簽到模式與補簽偏好,Daily sign-in mode and make-up sign preferences,每日簽到模式與補簽偏好,每日签到模式与补签偏好
-簽到設定,Daily Sign-in,簽到設定,签到设置
-緩存空間與啟動時清理設定,Cache storage and startup cleanup settings,緩存空間與啟動時清理設定,缓存空间与启动时清理设置
+每日维护,Daily maintenance,每日维护,每日维护
+沒有偵測到更新,No updates detected,沒有偵測到更新,没有检测到更新
+沒有可繼續的收藏更新任務,No ongoing favorite update tasks,沒有可繼續的收藏更新任務,没有可继续的收藏更新任务
+沒有找到Ta的主題,No threads found for this user,沒有找到Ta的主題,没有找到Ta的主题
+沒有找到Ta的回復,No reply found from Ta,沒有找到Ta的回復,沒有找到Ta的回復
+沒有找到Ta的回覆,No replies found from this user,沒有找到Ta的回覆,没有找到Ta的回复
+沒有找到Ta的日志,No blogs found for this user,沒有找到Ta的日志,没有找到Ta的日志
+沒有找到主題,No threads found,沒有找到主題,没有找到主题
+沒有找到回復,No reply found,沒有找到回復,沒有找到回復
+沒有找到回覆,No replies found,沒有找到回覆,没有找到回复
+沒有找到圖片,No images found,沒有找到圖片,没有找到图片
+沒有找到在線成員,No online members found,沒有找到在線成員,没有找到在线成员
+沒有找到好友,No friends found,沒有找到好友,没有找到好友
+沒有找到好友的日志,No friends' blogs found,沒有找到好友的日志,没有找到好友的日志
+沒有找到提醒,No reminders found,沒有找到提醒,没有找到提醒
+沒有找到搜尋結果,No search results found,沒有找到搜尋結果,没有找到搜索结果
+沒有找到日志,No blogs found,沒有找到日志,没有找到日志
+沒有找到標籤,No tags found,沒有找到標籤,没有找到标签
+沒有找到消息,No messages found,沒有找到消息,没有找到消息
+沒有找到相關主題,No related threads found,沒有找到相關主題,没有找到相关主题
+沒有找到訪客,No visitors found,沒有找到訪客,没有找到访客
+沒有找到評論,No comments found,沒有找到評論,没有找到评论
+沒有找到足跡,No footprints found,沒有找到足跡,没有找到足迹
+注冊時間,Registration time,注冊時間,注册时间
+消息,Messages,消息,消息
+消息提醒,Message reminder,消息提醒,消息提醒
+深色模式,Dark mode,深色模式,深色模式
+淺色模式,Light mode,淺色模式,浅色模式
+清空,Clear,清空,清空
+清空全選,Clear selection,清空全選,清空全选
+清除圖片、頁面與其他暫存資料，釋放目前已使用的儲存空間。,"Clear images, pages, and other temporary data to free storage.",清除圖片、頁面與其他暫存資料，釋放目前已使用的儲存空間。,清除图片、页面与其他暂存资料，释放目前已使用的存储空间。
 "清除圖片、頁面與其他暫存資料，釋放目前已使用的儲存空間。
 目前緩存大小：{}","Clear images, pages, and other temporary data to free up storage.
 Current cache size: {}","清除圖片、頁面與其他暫存資料，釋放目前已使用的儲存空間。
 目前緩存大小：{}","清除图片、页面与其他暂存资料，释放当前已使用的存储空间。
 当前缓存大小：{}"
-儲存空間,Storage,儲存空間,存储空间
-深色模式,Dark mode,深色模式,深色模式
-淺色模式,Light mode,淺色模式,浅色模式
-跟隨系統,Follow system,跟隨系統,跟随系统
-傳統黑,Classic black,傳統黑,传统黑
-傳統白,Classic white,傳統白,传统白
-預設,Default,預設,预设
-預設（深色）,Default (dark),預設（深色）,默认（深色）
-設定,Settings,設定,设置
-日曆月份：{},Calendar month: {},日曆月份：{},日历月份：{}
-全手動簽到,Fully manual sign-in,全手動簽到,全手动签到
-半自動簽到,Semi-automatic sign-in,半自動簽到,半自动签到
-簽到頁載入失敗：{},Sign-in page failed to load: {},簽到頁載入失敗：{},签到页载入失败：{}
-可補簽：{},Make-up sign options: {},可補簽：{},可补签：{}
-「{}」結束,{} ends,「{}」結束,“{}”结束
-「{}」開始,{} starts,「{}」開始,“{}”开始
-目前章節：{},Current chapter: {},目前章節：{},当前章节：{}
-最後章節：{},Last chapter: {},最後章節：{},最后章节：{}
-第{} ‧ {},Page {} ‧ {},第{} ‧ {},第{} ‧ {}
-第{} ‧ {} ‧ {}/{},Page {} ‧ {} ‧ {}/{},第{} ‧ {} ‧ {}/{},第{} ‧ {} ‧ {}/{}
-重新整理標籤頁失敗：{},Failed to refresh tag page: {},重新整理標籤頁失敗：{},重新整理标签页失败：{}
-點評失敗: {},Comment failed: {},點評失敗: {},点评失败: {}
-第{}樓,Floor {},第{}樓,第{}楼
-載入失敗: {},Load failed: {},載入失敗: {},载入失败: {}
-第 {} 頁載入失敗，點擊重試,Page {} failed to load. Tap to retry,第 {} 頁載入失敗，點擊重試,第 {} 页载入失败，点击重试
-本帖隱藏內容需要積分: {},Hidden content requires score: {},本帖隱藏內容需要積分: {},本帖隐藏内容需要积分: {}
-最後編輯於 {},Last edited at {},最後編輯於 {},最后编辑于 {}
-🌟 本帖評分 (共 {} 人),🌟 Post ratings ({} people),🌟 本帖評分 (共 {} 人),🌟 本帖评分（共 {} 人）
-評分失敗: {},Rating failed: {},評分失敗: {},评分失败: {}
-總積分 +{},Total score +{},總積分 +{},总积分 +{}
-刷新失敗: {}，嘗試讀取緩存,Refresh failed: {}. Trying cache,刷新失敗: {}，嘗試讀取緩存,刷新失败: {}，尝试读取缓存
-投票失敗: {},Vote failed: {},投票失敗: {},投票失败: {}
-{}天前,{} days ago,{}天前,{}天前
-{}小時前,{} hours ago,{}小時前,{}小时前
-{}分鐘前,{} minutes ago,{}分鐘前,{}分钟前
-30 天,30 days,30 天,30 天
-本周 7 天,7 days this week,本周 7 天,本周 7 天
-90 天,90 days,90 天,90 天
-附件選項,Attachment options,附件選項,附件选项
-加為好友,Add as friend,加為好友,加为好友
-新增書籤,Add bookmark,新增書籤,新增书签
-新增類別,Add category,新增類別,新增类别
-新增、編輯、刪除或調整你的收藏類別,"Add, edit, delete or adjust your favorite categories",新增、編輯、刪除或調整你的收藏類別,新增、编辑、删除或调整你的收藏类别
-新增集合,Add new collection,新增集合,新增集合
-新增筆記,Add new note,新增筆記,新增笔记
-已加入收藏,Added to favorites,已加入收藏,已加入收藏
-已加入本地收藏，但找不到同步目標。,"Added to local favorites, but sync target not found.",已加入本地收藏，但找不到同步目標。,已加入本地收藏，但找不到同步目标。
-已加入本地收藏,Added to local favorites,已加入本地收藏,已加入本地收藏
-新增收藏預設動作,New favorite default actions,新增收藏預設動作,新增收藏默认动作
-完成 Cloudflare 驗證後，程式會在簽到成功後一路補到不能再補。,"After completing Cloudflare verification, the app will automatically perform all available make-up sign-ins after a successful sign-in.",完成 Cloudflare 驗證後，程式會在簽到成功後一路補到不能再補。,完成 Cloudflare 验证后，程序会在签到成功后自动补签至无法继续补签。
-開啟後，刪除收藏時不再跳出確認視窗。,"When enabled, no confirmation dialog will pop up when deleting favorites.",開啟後，刪除收藏時不再跳出確認視窗。,开启后，删除收藏时不再弹出确认窗口。
-開啟後，新建收藏時會詢問是否同步到百合會。,"When enabled, you will be asked whether to sync to Yamibo when creating a new favorite.",開啟後，新建收藏時會詢問是否同步到百合會。,开启后，新建收藏时会询问是否同步到百合会。
-開啟後，收藏將完全消失時會詢問是否同步從百合會移除。,"When enabled, you will be asked whether to sync removal to Yamibo when a favorite is fully removed.",開啟後，收藏將完全消失時會詢問是否同步從百合會移除。,开启后，收藏将被完全移除时会询问是否同步从百合会移除。
-已清除所有緩存,All cache cleared,已清除所有緩存,已清除所有缓存
-已取消所有收藏,All favorites removed,已取消所有收藏,已取消所有收藏
-將重新檢查所有收藏並建立新的更新任務。網站維護中可能會產生大量錯誤記錄。,"All favorites will be rechecked and new update tasks created. A large number of error logs may be generated during website maintenance.",將重新檢查所有收藏並建立新的更新任務。網站維護中可能會產生大量錯誤記錄。,将重新检查所有收藏并建立新的更新任务。网站维护中可能会产生大量错误记录。
-已加入收藏，預設存入未分類,"Added to favorites, default saved to uncategorized",已加入收藏，預設存入未分類,已加入收藏，默认存入未分类
-已加入本地收藏，預設存入未分類,"Added to local favorites, default saved to uncategorized",已加入本地收藏，預設存入未分類,已加入本地收藏，默认存入未分类
-已加入大類,Added to main category,已加入大類,已加入大类
-已经打过卡,Already checked in,已经打过卡,已经打过卡
-已經是第一話,Already the first chapter,已經是第一話,已经是第一话
-已設為封面,Set as cover,已設為封面,已设为封面
-已同步至百合會,Already synced to Yamibo,已同步至百合會,已同步至百合会
-同步過程發生錯誤,An error occurred during synchronization,同步過程發生錯誤,同步过程发生错误
-Android 的背景同步依賴前景通知。開始同步後，只要通知已成功出現，再縮小 App 也能持續執行。,"Android background sync relies on foreground notifications. After starting sync, as long as the notification appears successfully, the app will continue running even when minimized.",Android 的背景同步依賴前景通知。開始同步後，只要通知已成功出現，再縮小 App 也能持續執行。,Android 的后台同步依赖前台通知。开始同步后，只要通知成功显示，将应用退到后台也能持续执行。
-公告,Announcement,公告,公告
-App 通知開關,App notification toggle,App 通知開關,App 通知开关
-App 系統設定,App system settings,App 系統設定,App 系统设置
-啟動檢查更新間隔,Launch update check interval,啟動檢查更新間隔,启动检查更新间隔
-啟動 app 後在背景檢查更新；未超過間隔不會發出網路請求。,"Checks for updates in the background after app launch; no network requests are sent before the interval elapses.",啟動 app 後在背景檢查更新；未超過間隔不會發出網路請求。,启动应用后在后台检查更新；未超过间隔不会发出网络请求。
-你確定要將百合會收藏同步到本地嗎,Are you sure you want to sync Yamibo favorites to local?,你確定要將百合會收藏同步到本地嗎,你确定要将百合会收藏同步到本地吗
-排列方式,Arrangement,排列方式,排列方式
-完全移除收藏時詢問同步刪除,Ask to sync deletion when fully removing favorites,完全移除收藏時詢問同步刪除,完全移除收藏时询问同步删除
-新增收藏時詢問同步,Ask to sync when adding a favorite,新增收藏時詢問同步,新增收藏时询问同步
-目前選取的收藏中，至少有一項存在於多個收藏路徑。,At least one selected favorite exists in multiple favorite paths.,目前選取的收藏中，至少有一項存在於多個收藏路徑。,当前选取的收藏中，至少有一项存在于多个收藏路径中。
-📎 附件,📎 Attachment,📎 附件,📎 附件
-已複製作者名稱,Author name copied,已複製作者名稱,已复制作者名称
-目前無法自動簽到，請改用手動模式,"Automatic sign-in is currently unavailable. Please use manual mode instead.",目前無法自動簽到，請改用手動模式,目前无法自动签到，请改用手动模式
-自動進行補簽,Auto make-up sign-in,自動進行補簽,自动进行补签
-目前無法啟動背景同步，請在 App 前景時重試。,"Background sync cannot be started at this time. Please try again while the app is in the foreground.",目前無法啟動背景同步，請在 App 前景時重試。,目前无法启动后台同步，请在应用前台时重试。
-背景同步中,Background sync in progress,背景同步中,后台同步中
-背景同步必須能在通知欄顯示進度。這項可直接在 App 內授予。,"Background sync must be able to display progress in the notification bar. This permission can be granted directly within the app.",背景同步必須能在通知欄顯示進度。這項可直接在 App 內授予。,后台同步必须能在通知栏显示进度。该权限可直接在应用内授予。
-長條圖,Bar chart,長條圖,柱状图
-電池最佳化,Battery Optimization,電池最佳化,电池优化
+清除閱讀紀錄,Clear reading history,清除閱讀紀錄,清除阅读记录
+準備同步任務,Preparing sync task,準備同步任務,准备同步任务
+準備定位,Preparing positioning,準備定位,准备定位
+準備檢查收藏更新,Preparing favorite update check,準備檢查收藏更新,准备检查收藏更新
+漫畫模式,Comic mode,漫畫模式,漫画模式
+漫畫閱讀器,Manga Reader,漫畫閱讀器,漫画阅读器
+漫畫閱讀模式,Comic reading mode,漫畫閱讀模式,漫画阅读模式
+瀑布貼齊,Staggered grid,瀑布貼齊,瀑布流
+点击打卡,Tap to check in,点击打卡,点击打卡
+無法匯入帖子 {}：{},Failed to import thread {}: {},無法匯入帖子 {}：{},无法导入帖子 {}：{}
+無法同步到百合會 {}：{},Failed to sync to Yamibo {}: {},無法同步到百合會 {}：{},无法同步到百合会 {}：{}
+無法從百合會解除收藏,Unable to remove Yamibo favorite,無法從百合會解除收藏,无法移除百合会收藏
+無法精準定位該評論,Unable to pinpoint this comment,無法精準定位該評論,无法精准定位该评论
+無法精準定位，已開啟小說頁,Precise location failed; opened the novel page,無法精準定位，已開啟小說頁,无法精准定位，已开启小说页
+無法識別的百合會帖子連結,Unrecognized Yamibo post link,無法識別的百合會帖子連結,无法识别的百合会帖子链接
+無法載入上一頁,Failed to load previous page,無法載入上一頁,无法载入上一页
+無法載入下一頁,Failed to load next page,無法載入下一頁,无法载入下一页
+無法載入閱讀目錄,Failed to load reading table of contents,無法載入閱讀目錄,无法载入阅读目录
+無法辨識此連結,Unrecognized link,無法辨識此連結,无法识别此链接
+版區,Forum,版區,版区
+狀態,Status,狀態,状态
+獲取用戶資料失敗: {},Failed to load profile: {},獲取用戶資料失敗: {},获取用户资料失败: {}
+獲取登入資訊失敗，請重新登入,Failed to obtain login information. Please log in again.,獲取登入資訊失敗，請重新登入,获取登录信息失败，请重新登录
 生日,Birthday,生日,生日
-日志,Blog,日志,日志
-日誌,Blog,日誌,日志
-書櫃,Bookcase,書櫃,书柜
-已新增書籤,Bookmark added,已新增書籤,已新增书签
-收藏本版,Bookmark this forum,收藏本版,收藏本版
-已移除書籤,Bookmark removed,已移除書籤,已移除书签
-隨便看看,Browse random blogs,隨便看看,随便看看
-正在計算中...,Calculating...,正在計算中...,正在计算中...
-取消全部收藏,Remove all favorites,取消全部收藏,取消全部收藏
-取消全部收藏嗎,Remove all favorites?,取消全部收藏嗎,取消全部收藏吗
-已取消收藏,Favorite removed,已取消收藏,已取消收藏
-取消後會移除目前這個收藏項目。,Canceling will remove the current favorite item.,取消後會移除目前這個收藏項目。,取消后会移除当前这个收藏项目。
-類別名稱,Category name,類別名稱,类别名称
+用戶,User,用戶,用户
+用戶空間/日志,User space/blogs,用戶空間/日志,用户空间/日志
+用戶組,User group,用戶組,用户组
+略過刪除確認,Skip deletion confirmation,略過刪除確認,跳过删除确认
+登入,Log in,登入,登录
+登入狀態已失效，無法檢查 {},"Login expired, cannot check {}",登入狀態已失效，無法檢查 {},登录状态已失效，无法检查 {}
+登入狀態已更新，但仍無法取得 formHash。,"Login state was refreshed, but formHash is still unavailable.",登入狀態已更新，但仍無法取得 formHash。,登录状态已更新，但仍无法获取 formHash。
+登入資訊過期，請重新登入,Login expired. Please sign in again.,登入資訊過期，請重新登入,登录信息过期，请重新登录
+登入頁面,Login page,登入頁面,登录页面
+登出,Sign out,登出,登出
+發布,Release,發布,发布
+發布頁,Release page,發布頁,发布页
+發帖成功,Post successful,發帖成功,发帖成功
+發日志,Post blog,發日志,发日志
+發消息,Send message,發消息,发消息
+發現新版本 {},New version {} available,發現新版本 {},发现新版本 {}
+發表回復,Post a reply,發表回復,发表回复
+發表帖子,Post thread,發表帖子,发表帖子
+發表於 {},Posted at {},發表於 {},发表于 {}
+發送,Send,發送,发送
+發送中,Sending,發送中,发送中
+發送回覆,Send reply,發送回覆,发送回复
+百合會已收藏，但未取得收藏識別碼,Bookmarked on Yamibo but no favorite ID was returned,百合會已收藏，但未取得收藏識別碼,百合會已收藏，但未取得收藏識別碼
+百合會收藏已同步到本地,Yamibo favorites synced to local,百合會收藏已同步到本地,百合会收藏已同步到本地
+百合會收藏識別碼不可用。請到收藏頁使用「同步百合會收藏」重新對齊識別碼後再試。,The Yamibo favorite ID is unavailable. Use Sync Yamibo Favorites on the Favorites page to realign IDs before retrying.,百合會收藏識別碼不可用。請到收藏頁使用「同步百合會收藏」重新對齊識別碼後再試。,百合会收藏标识码不可用。请到收藏页使用“同步百合会收藏”重新对齐标识码后再试。
+百合會目前維護中。,Yamibo is under maintenance.,百合會目前維護中。,百合会目前维护中。
+百合會目前維護中，請稍後再試。,Yamibo is under maintenance. Please try again later.,百合會目前維護中，請稍後再試。,百合会目前维护中，请稍后再试。
+百合會維護中...現在不是簽到的好時機呢,Yamibo under maintenance... not a good time to sign in.,百合會維護中...現在不是簽到的好時機呢,百合会维护中...现在不是签到的好时机呢
+百合會維護中，無法檢查 {},"Yamibo is under maintenance, cannot check {}",百合會維護中，無法檢查 {},百合会维护中，无法检查 {}
+百合會論壇,Yamibo Forum,百合會論壇,百合会论坛
+目前已是最新版本：{},You are on the latest version: {},目前已是最新版本：{},目前已是最新版本：{}
+目前未登入百合會。,Not signed in to Yamibo.,目前未登入百合會。,目前未登录百合会。
+目前未登入百合會，無法同步刪除網站收藏。,"Not signed in to Yamibo, so website favorites cannot be deleted.",目前未登入百合會，無法同步刪除網站收藏。,目前未登录百合会，无法同步删除网站收藏。
+目前未登入百合會，無法同步收藏。,"Not signed in to Yamibo, so favorites cannot be synced.",目前未登入百合會，無法同步收藏。,目前未登录百合会，无法同步收藏。
+目前未登入百合會，請重新登入後再同步。,Not signed in to Yamibo. Sign in again and retry sync.,目前未登入百合會，請重新登入後再同步。,目前未登录百合会，请重新登录后再同步。
+目前未登入，無法使用站內搜尋,Currently not logged in. Site search is unavailable.,目前未登入，無法使用站內搜尋,目前未登录，无法使用站内搜索
+目前無法啟動背景同步，請在 App 前景時重試。,Background sync cannot be started at this time. Please try again while the app is in the foreground.,目前無法啟動背景同步，請在 App 前景時重試。,目前无法启动后台同步，请在应用前台时重试。
+目前無法自動簽到，請改用手動模式,Automatic sign-in is currently unavailable. Please use manual mode instead.,目前無法自動簽到，請改用手動模式,目前无法自动签到，请改用手动模式
+目前章節：{},Current chapter: {},目前章節：{},当前章节：{}
+目前第 {} / {} 頁,Page {} of {},目前第 {} / {} 頁,目前第 {} / {} 页
+目前緩存大小：{},Current cache size: {},目前緩存大小：{},目前缓存大小：{}
+目前缺少 {} 項必要權限。處理完後，背景同步通知才能正常顯示。,{} required permissions are missing. Background sync notifications will work properly after they are granted.,目前缺少 {} 項必要權限。處理完後，背景同步通知才能正常顯示。,目前缺少 {} 项必要权限。处理完成后，后台同步通知才能正常显示。
+目前背景同步所需的主要存取都已就緒。,Main access required for background sync is now ready.,目前背景同步所需的主要存取都已就緒。,目前后台同步所需的主要权限都已就绪。
+目前選取的收藏中，至少有一項存在於多個收藏路徑。,At least one selected favorite exists in multiple favorite paths.,目前選取的收藏中，至少有一項存在於多個收藏路徑。,当前选取的收藏中，至少有一项存在于多个收藏路径中。
+目前還沒有收藏,No favorites yet,目前還沒有收藏,目前还没有收藏
+目前還沒有閱讀歷史紀錄,No reading history yet,目前還沒有閱讀歷史紀錄,目前还没有阅读历史记录
+目录,Table of contents,目录,目录
+目標類別：{},Target category: {},目標類別：{},目标类别：{}
+目錄,Table of contents,目錄,目录
+直屬收藏 {} 筆，集合內收藏 {} 筆。,{} direct favorites and {} favorites inside collections.,直屬收藏 {} 筆，集合內收藏 {} 筆。,直属收藏 {} 个，集合内收藏 {} 个。
+直方圖,Histogram,直方圖,直方图
+確定,Confirm,確定,确定
+確定要取消收藏嗎,Are you sure you want to remove this favorite?,確定要取消收藏嗎,确定要取消收藏吗
+確認作者頁 {} / {},Confirming author page {} / {},確認作者頁 {} / {},确认作者页 {} / {}
+社群,Community,社群,社群
+移動,Move,移動,移动
+移除原始條目,Remove original entry,移除原始條目,移除原始条目
+移除收藏失敗,Failed to remove favorites,移除收藏失敗,移除收藏失败
+移除書籤,Remove bookmark,移除書籤,移除书签
+積分,Points,積分,积分
+立即清除所有緩存,Clear all cache now,立即清除所有緩存,立即清除所有缓存
 章節,Chapter,章節,章节
 章節列表,Chapter list,章節列表,章节列表
-圖表,Chart,圖表,图表
-聊天,Chat,聊天,聊天
-查看,View,查看,查看
-打卡公告,Check-in announcement,打卡公告,打卡公告
-簽到行為,Sign-in behavior,簽到行為,签到行为
-啟動時簽到提醒,Launch sign-in reminder,啟動時簽到提醒,启动时签到提醒
-今天尚未簽到時，在 app 啟動後提醒你前往簽到。,"If you have not signed in today, you will be reminded to sign in after the app launches.",今天尚未簽到時，在 app 启动後提醒你前往簽到。,今天尚未签到时，在应用启动后提醒你前往签到。
-今天尚未完成每日簽到。,Daily sign-in is not completed today.,今天尚未完成每日簽到。,今天尚未完成每日签到。
-你今天還沒簽到,You have not signed in today,你今天還沒簽到,你今天还没签到
-簽到模式,Sign-in mode,簽到模式,签到模式
-打卡統計,Check-in statistics,打卡統計,打卡统计
-打卡成功,Check-in successful,打卡成功,打卡成功
-勾選大類，或點進去選擇小集合,"Check main categories, or tap in to select sub-collections",勾選大類，或點進去選擇小集合,勾选大类，或点进去选择小集合
-檢查通知權限、電池最佳化與背景同步所需的系統設定。,"Check system settings required for notification permissions, battery optimization, and background sync.",檢查通知權限、電池最佳化與背景同步所需的系統設定。,检查通知权限、电池优化与后台同步所需的系统设置。
-檢查更新,Check for updates,檢查更新,检查更新
-更新日誌,Update log,更新日誌,更新日志
-新版本 {} 正在準備中,Version {} is being prepared,新版本 {} 正在準備中,新版本 {} 正在准备中
-更新檔案尚未發布完成，請稍後再試。來源：{},Update files are not fully published yet. Please try again later. Source: {},更新檔案尚未發布完成，請稍後再試。來源：{},更新文件尚未发布完成，请稍后再试。来源：{}
-顯示首頁輪播圖,Show home carousel,顯示首頁輪播圖,显示首页轮播图
-在首頁版塊列表上方顯示百合會活動與推薦橫幅。,"Display Yamibo event and recommendation banners above the home forum list.",在首頁版塊列表上方顯示百合會活動與推薦橫幅。,在首页版块列表上方显示百合会活动与推荐横幅。
-首頁輪播圖,Home carousel,首頁輪播圖,首页轮播图
-圖片載入失敗,Image failed to load,圖片載入失敗,图片加载失败
-app dev by thenano,app developed by thenano,app dev by thenano,app dev by thenano
-檢查中...,Checking...,檢查中...,检查中...
-正在檢查收藏更新,Checking for favorites updates,正在檢查收藏更新,正在检查收藏更新
-正在簽到...,Signing in...,正在簽到...,正在签到...
-正在檢查更新,Checking for updates,正在檢查更新,正在检查更新
-分類,Category,分類,分类
-清空,Clear,清空,清空
-立即清除所有緩存,Clear all cache now,立即清除所有緩存,立即清除所有缓存
-App 啟動時清除緩存,Clear cache on app launch,App 啟動時清除緩存,App 启动时清除缓存
-清除閱讀紀錄,Clear reading history,清除閱讀紀錄,清除阅读记录
-点击打卡,Tap to check in,点击打卡,点击打卡
-點擊展開 / 收起,Tap to expand/collapse,點擊展開 / 收起,点击展开 / 收起
-點擊跳轉到評論區,Tap to jump to comments,點擊跳轉到評論區,点击跳转到评论区
-關閉這個畫面不會中止同步，你之後仍可從收藏頁或設定頁重新查看進度。,"Closing this screen will not stop sync. You can check progress again later from the Favorites or Settings page.",關閉這個畫面不會中止同步，你之後仍可從收藏頁或設定頁重新查看進度。,关闭这个页面不会中止同步，你之后仍可从收藏页或设置页重新查看进度。
-已新增集合,Collection added,已新增集合,已新增集合
-已建立集合,Collection created,已建立集合,已建立集合
-已更新集合,Collection updated,已更新集合,已更新集合
-顏色,Color,顏色,颜色
-顏色主題,Color theme,顏色主題,颜色主题
-漫畫模式,Comic mode,漫畫模式,漫画模式
-漫畫閱讀模式,Comic reading mode,漫畫閱讀模式,漫画阅读模式
-評論,Comment,評論,评论
-點評,Comment,點評,点评
-💬 點評,💬 Comment,💬 點評,💬 点评
-評論中...,Commenting...,評論中...,评论中...
-完全移除收藏預設動作,Fully remove favorite default actions,完全移除收藏預設動作,完全移除收藏默认动作
-確定要取消收藏嗎,Are you sure you want to remove this favorite?,確定要取消收藏嗎,确定要取消收藏吗
-內容區,Content area,內容區,内容区
-內容寬度,Content width,內容寬度,内容宽度
-繼續,Continue,繼續,继续
-繼續閱讀,Continue reading,繼續閱讀,继续阅读
-繼續同步,Continue syncing,繼續同步,继续同步
+第 {} 頁,Page {},第 {} 頁,第 {} 页
+第 {} 頁載入失敗，點擊重試,Page {} failed to load. Tap to retry,第 {} 頁載入失敗，點擊重試,第 {} 页载入失败，点击重试
+第{} ‧ {},Page {} ‧ {},第{} ‧ {},第{} ‧ {}
+第{} ‧ {} ‧ {}/{},Page {} ‧ {} ‧ {}/{},第{} ‧ {} ‧ {}/{},第{} ‧ {} ‧ {}/{}
+第{}樓,Floor {},第{}樓,第{}楼
+第{}頁,Page {},第{}頁,第{}页
+筆記,Notes,筆記,笔记
+简体中文,Simplified Chinese,簡體中文,简体中文
+管理收藏類別,Manage favorite categories,管理收藏類別,管理收藏类别
+管理組,Management group,管理組,管理组
+管理類別,Manage categories,管理類別,管理类别
+管理類別、整理排序與收藏互動設定,"Manage categories, sorting, and favorite interaction settings",管理類別、整理排序與收藏互動設定,管理类别、整理排序与收藏互动设置
+篩選,Filter,篩選,筛选
+篩選類別,Filter categories,篩選類別,筛选类别
 簡繁轉換,Simplified-Traditional Chinese conversion,簡繁轉換,简繁转换
+簡體,Simplified Chinese,簡體,简体
+簽到模式,Sign-in mode,簽到模式,签到模式
+簽到行為,Sign-in behavior,簽到行為,签到行为
+簽到設定,Daily Sign-in,簽到設定,签到设置
+簽到資訊,Sign-in information,簽到資訊,签到信息
+簽到頁載入失敗,Sign-in page failed to load,簽到頁載入失敗,签到页载入失败
+簽到頁載入失敗：{},Sign-in page failed to load: {},簽到頁載入失敗：{},签到页载入失败：{}
+系統列,System bar,系統列,系统栏
+系統目前不允許啟動背景同步，請在 App 前景時重試。,The system currently does not allow starting background sync. Please try again with the app in the foreground.,系統目前不允許啟動背景同步，請在 App 前景時重試。,系统目前不允许启动后台同步，请在应用前台时重试。
+系統目前不會因電池最佳化優先中止這個 App 的背景同步。,The system currently does not prioritize stopping this app's background sync due to battery optimization.,系統目前不會因電池最佳化優先中止這個 App 的背景同步。,系统目前不会因电池优化优先中止这个应用的后台同步。
+系統目前已關閉這個 App 的通知。請重新打開，不然同步仍然不會顯示在通知欄。,"Notifications for this app are currently turned off. Please turn them back on, otherwise sync progress will not appear in the notification bar.",系統目前已關閉這個 App 的通知。請重新打開，不然同步仍然不會顯示在通知欄。,系统目前已关闭这个应用的通知。请重新开启，否则同步进度仍不会显示在通知栏。
+紀錄,History,紀錄,记录
+網站收藏列表出現重複帖子：{},Duplicate thread found in website favorites: {},網站收藏列表出現重複帖子：{},网站收藏列表出现重复帖子：{}
+編輯,Edit,編輯,编辑
+編輯筆記,Edit note,編輯筆記,编辑笔记
+編輯集合,Edit collection,編輯集合,编辑集合
+編輯類別,Edit category,編輯類別,编辑类别
+緩存空間與啟動時清理設定,Cache storage and startup cleanup settings,緩存空間與啟動時清理設定,缓存空间与启动时清理设置
+總時數,Total hours,總時數,总时长
+總積分,Total points,總積分,总积分
+總積分 +{},Total score +{},總積分 +{},总积分 +{}
+總積分 {},Total points {},總積分 {},总积分 {}
+繁體,Traditional Chinese,繁體,繁体
+繁體中文,Traditional Chinese,繁體中文,繁体中文
+繼續,Continue,繼續,继续
+繼續同步,Continue syncing,繼續同步,继续同步
+繼續檢查收藏更新,Continuing favorite update check,繼續檢查收藏更新,继续检查收藏更新
+繼續閱讀,Continue reading,繼續閱讀,继续阅读
+置頂,Pinned,置頂,置顶
+聊天,Chat,聊天,聊天
+背景同步中,Background sync in progress,背景同步中,后台同步中
+背景同步任務已中斷，可重新同步。,Background sync task interrupted. You can resync.,背景同步任務已中斷，可重新同步。,后台同步任务已中断，可重新同步。
+背景同步必須能在通知欄顯示進度。這項可直接在 App 內授予。,Background sync must be able to display progress in the notification bar. This permission can be granted directly within the app.,背景同步必須能在通知欄顯示進度。這項可直接在 App 內授予。,后台同步必须能在通知栏显示进度。该权限可直接在应用内授予。
+背景同步週期,Background sync interval,背景同步週期,后台同步周期
+自動進行補簽,Auto make-up sign-in,自動進行補簽,自动进行补签
+自定義頭銜,Custom title,自定義頭銜,自定义头衔
+若等待過久可重新載入,If the wait is too long, you can reload,若等待過久可重新載入,若等待过久可重新加载
+若裝置廠商額外限制背景執行，可從這裡進入系統 App 設定再調整。,"If your device manufacturer imposes additional restrictions on background execution, you can access system app settings here to adjust.",若裝置廠商額外限制背景執行，可從這裡進入系統 App 設定再調整。,若设备厂商额外限制后台运行，可从这里进入系统应用设置再调整。
+行距,Line spacing,行距,行距
+行距比例,Line spacing ratio,行距比例,行距比例
+补签,Make-up sign-in,补签,补签
+補簽,Make-up sign-in,補簽,补签
 複製,Copy,複製,复制
+複製文字,Copy text,複製文字,复制文字
 複製連結,Copy link,複製連結,复制链接
 複製連結地址,Copy link address,複製連結地址,复制链接地址
 複製連結文字,Copy link text,複製連結文字,复制链接文字
-複製文字,Copy text,複製文字,复制文字
-建新類別,Create new category,建新類別,新建类别
-正在建立同步任務,Creating sync task,正在建立同步任務,正在建立同步任务
-目前未登入，無法使用站內搜尋,"Currently not logged in. Site search is unavailable.",目前未登入，無法使用站內搜尋,目前未登录，无法使用站内搜索
-自定義頭銜,Custom title,自定義頭銜,自定义头衔
-每日簽到,Daily sign-in,每日簽到,每日签到
-每日维护,Daily maintenance,每日维护,每日维护
-日,Day,日,日
-刪除類別,Delete category,刪除類別,删除类别
-解散,Disband,解散,解散
-已解散集合,Collection disbanded,已解散集合,已解散集合
-顯示收藏更新檢查進度與結果,Show favorite update check progress and results,顯示收藏更新檢查進度與結果,显示收藏更新检查进度与结果
-顯示百合會收藏同步進度,Show Yamibo favorite sync progress,顯示百合會收藏同步進度,显示百合会收藏同步进度
-是否要刪除所有路徑下的收藏,Do you want to delete favorites under all paths?,是否要刪除所有路徑下的收藏,是否要删除所有路径下的收藏
-要將此收藏從百合會網站移除嗎？,Do you want to remove this favorite from the Yamibo website?,要將此收藏從百合會網站移除嗎？,要将此收藏从百合会网站移除吗？
 要將此收藏同步到百合會嗎？,Do you want to sync this favorite to Yamibo?,要將此收藏同步到百合會嗎？,要将此收藏同步到百合会吗？
-下次不再提示,Don’t prompt again next time,下次不再提示,下次不再提示
-下載失敗,Download failed,下載失敗,下载失败
-下載更新,Download update,下載更新,下载更新
-正在下載更新...,Downloading update...,正在下載更新...,正在下载更新...
-編輯,Edit,編輯,编辑
-編輯類別,Edit category,編輯類別,编辑类别
-編輯集合,Edit collection,編輯集合,编辑集合
-編輯筆記,Edit note,編輯筆記,编辑笔记
-學歷,Education,學歷,学历
-- 評論區結束 -,- End of comments -,- 評論區結束 -,- 评论区结束 -
-輸入內容...,Enter content...,輸入內容...,输入内容...
-輸入關鍵字或帖子連結,Enter keyword or post link,輸入關鍵字或帖子連結,输入关键字或帖子链接
-輸入關鍵字或網址搜尋帖子,Enter keywords or URLs to search for posts,輸入關鍵字或網址搜尋帖子,输入关键字或网址搜索帖子
-輸入本地筆記...,Enter local note...,輸入本地筆記...,输入本地笔记...
-輸入頁碼,Enter page number,輸入頁碼,输入页码
-外部瀏覽器,External browser,外部瀏覽器,外部浏览器
-取消收藏失敗,Failed to remove favorite,取消收藏失敗,取消收藏失败
-建立類別失敗,Failed to create category,建立類別失敗,建立类别失败
-刪除收藏失敗,Failed to delete favorites,刪除收藏失敗,删除收藏失败
-下載圖片失敗,Failed to download image,下載圖片失敗,下载图片失败
-獲取登入資訊失敗，請重新登入,"Failed to obtain login information. Please log in again.",獲取登入資訊失敗，請重新登入,获取登录信息失败，请重新登录
-移除收藏失敗,Failed to remove favorites,移除收藏失敗,移除收藏失败
-收藏刪除,Favorite deletion,收藏刪除,收藏删除
-收藏顯示,Favorite display,收藏顯示,收藏显示
-收藏功能開發中,Favorite function is under development,收藏功能開發中,收藏功能开发中
-收藏位置已更新,Favorite location updated,收藏位置已更新,收藏位置已更新
-已更新收藏位置,Favorite location updated,已更新收藏位置,已更新收藏位置
-收藏日志,Favorite log,收藏日志,收藏日志
-收藏模塊比率,Favorite module ratio,收藏模塊比率,收藏模块比率
-已更新收藏路徑,Favorite path updated,已更新收藏路徑,已更新收藏路径
-已移除收藏,Favorite removed,已移除收藏,已移除收藏
-已從所有位置移除收藏,Favorite removed from all locations,已從所有位置移除收藏,已从所有位置移除收藏
-收藏同步偏好,Favorite sync preferences,收藏同步偏好,收藏同步偏好
-收藏同步,Favorite synchronization,收藏同步,收藏同步
-已取消收藏更新檢查,Favorite update check canceled,已取消收藏更新檢查,已取消收藏更新检查
-收藏更新檢查週期,Favorite update check cycle,收藏更新檢查週期,收藏更新检查周期
-已中斷收藏更新檢查,Favorite update check interrupted,已中斷收藏更新檢查,已中断收藏更新检查
-收藏更新完成,Favorite update completed,收藏更新完成,收藏更新完成
-收藏更新失敗,Favorite update failed,收藏更新失敗,收藏更新失败
-收藏更新已中斷,Favorite update has been interrupted,收藏更新已中斷,收藏更新已中断
-收藏更新中斷,Favorite update interrupted,收藏更新中斷,收藏更新中断
-收藏更新,Favorite updates,收藏更新,收藏更新
-已刪除收藏,Favorites deleted,已刪除收藏,已删除收藏
-收藏選單,Favorites menu,收藏選單,收藏菜单
-篩選類別,Filter categories,篩選類別,筛选类别
-完成,Finish,完成,完成
-}」結束,"} ends",}」結束,}”结束
-閱畢,Finished reading,閱畢,阅毕
-五,Five,五,五
-字體大小,Font size,字體大小,字体大小
-四,Four,四,四
-分數,Score,分數,分数
-好友的日志,Friends' blogs,好友的日志,好友的日志
-集合,Collection,集合,集合
-性別,Gender,性別,性别
-正在取得收藏頁,Loading favorites page,正在取得收藏頁,正在获取收藏页
-全域刷新,Global refresh,全域刷新,全局刷新
-全域刷新收藏更新,Global refresh favorite updates,全域刷新收藏更新,全局刷新收藏更新
-前往,Go to,前往,前往
-前往簽到,Go to sign-in,前往簽到,前往签到
-授予,Grant,授予,授予
-&gt;目录&lt;/div&gt;,&gt;Table of contents&lt;/div&gt;,&gt;目录&lt;/div&gt;,&gt;目录&lt;/div&gt;
-&gt;-简称征集中-&lt;/div&gt;,&gt;-Short name pending-&lt;/div&gt;,&gt;-简称征集中-&lt;/div&gt;,&gt;-简称征集中-&lt;/div&gt;
-#標籤漫畫,#Tag comics,#標籤漫畫,#标签漫画
-隱藏,Hide,隱藏,隐藏
-沒有找到Ta的日志,No blogs found for this user,沒有找到Ta的日志,没有找到Ta的日志
-沒有找到Ta的主題,No threads found for this user,沒有找到Ta的主題,没有找到Ta的主题
-直方圖,Histogram,直方圖,直方图
-本月時數,Hours this month,本月時數,本月时长
-本周時數,Hours this week,本周時數,本周时长
-我是YamiboApp的作者TheNano，這是一個第三方個人獨立開發的開源App,"I am TheNano, author of YamiboApp. This is an open-source app independently developed by a third-party individual.",我是YamiboApp的作者TheNano，這是一個第三方個人獨立開發的開源App,我是YamiboApp的作者TheNano，这是一个第三方个人独立开发的开源App
-若裝置廠商額外限制背景執行，可從這裡進入系統 App 設定再調整。,"If your device manufacturer imposes additional restrictions on background execution, you can access system app settings here to adjust.",若裝置廠商額外限制背景執行，可從這裡進入系統 App 設定再調整。,若设备厂商额外限制后台运行，可从这里进入系统应用设置再调整。
-若等待過久可重新載入,If the wait is too long, you can reload,若等待過久可重新載入,若等待过久可重新加载
+要將此收藏從百合會網站移除嗎？,Do you want to remove this favorite from the Yamibo website?,要將此收藏從百合會網站移除嗎？,要将此收藏从百合会网站移除吗？
+解散,Disband,解散,解散
+解析連結,Parsing link,解析連結,解析链接
+觸控分區,Touch zones,觸控分區,触控分区
+記住這次選擇,Remember this choice,記住這次選擇,记住这次选择
+設定,Settings,設定,设置
+設定功能開發中,Settings function is under development,設定功能開發中,设置功能开发中
+設為RSS封面,Set as RSS cover,設為RSS封面,设为RSS封面
+設為封面,Set as cover,設為封面,设为封面
+設為標籤封面,Set as tag cover,設為標籤封面,设为标签封面
+評分,Score,評分,评分
+評分失敗: {},Rating failed: {},評分失敗: {},评分失败: {}
+評分成功，刷新後更新評分/點評狀態,Rating successful. Refresh to update rating/review status.,評分成功，刷新後更新評分/點評狀態,评分成功，刷新后更新评分/点评状态
+評分理由,Rating reason,評分理由,评分理由
+評論,Comment,評論,评论
+評論中...,Commenting...,評論中...,评论中...
+語言,Language,語言,语言
 說明,About,說明,说明
-已複製圖片,Image copied,已複製圖片,已复制图片
-圖片載入失敗,Image loading failed,圖片載入失敗,图片加载失败
-已匯入到本地,Imported to local,已匯入到本地,已导入到本地
-手動模式下只保存這個偏好；半自動模式才會真的自動補簽。,"In manual mode, only this preference is saved; automatic make-up sign-ins only work in semi-automatic mode.",手動模式下只保存這個偏好；半自動模式才會真的自動補簽。,手动模式下只保存这个偏好；半自动模式才会真正自动补签。
-積分,Points,積分,积分
-中斷,Interrupt,中斷,中断
-中斷同步,Interrupt sync,中斷同步,中断同步
-區間,Interval,區間,区间
-邀請閱讀,Invitation to read,邀請閱讀,邀请阅读
-邀請,Invite,邀請,邀请
-iOS 最多只能在進入背景後維持一小段時間執行。若系統掛起 App，收藏同步仍可能中斷。,"iOS can only run in the background for a short period. If the system suspends the app, favorite sync may still be interrupted.",iOS 最多只能在進入背景後維持一小段時間執行。若系統掛起 App，收藏同步仍可能中斷。,iOS 进入后台后最多只能维持短时间运行。若系统挂起应用，收藏同步仍可能中断。
-iOS 目前沒有 Android 那種常駐前景通知與長時間背景同步能力。,"iOS currently does not have Android's persistent foreground notifications and long-duration background sync capabilities.",iOS 目前沒有 Android 那種常駐前景通知與長時間背景同步能力。,iOS 目前没有 Android 那种常驻前台通知与长时间后台同步能力。
-只加入部分集合,Added to partial collections only,只加入部分集合,只加入部分集合
+請保持 App 在前景後再開始同步。,Please keep the app in the foreground before starting sync.,請保持 App 在前景後再開始同步。,请保持应用在前台后再开始同步。
+請先允許通知權限，背景同步才會顯示在通知欄。,Please allow notification permission first for background sync to appear in the notification bar.,請先允許通知權限，背景同步才會顯示在通知欄。,请先允许通知权限，后台同步才会显示在通知栏。
+請先打開簽到頁 WebView 讓程式抓到頁面內容，或使用下方按鈕手動刷新。,"Please open the sign-in page WebView first to let the app capture the page content, or use the button below to manually refresh.",請先打開簽到頁 WebView 讓程式抓到頁面內容，或使用下方按鈕手動刷新。,请先打开签到页 WebView 让程序获取页面内容，或使用下方按钮手动刷新。
+請先登入後再搜尋,Please log in first before searching,請先登入後再搜尋,请先登录后再搜索
+請先登入後再發送消息,Please log in first before sending messages,請先登入後再發送消息,请先登录后再发送消息
+請先登入後再評論,Please log in first before commenting,請先登入後再評論,请先登录后再评论
+請先輸入類別名稱,Please enter the category name first,請先輸入類別名稱,请先输入类别名称
+請稍後再試,Please try again later,請稍後再試,请稍后再试
+請輸入內容,Please enter content,請輸入內容,请输入内容
+請輸入內容...,Please enter content...,請輸入內容...,请输入内容...
+請輸入評論內容,Please enter comment content,請輸入評論內容,请输入评论内容
+請輸入類別名稱,Please enter a category name,請輸入類別名稱,请输入类别名称
+讀取 findpost 定位頁,Reading findpost location page,讀取 findpost 定位頁,读取 findpost 定位页
+讀取失敗,Read failed,讀取失敗,读取失败
+讀取帖子首頁,Reading thread home page,讀取帖子首頁,读取帖子首页
+跟隨系統,Follow system,跟隨系統,跟随系统
 跳轉,Jump,跳轉,跳转
 跳轉到收藏,Jump to favorites,跳轉到收藏,跳转到收藏
 跳轉到首頁,Jump to homepage,跳轉到首頁,跳转到首页
 跳過,Skip,跳過,跳过
-暫不支持跳轉到公告頁,Jumping to the announcement page is not supported yet.,暫不支持跳轉到公告頁,暂不支持跳转到公告页
-剛剛,Just now,剛剛,刚刚
-保留系統列背景,Keep system bar background,保留系統列背景,保留系统栏背景
-最後一次同步時間,Last sync time,最後一次同步時間,最后一次同步时间
- / 最後更新 , / Last updated, / 最後更新 , / 最后更新
-最後訪問,Last visited,最後訪問,最后访问
-最新發表的日志,Latest published blogs,最新發表的日志,最新发表的日志
-發表回復,Post a reply,發表回復,发表回复
-折線圖,Line chart,折線圖,折线图
-行距,Line spacing,行距,行距
-行距比例,Line spacing ratio,行距比例,行距比例
-連結選項,Link options,連結選項,链接选项
 載入失敗,Loading failed,載入失敗,载入失败
-載入更多評論,Loading more comments,載入更多評論,载入更多评论
-正在載入下一個分頁...,Loading next page...,正在載入下一個分頁...,正在载入下一页...
-正在載入上一個分頁...,Loading previous page...,正在載入上一個分頁...,正在载入上一页...
-正在定位連結,Locating link,正在定位連結,正在定位链接
-日志評論,Blog comments,日志評論,日志评论
-登入,Log in,登入,登录
-登入頁面,Login page,登入頁面,登录页面
-管理收藏類別,Manage favorite categories,管理收藏類別,管理收藏类别
-管理類別,Manage categories,管理類別,管理类别
-管理組,Management group,管理組,管理组
-手動刷新資訊,Manually refresh information,手動刷新資訊,手动刷新信息
-廠商背景限制說明,Manufacturer background restrictions,廠商背景限制說明,厂商后台限制说明
-標為已讀,Mark as read,標為已讀,标为已读
-標為未讀,Mark as unread,標為未讀,标为未读
-已標為已讀,Marked as read,已標為已讀,已标为已读
-已標為未讀,Marked as unread,已標為未讀,已标为未读
-選單,Menu,選單,菜单
-消息提醒,Message reminder,消息提醒,消息提醒
-錯誤,Error,錯誤,错误
-更多,More,更多,更多
-移動,Move,移動,移动
-必須處理,Required,必須處理,必须处理
-我的日志,My blogs,我的日志,我的日志
-我的打卡动态,My check-in status,我的打卡动态,我的打卡动态
-我的打卡動態,My check-in status,我的打卡動態,我的打卡动态
-我的收藏,My favorites,我的收藏,我的收藏
-我的足跡,My footprints,我的足跡,我的足迹
-我的好友,My friends,我的好友,我的好友
-我的消息,My messages,我的消息,我的消息
-我的提醒,My notifications,我的提醒,我的提醒
-我的資料,My profile,我的資料,我的资料
-我的回覆,My replies,我的回覆,我的回复
-我的空間,My space,我的空間,我的空间
-我的主題,My threads,我的主題,我的主题
-我的訪客,My visitors,我的訪客,我的访客
-下一話,Next chapter,下一話,下一话
-下一頁,Next page,下一頁,下一页
-下一個分頁,Next page,下一個分頁,下一页
-否,No,否,否
-暫無評論,No comments yet,暫無評論,暂无评论
-沒有找到評論,No comments found,沒有找到評論,没有找到评论
-尚無收藏資料,No favorites yet,尚無收藏資料,暂无收藏数据
-沒有找到足跡,No footprints found,沒有找到足跡,没有找到足迹
-沒有找到好友的日志,No friends' blogs found,沒有找到好友的日志,没有找到好友的日志
-沒有找到好友,No friends found,沒有找到好友,没有找到好友
-沒有找到日志,No blogs found,沒有找到日志,没有找到日志
-沒有找到消息,No messages found,沒有找到消息,没有找到消息
-- 沒有更多內容了 -,- No more content -,- 沒有更多內容了 -,- 没有更多内容了 -
-沒有找到在線成員,No online members found,沒有找到在線成員,没有找到在线成员
-沒有找到圖片,No images found,沒有找到圖片,没有找到图片
-尚無閱讀時數資料,No reading hours data yet,尚無閱讀時數資料,暂无阅读时长数据
-沒有找到相關主題,No related threads found,沒有找到相關主題,没有找到相关主题
-沒有找到回覆,No replies found,沒有找到回覆,没有找到回复
-沒有找到Ta的回覆,No replies found from this user,沒有找到Ta的回覆,没有找到Ta的回复
-搜尋無結果,No results found,搜尋無結果,搜索无结果
-沒有找到搜尋結果,No search results found,沒有找到搜尋結果,没有找到搜索结果
-沒有偵測到更新,No updates detected,沒有偵測到更新,没有检测到更新
-沒有找到訪客,No visitors found,沒有找到訪客,没有找到访客
-未加入大類,Not added to main category,未加入大類,未加入大类
-未登入，請先登入後再收藏,"Not logged in. Please log in first before adding favorites.",未登入，請先登入後再收藏,未登录，请先登录后再收藏
-尚未加入,Not yet joined,尚未加入,尚未加入
-已刪除筆記,Note deleted,已刪除筆記,已删除笔记
-已保存筆記,Note saved,已保存筆記,已保存笔记
-筆記,Notes,筆記,笔记
-通知與背景同步設定,Notification and background sync settings,通知與背景同步設定,通知与后台同步设置
-通知權限,Notification permissions,通知權限,通知权限
-系統目前已關閉這個 App 的通知。請重新打開，不然同步仍然不會顯示在通知欄。,"Notifications for this app are currently turned off. Please turn them back on, otherwise sync progress will not appear in the notification bar.",系統目前已關閉這個 App 的通知。請重新打開，不然同步仍然不會顯示在通知欄。,系统目前已关闭这个应用的通知。请重新开启，否则同步进度仍不会显示在通知栏。
-通知作者,Notify author,通知作者,通知作者
-小說,Novel,小說,小说
-頁數,Page count,頁數,页数
-對象,Target,對象,对象
-已取得,Obtained,已取得,已取得
-一,One,一,一
-一年,One year,一年,一年
-在線成員,Online members,在線成員,在线成员
-在線時間,Online time,在線時間,在线时间
-只刪本地,Delete local only,只刪本地,只删本地
-只存本地,Save local only,只存本地,只存本地
-開啟替代頁,Open alternative page,開啟替代頁,开启替代页
-打開簽到頁 WebView,Open sign-in page WebView,打開簽到頁 WebView,打开签到页 WebView
-App 內打開,Open in app,App 內打開,应用内打开
-在瀏覽器開啟,Open in browser,在瀏覽器開啟,在浏览器打开
-在應用內開啟連結,Open link in app,在應用內開啟連結,在应用内打开链接
-打開進度,Open progress,打開進度,打开进度
-使用外部瀏覽器開啟,Open with external browser,使用外部瀏覽器開啟,使用外部浏览器打开
-} 頁,} pages,} 頁,} 页
-個人資料,Profile,個人資料,个人资料
-個人主頁,Personal homepage,個人主頁,个人主页
-個人簽名,Personal signature,個人簽名,个人签名
-圖片載入中,Loading image,圖片載入中,图片加载中
-圓餅圖,Pie chart,圓餅圖,饼图
-置頂,Pinned,置頂,置顶
-出生地,Place of birth,出生地,出生地
-平台限制,Platform restrictions,平台限制,平台限制
-請先允許通知權限，背景同步才會顯示在通知欄。,Please allow notification permission first for background sync to appear in the notification bar.,請先允許通知權限，背景同步才會顯示在通知欄。,请先允许通知权限，后台同步才会显示在通知栏。
-請輸入類別名稱,Please enter a category name,請輸入類別名稱,请输入类别名称
-請先輸入類別名稱,Please enter the category name first,請先輸入類別名稱,请先输入类别名称
-請輸入評論內容,Please enter comment content,請輸入評論內容,请输入评论内容
-請輸入內容...,Please enter content...,請輸入內容...,请输入内容...
-請輸入內容,Please enter content,請輸入內容,请输入内容
-請保持 App 在前景後再開始同步。,Please keep the app in the foreground before starting sync.,請保持 App 在前景後再開始同步。,请保持应用在前台后再开始同步。
-請先登入後再評論,Please log in first before commenting,請先登入後再評論,请先登录后再评论
-請先登入後再搜尋,Please log in first before searching,請先登入後再搜尋,请先登录后再搜索
-請先登入後再發送消息,Please log in first before sending messages,請先登入後再發送消息,请先登录后再发送消息
-請先打開簽到頁 WebView 讓程式抓到頁面內容，或使用下方按鈕手動刷新。,"Please open the sign-in page WebView first to let the app capture the page content, or use the button below to manually refresh.",請先打開簽到頁 WebView 讓程式抓到頁面內容，或使用下方按鈕手動刷新。,请先打开签到页 WebView 让程序获取页面内容，或使用下方按钮手动刷新。
-請稍後再試,Please try again later,請稍後再試,请稍后再试
-定位中,Positioning,定位中,定位中
-定位失敗,Positioning failed,定位失敗,定位失败
-帖子,Post,帖子,帖子
-發表帖子,Post thread,發表帖子,发表帖子
-發日志,Post blog,發日志,发日志
-發帖成功,Post successful,發帖成功,发帖成功
-準備定位,Preparing positioning,準備定位,准备定位
-再按一次退出應用,Press again to exit the app,再按一次退出應用,再按一次退出应用
-預覽,Preview,預覽,预览
-上一話,Previous chapter,上一話,上一话
-上一頁,Previous page,上一頁,上一页
-上一個分頁,Previous page,上一個分頁,上一页
-上一頁 / 下一頁,Previous page / next page,上一頁 / 下一頁,上一页 / 下一页
-提示信息,Prompt message,提示信息,提示信息
-排名,Ranking,排名,排名
 "載入失敗, 可選擇直接填寫",Failed to load; you can enter manually,"載入失敗, 可選擇直接填寫","载入失败, 可选择直接填写"
-正在載入選項,Loading options,正在載入選項,正在载入选项
-本帖評分,Rate this post,本帖評分,本帖评分
-評分成功，刷新後更新評分/點評狀態,"Rating successful. Refresh to update rating/review status.",評分成功，刷新後更新評分/點評狀態,评分成功，刷新后更新评分/点评状态
-補簽,Make-up sign-in,補簽,补签
-补签,Make-up sign-in,补签,补签
-已讀完所有章節,Read all chapters,已讀完所有章節,已读完所有章节
-讀取失敗,Read failed,讀取失敗,读取失败
-閱讀標記,Read mark,閱讀標記,阅读标记
-已讀/總數,Read/total,已讀/總數,已读/总数
-閱讀圖表,Reading charts,閱讀圖表,阅读图表
-已清除閱讀紀錄,Reading history cleared,已清除閱讀紀錄,已清除阅读记录
-已刷新閱讀歷史紀錄,Reading history has been refreshed,已刷新閱讀歷史紀錄,已刷新阅读历史记录
-閱讀時數,Reading hours,閱讀時數,阅读时长
-閱讀模式,Reading mode,閱讀模式,阅读模式
-閱讀統計,Reading statistics,閱讀統計,阅读统计
-已就緒,Ready,已就緒,已就绪
-評分理由,Rating reason,評分理由,评分理由
-最近閱讀 ,Recently read,最近閱讀 ,最近阅读
-重新檢查,Recheck,重新檢查,重新检查
-推薦閱讀的日志,Recommended reading blogs,推薦閱讀的日志,推荐阅读的日志
-建議處理,Recommended action,建議處理,建议处理
--简称征集中-,-Short name pending-,-简称征集中-,-简称征集中-
-重新整理,Refresh,重新整理,重新整理
-刷新,Refresh,刷新,刷新
-刷新週期,Refresh cycle,刷新週期,刷新周期
-注冊時間,Registration time,注冊時間,注册时间
-發布,Release,發布,发布
-發布頁,Release page,發布頁,发布页
-重新載入,Reload,重新載入,重新加载
-記住這次選擇,Remember this choice,記住這次選擇,记住这次选择
-提醒,Reminder,提醒,提醒
-沒有找到提醒,No reminders found,沒有找到提醒,没有找到提醒
-移除書籤,Remove bookmark,移除書籤,移除书签
-僅移除當下目錄,Remove current directory only,僅移除當下目錄,仅移除当前目录
-移除原始條目,Remove original entry,移除原始條目,移除原始条目
-正在從百合會移除收藏...,Removing favorites from Yamibo...,正在從百合會移除收藏...,正在从百合会移除收藏...
-更新,Update,更新,更新
-回復,Reply,回復,回复
-回復成功,Reply successful,回復成功,回复成功
-回覆,Reply,回覆,回复
-重新同步,Resync,重新同步,重新同步
+載入失敗: {},Load failed: {},載入失敗: {},载入失败: {}
+載入更多評論,Loading more comments,載入更多評論,载入更多评论
+載入第 {} 頁失敗: {},Failed to load page {}: {},載入第 {} 頁失敗: {},载入第 {} 页失败: {}
+載入錯誤：{},Load error: {},載入錯誤：{},载入错误：{}
+輕觸區域,Tap area,輕觸區域,轻触区域
+輸入內容...,Enter content...,輸入內容...,输入内容...
+輸入本地筆記...,Enter local note...,輸入本地筆記...,输入本地笔记...
+輸入關鍵字或帖子連結,Enter keyword or post link,輸入關鍵字或帖子連結,输入关键字或帖子链接
+輸入關鍵字或網址搜尋帖子,Enter keywords or URLs to search for posts,輸入關鍵字或網址搜尋帖子,输入关键字或网址搜索帖子
+輸入頁碼,Enter page number,輸入頁碼,输入页码
 返回,Return,返回,返回
 返回签详情,Return to sign-in details,返回签详情,返回签到详情
-保存,Save,保存,保存
-儲存失敗,Save failed,儲存失敗,保存失败
-保存失敗,Save failed,保存失敗,保存失败
-已儲存圖片至相簿,Saved image to album,已儲存圖片至相簿,已保存图片至相册
-評分,Score,評分,评分
-搜尋失敗,Search failed,搜尋失敗,搜索失败
-搜尋收藏,Search favorites,搜尋收藏,搜索收藏
-搜尋收藏標題...,Search favorite titles...,搜尋收藏標題...,搜索收藏标题...
-搜尋帖子...,Search posts...,搜尋帖子...,搜索帖子...
-搜尋標題或連結...,Search title or link...,搜尋標題或連結...,搜索标题或链接...
-搜尋中...,Searching...,搜尋中...,搜索中...
-選擇,Select,選擇,选择
-選擇類別,Select category,選擇類別,选择类别
-選擇頁面,Select page,選擇頁面,选择页面
-選擇評分理由,Select rating reason,選擇評分理由,选择评分理由
-選擇分數,Select score,選擇分數,选择分数
-已選擇,Selected,已選擇,已选择
-發送,Send,發送,发送
-發消息,Send message,發消息,发消息
-發送回覆,Send reply,發送回覆,发送回复
-發送中,Sending,發送中,发送中
-設為封面,Set as cover,設為封面,设为封面
-設定功能開發中,Settings function is under development,設定功能開發中,设置功能开发中
-分享,Share,分享,分享
-分享日志,Share blog,分享日志,分享日志
-分享圖片,Share image,分享圖片,分享图片
-屏蔽,Block,屏蔽,屏蔽
-本月簽到表格,Monthly sign-in calendar,本月簽到表格,本月签到表格
-簽到資訊,Sign-in information,簽到資訊,签到信息
-尚未取得簽到資訊,Sign-in information not yet obtained,尚未取得簽到資訊,尚未获取签到信息
-簽到頁載入失敗,Sign-in page failed to load,簽到頁載入失敗,签到页载入失败
-登出,Sign out,登出,登出
-已簽,Signed,已簽,已签
-今日已簽到,Signed in today,今日已簽到,今日已签到
-今日已簽,Signed today,今日已簽,今日已签
-六,Six,六,六
-略過刪除確認,Skip deletion confirmation,略過刪除確認,跳过删除确认
-部分品牌會額外限制背景同步。若你已開通知與電池最佳化，但任務仍常被中止，請查看對應機型說明。,"Some brands impose additional restrictions on background sync. If you have enabled notifications and battery optimization but tasks are still frequently stopped, please check the instructions for your device model.",部分品牌會額外限制背景同步。若你已開通知與電池最佳化，但任務仍常被中止，請查看對應機型說明。,部分品牌会额外限制后台同步。若你已开启通知与电池优化，但任务仍经常被中止，请查看对应机型说明。
-部分裝置會因電池最佳化提早中止背景網路。建議將本 App 加入忽略最佳化名單。,"Some devices may terminate background network early due to battery optimization. It is recommended to add this app to the optimization exemption list.",部分裝置會因電池最佳化提早中止背景網路。建議將本 App 加入忽略最佳化名單。,部分设备会因电池优化提早中止后台网络。建议将本应用加入优化白名单。
-宋体,SimSun,宋体,宋体
-排序,Sort,排序,排序
-排序方式,Sort by,排序方式,排序方式
-}」開始,"} starts",}」開始,}”开始
-開始全域刷新收藏更新,Start global refresh of favorite updates,開始全域刷新收藏更新,开始全局刷新收藏更新
-開始閱讀,Start reading,開始閱讀,开始阅读
-開始刷新,Start refreshing,開始刷新,开始刷新
-狀態,Status,狀態,状态
-儲存空間使用情形,Storage usage,儲存空間使用情形,存储空间使用情况
-儲存,Save,儲存,储存
-提交,Submit,提交,提交
-提交投票,Submit vote,提交投票,提交投票
-提交中...,Submitting...,提交中...,提交中...
-子版區,Sub-forum,子版區,子版区
-摘要,Summary,摘要,摘要
-確定,Confirm,確定,确定
-同步已取消,Sync canceled,同步已取消,同步已取消
-已取消同步,Sync canceled,已取消同步,已取消同步
-同步失敗,Sync failed,同步失敗,同步失败
-尚未開始同步,Sync not started yet,尚未開始同步,尚未开始同步
-同步已中斷,Sync interrupted,同步已中斷,同步已中断
-同步到百合會,Sync to Yamibo,同步到百合會,同步到百合会
-同步完成,Sync completed,同步完成,同步完成
-同步花費時間,Sync duration,同步花費時間,同步耗时
-正在同步到百合會...,Syncing to Yamibo...,正在同步到百合會...,正在同步到百合会...
-同步移除,Sync removal,同步移除,同步移除
-同步百合會收藏,Sync Yamibo favorites,同步百合會收藏,同步百合会收藏
-合成集合,Merge collections,合成集合,合并集合
-系統列,System bar,系統列,系统栏
-目录,Table of contents,目录,目录
-目錄,Table of contents,目錄,目录
-Tag 漫畫,Tag comics,Tag 漫畫,Tag 漫画
-標籤列表,Tag list,標籤列表,标签列表
-沒有找到標籤,No tags found,沒有找到標籤,没有找到标签
-文字排版,Text layout,文字排版,文字排版
-文字大小,Text size,文字大小,文字大小
-背景同步任務已中斷，可重新同步。,Background sync task interrupted. You can resync.,背景同步任務已中斷，可重新同步。,后台同步任务已中断，可重新同步。
-已移除當下目錄收藏,Current directory favorite removed,已移除當下目錄收藏,已移除当前目录收藏
-前天,The day before yesterday,前天,前天
-目前背景同步所需的主要存取都已就緒。,Main access required for background sync is now ready.,目前背景同步所需的主要存取都已就緒。,目前后台同步所需的主要权限都已就绪。
-通知欄可正常顯示背景同步進度與完成結果。,Notification bar can display background sync progress and completion results normally.,通知欄可正常顯示背景同步進度與完成結果。,通知栏可正常显示后台同步进度与完成结果。
-點評成功，刷新後更新評分/點評狀態,"Review successful. Refresh to update rating/review status.",點評成功，刷新後更新評分/點評狀態,点评成功，刷新后更新评分/点评状态
-智能更新策略尚未接入，暫停週期背景檢查。,"Smart update strategy not yet implemented. Periodic background checks are paused.",智能更新策略尚未接入，暫停週期背景檢查。,智能更新策略尚未接入，暂停周期后台检查。
-找不到指定的樓層，已跳轉至最接近的樓層,Specified floor not found. Jumped to nearest floor.,找不到指定的樓層，已跳轉至最接近的樓層,找不到指定的楼层，已跳转至最接近的楼层
-星星按鈕可直接收藏，長按可指定小集合,"Tap the star button to favorite directly; long press to assign to a collection.",星星按鈕可直接收藏，長按可指定小集合,星星按钮可直接收藏，长按可指定小集合
-這裡會顯示最近一次收藏同步的狀態與進度。同步開始後，你也可以從這裡重新打開進度畫面。,"This shows the status and progress of the latest favorite sync. After sync starts, you can reopen the progress screen from here.",這裡會顯示最近一次收藏同步的狀態與進度。同步開始後，你也可以從這裡重新打開進度畫面。,这里会显示最近一次收藏同步的状态与进度。同步开始后，你也可以从这里重新打开进度页面。
-找不到這個同步任務。,Sync task not found.,找不到這個同步任務。,找不到这个同步任务。
-系統目前不允許啟動背景同步，請在 App 前景時重試。,"The system currently does not allow starting background sync. Please try again with the app in the foreground.",系統目前不允許啟動背景同步，請在 App 前景時重試。,系统目前不允许启动后台同步，请在应用前台时重试。
-系統目前不會因電池最佳化優先中止這個 App 的背景同步。,"The system currently does not prioritize stopping this app's background sync due to battery optimization.",系統目前不會因電池最佳化優先中止這個 App 的背景同步。,系统目前不会因电池优化优先中止这个应用的后台同步。
-更新頁不需要網路載入,The update page does not require network loading,更新頁不需要網路載入,更新页不需要网络加载
-投票成功，正在刷新頁面...,"Vote successful. Refreshing page...",投票成功，正在刷新頁面...,投票成功，正在刷新页面...
-Ta的日志,Their blogs,Ta的日志,Ta的日志
-Ta的資料,Their profile,Ta的資料,Ta的资料
-Ta的回覆,Their replies,Ta的回覆,Ta的回复
-Ta的主題,Their threads,Ta的主題,Ta的主题
-主題,Theme,主題,主题
-沒有可繼續的收藏更新任務,No ongoing favorite update tasks,沒有可繼續的收藏更新任務,没有可继续的收藏更新任务
-目前還沒有收藏,No favorites yet,目前還沒有收藏,目前还没有收藏
-目前還沒有閱讀歷史紀錄,No reading history yet,目前還沒有閱讀歷史紀錄,目前还没有阅读历史记录
 這個集合還沒有內容,This collection is empty,這個集合還沒有內容,这个集合还没有内容
-此連結暫不支援 App 內開啟,This link does not support opening in-app yet.,此連結暫不支援 App 內開啟,此链接暂不支持应用内打开
-無法辨識此連結,Unrecognized link,無法辨識此連結,无法识别此链接
-本月,This month,本月,本月
-這個頁面在 iOS 主要是說明限制，不提供 Android 式的系統授權捷徑。,"This page on iOS mainly explains limitations and does not provide Android-style system authorization shortcuts.",這個頁面在 iOS 主要是說明限制，不提供 Android 式的系統授權捷徑。,这个页面在 iOS 主要是说明限制，不提供 Android 式的系统授权捷径。
-已刪除這筆紀錄,This record has been deleted,已刪除這筆紀錄,已删除这条记录
-三,Three,三,三
-tip：長按可詳細編輯收藏路徑,Tip: Long press to edit favorite path in detail,tip：長按可詳細編輯收藏路徑,tip：长按可详细编辑收藏路径
-"💡 tips : 標籤頁面類似常規漫畫App, 推薦用於收藏漫畫","💡 Tip: Tag pages are similar to standard comic apps, recommended for saving comics","💡 tips : 標籤頁面類似常規漫畫App, 推薦用於收藏漫畫","💡 tips : 标签页面类似常规漫画App, 推荐用于收藏漫画"
-已複製標題,Title copied,已複製標題,已复制标题
-<title>百合会每日维护</title>,<title>Yamibo Daily Maintenance</title>,<title>百合会每日维护</title>,<title>百合会每日维护</title>
-今日,Today,今日,今日
-今天,Today,今天,今天
-今天狀態：未簽到,Today's status: Not signed in,今天狀態：未簽到,今天状态：未签到
-今天狀態：已簽到,Today's status: Signed in,今天狀態：已簽到,今天状态：已签到
-TODO: 消息互動尚未接入,TODO: Message interaction not yet implemented,TODO: 消息互動尚未接入,TODO: 消息互动尚未接入
-TODO: 回覆定位跳轉尚未接入,TODO: Reply positioning jump not yet implemented,TODO: 回覆定位跳轉尚未接入,TODO: 回复定位跳转尚未接入
-沒有找到主題,No threads found,沒有找到主題,没有找到主题
-總時數,Total hours,總時數,总时长
-總積分,Total points,總積分,总积分
-輕觸區域,Tap area,輕觸區域,轻触区域
-觸控分區,Touch zones,觸控分區,触控分区
+這個頁面在 iOS 主要是說明限制，不提供 Android 式的系統授權捷徑。,This page on iOS mainly explains limitations and does not provide Android-style system authorization shortcuts.,這個頁面在 iOS 主要是說明限制，不提供 Android 式的系統授權捷徑。,这个页面在 iOS 主要是说明限制，不提供 Android 式的系统授权捷径。
+這個項目目前收藏在：{},This item is currently saved in: {},這個項目目前收藏在：{},这个项目目前收藏在：{}
+這種類型的收藏目前不支援同步到百合會。,This favorite type cannot be synced to Yamibo yet.,這種類型的收藏目前不支援同步到百合會。,这种类型的收藏目前不支持同步到百合会。
+這筆收藏缺少網站 favorite id，暫時無法同步刪除網站端資料。,"This favorite has no website favorite ID, so website-side deletion is not available yet.",這筆收藏缺少網站 favorite id，暫時無法同步刪除網站端資料。,这笔收藏缺少网站收藏ID，暂时无法同步删除网站端数据。
+這裡會顯示最近一次收藏同步的狀態與進度。同步開始後，你也可以從這裡重新打開進度畫面。,"This shows the status and progress of the latest favorite sync. After sync starts, you can reopen the progress screen from here.",這裡會顯示最近一次收藏同步的狀態與進度。同步開始後，你也可以從這裡重新打開進度畫面。,这里会显示最近一次收藏同步的状态与进度。同步开始后，你也可以从这里重新打开进度页面。
+通知作者,Notify author,通知作者,通知作者
+通知欄可正常顯示背景同步進度與完成結果。,Notification bar can display background sync progress and completion results normally.,通知欄可正常顯示背景同步進度與完成結果。,通知栏可正常显示后台同步进度与完成结果。
+通知權限,Notification permissions,通知權限,通知权限
+通知與背景同步,Notifications & Background Sync,通知與背景同步,通知与后台同步
+通知與背景同步設定,Notification and background sync settings,通知與背景同步設定,通知与后台同步设置
+連結選項,Link options,連結選項,链接选项
+選單,Menu,選單,菜单
+選擇,Select,選擇,选择
+選擇分數,Select score,選擇分數,选择分数
+選擇評分理由,Select rating reason,選擇評分理由,选择评分理由
+選擇頁面,Select page,選擇頁面,选择页面
+選擇類別,Select category,選擇類別,选择类别
+邀請,Invite,邀請,邀请
+邀請閱讀,Invitation to read,邀請閱讀,邀请阅读
+邊緣式,Edge style,邊緣式,边缘式
+部分品牌會額外限制背景同步。若你已開通知與電池最佳化，但任務仍常被中止，請查看對應機型說明。,"Some brands impose additional restrictions on background sync. If you have enabled notifications and battery optimization but tasks are still frequently stopped, please check the instructions for your device model.",部分品牌會額外限制背景同步。若你已開通知與電池最佳化，但任務仍常被中止，請查看對應機型說明。,部分品牌会额外限制后台同步。若你已开启通知与电池优化，但任务仍经常被中止，请查看对应机型说明。
+部分裝置會因電池最佳化提早中止背景網路。建議將本 App 加入忽略最佳化名單。,Some devices may terminate background network early due to battery optimization. It is recommended to add this app to the optimization exemption list.,部分裝置會因電池最佳化提早中止背景網路。建議將本 App 加入忽略最佳化名單。,部分设备会因电池优化提早中止后台网络。建议将本应用加入优化白名单。
+重新同步,Resync,重新同步,重新同步
+重新對齊網站收藏資料失敗：{},Failed to reconcile website favorites: {},重新對齊網站收藏資料失敗：{},重新对齐网站收藏数据失败：{}
+重新整理,Refresh,重新整理,重新整理
+重新整理帖子失敗：{},Failed to refresh thread: {},重新整理帖子失敗：{},重新整理帖子失败：{}
+重新整理標籤頁失敗：{},Failed to refresh tag page: {},重新整理標籤頁失敗：{},重新整理标签页失败：{}
+重新檢查,Recheck,重新檢查,重新检查
+重新載入,Reload,重新載入,重新加载
 重試,Retry,重試,重试
-二,Two,二,二
-無法載入下一頁,Failed to load next page,無法載入下一頁,无法载入下一页
-無法載入上一頁,Failed to load previous page,無法載入上一頁,无法载入上一页
-無法載入閱讀目錄,Failed to load reading table of contents,無法載入閱讀目錄,无法载入阅读目录
-無法精準定位該評論,Unable to pinpoint this comment,無法精準定位該評論,无法精准定位该评论
-無法識別的百合會帖子連結,Unrecognized Yamibo post link,無法識別的百合會帖子連結,无法识别的百合会帖子链接
-（無標題）,(untitled),（無標題）,（无标题）
-發現新版本 {},New version {} available,發現新版本 {},发现新版本 {}
-新版已可下載。你可以立即下載更新，或稍後到設定中的 App 更新頁處理。,"A new version is available. You can download the update now, or go to Settings > App updates later.",新版已可下載。你可以立即下載更新，或稍後到設定中的 App 更新頁處理。,新版已可下载。你可以立即下载更新，或稍后到设置中的 App 更新页处理。
-檢查更新失敗,Update check failed,檢查更新失敗,检查更新失败
-更新檢查被系統中斷,Update check interrupted by system,更新檢查被系統中斷,更新检查被系统中断
-下載失敗：{},Download failed: {},下載失敗：{},下载失败：{}
-已忽略版本 {},Version {} ignored,已忽略版本 {},已忽略版本 {}
-需要允許此 app 安裝未知來源應用，完成授權後請重新點擊下載。,"Allow this app to install apps from unknown sources, then tap download again after granting permission.",需要允許此 app 安裝未知來源應用，完成授權後請重新點擊下載。,需要允许此应用安装未知来源应用，完成授权后请重新点击下载。
-下載完成，已打開系統安裝流程。,Download complete. System installation has been started.,下載完成，已打開系統安裝流程。,下载完成，已打开系统安装流程。
-更新資訊來自 manifest；牆內使用者可優先使用 Gitee/Gitea 鏡像源。,"Update information comes from manifest. Mainland users can prioritize Gitee/Gitea mirror sources.",更新資訊來自 manifest；牆內使用者可優先使用 Gitee/Gitea 鏡像源。,更新信息来自 manifest；墙内用户可优先使用 Gitee/Gitea 镜像源。
-尚未檢查更新,Updates not checked yet,尚未檢查更新,尚未检查更新
-來源：{},Source: {},來源：{},来源：{}
-目前已是最新版本：{},You are on the latest version: {},目前已是最新版本：{},目前已是最新版本：{}
-在狀態列與底部導覽列後方使用閱讀背景，避免透明系統列蓋住內容。,"Use a reading background behind the status bar and bottom navigation bar to prevent transparent system bars from covering content.",在狀態列與底部導覽列後方使用閱讀背景，避免透明系統列蓋住內容。,在状态栏与底部导航栏后方使用阅读背景，避免透明系统栏盖住内容。
-用戶,User,用戶,用户
-用戶組,User group,用戶組,用户组
-查看進度,View progress,查看進度,查看进度
-查看標籤列表,View tag list,查看標籤列表,查看标签列表
-WebView 打開,Open in WebView,WebView 打開,WebView 打开
-同步到哪個類別,Which category to sync to?,同步到哪個類別,同步到哪个类别
-同步移除百合會收藏嗎,Sync remove Yamibo favorite?,同步移除百合會收藏嗎,同步移除百合会收藏吗
-同步到百合會收藏嗎,Sync to Yamibo favorites?,同步到百合會收藏嗎,同步到百合会收藏吗
-作品,Work,作品,作品
-作品與章節,Works and chapters,作品與章節,作品与章节
-百合會收藏已同步到本地,Yamibo favorites synced to local,百合會收藏已同步到本地,百合会收藏已同步到本地
-百合會維護中...現在不是簽到的好時機呢,Yamibo under maintenance... not a good time to sign in.,百合會維護中...現在不是簽到的好時機呢,百合会维护中...现在不是签到的好时机呢
-是,Yes,是,是
-昨天,Yesterday,昨天,昨天
-{} 小時,{} hours,{} 小時,{} 小时
-{} - Ta的日志,{} - Blogs,{} - Ta的日志,{} - Ta的日志
-{}的資料,{} profile,{}的資料,{}的资料
-{} - Ta的主題,{} - Threads,{} - Ta的主題,{} - Ta的主题
-{} 點,{} points,{} 點,{} 点
+錯誤,Error,錯誤,错误
+長條圖,Bar chart,長條圖,柱状图
+開啟後，刪除收藏時不再跳出確認視窗。,"When enabled, no confirmation dialog will pop up when deleting favorites.",開啟後，刪除收藏時不再跳出確認視窗。,开启后，删除收藏时不再弹出确认窗口。
+開啟後，收藏將完全消失時會詢問是否同步從百合會移除。,"When enabled, you will be asked whether to sync removal to Yamibo when a favorite is fully removed.",開啟後，收藏將完全消失時會詢問是否同步從百合會移除。,开启后，收藏将被完全移除时会询问是否同步从百合会移除。
+開啟後，新建收藏時會詢問是否同步到百合會。,"When enabled, you will be asked whether to sync to Yamibo when creating a new favorite.",開啟後，新建收藏時會詢問是否同步到百合會。,开启后，新建收藏时会询问是否同步到百合会。
+開啟替代頁,Open alternative page,開啟替代頁,开启替代页
+開始全域刷新收藏更新,Start global refresh of favorite updates,開始全域刷新收藏更新,开始全局刷新收藏更新
+開始刷新,Start refreshing,開始刷新,开始刷新
+開始同步,Starting sync,開始同步,开始同步
+開始閱讀,Start reading,開始閱讀,开始阅读
+閱畢,Finished reading,閱畢,阅毕
+閱讀圖表,Reading charts,閱讀圖表,阅读图表
+閱讀時數,Reading hours,閱讀時數,阅读时长
+閱讀標記,Read mark,閱讀標記,阅读标记
+閱讀模式,Reading mode,閱讀模式,阅读模式
+閱讀模式與觸控區域設定,Reading mode and touch zone settings,閱讀模式與觸控區域設定,阅读模式与触控区域设置
+閱讀歷史,Reading History,閱讀歷史,阅读历史
+閱讀統計,Reading statistics,閱讀統計,阅读统计
 關於,About,關於,关于
 關於 ({}),About ({}),關於 ({}),关于 ({})
-社群,Community,社群,社群
-設為標籤封面,Set as tag cover,設為標籤封面,设为标签封面
-設為RSS封面,Set as RSS cover,設為RSS封面,设为RSS封面
-已設為標籤封面,Set as tag cover,已設為標籤封面,已设为标签封面
-已設為RSS封面,Set as RSS cover,已設為RSS封面,已设为RSS封面
-RSS搜尋目錄,RSS search directory,RSS搜尋目錄,RSS搜索目录
-RSS搜尋目錄(#{}),RSS search directory (#{}),RSS搜尋目錄(#{}),RSS搜索目录(#{})清除圖片、頁面與其他暫存資料，釋放目前已使用的儲存空間。,"Clear images, pages, and other temporary data to free storage.",清除圖片、頁面與其他暫存資料，釋放目前已使用的儲存空間。,清除图片、页面与其他暂存资料，释放目前已使用的存储空间。
-目前緩存大小：{},Current cache size: {},目前緩存大小：{},目前缓存大小：{}
-同步至百合會失敗：{},Failed to sync to Yamibo: {},同步至百合會失敗：{},同步至百合會失敗：{}
-百合會已收藏，但未取得收藏識別碼,Bookmarked on Yamibo but no favorite ID was returned,百合會已收藏，但未取得收藏識別碼,百合會已收藏，但未取得收藏識別碼
-百合會收藏識別碼不可用。請到收藏頁使用「同步百合會收藏」重新對齊識別碼後再試。,The Yamibo favorite ID is unavailable. Use Sync Yamibo Favorites on the Favorites page to realign IDs before retrying.,百合會收藏識別碼不可用。請到收藏頁使用「同步百合會收藏」重新對齊識別碼後再試。,百合会收藏标识码不可用。请到收藏页使用“同步百合会收藏”重新对齐标识码后再试。
-正在收藏本版...,Bookmarking this forum...,正在收藏本版...,正在收藏本版...
-已收藏本版,Forum bookmarked,已收藏本版,已收藏本版
-正在解除本版收藏...,Removing forum bookmark...,正在解除本版收藏...,正在解除本版收藏...
-已解除本版收藏,Forum bookmark removed,已解除本版收藏,已解除本版收藏
-已從百合會取消收藏,Removed from Yamibo favorites,已從百合會取消收藏,已從百合會取消收藏
-建立備份時發生錯誤,An error occurred while creating the backup,建立備份時發生錯誤,建立備份時發生錯誤
-正在建立備份,Creating backup,正在建立備份,正在建立備份
-沒有找到回復,No reply found,沒有找到回復,沒有找到回復
-沒有找到Ta的回復,No reply found from Ta,沒有找到Ta的回復,沒有找到Ta的回復
-保留本地收藏,Keep local favorite,保留本地收藏,保留本地收藏
-僅解除本地收藏,Remove local favorite only,僅解除本地收藏,仅移除本地收藏
-已解除本地收藏，百合會收藏仍可能存在,Local favorite removed; the Yamibo favorite may still exist,已解除本地收藏，百合會收藏仍可能存在,已移除本地收藏，百合会收藏可能仍然存在
-無法從百合會解除收藏,Unable to remove Yamibo favorite,無法從百合會解除收藏,无法移除百合会收藏
-帖子頁數,Post pages,帖子頁數,帖子页数
-標籤漫畫章節數,Tag manga chapters,標籤漫畫章節數,标签漫画章节数
+關閉,Close,關閉,关闭
+關閉這個畫面不會中止同步，你之後仍可從收藏頁或設定頁重新查看進度。,Closing this screen will not stop sync. You can check progress again later from the Favorites or Settings page.,關閉這個畫面不會中止同步，你之後仍可從收藏頁或設定頁重新查看進度。,关闭这个页面不会中止同步，你之后仍可从收藏页或设置页重新查看进度。
+附件選項,Attachment options,附件選項,附件选项
+隨便看看,Browse random blogs,隨便看看,随便看看
+隱藏,Hide,隱藏,隐藏
+集合,Collection,集合,集合
+離開前台時同步,Sync when leaving foreground,離開前台時同步,离开前台时同步
+電池最佳化,Battery Optimization,電池最佳化,电池优化
+需要允許此 app 安裝未知來源應用，完成授權後請重新點擊下載。,"Allow this app to install apps from unknown sources, then tap download again after granting permission.",需要允許此 app 安裝未知來源應用，完成授權後請重新點擊下載。,需要允许此应用安装未知来源应用，完成授权后请重新点击下载。
+頁數,Page count,頁數,页数
+頁數 {}/{} 頁,Page {}/{},頁數 {}/{} 頁,页数 {}/{} 页
+頁數 正在取得收藏頁,Fetching favorite pages,頁數 正在取得收藏頁,页数：正在获取收藏页
+預覽,Preview,預覽,预览
+預設,Default,預設,预设
+預設（深色）,Default (dark),預設（深色）,默认（深色）
+顏色,Color,顏色,颜色
+顏色主題,Color theme,顏色主題,颜色主题
+類別名稱,Category name,類別名稱,类别名称
+顯示收藏更新檢查進度與結果,Show favorite update check progress and results,顯示收藏更新檢查進度與結果,显示收藏更新检查进度与结果
+顯示百合會收藏同步進度,Show Yamibo favorite sync progress,顯示百合會收藏同步進度,显示百合会收藏同步进度
+顯示首頁輪播圖,Show home carousel,顯示首頁輪播圖,显示首页轮播图
+首頁,Home,首頁,首页
+首頁輪播圖,Home carousel,首頁輪播圖,首页轮播图
+默認,Default,默認,默认
+點擊展開 / 收起,Tap to expand/collapse,點擊展開 / 收起,点击展开 / 收起
+點擊跳轉到評論區,Tap to jump to comments,點擊跳轉到評論區,点击跳转到评论区
+點評,Comment,點評,点评
+點評失敗: {},Comment failed: {},點評失敗: {},点评失败: {}
+點評成功，刷新後更新評分/點評狀態,Review successful. Refresh to update rating/review status.,點評成功，刷新後更新評分/點評狀態,点评成功，刷新后更新评分/点评状态
+（無標題）,(untitled),（無標題）,（无标题）
+🌟 本帖評分 (共 {} 人),🌟 Post ratings ({} people),🌟 本帖評分 (共 {} 人),🌟 本帖评分（共 {} 人）
+"💡 tips : 標籤頁面類似常規漫畫App, 推薦用於收藏漫畫","💡 Tip: Tag pages are similar to standard comic apps, recommended for saving comics","💡 tips : 標籤頁面類似常規漫畫App, 推薦用於收藏漫畫","💡 tips : 标签页面类似常规漫画App, 推荐用于收藏漫画"
+💬 點評,💬 Comment,💬 點評,💬 点评
+📎 附件,📎 Attachment,📎 附件,📎 附件

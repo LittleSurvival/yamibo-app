@@ -351,7 +351,7 @@ private fun BackupFolderRequiredCard(onOpenSettings: () -> Unit) {
     YamiboDownloadCard {
         Text(i18n("尚未設定下載資料夾"), color = colors.textStrong, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(6.dp))
-        Text(i18n("下載內容會存放在設定與收藏備份指定的資料夾。"), color = colors.textDark.copy(alpha = 0.68f), fontSize = 13.sp)
+        Text(i18n("下載內容會存放在本地資料備份指定的資料夾。"), color = colors.textDark.copy(alpha = 0.68f), fontSize = 13.sp)
         Spacer(Modifier.height(12.dp))
         SmallQueueButton(i18n("前往設定"), onOpenSettings)
     }

@@ -11,6 +11,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -34,6 +35,7 @@ fun YamiboActionChip(
     text: String,
     onClick: () -> Unit,
     selected: Boolean = false,
+    enabled: Boolean = true,
 ) {
     val colors = YamiboTheme.colors
     val shape = RoundedCornerShape(10.dp)
@@ -43,10 +45,12 @@ fun YamiboActionChip(
         fontSize = 12.sp,
         fontWeight = FontWeight.SemiBold,
         modifier = Modifier
+            .alpha(if (enabled) 1f else 0.4f)
             .clip(shape)
             .background(if (selected) colors.brownDeep else colors.brownPrimary.copy(alpha = 0.12f))
             .border(BorderStroke(1.dp, colors.brownPrimary.copy(alpha = 0.12f)), shape)
             .clickable(
+                enabled = enabled,
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick,

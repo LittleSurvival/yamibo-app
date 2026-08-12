@@ -178,6 +178,7 @@ fun ImagesReaderScreen(
     val readingMode = effectiveReadingMode.mode
     val modeSource = effectiveReadingMode.source
     val touchZoneLayout = mangaSettingsRepo.touchZone.state()
+    val reverseTouchZones = mangaSettingsRepo.reverseTouchZones.state()
     
     val isRtl = readingMode == ReadingMode.SINGLE_RTL
     var tagThreadChapterStates by remember { mutableStateOf<Map<Long, ChapterStateRepository.Entry>>(emptyMap()) }
@@ -876,17 +877,14 @@ fun ImagesReaderScreen(
         if (showTouchZonePreview) { showTouchZonePreview = false; return }
 
         if (touchZoneLayout != TouchZoneLayout.DISABLED) {
-            val action = getTouchAction(touchZoneLayout, xFraction, yFraction)
-            val readingDirectionAction = if (!isScrollMode && isRtl) {
-                when (action) {
-                    TouchAction.PREV -> TouchAction.NEXT
-                    TouchAction.NEXT -> TouchAction.PREV
-                    else -> action
-                }
-            } else {
-                action
-            }
-            when (readingDirectionAction) {
+            val action = getEffectiveMangaTouchAction(
+                layout = touchZoneLayout,
+                xFraction = xFraction,
+                yFraction = yFraction,
+                reverseTouchZones = reverseTouchZones,
+                isRtl = isRtl,
+            )
+            when (action) {
                 TouchAction.PREV -> {
                     if (isScrollMode) {
                         if (currentPage == minPage() && hasPrevChapter) launchPrevChapter()
@@ -979,7 +977,7 @@ fun ImagesReaderScreen(
                 .fillMaxSize()
                 .onSizeChanged { containerSize = it }
                 // 1. Unified Tap Handler
-                .pointerInput(touchZoneLayout, readingMode, actualImageList.size) {
+                .pointerInput(touchZoneLayout, reverseTouchZones, readingMode, actualImageList.size) {
                     detectTapGestures(
                         onTap = { offset ->
                             val xFrac = offset.x / size.width.toFloat()
@@ -1225,7 +1223,12 @@ fun ImagesReaderScreen(
                 LazyColumn(
                     state = scrollListState,
                     modifier = Modifier.fillMaxSize()
-                        .nestedScroll(nestedScrollConnection)
+                        .nestedScroll(nestedScrollConnection),
+                    verticalArrangement = if (!isCatalogMode && actualImageList.size == 1) {
+                        Arrangement.Center
+                    } else {
+                        Arrangement.Top
+                    },
                 ) {
                     if (isCatalogMode) {
                         item {
@@ -1485,7 +1488,12 @@ fun ImagesReaderScreen(
         }
 
         // Touch zone preview overlay
-        TouchZoneOverlay(visible = showTouchZonePreview, layout = touchZoneLayout)
+        TouchZoneOverlay(
+            visible = showTouchZonePreview,
+            layout = touchZoneLayout,
+            reverseTouchZones = reverseTouchZones,
+            isRtl = isRtl,
+        )
 
         // Manga overlay (TopBar + BottomBar) — has its own scrim for dismissal
         MangaReaderOverlay(
@@ -1692,6 +1700,7 @@ fun ImagesReaderScreen(
                 }
             },
             onTouchZoneLayoutChange = { layout -> mangaSettingsRepo.touchZone.setValue(layout); showTouchZonePreview = true },
+            onReverseTouchZonesChanged = { showTouchZonePreview = true },
             modifier = Modifier.align(Alignment.BottomCenter)
         )
 

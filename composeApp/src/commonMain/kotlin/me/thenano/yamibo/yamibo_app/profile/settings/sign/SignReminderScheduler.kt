@@ -6,4 +6,5 @@ interface SignReminderScheduler {
     suspend fun schedule(frequency: SignReminderFrequency)
     suspend fun runNow()
     suspend fun cancel()
+    suspend fun dismissActiveReminder()
 }

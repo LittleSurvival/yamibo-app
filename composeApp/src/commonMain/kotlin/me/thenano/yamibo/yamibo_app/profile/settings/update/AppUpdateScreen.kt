@@ -20,6 +20,7 @@ import me.thenano.yamibo.yamibo_app.components.controls.YamiboSingleSelectDialog
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBar
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.i18n.i18n
+import me.thenano.yamibo.yamibo_app.i18n.localizedLabel
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.repository.appupdate.*
 import me.thenano.yamibo.yamibo_app.repository.settings.AppUpdateLaunchCheckThreshold
@@ -387,11 +388,7 @@ private fun AppUpdateLaunchThresholdDialog(
 @Composable
 private fun appUpdateLaunchThresholdLabel(option: AppUpdateLaunchCheckThreshold): String = when (option) {
     AppUpdateLaunchCheckThreshold.MANUAL -> i18n("不自動檢查")
-    AppUpdateLaunchCheckThreshold.HOURS_6 -> i18n("6 小時")
-    AppUpdateLaunchCheckThreshold.HOURS_12 -> i18n("12 小時")
-    AppUpdateLaunchCheckThreshold.HOURS_24 -> i18n("24 小時")
-    AppUpdateLaunchCheckThreshold.DAYS_3 -> i18n("3 天")
-    AppUpdateLaunchCheckThreshold.DAYS_7 -> i18n("7 天")
+    else -> requireNotNull(option.fixedInterval).localizedLabel()
 }
 
 private fun AppUpdateCheckResult.Preparing.displayVersionLabel(): String = "$channel-v$versionName"

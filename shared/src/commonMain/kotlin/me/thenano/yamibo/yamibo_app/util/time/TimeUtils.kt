@@ -45,9 +45,10 @@ fun formatDateTime(timestamp: Long): String {
 }
 
 private fun datePartsAtUtcPlus8(timestamp: Long): Triple<Int, Int, Int> {
-    val totalDays = timestamp / (24 * 60 * 60 * 1000L)
+    val utcPlus8OffsetMillis = 8L * 60L * 60L * 1000L
+    val totalDays = (timestamp + utcPlus8OffsetMillis).floorDiv(24L * 60L * 60L * 1000L)
     var year = 1970
-    var remainingDays = totalDays + (8 * 60 * 60 * 1000L / (24 * 60 * 60 * 1000L))
+    var remainingDays = totalDays
     while (true) {
         val daysInYear = if (isLeapYear(year)) 366L else 365L
         if (remainingDays < daysInYear) break

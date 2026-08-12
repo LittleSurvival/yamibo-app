@@ -1,0 +1,14 @@
+upsertChoice:
+INSERT OR REPLACE INTO FavoriteUpdateFidChoice(fid, enabled, winnerOperationId, updatedAt)
+VALUES (?, ?, ?, ?);
+
+getByFid:
+SELECT * FROM FavoriteUpdateFidChoice
+WHERE fid = ?;
+
+getAll:
+SELECT * FROM FavoriteUpdateFidChoice
+ORDER BY fid ASC;
+
+deleteAll:
+DELETE FROM FavoriteUpdateFidChoice;

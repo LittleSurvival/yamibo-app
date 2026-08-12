@@ -1,32 +1,123 @@
-CREATE TABLE LocalNovel (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    fileType TEXT NOT NULL DEFAULT 'txt',
-    title TEXT NOT NULL,
-    author TEXT NOT NULL DEFAULT '',
-    fileUri TEXT NOT NULL,
-    coverPath TEXT,
-    totalChars INTEGER NOT NULL DEFAULT 0,
-    encoding TEXT NOT NULL DEFAULT 'UTF-8',
-    totalChapters INTEGER NOT NULL DEFAULT 0,
-    epubExtractDir TEXT,
-    createdAt INTEGER NOT NULL,
-    lastReadAt INTEGER NOT NULL DEFAULT 0
+CREATE TABLE AppSyncInstallation (
+    singletonId INTEGER NOT NULL PRIMARY KEY CHECK (singletonId = 1),
+    databaseGeneration TEXT NOT NULL,
+    accountBinding TEXT,
+    deviceId TEXT NOT NULL,
+    deviceEpoch TEXT NOT NULL,
+    writerNonce TEXT NOT NULL,
+    nextSequence INTEGER NOT NULL DEFAULT 1,
+    state TEXT NOT NULL,
+    lastVerifiedHeartbeatAt INTEGER,
+    journalBlogId INTEGER,
+    lastFullDiscoveryAt INTEGER,
+    automaticEnabled INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE AppSyncOutbox (
+    operationId TEXT NOT NULL PRIMARY KEY,
+    deviceId TEXT NOT NULL,
+    deviceEpoch TEXT NOT NULL,
+    sequence INTEGER NOT NULL,
+    accountBinding TEXT NOT NULL,
+    domainId TEXT NOT NULL,
+    entityId TEXT NOT NULL,
+    entityGeneration INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    fieldsJson TEXT NOT NULL,
+    causalContextJson TEXT NOT NULL,
+    createdAtEpochMillis INTEGER NOT NULL,
+    origin TEXT NOT NULL,
+    bulkDeleteAuthorizationId TEXT,
+    schemaVersion INTEGER NOT NULL,
+    lifecycle TEXT NOT NULL,
+    acknowledgedAtEpochMillis INTEGER,
+    UNIQUE(deviceId, deviceEpoch, sequence)
 );
 
-CREATE TABLE LocalNovelChapter (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    novelId INTEGER NOT NULL,
-    title TEXT NOT NULL,
-    chapterIndex INTEGER NOT NULL,
-    startOffset INTEGER NOT NULL DEFAULT 0,
-    endOffset INTEGER NOT NULL DEFAULT 0,
-    internalPath TEXT NOT NULL DEFAULT '',
-    FOREIGN KEY (novelId) REFERENCES LocalNovel(id) ON DELETE CASCADE
+CREATE INDEX AppSyncOutboxLifecycleIndex
+ON AppSyncOutbox(lifecycle, sequence);
+
+CREATE TABLE AppSyncAppliedOperation (
+    operationId TEXT NOT NULL PRIMARY KEY,
+    deviceId TEXT NOT NULL,
+    deviceEpoch TEXT NOT NULL,
+    sequence INTEGER NOT NULL,
+    appliedAtEpochMillis INTEGER NOT NULL
 );
 
-CREATE TABLE LocalNovelProgress (
-    novelId INTEGER PRIMARY KEY,
-    chapterId INTEGER NOT NULL DEFAULT 0,
-    charOffset INTEGER NOT NULL DEFAULT 0,
-    FOREIGN KEY (novelId) REFERENCES LocalNovel(id) ON DELETE CASCADE
+CREATE TABLE AppSyncCausalWatermark (
+    replicaKey TEXT NOT NULL PRIMARY KEY,
+    sequence INTEGER NOT NULL
+);
+
+CREATE TABLE AppSyncConflictHistory (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    domainId TEXT NOT NULL,
+    entityId TEXT NOT NULL,
+    entityGeneration INTEGER NOT NULL,
+    fieldName TEXT,
+    winnerOperationId TEXT NOT NULL,
+    loserOperationId TEXT NOT NULL,
+    policy TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    recordedAtEpochMillis INTEGER NOT NULL,
+    UNIQUE(winnerOperationId, loserOperationId, fieldName)
+);
+
+CREATE TABLE AppSyncQuarantine (
+    operationId TEXT NOT NULL PRIMARY KEY,
+    encodedOperation TEXT NOT NULL,
+    reasonCode TEXT NOT NULL,
+    reasonDetail TEXT NOT NULL,
+    quarantinedAtEpochMillis INTEGER NOT NULL,
+    retryAfterSchemaVersion INTEGER
+);
+
+CREATE TABLE AppSyncRunLease (
+    singletonId INTEGER NOT NULL PRIMARY KEY CHECK (singletonId = 1),
+    ownerId TEXT NOT NULL,
+    acquiredAtEpochMillis INTEGER NOT NULL,
+    expiresAtEpochMillis INTEGER NOT NULL
+);
+
+CREATE TABLE AppSyncCheckpoint (
+    checkpointId TEXT NOT NULL PRIMARY KEY,
+    blogId INTEGER,
+    causalContextJson TEXT NOT NULL,
+    payloadFingerprint TEXT NOT NULL,
+    state TEXT NOT NULL,
+    createdAtEpochMillis INTEGER NOT NULL,
+    verifiedAtEpochMillis INTEGER
+);
+
+CREATE TABLE AppSyncCheckpointAcknowledgement (
+    checkpointId TEXT NOT NULL,
+    replicaKey TEXT NOT NULL,
+    acknowledgedVectorJson TEXT NOT NULL,
+    acknowledgedAtEpochMillis INTEGER NOT NULL,
+    PRIMARY KEY(checkpointId, replicaKey),
+    FOREIGN KEY(checkpointId) REFERENCES AppSyncCheckpoint(checkpointId) ON DELETE CASCADE
+);
+
+CREATE TABLE AppSyncBulkDeleteAuthorization (
+    authorizationId TEXT NOT NULL PRIMARY KEY,
+    domainId TEXT NOT NULL,
+    scopeKey TEXT NOT NULL,
+    operationCount INTEGER NOT NULL,
+    expiresAtEpochMillis INTEGER NOT NULL,
+    consumedAtEpochMillis INTEGER
+);
+
+CREATE TABLE AppSyncReliabilityRun (
+    runId TEXT NOT NULL PRIMARY KEY,
+    trigger TEXT NOT NULL,
+    phase TEXT NOT NULL,
+    outcome TEXT,
+    eligible INTEGER NOT NULL,
+    exclusionReason TEXT,
+    retryCount INTEGER NOT NULL DEFAULT 0,
+    pendingCount INTEGER NOT NULL DEFAULT 0,
+    quarantineCount INTEGER NOT NULL DEFAULT 0,
+    startedAtEpochMillis INTEGER NOT NULL,
+    completedAtEpochMillis INTEGER,
+    nextRetryAtEpochMillis INTEGER
 );

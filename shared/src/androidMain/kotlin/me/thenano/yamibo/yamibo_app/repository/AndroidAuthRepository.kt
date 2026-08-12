@@ -6,11 +6,13 @@ import io.github.littlesurvival.YamiboRoute
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.page.ProfilePage
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.suspendCancellableCoroutine
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.store.auth.CookieStore
 import me.thenano.yamibo.yamibo_app.store.auth.UserStore
 import me.thenano.yamibo.yamibo_app.store.forum.ForumFavoriteStore
 import me.thenano.yamibo.yamibo_app.util.auth.parseCookieStringToMap
+import kotlin.coroutines.resume
 import kotlin.time.Duration.Companion.milliseconds
 
 class AndroidAuthRepository(
@@ -49,6 +51,8 @@ class AndroidAuthRepository(
             is YamiboResult.NoPermission -> {
                 return YamiboResult.Failure(i18n("獲取用戶資料失敗: {}", profileResult.reason))
             }
+
+            is YamiboResult.WafChallenge -> return profileResult
         }
     }
 
@@ -70,6 +74,7 @@ class AndroidAuthRepository(
     override fun syncCookieFromWebView() {
         val cookie = CookieManager.getInstance().getCookie(YamiboRoute.Domain.build()) ?: return
         cookieStore.save(cookie)
+        yamiboClient.setCookie(cookie, importNox = true)
     }
 
     override fun currentUser(): ProfilePage? {
@@ -77,13 +82,31 @@ class AndroidAuthRepository(
     }
 
     override suspend fun logOut() {
+        yamiboClient.clearCookies(clearNox = false)
         cookieStore.clear()
         userStore.clear()
         forumFavoriteStore?.clear()
-        /** remove cookie from webview */
-        CookieManager.getInstance().apply {
-            removeAllCookies(null)
-            flush()
+        CookieManager.getInstance().clearAllExceptNox(YamiboRoute.Domain.build())
+    }
+
+    private suspend fun CookieManager.clearAllExceptNox(url: String) {
+        val nox = parseCookieStringToMap(getCookie(url))[NOX_COOKIE_NAME]
+        suspendCancellableCoroutine { continuation ->
+            removeAllCookies {
+                if (nox == null) {
+                    flush()
+                    if (continuation.isActive) continuation.resume(Unit)
+                } else {
+                    setCookie(url, "$NOX_COOKIE_NAME=$nox; Path=/; Secure") {
+                        flush()
+                        if (continuation.isActive) continuation.resume(Unit)
+                    }
+                }
+            }
         }
+    }
+
+    private companion object {
+        const val NOX_COOKIE_NAME = "nox_jst_v1"
     }
 }

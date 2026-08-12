@@ -15,7 +15,7 @@ import androidx.annotation.RequiresPermission
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import me.thenano.yamibo.yamibo_app.MainActivity
-import me.thenano.yamibo.yamibo_app.R
+import me.thenano.yamibo.yamibo_app.notification.AndroidNotificationMetadata
 import me.thenano.yamibo.yamibo_app.repository.FavoriteUpdateRepository.RunSnapshot
 
 internal class AndroidFavoriteUpdateNotificationRepository(
@@ -33,7 +33,7 @@ internal class AndroidFavoriteUpdateNotificationRepository(
         val processed = (snapshot.completedCount + snapshot.skippedCount + snapshot.failedCount).coerceAtMost(total)
         val progress = if (total > 0) ((processed * 100f) / total).toInt().coerceIn(0, 100) else 0
         return NotificationCompat.Builder(appContext, CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(AndroidNotificationMetadata.SMALL_ICON_RES_ID)
             .setContentTitle(i18n("收藏更新"))
             .setContentText(snapshot.currentItem?.takeIf { it.isNotBlank() } ?: i18n("正在檢查收藏更新"))
             .setOnlyAlertOnce(true)
@@ -50,7 +50,7 @@ internal class AndroidFavoriteUpdateNotificationRepository(
         notificationManager.notify(
             NOTIFICATION_ID,
             NotificationCompat.Builder(appContext, CHANNEL_ID)
-                .setSmallIcon(R.mipmap.ic_launcher)
+                .setSmallIcon(AndroidNotificationMetadata.SMALL_ICON_RES_ID)
                 .setContentTitle(i18n("收藏更新完成"))
                 .setContentText(if (snapshot.detectedCount > 0) i18n("偵測到 {} 個更新", snapshot.detectedCount) else i18n("沒有偵測到更新"))
                 .setAutoCancel(true)
@@ -66,7 +66,7 @@ internal class AndroidFavoriteUpdateNotificationRepository(
         notificationManager.notify(
             NOTIFICATION_ID,
             NotificationCompat.Builder(appContext, CHANNEL_ID)
-                .setSmallIcon(R.mipmap.ic_launcher)
+                .setSmallIcon(AndroidNotificationMetadata.SMALL_ICON_RES_ID)
                 .setContentTitle(title)
                 .setContentText(text)
                 .setAutoCancel(true)
