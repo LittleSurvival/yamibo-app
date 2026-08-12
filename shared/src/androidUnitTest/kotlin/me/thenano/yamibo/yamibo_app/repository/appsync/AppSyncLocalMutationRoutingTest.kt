@@ -172,6 +172,58 @@ class AppSyncLocalMutationRoutingTest {
     }
 
     @Test
+    fun signPageCacheAndItsFreshnessTimestampRemainLocalOnly() {
+        val fixture = activeFixture()
+        val settings = MapSettingsStore()
+        val recordingStore = OperationRecordingSettingsStore(fixture.db, settings, fixture.recorder)
+
+        recordingStore.putString("appsettings.signpagehtmlcache", "<html>large cache</html>")
+        recordingStore.putString("appsettings.signpagehtmlcacheupdatedat", "123456789")
+
+        assertEquals("<html>large cache</html>", settings.getString("appsettings.signpagehtmlcache", ""))
+        assertEquals("123456789", settings.getString("appsettings.signpagehtmlcacheupdatedat", ""))
+        assertTrue(fixture.store.pendingOperations().isEmpty())
+        assertEquals(
+            null,
+            fixture.db.appSyncOperationQueries
+                .getSyncSettingValue("appsettings.signpagehtmlcache")
+                .executeAsOneOrNull(),
+        )
+        assertEquals(
+            null,
+            fixture.db.appSyncOperationQueries
+                .getSyncSettingValue("appsettings.signpagehtmlcacheupdatedat")
+                .executeAsOneOrNull(),
+        )
+    }
+
+    @Test
+    fun threadCoverOperationsOnlyCarryHttpLinks() = runBlocking {
+        val cases = listOf(
+            "http://example.com/cover.jpg" to "http://example.com/cover.jpg",
+            "https://example.com/cover.jpg" to "https://example.com/cover.jpg",
+            "data:image/png;base64,AAAA" to null,
+            "http://data:image/png;base64,AAAA" to null,
+            "file:///tmp/cover.jpg" to null,
+            "not a link" to null,
+        )
+
+        cases.forEachIndexed { index, (input, expected) ->
+            val fixture = activeFixture()
+            val repository = OperationRecordingReadHistoryRepository(
+                AndroidReadHistoryRepository(fixture.db),
+                fixture.recorder,
+            )
+
+            repository.savePosition(
+                sampleThread().copy(threadId = ThreadId(index + 1), threadCover = input),
+            )
+
+            assertEquals(expected, fixture.store.pendingOperations().single().fields["threadCover"], input)
+        }
+    }
+
+    @Test
     fun mangaAndThreadTouchSettingsSyncAsIndependentEntities() {
         val source = activeFixture()
         val sourceSettings = MapSettingsStore()

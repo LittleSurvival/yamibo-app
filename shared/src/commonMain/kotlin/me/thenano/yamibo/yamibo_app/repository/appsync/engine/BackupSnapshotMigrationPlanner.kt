@@ -3,6 +3,7 @@ package me.thenano.yamibo.yamibo_app.repository.appsync.engine
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDomainId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncEntityId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationKind
+import me.thenano.yamibo.yamibo_app.repository.appsync.appSyncThreadCoverOrNull
 import me.thenano.yamibo.yamibo_app.repository.appsync.isAppSyncLocalOnlySetting
 import me.thenano.yamibo.yamibo_app.repository.backup.YamiboBackupFile
 import me.thenano.yamibo.yamibo_app.store.appsync.LocalSyncOperationDraft
@@ -157,7 +158,7 @@ internal class BackupSnapshotMigrationPlanner {
                             "authorId" to it.authorId.toString(),
                             "historyOrigin" to it.historyOrigin,
                             "threadName" to it.threadName,
-                            "threadCover" to it.threadCover,
+                            "threadCover" to appSyncThreadCoverOrNull(it.threadCover),
                             "forumName" to it.forumName,
                             "forumId" to it.forumId?.toString(),
                             "page" to it.page.toString(),
