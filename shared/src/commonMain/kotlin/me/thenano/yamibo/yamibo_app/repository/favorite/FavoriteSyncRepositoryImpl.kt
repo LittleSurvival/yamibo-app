@@ -327,7 +327,7 @@ class FavoriteSyncRepositoryImpl(
                 }
 
                 is YamiboResult.WafChallenge -> {
-                    failRun(current.copy(failedCount = current.failedCount + 1), result.message())
+                    interruptRun(current, result.message())
                     return
                 }
 
@@ -434,7 +434,7 @@ class FavoriteSyncRepositoryImpl(
                         }
 
                         is YamiboResult.WafChallenge -> {
-                            failRun(current.copy(failedCount = current.failedCount + 1), threadResult.message())
+                            interruptRun(current, threadResult.message())
                             return
                         }
 
@@ -486,7 +486,7 @@ class FavoriteSyncRepositoryImpl(
             }
 
             is YamiboResult.WafChallenge -> {
-                failRun(current, formHashResult.message())
+                interruptRun(current, formHashResult.message())
                 return
             }
 
@@ -547,7 +547,7 @@ class FavoriteSyncRepositoryImpl(
                 }
 
                 is YamiboResult.WafChallenge -> {
-                    failRun(current, addResult.message())
+                    interruptRun(current, addResult.message())
                     return
                 }
 

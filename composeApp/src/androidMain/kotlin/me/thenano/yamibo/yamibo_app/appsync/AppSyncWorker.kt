@@ -3,10 +3,10 @@ package me.thenano.yamibo.yamibo_app.appsync
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import io.github.littlesurvival.YamiboClient
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.db.DatabaseFactory
+import me.thenano.yamibo.yamibo_app.network.AndroidYamiboClientProvider
 import me.thenano.yamibo.yamibo_app.repository.AndroidAuthRepository
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncService
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncServicePhase
@@ -27,7 +27,7 @@ class AppSyncWorker(
 ) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result = try {
         if (runAttemptCount >= MAX_RETRY_ATTEMPTS) return Result.failure()
-        val client = YamiboClient(timeoutMillis = 60_000L)
+        val client = AndroidYamiboClientProvider.get(applicationContext)
         val auth = AndroidAuthRepository(
             AndroidCookieStore(applicationContext),
             AndroidUserStore(applicationContext),

@@ -2,7 +2,6 @@
 
 package me.thenano.yamibo.yamibo_app.appsync
 
-import io.github.littlesurvival.YamiboClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -13,6 +12,7 @@ import me.thenano.yamibo.yamibo_app.AppVersion
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.db.DatabaseFactory
 import me.thenano.yamibo.yamibo_app.repository.IOSAuthRepository
+import me.thenano.yamibo.yamibo_app.network.IOSYamiboClientProvider
 import me.thenano.yamibo.yamibo_app.repository.IOSBackupStorageProvider
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncService
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncServicePhase
@@ -103,10 +103,11 @@ private data class IOSAppSyncRunOutcome(
 )
 
 private suspend fun runAppSyncOnce(): IOSAppSyncRunOutcome {
-    val client = YamiboClient(timeoutMillis = 60_000L)
+    val cookieStore = IOSCookieStore()
+    val client = IOSYamiboClientProvider.getForBackground(cookieStore)
     val rawSettings = IOSSettingsStore()
     val auth = IOSAuthRepository(
-        IOSCookieStore(),
+        cookieStore,
         IOSUserStore(),
         client,
         IOSForumFavoriteStore(),

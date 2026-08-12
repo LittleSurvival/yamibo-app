@@ -13,12 +13,12 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import io.github.littlesurvival.YamiboClient
 import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.MainActivity
 import me.thenano.yamibo.yamibo_app.db.DatabaseFactory
 import me.thenano.yamibo.yamibo_app.notification.AndroidNotificationMetadata
 import me.thenano.yamibo.yamibo_app.notification.dismissActiveSignReminder
+import me.thenano.yamibo.yamibo_app.network.AndroidYamiboClientProvider
 import me.thenano.yamibo.yamibo_app.repository.AndroidAuthRepository
 import me.thenano.yamibo.yamibo_app.repository.AndroidSignRepository
 import me.thenano.yamibo.yamibo_app.repository.settings.AppSettingsRepository
@@ -45,7 +45,7 @@ class SignReminderWorker(
         val dbFactory = DatabaseFactory(applicationContext)
         val settingsStore = AndroidSettingsStore(applicationContext)
         val appSettingsRepository = AppSettingsRepository(settingsStore)
-        val yamiboClient = YamiboClient()
+        val yamiboClient = AndroidYamiboClientProvider.get(applicationContext)
         val authRepository = AndroidAuthRepository(
             AndroidCookieStore(applicationContext),
             AndroidUserStore(applicationContext),

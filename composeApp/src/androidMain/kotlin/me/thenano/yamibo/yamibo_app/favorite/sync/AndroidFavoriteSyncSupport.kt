@@ -1,10 +1,10 @@
 package me.thenano.yamibo.yamibo_app.favorite.sync
 
 import android.content.Context
-import io.github.littlesurvival.YamiboClient
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.core.cache.DiskCacheFactory
 import me.thenano.yamibo.yamibo_app.db.DatabaseFactory
+import me.thenano.yamibo.yamibo_app.network.AndroidYamiboClientProvider
 import me.thenano.yamibo.yamibo_app.repository.AndroidAuthRepository
 import me.thenano.yamibo.yamibo_app.repository.AndroidFavoriteRepository
 import me.thenano.yamibo.yamibo_app.repository.AndroidThreadRepository
@@ -20,7 +20,7 @@ internal object AndroidFavoriteSyncSupport {
         val appContext = context.applicationContext
         val cookieStore = AndroidCookieStore(appContext)
         val userStore = AndroidUserStore(appContext)
-        val yamiboClient = YamiboClient(timeoutMillis = 60_000L)
+        val yamiboClient = AndroidYamiboClientProvider.get(appContext)
         val authRepository = AndroidAuthRepository(cookieStore, userStore, yamiboClient)
         val dbFactory = DatabaseFactory(appContext)
         val diskCacheFactory = DiskCacheFactory(

@@ -14,6 +14,7 @@ import kotlin.time.Duration.Companion.seconds
 class FavoriteSyncRunner(
     private val repository: FavoriteSyncRepository,
     private val backgroundTaskRepository: BackgroundTaskRepository,
+    private val prepareRemoteAccess: suspend () -> String? = { null },
 ) {
     sealed interface LaunchResult {
         data class Started(val runId: String) : LaunchResult
@@ -47,12 +48,19 @@ class FavoriteSyncRunner(
             return LaunchResult.Started(runningState.snapshot.runId)
         }
 
+        prepareRemoteAccess()?.let { reason ->
+            return LaunchResult.Rejected(reason = reason)
+        }
         val runId = repository.startRemoteImport(targetCategoryId)
         return startSyncTask(runId)
     }
 
     suspend fun resumeInterruptedImport(): LaunchResult? {
         val previousRunningRunId = (state.value as? FavoriteSyncState.Running)?.snapshot?.runId
+        val resumable = repository.getLatestSnapshot() ?: return null
+        prepareRemoteAccess()?.let { reason ->
+            return LaunchResult.Rejected(reason = reason, runId = resumable.runId)
+        }
         val runId = repository.resumeInterruptedRun() ?: return null
         if (previousRunningRunId != runId) {
             return startSyncTask(runId)

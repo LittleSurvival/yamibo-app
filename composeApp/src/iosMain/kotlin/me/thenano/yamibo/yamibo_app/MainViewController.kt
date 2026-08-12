@@ -6,7 +6,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.window.ComposeUIViewController
-import io.github.littlesurvival.YamiboClient
+import io.github.littlesurvival.core.YamiboResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -17,8 +17,10 @@ import me.thenano.yamibo.yamibo_app.favorite.sync.IOSBackgroundTaskRepository
 import me.thenano.yamibo.yamibo_app.favorite.updates.FavoriteUpdateRunner
 import me.thenano.yamibo.yamibo_app.favorite.updates.IOSFavoriteUpdateScheduler
 import me.thenano.yamibo.yamibo_app.feedback.AppFeedbackController
+import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.navigation.rememberRestorableNavigator
+import me.thenano.yamibo.yamibo_app.network.IOSYamiboClientProvider
 import me.thenano.yamibo.yamibo_app.profile.settings.access.IOSBackgroundAccessRepository
 import me.thenano.yamibo.yamibo_app.profile.settings.backup.IOSBackupScheduler
 import me.thenano.yamibo.yamibo_app.profile.settings.sign.IOSSignReminderScheduler
@@ -80,10 +82,7 @@ fun MainViewController() = ComposeUIViewController {
     val rawSettingsStore = remember { IOSSettingsStore() }
 
     /** Repository Logic */
-    val yamiboClient = remember { YamiboClient() }
-    DisposableEffect(yamiboClient) {
-        onDispose { yamiboClient.close() }
-    }
+    val yamiboClient = remember { IOSYamiboClientProvider.get(cookieStore) }
     val authRepository = remember { IOSAuthRepository(cookieStore, userStore, yamiboClient, forumFavoriteStore) }
 
     val dbFactory = remember { DatabaseFactory() }
@@ -169,9 +168,31 @@ fun MainViewController() = ComposeUIViewController {
         )
     }
     val backgroundTaskRepository = remember { IOSBackgroundTaskRepository(favoriteSyncRepository) }
-    val favoriteSyncRunner = remember { FavoriteSyncRunner(favoriteSyncRepository, backgroundTaskRepository) }
+    val favoriteSyncRunner = remember {
+        FavoriteSyncRunner(
+            repository = favoriteSyncRepository,
+            backgroundTaskRepository = backgroundTaskRepository,
+            prepareRemoteAccess = {
+                when (val result = remoteFavoriteRepository.fetchFavorites()) {
+                    is YamiboResult.Success -> null
+                    else -> i18n(result.message())
+                }
+            },
+        )
+    }
     val favoriteUpdateScheduler = remember { IOSFavoriteUpdateScheduler(favoriteUpdateRepository) }
-    val favoriteUpdateRunner = remember { FavoriteUpdateRunner(favoriteUpdateRepository, favoriteUpdateScheduler) }
+    val favoriteUpdateRunner = remember {
+        FavoriteUpdateRunner(
+            repository = favoriteUpdateRepository,
+            scheduler = favoriteUpdateScheduler,
+            prepareRemoteAccess = {
+                when (val result = remoteFavoriteRepository.fetchFavorites()) {
+                    is YamiboResult.Success -> null
+                    else -> i18n(result.message())
+                }
+            },
+        )
+    }
     val backupStorageProvider = remember { IOSBackupStorageProvider(appSettingsRepository) }
     val backupRepository = remember {
         BackupRepositoryImpl(

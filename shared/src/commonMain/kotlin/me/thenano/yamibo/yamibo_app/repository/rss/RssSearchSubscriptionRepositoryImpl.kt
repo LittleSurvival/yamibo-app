@@ -234,7 +234,7 @@ class RssSearchSubscriptionRepositoryImpl private constructor(
                     id = subscriptionId,
                 )
                 reloadState()
-                YamiboResult.Failure(result.message())
+                if (result is YamiboResult.WafChallenge) result else YamiboResult.Failure(result.message())
             }
         }
     }

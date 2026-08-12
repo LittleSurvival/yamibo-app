@@ -17,7 +17,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
-import io.github.littlesurvival.YamiboClient
+import io.github.littlesurvival.core.YamiboResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -37,6 +37,7 @@ import me.thenano.yamibo.yamibo_app.confirmation.AppConfirmationController
 import me.thenano.yamibo.yamibo_app.feedback.AppFeedbackController
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.navigation.rememberRestorableNavigator
+import me.thenano.yamibo.yamibo_app.network.AndroidYamiboClientProvider
 import me.thenano.yamibo.yamibo_app.notification.dismissActiveSignReminder
 import me.thenano.yamibo.yamibo_app.profile.settings.access.AndroidBackgroundAccessRepository
 import me.thenano.yamibo.yamibo_app.profile.settings.backup.AndroidBackupScheduler
@@ -157,10 +158,7 @@ class MainActivity : ComponentActivity() {
             val rawSettingsStore = remember { AndroidSettingsStore(context) }
 
             /** Repository Logic */
-            val yamiboClient = remember { YamiboClient(timeoutMillis = 60_000L) }
-            DisposableEffect(yamiboClient) {
-                onDispose { yamiboClient.close() }
-            }
+            val yamiboClient = remember { AndroidYamiboClientProvider.get(context) }
             val authRepository = remember {
                 AndroidAuthRepository(cookieStore, userStore, yamiboClient, forumFavoriteStore)
             }
@@ -254,10 +252,32 @@ class MainActivity : ComponentActivity() {
             }
             val backgroundTaskRepository = remember { AndroidBackgroundTaskRepository(context) }
             @SuppressLint("RememberReturnType")
-            val favoriteSyncRunner = remember { FavoriteSyncRunner(favoriteSyncRepository, backgroundTaskRepository) }
+            val favoriteSyncRunner = remember {
+                FavoriteSyncRunner(
+                    repository = favoriteSyncRepository,
+                    backgroundTaskRepository = backgroundTaskRepository,
+                    prepareRemoteAccess = {
+                        when (val result = remoteFavoriteRepository.fetchFavorites()) {
+                            is YamiboResult.Success -> null
+                            else -> i18n(result.message())
+                        }
+                    },
+                )
+            }
             val favoriteUpdateScheduler = remember { AndroidFavoriteUpdateScheduler(context) }
             @SuppressLint("RememberReturnType")
-            val favoriteUpdateRunner = remember { FavoriteUpdateRunner(favoriteUpdateRepository, favoriteUpdateScheduler) }
+            val favoriteUpdateRunner = remember {
+                FavoriteUpdateRunner(
+                    repository = favoriteUpdateRepository,
+                    scheduler = favoriteUpdateScheduler,
+                    prepareRemoteAccess = {
+                        when (val result = remoteFavoriteRepository.fetchFavorites()) {
+                            is YamiboResult.Success -> null
+                            else -> i18n(result.message())
+                        }
+                    },
+                )
+            }
             val backupStorageProvider = remember { AndroidBackupStorageProvider(context, appSettingsRepository) }
             val backupRepository = remember {
                 BackupRepositoryImpl(

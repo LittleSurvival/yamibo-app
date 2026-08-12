@@ -3,7 +3,6 @@ package me.thenano.yamibo.yamibo_app.appsync
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import io.github.littlesurvival.YamiboClient
 import io.github.littlesurvival.dto.page.BlogPage
 import io.github.littlesurvival.dto.page.UserSpaceBlogPage
 import kotlinx.coroutines.CoroutineScope
@@ -13,6 +12,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncCloudConfigD
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncCloudResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.YamiboAppSyncBlogProvider
 import me.thenano.yamibo.yamibo_app.store.AndroidCookieStore
+import me.thenano.yamibo.yamibo_app.network.AndroidYamiboClientProvider
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -38,7 +38,7 @@ class AppSyncProviderProbeReceiver : BroadcastReceiver() {
             .put("startedAtEpochMillis", System.currentTimeMillis())
         val provider = YamiboAppSyncBlogProvider(
             cookieStore = AndroidCookieStore(context),
-            yamiboClient = YamiboClient(timeoutMillis = REQUEST_TIMEOUT_MILLIS),
+            yamiboClient = AndroidYamiboClientProvider.get(context),
         )
 
         lateinit var firstResult: AppSyncCloudResult<UserSpaceBlogPage>
@@ -129,7 +129,6 @@ class AppSyncProviderProbeReceiver : BroadcastReceiver() {
         const val ACTION =
             "me.thenano.yamibo.yamibo_app.debug.APP_SYNC_PROVIDER_PROBE"
         const val REPORT_FILE = "appsync-provider-probe.json"
-        const val REQUEST_TIMEOUT_MILLIS = 60_000L
         const val MAX_PAGES = 20
         const val MAX_AUTHORITATIVE_READS = 10
         const val JOURNAL_TITLE_PREFIX = "Yamibo App Sync Journal - DO NOT EDIT - v1 - "

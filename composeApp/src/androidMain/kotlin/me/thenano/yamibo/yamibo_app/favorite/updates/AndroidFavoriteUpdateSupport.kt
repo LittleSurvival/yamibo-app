@@ -1,10 +1,10 @@
 package me.thenano.yamibo.yamibo_app.favorite.updates
 
 import android.content.Context
-import io.github.littlesurvival.YamiboClient
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.core.cache.DiskCacheFactory
 import me.thenano.yamibo.yamibo_app.db.DatabaseFactory
+import me.thenano.yamibo.yamibo_app.network.AndroidYamiboClientProvider
 import me.thenano.yamibo.yamibo_app.repository.AndroidAuthRepository
 import me.thenano.yamibo.yamibo_app.repository.AndroidForumRepository
 import me.thenano.yamibo.yamibo_app.repository.AndroidTagRepository
@@ -24,7 +24,7 @@ internal object AndroidFavoriteUpdateSupport {
         val cookieStore = AndroidCookieStore(appContext)
         val userStore = AndroidUserStore(appContext)
         val forumFavoriteStore = AndroidForumFavoriteStore(appContext)
-        val yamiboClient = YamiboClient(timeoutMillis = 60_000L)
+        val yamiboClient = AndroidYamiboClientProvider.get(appContext)
         val diskCacheFactory = DiskCacheFactory(
             dbFactory = dbFactory,
             cacheDirPath = appContext.cacheDir.absolutePath,

@@ -202,6 +202,10 @@ class FavoriteUpdateRepositoryImpl internal constructor(
             }
             current = when (result) {
                 CheckResult.Skipped -> updateSnapshot(current.copy(skippedCount = current.skippedCount + 1))
+                is CheckResult.Interrupted -> {
+                    interruptRun(current, result.reason)
+                    return
+                }
                 is CheckResult.Failed -> updateSnapshot(
                     current.copy(
                         failedCount = current.failedCount + 1,
@@ -370,7 +374,7 @@ class FavoriteUpdateRepositoryImpl internal constructor(
         val result = threadRepository.fetchThread(threadId, authorId, page = 1, reverse = true)
         return when (result) {
             is YamiboResult.Success -> handleThreadPage(item, mode, result.value, authorId)
-            else -> result.toCheckFailure(item.title)
+            else -> result.toCheckResult(item.title)
         }
     }
 
@@ -535,7 +539,7 @@ class FavoriteUpdateRepositoryImpl internal constructor(
         val existing = targetQueries.getByTarget(item.targetType.name, item.targetId, authorId).executeAsOneOrNull()
         when (val result = rssSearchSubscriptionRepository.refresh(item.targetId)) {
             is YamiboResult.Success -> Unit
-            else -> return result.toCheckFailure(item.title)
+            else -> return result.toCheckResult(item.title)
         }
         val currentRows = rssResultQueries
             .getBySubscription(item.targetId, Long.MAX_VALUE, 0)
@@ -592,7 +596,7 @@ class FavoriteUpdateRepositoryImpl internal constructor(
         val existing = targetQueries.getByTarget(item.targetType.name, item.targetId, authorId).executeAsOneOrNull()
         val pageOne = when (val result = tagRepository.fetchTagPage(TagId(item.targetId.toInt()), 1)) {
             is YamiboResult.Success -> result.value
-            else -> return result.toCheckFailure(item.title)
+            else -> return result.toCheckResult(item.title)
         }
         val knownIds = existing?.knownThreadIds?.csvLongs()?.toMutableSet() ?: linkedSetOf()
         val firstPageIds = pageOne.threadSummaries.map { it.tid.value.toLong() }
@@ -609,8 +613,14 @@ class FavoriteUpdateRepositoryImpl internal constructor(
         var cursor = 0
         while (cursor < pagesToScan.size && pagesToScan.size <= MAX_TAG_SCAN_PAGES) {
             val pageIndex = pagesToScan.elementAt(cursor++)
-            val page = if (pageIndex == 1) pageOne else fetchTagPageOrFailure(item, pageIndex).getOrElse {
-                return CheckResult.Failed(it.message ?: i18n("Tag 頁面載入失敗"))
+            val page = if (pageIndex == 1) {
+                pageOne
+            } else {
+                when (val result = fetchTagPage(item, pageIndex)) {
+                    is TagPageCheck.Success -> result.page
+                    is TagPageCheck.Failed -> return CheckResult.Failed(result.reason)
+                    is TagPageCheck.Interrupted -> return CheckResult.Interrupted(result.reason)
+                }
             }
             scannedPages[pageIndex] = page
             val pageMax = page.pageNav?.totalPages ?: maxPageSeen
@@ -689,13 +699,14 @@ class FavoriteUpdateRepositoryImpl internal constructor(
         return CheckResult.Checked(detectedCount)
     }
 
-    private suspend fun fetchTagPageOrFailure(
+    private suspend fun fetchTagPage(
         item: FavoriteStoreRepository.FavoriteItem,
         page: Int,
-    ): Result<TagPage> {
+    ): TagPageCheck {
         return when (val result = tagRepository.fetchTagPage(TagId(item.targetId.toInt()), page)) {
-            is YamiboResult.Success -> Result.success(result.value)
-            else -> Result.failure(IllegalStateException(result.favoriteUpdateFailureReason(item.title)))
+            is YamiboResult.Success -> TagPageCheck.Success(result.value)
+            is YamiboResult.WafChallenge -> TagPageCheck.Interrupted(result.message())
+            else -> TagPageCheck.Failed(result.favoriteUpdateFailureReason(item.title))
         }
     }
 
@@ -1092,8 +1103,12 @@ class FavoriteUpdateRepositoryImpl internal constructor(
     private fun threadSourceDiscriminator(postId: Long, updatedAt: Long?): String =
         if (updatedAt == null) "post:$postId" else "post:$postId:revision:$updatedAt"
 
-    private fun YamiboResult<*>.toCheckFailure(itemTitle: String): CheckResult.Failed =
-        CheckResult.Failed(favoriteUpdateFailureReason(itemTitle))
+    private fun YamiboResult<*>.toCheckResult(itemTitle: String): CheckResult =
+        if (this is YamiboResult.WafChallenge) {
+            CheckResult.Interrupted(message())
+        } else {
+            CheckResult.Failed(favoriteUpdateFailureReason(itemTitle))
+        }
 
     private fun shouldStop(runId: String): Boolean {
         if (runId in interruptRequestedRunIds) return true
@@ -1105,6 +1120,13 @@ class FavoriteUpdateRepositoryImpl internal constructor(
         data object Skipped : CheckResult
         data class Checked(val detectedCount: Int) : CheckResult
         data class Failed(val reason: String) : CheckResult
+        data class Interrupted(val reason: String) : CheckResult
+    }
+
+    private sealed interface TagPageCheck {
+        data class Success(val page: TagPage) : TagPageCheck
+        data class Failed(val reason: String) : TagPageCheck
+        data class Interrupted(val reason: String) : TagPageCheck
     }
 
     companion object {
