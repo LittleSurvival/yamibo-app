@@ -8,6 +8,9 @@ internal sealed interface HistoryState {
         val items: List<ReadHistoryRepository.AnyReadingHistory>,
         val totalCount: Long,
         val currentPage: Int,
+        val requestKey: String = "",
+        val loadGeneration: Long = 0L,
+        val supplementaryLoading: Boolean = false,
     ) : HistoryState
 
     data object Empty : HistoryState

@@ -16,6 +16,11 @@ WHERE threadId = ? AND threadType = ? AND authorId = ?
 ORDER BY lastVisitTime DESC
 LIMIT 1;
 
+getByThreadIds:
+SELECT * FROM ReadingHistory
+WHERE threadId IN ? AND historyOrigin = 'Direct'
+ORDER BY lastVisitTime DESC;
+
 getPage:
 SELECT * FROM ReadingHistory
 WHERE historyOrigin = 'Direct'
@@ -80,4 +85,48 @@ WHERE (threadId, threadType, authorId, historyOrigin) IN (
     FROM ReadingHistory
     ORDER BY lastVisitTime DESC
     LIMIT -1 OFFSET ?
+);
+
+countLatestTags:
+SELECT COUNT(*)
+FROM (
+    SELECT tagId FROM MangaTagReadingHistory
+    UNION
+    SELECT tagId FROM TagCatalogReadingHistory
+);
+
+countLatestRss:
+SELECT COUNT(*)
+FROM (
+    SELECT subscriptionId FROM RssSearchReadingHistory
+    UNION
+    SELECT subscriptionId FROM RssCatalogReadingHistory
+);
+
+countLatestTagsByName:
+SELECT COUNT(*)
+FROM (
+    SELECT tagId
+    FROM MangaTagReadingHistory
+    WHERE tagName LIKE '%' || :query || '%' OR threadTitle LIKE '%' || :query || '%'
+    UNION
+    SELECT tagId
+    FROM TagCatalogReadingHistory
+    WHERE tagName LIKE '%' || :query || '%' OR threadTitle LIKE '%' || :query || '%'
+);
+
+countLatestRssByName:
+SELECT COUNT(*)
+FROM (
+    SELECT subscriptionId
+    FROM RssSearchReadingHistory
+    WHERE subscriptionTitle LIKE '%' || :query || '%'
+       OR subscriptionQuery LIKE '%' || :query || '%'
+       OR threadTitle LIKE '%' || :query || '%'
+    UNION
+    SELECT subscriptionId
+    FROM RssCatalogReadingHistory
+    WHERE subscriptionTitle LIKE '%' || :query || '%'
+       OR subscriptionQuery LIKE '%' || :query || '%'
+       OR threadTitle LIKE '%' || :query || '%'
 );

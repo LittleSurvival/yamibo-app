@@ -20,6 +20,7 @@ import io.github.littlesurvival.dto.value.TagId
 import io.github.littlesurvival.dto.value.ThreadId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -30,6 +31,8 @@ import me.thenano.yamibo.yamibo_app.favorite.components.*
 import me.thenano.yamibo.yamibo_app.favorite.sync.IFavoriteSyncProgressScreen
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.navigation.*
+import me.thenano.yamibo.yamibo_app.performance.favoriteHistoryLoadPerf
+import me.thenano.yamibo.yamibo_app.performance.LatestLoadGeneration
 import me.thenano.yamibo.yamibo_app.profile.settings.access.IBackgroundAccessSetupScreen
 import me.thenano.yamibo.yamibo_app.profile.settings.backup.IBackupSettingsScreen
 import me.thenano.yamibo.yamibo_app.repository.FavoriteShareRepository
@@ -52,6 +55,10 @@ internal sealed interface FavoritePageState {
         val content: FavoriteCategoryContent,
         val lastReadMap: Map<Long, Long>,
         val remoteFavoriteOrderMap: Map<Long, Long>,
+        val loadedSortMode: FavoriteSortMode,
+        val loadedSortDescending: Boolean,
+        val loadGeneration: Long = 0L,
+        val supplementaryLoading: Boolean = false,
     ) : FavoritePageState
 }
 
@@ -146,8 +153,10 @@ fun FavoritePage() {
     val sortDescending = appSettingsRepository.favoriteSortDescending.state()
     val syncState by favoriteSyncRunner.state.collectAsState()
     val hiddenFavoritePageRuns by favoriteSyncRunner.hiddenFavoritePageRuns.collectAsState()
+    val favoriteRepositoryRevision by favoriteRepository.favoriteItemRevision.collectAsState()
 
     var state by remember { mutableStateOf<FavoritePageState>(FavoritePageState.Loading) }
+    val loadGeneration = remember { LatestLoadGeneration() }
     var searchActive by remember { mutableStateOf(false) }
     var selectedItemIds by rememberSaveable { mutableStateOf(setOf<Long>()) }
     var selectedCollectionIds by rememberSaveable { mutableStateOf(setOf<Long>()) }
@@ -271,8 +280,12 @@ fun FavoritePage() {
     }
 
     suspend fun reload(preferredCategoryId: Long? = null) {
+        val generation = loadGeneration.begin()
+        favoriteHistoryLoadPerf("favorite", generation, "request_start", "preferredCategoryId=$preferredCategoryId")
         val currentSelectedCategoryId = (state as? FavoritePageState.Ready)?.selectedCategoryId
-        val snapshot = withContext(Dispatchers.Default) {
+        val activeSortMode = sortMode
+        val activeSortDescending = sortDescending
+        val primary = withContext(Dispatchers.Default) {
             favoriteRepository.ensureDefaults()
             val categories = favoriteRepository.getCategories()
             val savedCategoryId = appSettingsRepository.favoriteLastCategoryId.getValue().toLong()
@@ -292,27 +305,80 @@ fun FavoritePage() {
                 content.collections.forEach { addAll(it.items) }
             }.distinctBy { it.id }
             val isMangaMode = appSettingsRepository.isMangaMode.getValue()
-            val lastReadMap = buildMap {
-                allSortItems.forEach { item ->
-                    put(item.id, favoriteItemLastReadAt(item, readHistoryRepository, isMangaMode))
-                }
+            val lastReadMap = if (activeSortMode == FavoriteSortMode.LAST_READ) {
+                favoriteLastReadMap(allSortItems, readHistoryRepository, isMangaMode)
+            } else {
+                emptyMap()
             }
-            val remoteFavoriteOrderMap = favoriteSyncRepository.getRemoteFavoriteOrderMap(
-                allSortItems.map { it.id }.toSet()
-            )
-            FavoritePageState.Ready(
-                categories = categories,
-                selectedCategoryId = selectedCategoryId,
-                content = content,
-                lastReadMap = lastReadMap,
-                remoteFavoriteOrderMap = remoteFavoriteOrderMap,
+            val remoteFavoriteOrderMap = if (activeSortMode == FavoriteSortMode.FAVORITED_ORDER) {
+                favoriteSyncRepository.getRemoteFavoriteOrderMap(allSortItems.map { it.id }.toSet())
+            } else {
+                emptyMap()
+            }
+            Triple(
+                FavoritePageState.Ready(
+                    categories = categories,
+                    selectedCategoryId = selectedCategoryId,
+                    content = content,
+                    lastReadMap = lastReadMap,
+                    remoteFavoriteOrderMap = remoteFavoriteOrderMap,
+                    loadedSortMode = activeSortMode,
+                    loadedSortDescending = activeSortDescending,
+                    loadGeneration = generation,
+                    supplementaryLoading = true,
+                ),
+                allSortItems,
+                isMangaMode,
             )
         }
+        favoriteHistoryLoadPerf("favorite", generation, "primary_repository_complete")
+        if (!loadGeneration.isCurrent(generation)) {
+            favoriteHistoryLoadPerf("favorite", generation, "obsolete_before_primary")
+            return
+        }
+        val snapshot = primary.first
         val content = snapshot.content
         if (openedCollectionId != null && content.collections.none { it.collection.id == openedCollectionId }) {
             openedCollectionId = null
         }
         state = snapshot
+        favoriteHistoryLoadPerf("favorite", generation, "primary_state_published", "items=${primary.second.size}")
+        // Let the primary state reach a frame before optional database enrichment competes for CPU.
+        withFrameNanos { }
+
+        val supplementary = try {
+            withContext(Dispatchers.Default) {
+                val lastReadMap = if (activeSortMode == FavoriteSortMode.LAST_READ) {
+                    snapshot.lastReadMap
+                } else {
+                    favoriteLastReadMap(primary.second, readHistoryRepository, primary.third)
+                }
+                val remoteFavoriteOrderMap = if (activeSortMode == FavoriteSortMode.FAVORITED_ORDER) {
+                    snapshot.remoteFavoriteOrderMap
+                } else {
+                    favoriteSyncRepository.getRemoteFavoriteOrderMap(primary.second.map { it.id }.toSet())
+                }
+                lastReadMap to remoteFavoriteOrderMap
+            }
+        } catch (error: Exception) {
+            Logger.e("FavoritePage", "Supplementary favorite metadata failed", error)
+            if (loadGeneration.isCurrent(generation)) {
+                state = snapshot.copy(supplementaryLoading = false)
+                favoriteHistoryLoadPerf("favorite", generation, "supplementary_failed")
+            }
+            return
+        }
+        favoriteHistoryLoadPerf("favorite", generation, "supplementary_repository_complete")
+        if (!loadGeneration.isCurrent(generation)) {
+            favoriteHistoryLoadPerf("favorite", generation, "obsolete_before_supplementary")
+            return
+        }
+        state = snapshot.copy(
+            lastReadMap = supplementary.first,
+            remoteFavoriteOrderMap = supplementary.second,
+            supplementaryLoading = false,
+        )
+        favoriteHistoryLoadPerf("favorite", generation, "supplementary_state_published")
     }
 
     fun importFavorites(target: FavoriteShareRepository.ImportTarget) {
@@ -352,7 +418,10 @@ fun FavoritePage() {
         pickerCollectionSelection = collections
     }
 
-    LaunchedEffect(navigator.stack.size) { reload() }
+    LaunchedEffect(navigator.stack.size, favoriteRepositoryRevision, sortMode, sortDescending) {
+        if (state !is FavoritePageState.Loading) delay(50)
+        reload()
+    }
 
     suspend fun refreshSearchCounts(query: String) {
         val trimmed = query.trim()
@@ -465,6 +534,16 @@ fun FavoritePage() {
     }
 
     val ready = state as? FavoritePageState.Ready
+    LaunchedEffect(ready?.loadGeneration) {
+        ready?.let {
+            favoriteHistoryLoadPerf(
+                "favorite",
+                it.loadGeneration,
+                "first_content_rendered",
+                "supplementaryLoading=${it.supplementaryLoading}",
+            )
+        }
+    }
     LaunchedEffect(searchQuery, ready?.categories?.map { it.id }) {
         refreshSearchCounts(searchQuery)
     }
@@ -515,6 +594,8 @@ fun FavoritePage() {
     }
     val resolvedLastReadMap = ready?.lastReadMap.orEmpty()
     val resolvedRemoteFavoriteOrderMap = ready?.remoteFavoriteOrderMap.orEmpty()
+    val loadedSortMode = ready?.loadedSortMode ?: sortMode
+    val loadedSortDescending = ready?.loadedSortDescending ?: sortDescending
     val collections = sortCollections(
         ready?.content?.collections.orEmpty()
             .map { collection ->
@@ -528,8 +609,8 @@ fun FavoritePage() {
                 (normalizedFavoriteForumFilterKeys.isEmpty() || collection.items.isNotEmpty()) &&
                     (!searchEnabled || collectionMatchesQuery(collection, trimmedSearchQuery))
             },
-        sortMode,
-        sortDescending,
+        loadedSortMode,
+        loadedSortDescending,
         resolvedLastReadMap,
         resolvedRemoteFavoriteOrderMap,
     )
@@ -537,8 +618,8 @@ fun FavoritePage() {
         visibleItems.filter {
             matchesForumFilter(it) && (!searchEnabled || favoriteItemMatchesQuery(it, trimmedSearchQuery))
         },
-        sortMode,
-        sortDescending,
+        loadedSortMode,
+        loadedSortDescending,
         resolvedLastReadMap,
         resolvedRemoteFavoriteOrderMap,
     )
@@ -561,8 +642,8 @@ fun FavoritePage() {
                 searchCategoryMatchCounts = categoryBadgeCounts,
                 favoriteFilterActive = normalizedFavoriteForumFilterKeys.isNotEmpty(),
                 showFavoriteCounts = showFavoriteCounts,
-                sortMode = sortMode,
-                sortDescending = sortDescending,
+                sortMode = loadedSortMode,
+                sortDescending = loadedSortDescending,
                 favoriteGridMode = favoriteGridMode,
                 gridEntries = gridEntries,
                 openedCollection = openedCollection,
@@ -1256,32 +1337,27 @@ fun FavoritePage() {
     }
 }
 
-private suspend fun favoriteItemLastReadAt(
-    item: FavoriteItem,
+private suspend fun favoriteLastReadMap(
+    items: Collection<FavoriteItem>,
     repo: ReadHistoryRepository,
     isMangaMode: Boolean,
-): Long {
-    return when (item.targetType) {
-        FavoriteTargetType.ThreadNormal -> repo.getPosition(ThreadId(item.targetId.toInt()), ReadHistoryRepository.ThreadEntryType.Normal)?.lastVisitTime ?: 0L
-        FavoriteTargetType.ThreadNovel -> repo.getPosition(ThreadId(item.targetId.toInt()), ReadHistoryRepository.ThreadEntryType.Novel, item.authorId)?.lastVisitTime ?: 0L
-        FavoriteTargetType.TagManga -> if (isMangaMode) {
-            repo.getTagMangaReaderModeHistoryPosition(TagId(item.targetId.toInt()))?.lastVisitTime ?: 0L
-        } else {
-            repo.getTagCatalogThreadHistoryPosition(TagId(item.targetId.toInt()))?.lastVisitTime ?: 0L
-        }
-        FavoriteTargetType.RssSearch -> if (isMangaMode) {
-            repo.getRssSearchReaderModeHistoryPosition(item.targetId)?.lastVisitTime ?: 0L
-        } else {
-            repo.getRssCatalogThreadHistoryPosition(item.targetId)?.lastVisitTime ?: 0L
-        }
-    }
-}
+): Map<Long, Long> = repo.getLastVisitTimes(
+    lookups = items.map { item ->
+        ReadHistoryRepository.LastVisitLookup(
+            itemId = item.id,
+            targetType = item.targetType,
+            targetId = item.targetId,
+            authorId = item.authorId,
+        )
+    },
+    isMangaMode = isMangaMode,
+)
 
 private fun favoriteItemEffectiveUpdatedAt(item: FavoriteItem): Long {
     return item.lastUpdatedTime?.takeIf { it > 0L } ?: item.lastFavoriteStatusUpdateAt
 }
 
-private fun sortCollections(
+internal fun sortCollections(
     items: List<FavoriteCollectionWithItems>,
     mode: FavoriteSortMode,
     descending: Boolean,
@@ -1322,7 +1398,7 @@ private fun sortCollections(
     return if (mode == FavoriteSortMode.FAVORITED_ORDER || descending) sorted else sorted.reversed()
 }
 
-private fun sortItems(
+internal fun sortItems(
     items: List<FavoriteItem>,
     mode: FavoriteSortMode,
     descending: Boolean,

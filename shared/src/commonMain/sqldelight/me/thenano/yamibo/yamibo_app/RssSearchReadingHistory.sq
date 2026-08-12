@@ -10,6 +10,9 @@ INSERT OR REPLACE INTO RssSearchReadingHistory(
 getBySubscriptionId:
 SELECT * FROM RssSearchReadingHistory WHERE subscriptionId = ?;
 
+getBySubscriptionIds:
+SELECT * FROM RssSearchReadingHistory WHERE subscriptionId IN ?;
+
 deleteBySubscriptionId:
 DELETE FROM RssSearchReadingHistory WHERE subscriptionId = ?;
 

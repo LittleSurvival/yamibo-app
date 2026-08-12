@@ -93,12 +93,39 @@ class FavoriteStoreRepositoryImpl internal constructor(
     }
 
     override suspend fun getCollectionsWithItems(categoryId: Long): List<FavoriteCollectionWithItems> {
-        return getCollections(categoryId).map { collection ->
+        val collections = getCollections(categoryId)
+        val itemsByCollectionId = itemQueries.getByCollectionCategoryId(categoryId) {
+                collectionId,
+                id,
+                targetType,
+                targetId,
+                title,
+                coverUrl,
+                forumId,
+                forumName,
+                authorId,
+                createdAt,
+                lastFavoriteStatusUpdateAt,
+                lastUpdatedTime,
+            ->
+            collectionId to FavoriteItem(
+                id = id,
+                targetType = FavoriteTargetType.fromStorage(targetType),
+                targetId = targetId,
+                title = title,
+                coverUrl = coverUrl,
+                lastUpdatedTime = lastUpdatedTime,
+                forumId = forumId?.toInt()?.let(::ForumId),
+                forumName = forumName,
+                authorId = authorId.takeIf { it != 0L }?.toInt()?.let(::UserId),
+                createdAt = createdAt,
+                lastFavoriteStatusUpdateAt = lastFavoriteStatusUpdateAt,
+            )
+        }.executeAsList().groupBy({ it.first }, { it.second })
+        return collections.map { collection ->
             FavoriteCollectionWithItems(
                 collection = collection,
-                items = itemQueries.getByCollectionId(collection.id)
-                    .executeAsList()
-                    .map { it.toModel() }
+                items = itemsByCollectionId[collection.id].orEmpty(),
             )
         }
     }
