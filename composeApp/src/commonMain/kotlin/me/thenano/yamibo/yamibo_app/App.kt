@@ -91,7 +91,11 @@ fun YamiboWafRecoveryRoot(
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_RESUME -> isForeground = true
-                Lifecycle.Event.ON_PAUSE,
+                // ON_PAUSE (system permission dialogs, notification shade, ...) is a transient
+                // state: the window and WebView stay live and JS keeps running, so reporting the
+                // host as background here would abort the in-flight NOX WAF recovery with
+                // FOREGROUND_REQUIRED and fail the cold start. Only true background (ON_STOP,
+                // where Android suspends the WebView) should fail fast.
                 Lifecycle.Event.ON_STOP,
                 Lifecycle.Event.ON_DESTROY -> isForeground = false
                 else -> Unit
