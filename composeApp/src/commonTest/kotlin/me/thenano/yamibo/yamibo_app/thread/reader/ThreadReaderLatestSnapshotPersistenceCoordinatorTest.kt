@@ -8,16 +8,17 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
+import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.ThreadReaderLatestSnapshotPersistenceCoordinator
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
-class LatestSnapshotPersistenceCoordinatorTest {
+class ThreadReaderLatestSnapshotPersistenceCoordinatorTest {
     @Test
     fun burstKeepsOnlyLatestSemanticSnapshot() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val gate = CompletableDeferred<Unit>()
         val writes = mutableListOf<Snapshot>()
-        val coordinator = LatestSnapshotPersistenceCoordinator<Snapshot, Int>(
+        val coordinator = ThreadReaderLatestSnapshotPersistenceCoordinator<Snapshot, Int>(
             scope = scope,
             quietPeriodMillis = 1_000,
             semanticKey = Snapshot::position,
@@ -39,7 +40,7 @@ class LatestSnapshotPersistenceCoordinatorTest {
     fun explicitFlushPersistsLatestAndSkipsTimestampOnlyDuplicate() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val writes = mutableListOf<Snapshot>()
-        val coordinator = LatestSnapshotPersistenceCoordinator(
+        val coordinator = ThreadReaderLatestSnapshotPersistenceCoordinator(
             scope = scope,
             quietPeriodMillis = 1_000,
             semanticKey = Snapshot::position,
@@ -61,7 +62,7 @@ class LatestSnapshotPersistenceCoordinatorTest {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val firstWriteGate = CompletableDeferred<Unit>()
         val writes = mutableListOf<Int>()
-        val coordinator = LatestSnapshotPersistenceCoordinator<Int, Int>(
+        val coordinator = ThreadReaderLatestSnapshotPersistenceCoordinator<Int, Int>(
             scope = scope,
             quietPeriodMillis = 1_000,
             semanticKey = { it },
@@ -92,7 +93,7 @@ class LatestSnapshotPersistenceCoordinatorTest {
     fun cancellationDropsOnlyTheUnflushedSnapshot() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val writes = mutableListOf<Int>()
-        val coordinator = LatestSnapshotPersistenceCoordinator<Int, Int>(
+        val coordinator = ThreadReaderLatestSnapshotPersistenceCoordinator<Int, Int>(
             scope = scope,
             quietPeriodMillis = 1_000,
             semanticKey = { it },

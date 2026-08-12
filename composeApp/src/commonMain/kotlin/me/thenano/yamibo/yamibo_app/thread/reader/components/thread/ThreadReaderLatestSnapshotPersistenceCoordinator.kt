@@ -1,4 +1,4 @@
-package me.thenano.yamibo.yamibo_app.thread.reader
+package me.thenano.yamibo.yamibo_app.thread.reader.components.thread
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -6,6 +6,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * Coalesces a burst of UI snapshots into one serialized durable write.
@@ -13,12 +14,12 @@ import kotlinx.coroutines.sync.withLock
  * Snapshot capture stays with the caller; this coordinator only owns immutable values and never
  * reads Compose state from its delayed job.
  */
-internal class LatestSnapshotPersistenceCoordinator<T, K>(
+internal class ThreadReaderLatestSnapshotPersistenceCoordinator<T, K>(
     private val scope: CoroutineScope,
     private val quietPeriodMillis: Long,
     private val semanticKey: (T) -> K,
     private val persist: suspend (T) -> Unit,
-    private val waitForQuietPeriod: suspend (Long) -> Unit = { delay(it) },
+    private val waitForQuietPeriod: suspend (Long) -> Unit = { delay(it.milliseconds) },
 ) {
     private val stateMutex = Mutex()
     private val writeMutex = Mutex()

@@ -2372,7 +2372,7 @@ internal fun ThreadReaderScreen(
         CoroutineScope(SupervisorJob() + Dispatchers.Default)
     }
     val persistenceCoordinator = remember(tid, persistenceScope) {
-        LatestSnapshotPersistenceCoordinator(
+        ThreadReaderLatestSnapshotPersistenceCoordinator(
             scope = persistenceScope,
             quietPeriodMillis = 1_000L,
             semanticKey = ReaderPersistenceSnapshot::semanticKey,
