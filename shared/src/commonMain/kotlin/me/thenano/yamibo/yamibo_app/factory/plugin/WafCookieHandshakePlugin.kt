@@ -1,4 +1,4 @@
-package me.thenano.yamibo.yamibo_app.network
+package me.thenano.yamibo.yamibo_app.factory.plugin
 
 import io.ktor.client.plugins.api.Send
 import io.ktor.client.plugins.api.SendingRequest
@@ -30,7 +30,7 @@ private const val WAF_COOKIE_NAME = "abymg_id"
  * the lifetime of the singleton image loader, so the WAF cookie is reused by subsequent images while
  * remaining isolated from unrelated hosts and application restarts.
  */
-internal val WafCookieHandshake = createClientPlugin("WafCookieHandshake") {
+internal val WafCookieHandshakePlugin = createClientPlugin("WafCookieHandshake") {
     val storage = WafCookieStorage()
     val yamiboDomain = YamiboRoute.Domain.build()
 

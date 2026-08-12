@@ -10,6 +10,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.runBlocking
+import me.thenano.yamibo.yamibo_app.factory.plugin.WafCookieHandshakePlugin
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -43,7 +44,7 @@ class WafCookieHandshakeTest {
             }
         }
         val client = HttpClient(engine) {
-            install(WafCookieHandshake)
+            install(WafCookieHandshakePlugin)
         }
 
         try {

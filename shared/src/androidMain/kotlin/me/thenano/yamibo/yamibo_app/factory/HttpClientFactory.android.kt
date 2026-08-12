@@ -6,7 +6,7 @@ import io.ktor.client.plugins.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.json.Json
-import me.thenano.yamibo.yamibo_app.network.WafCookieHandshake
+import me.thenano.yamibo.yamibo_app.factory.plugin.WafCookieHandshakePlugin
 
 @Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
 actual object HttpClientFactory {
@@ -23,7 +23,7 @@ actual object HttpClientFactory {
             socketTimeoutMillis = 30_000
             requestTimeoutMillis = 45_000
         }
-        install(WafCookieHandshake)
+        install(WafCookieHandshakePlugin)
 
         install(ContentNegotiation) {
             json(
