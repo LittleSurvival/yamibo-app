@@ -4,6 +4,7 @@ import io.github.littlesurvival.YamiboClient
 import io.github.littlesurvival.YamiboRoute
 import kotlinx.coroutines.suspendCancellableCoroutine
 import me.thenano.yamibo.yamibo_app.store.auth.CookieStore
+import me.thenano.yamibo.yamibo_app.util.auth.composeYamiboClientCookieHeader
 import platform.Foundation.NSHTTPCookie
 import platform.Foundation.NSHTTPCookieStorage
 import platform.Foundation.NSURL

@@ -1,9 +1,9 @@
-package me.thenano.yamibo.yamibo_app.network
+package me.thenano.yamibo.yamibo_app.util.auth
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
-class YamiboClientCookieHydrationTest {
+class CookieParserTest {
     @Test
     fun serviceCookieUsesPersistedAuthenticationAndPlatformNox() {
         assertEquals(

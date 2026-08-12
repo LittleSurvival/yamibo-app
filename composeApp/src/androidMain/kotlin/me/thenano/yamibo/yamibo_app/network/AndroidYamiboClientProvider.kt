@@ -5,6 +5,7 @@ import android.webkit.CookieManager
 import io.github.littlesurvival.YamiboClient
 import io.github.littlesurvival.YamiboRoute
 import me.thenano.yamibo.yamibo_app.store.AndroidCookieStore
+import me.thenano.yamibo.yamibo_app.util.auth.composeYamiboClientCookieHeader
 
 /** Owns the single Yamibo client for the lifetime of the Android app process. */
 internal object AndroidYamiboClientProvider {
