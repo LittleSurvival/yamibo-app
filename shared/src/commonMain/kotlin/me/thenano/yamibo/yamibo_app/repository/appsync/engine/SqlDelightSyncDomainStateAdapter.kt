@@ -3,6 +3,7 @@ package me.thenano.yamibo.yamibo_app.repository.appsync.engine
 import kotlinx.serialization.json.Json
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDomainId
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncEntityId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperation
 
 internal interface SyncDomainMaterializer {
@@ -21,17 +22,33 @@ internal class SqlDelightSyncDomainStateAdapter(
         explicitNulls = true
     },
     private val nowMillis: () -> Long,
+    private val onFullStateRead: () -> Unit = {},
 ) : SyncDomainStateAdapter {
     private val queries = db.appSyncOperationQueries
 
-    override fun currentState(): Map<SyncEntityKey, ResolvedSyncEntity> =
-        queries.getResolvedEntities().executeAsList().associate { row ->
-            val entity = json.decodeFromString(
-                ResolvedSyncEntity.serializer(),
-                row.encodedState,
-            )
-            entity.key to entity
+    override fun currentState(): Map<SyncEntityKey, ResolvedSyncEntity> {
+        onFullStateRead()
+        return queries.getResolvedEntities().executeAsList().associate { row ->
+            decodeEntity(row.encodedState)
         }
+    }
+
+    fun entityState(domainId: SyncDomainId, entityId: SyncEntityId): Map<SyncEntityKey, ResolvedSyncEntity> =
+        queries.getResolvedEntitiesByDomainAndEntity(domainId.value, entityId.value)
+            .executeAsList()
+            .associate { row -> decodeEntity(row.encodedState) }
+
+    fun currentGeneration(domainId: SyncDomainId, entityId: SyncEntityId): Long {
+        val latest = entityState(domainId, entityId)
+            .values
+            .maxByOrNull { it.key.generation }
+            ?: return 1
+        return if (latest.tombstone != null || latest.relationPresent == false) {
+            latest.key.generation + 1
+        } else {
+            latest.key.generation
+        }
+    }
 
     override fun apply(result: OperationReductionResult) {
         applyWithinTransaction(result)
@@ -52,7 +69,10 @@ internal class SqlDelightSyncDomainStateAdapter(
     }
 
     fun recordLocal(operation: SyncOperation) {
-        val result = reducer.reduce(currentState(), listOf(operation))
+        val result = reducer.reduce(
+            current = entityState(operation.domainId, operation.entityId),
+            operations = listOf(operation),
+        )
         result.entities.values.forEach(::persist)
     }
 
@@ -91,6 +111,11 @@ internal class SqlDelightSyncDomainStateAdapter(
             encodedState = json.encodeToString(ResolvedSyncEntity.serializer(), entity),
             updatedAtEpochMillis = nowMillis(),
         )
+    }
+
+    private fun decodeEntity(encodedState: String): Pair<SyncEntityKey, ResolvedSyncEntity> {
+        val entity = json.decodeFromString(ResolvedSyncEntity.serializer(), encodedState)
+        return entity.key to entity
     }
 
     private fun SyncEntityKey.stableKey(): String =

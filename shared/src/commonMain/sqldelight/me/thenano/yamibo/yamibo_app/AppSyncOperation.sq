@@ -454,6 +454,11 @@ SELECT * FROM AppSyncResolvedEntity
 WHERE domainId = ?
 ORDER BY entityKey ASC;
 
+getResolvedEntitiesByDomainAndEntity:
+SELECT * FROM AppSyncResolvedEntity
+WHERE domainId = ? AND entityId = ?
+ORDER BY entityGeneration ASC;
+
 clearResolvedEntities:
 DELETE FROM AppSyncResolvedEntity;
 

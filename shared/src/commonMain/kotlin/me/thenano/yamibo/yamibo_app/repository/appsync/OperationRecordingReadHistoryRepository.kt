@@ -1,7 +1,10 @@
 package me.thenano.yamibo.yamibo_app.repository.appsync
 
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
+import me.thenano.yamibo.yamibo_app.repository.SynchronousReaderPersistence
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDomainId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncEntityId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationKind
@@ -11,16 +14,18 @@ import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
 internal class OperationRecordingReadHistoryRepository(
     private val delegate: ReadHistoryRepository,
     private val recorder: AppSyncMutationRecorder,
+    private val storageDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : ReadHistoryRepository by delegate {
-    override suspend fun savePosition(history: ReadHistoryRepository.ThreadReadingHistory) {
+    override suspend fun savePosition(history: ReadHistoryRepository.ThreadReadingHistory) =
+        withContext(storageDispatcher) {
         val existing = delegate.getPosition(history.threadId, history.threadType, history.authorId)
-        record(
+        recordSynchronous(
             "reading.thread",
             threadEntityId(history),
             if (existing == null) SyncOperationKind.Put else SyncOperationKind.Patch,
             history.fields(),
         ) {
-            delegate.savePosition(history)
+            delegate.synchronousReaderPersistence().savePositionSynchronously(history)
         }
     }
 
@@ -28,31 +33,33 @@ internal class OperationRecordingReadHistoryRepository(
         tid: io.github.littlesurvival.dto.value.ThreadId,
         threadType: ReadHistoryRepository.ThreadEntryType,
         authorId: io.github.littlesurvival.dto.value.UserId?,
-    ) {
-        val existing = delegate.getPosition(tid, threadType, authorId) ?: return
+    ) = withContext(storageDispatcher) {
+        val existing = delegate.getPosition(tid, threadType, authorId) ?: return@withContext
         record("reading.thread", threadEntityId(existing), SyncOperationKind.Delete, existing.fields()) {
-            delegate.deleteHistory(tid, threadType, authorId)
+            delegate.synchronousReaderPersistence().deleteHistorySynchronously(existing)
         }
     }
 
-    override suspend fun deleteHistoryBatch(items: List<ReadHistoryRepository.ThreadReadingHistory>) {
+    override suspend fun deleteHistoryBatch(items: List<ReadHistoryRepository.ThreadReadingHistory>) =
+        withContext(storageDispatcher) {
         recordAuthorizedDeleteBatch(items.distinctBy(::threadEntityId).map {
             draft("reading.thread", threadEntityId(it), SyncOperationKind.Delete, it.fields())
         }, "reading-history:selected") {
-            delegate.deleteHistoryBatch(items)
+            delegate.synchronousReaderPersistence().deleteHistoryBatchSynchronously(items)
         }
     }
 
-    override suspend fun deleteAll() {
+    override suspend fun deleteAll() = withContext(storageDispatcher) {
         val items = loadAllThreadHistory()
         recordAuthorizedDeleteBatch(items.map {
             draft("reading.thread", threadEntityId(it), SyncOperationKind.Delete, it.fields())
         }, "reading-history:all-thread") {
-            delegate.deleteAll()
+            delegate.synchronousReaderPersistence().deleteAllThreadHistorySynchronously()
         }
     }
 
-    override suspend fun saveImagePosition(history: ReadHistoryRepository.ImageReadingHistory) {
+    override suspend fun saveImagePosition(history: ReadHistoryRepository.ImageReadingHistory) =
+        withContext(storageDispatcher) {
         val existing = delegate.getImagePosition(history.postId)
         record(
             "reading.image",
@@ -60,13 +67,13 @@ internal class OperationRecordingReadHistoryRepository(
             if (existing == null) SyncOperationKind.Put else SyncOperationKind.Patch,
             history.fields(),
         ) {
-            delegate.saveImagePosition(history)
+            delegate.synchronousReaderPersistence().saveImagePositionSynchronously(history)
         }
     }
 
     override suspend fun saveTagMangaReaderModeHistory(
         history: ReadHistoryRepository.TagMangaReadingHistory,
-    ) {
+    ) = withContext(storageDispatcher) {
         val existing = delegate.getTagMangaReaderModeHistoryPosition(history.tagId)
         record(
             "reading.tag-manga",
@@ -74,57 +81,58 @@ internal class OperationRecordingReadHistoryRepository(
             if (existing == null) SyncOperationKind.Put else SyncOperationKind.Patch,
             history.fields(),
         ) {
-            delegate.saveTagMangaReaderModeHistory(history)
+            delegate.synchronousReaderPersistence().saveTagMangaReaderModeHistorySynchronously(history)
         }
     }
 
-    override suspend fun deleteMangaTagHistory(tagId: io.github.littlesurvival.dto.value.TagId) {
-        val existing = delegate.getTagMangaReaderModeHistoryPosition(tagId) ?: return
+    override suspend fun deleteMangaTagHistory(tagId: io.github.littlesurvival.dto.value.TagId) =
+        withContext(storageDispatcher) {
+        val existing = delegate.getTagMangaReaderModeHistoryPosition(tagId) ?: return@withContext
         record(
             "reading.tag-manga",
             tagId.value.toString(),
             SyncOperationKind.Delete,
             existing.fields(),
         ) {
-            delegate.deleteMangaTagHistory(tagId)
+            delegate.synchronousReaderPersistence().deleteMangaTagHistorySynchronously(tagId)
         }
     }
 
     override suspend fun saveTagCatalogThreadHistory(
         history: ReadHistoryRepository.TagCatalogReadingHistory,
-    ) {
+    ) = withContext(storageDispatcher) {
         val existing = delegate.getTagCatalogThreadHistoryPosition(history.tagId)
-        record(
+        recordSynchronous(
             "reading.tag-catalog",
             history.tagId.value.toString(),
             if (existing == null) SyncOperationKind.Put else SyncOperationKind.Patch,
             history.fields(),
         ) {
-            delegate.saveTagCatalogThreadHistory(history)
+            delegate.synchronousReaderPersistence().saveTagCatalogThreadHistorySynchronously(history)
         }
     }
 
     override suspend fun deleteTagCatalogThreadHistory(
         tagId: io.github.littlesurvival.dto.value.TagId,
-    ) {
-        val existing = delegate.getTagCatalogThreadHistoryPosition(tagId) ?: return
+    ) = withContext(storageDispatcher) {
+        val existing = delegate.getTagCatalogThreadHistoryPosition(tagId) ?: return@withContext
         record(
             "reading.tag-catalog",
             tagId.value.toString(),
             SyncOperationKind.Delete,
             existing.fields(),
         ) {
-            delegate.deleteTagCatalogThreadHistory(tagId)
+            delegate.synchronousReaderPersistence().deleteTagCatalogThreadHistorySynchronously(tagId)
         }
     }
 
     override suspend fun saveRssSearchReaderModeHistory(
         history: ReadHistoryRepository.RssSearchReadingHistory,
-    ) {
+    ) = withContext(storageDispatcher) {
         val syncId = delegate.getRssSubscriptionSyncId(history.subscriptionId)
         if (syncId == null) {
             delegate.saveRssSearchReaderModeHistory(history)
-            return
+            return@withContext
         }
         val existing = delegate.getRssSearchReaderModeHistoryPosition(history.subscriptionId)
         record(
@@ -133,54 +141,55 @@ internal class OperationRecordingReadHistoryRepository(
             if (existing == null) SyncOperationKind.Put else SyncOperationKind.Patch,
             history.fields(syncId),
         ) {
-            delegate.saveRssSearchReaderModeHistory(history)
+            delegate.synchronousReaderPersistence().saveRssSearchReaderModeHistorySynchronously(history)
         }
     }
 
-    override suspend fun deleteRssSearchHistory(subscriptionId: Long) {
-        val existing = delegate.getRssSearchReaderModeHistoryPosition(subscriptionId) ?: return
+    override suspend fun deleteRssSearchHistory(subscriptionId: Long) = withContext(storageDispatcher) {
+        val existing = delegate.getRssSearchReaderModeHistoryPosition(subscriptionId) ?: return@withContext
         val syncId = delegate.getRssSubscriptionSyncId(subscriptionId)
         if (syncId == null) {
             delegate.deleteRssSearchHistory(subscriptionId)
-            return
+            return@withContext
         }
         record("reading.rss-search", syncId, SyncOperationKind.Delete, existing.fields(syncId)) {
-            delegate.deleteRssSearchHistory(subscriptionId)
+            delegate.synchronousReaderPersistence().deleteRssSearchHistorySynchronously(subscriptionId)
         }
     }
 
     override suspend fun saveRssCatalogThreadHistory(
         history: ReadHistoryRepository.RssCatalogReadingHistory,
-    ) {
+    ) = withContext(storageDispatcher) {
         val syncId = delegate.getRssSubscriptionSyncId(history.subscriptionId)
         if (syncId == null) {
             delegate.saveRssCatalogThreadHistory(history)
-            return
+            return@withContext
         }
         val existing = delegate.getRssCatalogThreadHistoryPosition(history.subscriptionId)
-        record(
+        recordSynchronous(
             "reading.rss-catalog",
             syncId,
             if (existing == null) SyncOperationKind.Put else SyncOperationKind.Patch,
             history.fields(syncId),
         ) {
-            delegate.saveRssCatalogThreadHistory(history)
+            delegate.synchronousReaderPersistence().saveRssCatalogThreadHistorySynchronously(history)
         }
     }
 
-    override suspend fun deleteRssCatalogThreadHistory(subscriptionId: Long) {
-        val existing = delegate.getRssCatalogThreadHistoryPosition(subscriptionId) ?: return
+    override suspend fun deleteRssCatalogThreadHistory(subscriptionId: Long) = withContext(storageDispatcher) {
+        val existing = delegate.getRssCatalogThreadHistoryPosition(subscriptionId) ?: return@withContext
         val syncId = delegate.getRssSubscriptionSyncId(subscriptionId)
         if (syncId == null) {
             delegate.deleteRssCatalogThreadHistory(subscriptionId)
-            return
+            return@withContext
         }
         record("reading.rss-catalog", syncId, SyncOperationKind.Delete, existing.fields(syncId)) {
-            delegate.deleteRssCatalogThreadHistory(subscriptionId)
+            delegate.synchronousReaderPersistence().deleteRssCatalogThreadHistorySynchronously(subscriptionId)
         }
     }
 
-    override suspend fun deleteCombinedHistoryBatch(items: List<ReadHistoryRepository.AnyReadingHistory>) {
+    override suspend fun deleteCombinedHistoryBatch(items: List<ReadHistoryRepository.AnyReadingHistory>) =
+        withContext(storageDispatcher) {
         val drafts = items.mapNotNull { item ->
             when (item) {
                 is ReadHistoryRepository.ThreadReadingHistory ->
@@ -217,11 +226,11 @@ internal class OperationRecordingReadHistoryRepository(
             }
         }.distinctBy { "${it.domainId.value}|${it.entityId.value}" }
         recordAuthorizedDeleteBatch(drafts, "reading-history:selected-combined") {
-            delegate.deleteCombinedHistoryBatch(items)
+            delegate.synchronousReaderPersistence().deleteCombinedHistoryBatchSynchronously(items)
         }
     }
 
-    override suspend fun deleteAllCombinedHistory() {
+    override suspend fun deleteAllCombinedHistory() = withContext(storageDispatcher) {
         val threads = loadAllThreadHistory()
         val images = delegate.getAllImageHistoryForSync()
         val mangaTags = delegate.getAllTagMangaHistoryForSync()
@@ -256,12 +265,13 @@ internal class OperationRecordingReadHistoryRepository(
             }
         }
         recordAuthorizedDeleteBatch(drafts, "reading-history:all-combined") {
-            delegate.deleteAllCombinedHistory()
+            delegate.synchronousReaderPersistence().deleteAllCombinedHistorySynchronously()
         }
     }
 
-    override suspend fun recordReadingDuration(dateKey: String, durationMillis: Long) {
-        if (durationMillis <= 0) return
+    override suspend fun recordReadingDuration(dateKey: String, durationMillis: Long) =
+        withContext(storageDispatcher) {
+        if (durationMillis <= 0) return@withContext
         val current = delegate.getReadingDurationTotal(dateKey, dateKey)
         val next = current + durationMillis
         record(
@@ -274,7 +284,7 @@ internal class OperationRecordingReadHistoryRepository(
                 "updatedAt" to currentTimeMillis().toString(),
             ),
         ) {
-            delegate.recordReadingDuration(dateKey, durationMillis)
+            delegate.synchronousReaderPersistence().recordReadingDurationSynchronously(dateKey, durationMillis)
         }
     }
 
@@ -283,12 +293,36 @@ internal class OperationRecordingReadHistoryRepository(
         return if (count == 0) emptyList() else delegate.getHistoryPage(1, count)
     }
 
-    private fun record(
+    private suspend fun record(
         domain: String,
         entityId: String,
         kind: SyncOperationKind,
         fields: Map<String, String?>,
-        mutation: suspend () -> Unit,
+        mutation: () -> Unit,
+    ) = withContext(storageDispatcher) {
+        recordSynchronous(domain, entityId, kind, fields, mutation)
+    }
+
+    private suspend fun recordAuthorizedDeleteBatch(
+        drafts: List<LocalSyncOperationDraft>,
+        scopeKey: String,
+        mutation: () -> Unit,
+    ): Unit = withContext(storageDispatcher) {
+        if (drafts.isEmpty()) {
+            mutation()
+        } else {
+            recorder.recordAuthorizedDeleteBatch(drafts, scopeKey) {
+                mutation()
+            }
+        }
+    }
+
+    private fun recordSynchronous(
+        domain: String,
+        entityId: String,
+        kind: SyncOperationKind,
+        fields: Map<String, String?>,
+        mutation: () -> Unit,
     ) {
         recorder.record(
             domain = domain,
@@ -297,23 +331,13 @@ internal class OperationRecordingReadHistoryRepository(
             fields = fields,
             entityGeneration = recorder.currentGeneration(domain, entityId),
         ) {
-            runBlocking { mutation() }
-        }
-    }
-    private fun recordAuthorizedDeleteBatch(
-        drafts: List<LocalSyncOperationDraft>,
-        scopeKey: String,
-        mutation: suspend () -> Unit,
-    ) {
-        if (drafts.isEmpty()) {
-            runBlocking { mutation() }
-        } else {
-            recorder.recordAuthorizedDeleteBatch(drafts, scopeKey) {
-                runBlocking { mutation() }
-            }
+            mutation()
         }
     }
 
+    private fun ReadHistoryRepository.synchronousReaderPersistence(): SynchronousReaderPersistence =
+        this as? SynchronousReaderPersistence
+            ?: error("AppSync reading persistence requires a SQLDelight synchronous mutation delegate")
     private fun draft(
         domain: String,
         entityId: String,

@@ -34,6 +34,67 @@ import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 
 class AppSyncLocalMutationRoutingTest {
     @Test
+    fun localMutationNeverLoadsTheFullResolvedState() = runBlocking {
+        val db = inMemoryDatabase()
+        val store = SqlDelightAppSyncOperationStore(db).also {
+            it.initialize("generation")
+            it.bindAccount(SyncAccountBinding("account"), AppSyncInstallationState.Active)
+        }
+        var fullStateReads = 0
+        val domainState = SqlDelightSyncDomainStateAdapter(
+            db = db,
+            materializer = DatabaseSyncDomainMaterializer(db, MapSettingsStore()),
+            nowMillis = { 100 },
+            onFullStateRead = { fullStateReads++ },
+        )
+        val recorder = AppSyncMutationRecorder(true, store, domainState, nowMillis = { 100 })
+        val repository = OperationRecordingReadHistoryRepository(
+            AndroidReadHistoryRepository(db),
+            recorder,
+        )
+
+        repository.savePosition(sampleThread())
+        repository.savePosition(sampleThread().copy(page = 2, lastVisitTime = 2))
+
+        assertEquals(0, fullStateReads)
+        assertEquals(2, store.pendingOperations().size)
+    }
+
+    @Test
+    fun entityScopedGenerationAdvancesAfterTombstoneWithoutReadingUnrelatedState() = runBlocking {
+        val db = inMemoryDatabase()
+        val store = SqlDelightAppSyncOperationStore(db).also {
+            it.initialize("generation")
+            it.bindAccount(SyncAccountBinding("account"), AppSyncInstallationState.Active)
+        }
+        var fullStateReads = 0
+        val domainState = SqlDelightSyncDomainStateAdapter(
+            db = db,
+            materializer = DatabaseSyncDomainMaterializer(db, MapSettingsStore()),
+            nowMillis = { 100 },
+            onFullStateRead = { fullStateReads++ },
+        )
+        val recorder = AppSyncMutationRecorder(true, store, domainState, nowMillis = { 100 })
+        val delegate = AndroidReadHistoryRepository(db)
+        val repository = OperationRecordingReadHistoryRepository(delegate, recorder)
+        val history = sampleThread()
+
+        repository.savePosition(history)
+        repository.deleteHistory(history.threadId, history.threadType, history.authorId)
+        repository.savePosition(history.copy(page = 3, lastVisitTime = 3))
+
+        assertEquals(0, fullStateReads)
+        assertEquals(
+            listOf(1L, 1L, 2L),
+            store.pendingOperations().map { it.entityGeneration },
+        )
+        assertEquals(
+            listOf(SyncOperationKind.Put, SyncOperationKind.Delete, SyncOperationKind.Put),
+            store.pendingOperations().map { it.kind },
+        )
+    }
+
+    @Test
     fun activeDetailNoteMutationCommitsDataAndOperationTogether() = runBlocking {
         val fixture = activeFixture()
         val repository = DetailNoteRepositoryImpl(fixture.db, fixture.recorder)

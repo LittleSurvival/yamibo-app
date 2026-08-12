@@ -175,6 +175,21 @@ private data class ThreadReaderSinglePageSession(
     val generation: Int,
 )
 
+private data class ReaderPersistenceSnapshot(
+    val history: ReadHistoryRepository.ThreadReadingHistory?,
+    val progressUpdates: List<ChapterStateRepository.ProgressUpdate>,
+)
+
+private data class ReaderPersistenceSemanticKey(
+    val history: ReadHistoryRepository.ThreadReadingHistory?,
+    val progressUpdates: List<ChapterStateRepository.ProgressUpdate>,
+)
+
+private fun ReaderPersistenceSnapshot.semanticKey() = ReaderPersistenceSemanticKey(
+    history = history?.copy(lastVisitTime = 0L),
+    progressUpdates = progressUpdates,
+)
+
 private const val FOOTER_SECTION_PREFIX = "Footer:"
 
 internal fun footerSectionAnchor(section: PostFooterSection): String = "$FOOTER_SECTION_PREFIX${section.name}"
@@ -715,7 +730,7 @@ internal fun ThreadReaderScreen(
     var hasPresentedInitialSinglePage by remember(tid, targetPid) { mutableStateOf(false) }
     var pendingTargetPid by remember(tid, targetPid) { mutableStateOf(targetPid?.value?.toLong()) }
     var lastReadingSnapshot by remember(tid) {
-        mutableStateOf<Pair<ThreadReadingHistory?, List<ChapterStateRepository.ProgressUpdate>>?>(null)
+        mutableStateOf<ReaderPersistenceSnapshot?>(null)
     }
     val threadHistoryOrigin = when {
         catalogTagId != null -> ReadHistoryRepository.ThreadHistoryOrigin.TagCatalog
@@ -2322,8 +2337,8 @@ internal fun ThreadReaderScreen(
         }
     }
 
-    suspend fun persistCurrentReadingState() {
-        if (!canWriteReadingState()) return
+    fun captureCurrentReadingSnapshot(): ReaderPersistenceSnapshot? {
+        if (!canWriteReadingState()) return null
         val history = runCatching(::buildHistory)
             .onFailure { error ->
                 Logger.w("ThreadReaderScreen", "Failed to build reading history snapshot tid=${tid.value}", error)
@@ -2336,13 +2351,39 @@ internal fun ThreadReaderScreen(
                 debugPerfLog("progress_build_error|${error::class.simpleName}|${error.message.orEmpty()}")
             }
             .getOrDefault(emptyList())
-        if (history != null || progressUpdates.isNotEmpty()) {
-            lastReadingSnapshot = history to progressUpdates
+        val snapshot = if (history != null || progressUpdates.isNotEmpty()) {
+            ReaderPersistenceSnapshot(history, progressUpdates).also { lastReadingSnapshot = it }
+        } else {
+            lastReadingSnapshot
         }
         debugPerfLog(
-            "persist_reading_state|mode=$threadReaderMode|history=${history != null}|progressUpdates=${progressUpdates.size}"
+            "capture_reading_state|mode=$threadReaderMode|history=${history != null}|progressUpdates=${progressUpdates.size}"
         )
-        persistReadingSnapshot(history, progressUpdates)
+        return snapshot
+    }
+
+    val latestPersistReadingSnapshot = remember(tid) {
+        mutableStateOf<suspend (ReaderPersistenceSnapshot) -> Unit>({})
+    }
+    latestPersistReadingSnapshot.value = { snapshot ->
+        persistReadingSnapshot(snapshot.history, snapshot.progressUpdates)
+    }
+    val persistenceScope = remember(tid) {
+        CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    }
+    val persistenceCoordinator = remember(tid, persistenceScope) {
+        LatestSnapshotPersistenceCoordinator(
+            scope = persistenceScope,
+            quietPeriodMillis = 1_000L,
+            semanticKey = ReaderPersistenceSnapshot::semanticKey,
+            persist = { snapshot -> latestPersistReadingSnapshot.value(snapshot) },
+        )
+    }
+
+    suspend fun persistCurrentReadingState(flush: Boolean = false) {
+        val snapshot = captureCurrentReadingSnapshot() ?: return
+        persistenceCoordinator.submit(snapshot)
+        if (flush) persistenceCoordinator.flush()
     }
 
     fun currentVisiblePageForAction(): Int {
@@ -2517,7 +2558,7 @@ internal fun ThreadReaderScreen(
             return
         }
         scope.launch {
-            persistCurrentReadingState()
+            persistCurrentReadingState(flush = true)
             navigator.pop()
         }
     }
@@ -3000,40 +3041,14 @@ internal fun ThreadReaderScreen(
     }
 
     val latestContentPostEndingAtIndex = rememberUpdatedState(contentPostEndingAtIndex)
-    val latestPersistCurrentReadingState = rememberUpdatedState<suspend () -> Unit> {
-        persistCurrentReadingState()
+    val latestPersistCurrentReadingState = remember(tid) {
+        mutableStateOf<suspend () -> Unit>({})
     }
-    val latestCaptureReadingSnapshot = rememberUpdatedState(
-        newValue = {
-            if (!canWriteReadingState()) {
-                null
-            } else {
-                val history = runCatching(::buildHistory)
-                    .onFailure { error ->
-                        Logger.w(
-                            "ThreadReaderScreen",
-                            "Failed to capture reading history snapshot tid=${tid.value}",
-                            error
-                        )
-                    }
-                    .getOrNull()
-                val progressUpdates = runCatching(::currentChapterUpdates)
-                    .onFailure { error ->
-                        Logger.w(
-                            "ThreadReaderScreen",
-                            "Failed to capture chapter progress snapshot tid=${tid.value}",
-                            error
-                        )
-                    }
-                    .getOrDefault(emptyList())
-                if (history != null || progressUpdates.isNotEmpty()) {
-                    history to progressUpdates
-                } else {
-                    lastReadingSnapshot
-                }
-            }
-        }
-    )
+    latestPersistCurrentReadingState.value = { persistCurrentReadingState() }
+    val latestCaptureReadingSnapshot = remember(tid) {
+        mutableStateOf<() -> ReaderPersistenceSnapshot?>({ null })
+    }
+    latestCaptureReadingSnapshot.value = { captureCurrentReadingSnapshot() }
     val latestUntitledLabel = rememberUpdatedState(i18n("（無標題）"))
     val readerScrollSession = remember(listState) { ReaderScrollSession() }
     fun recordCrossedIndices(indices: IntRange?) {
@@ -3096,26 +3111,36 @@ internal fun ThreadReaderScreen(
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
+    DisposableEffect(lifecycleOwner, persistenceCoordinator, persistenceScope) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_PAUSE) {
-                val (history, progressUpdates) = latestCaptureReadingSnapshot.value()
-                    ?: return@LifecycleEventObserver
-                CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
-                    persistReadingSnapshot(history, progressUpdates)
+                val snapshot = latestCaptureReadingSnapshot.value() ?: return@LifecycleEventObserver
+                persistenceScope.launch {
+                    persistenceCoordinator.submit(snapshot)
+                    persistenceCoordinator.flush()
                 }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
+            val snapshot = latestCaptureReadingSnapshot.value()
+            if (snapshot == null) {
+                persistenceScope.cancel()
+            } else {
+                CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
+                    persistenceCoordinator.submit(snapshot)
+                    persistenceCoordinator.flush()
+                    persistenceScope.cancel()
+                }
+            }
         }
     }
 
     LaunchedEffect(drawerState.isOpen, state, readerEntries, canPersistReadingState) {
         if (!drawerState.isOpen || state != ReaderState.Success || !canPersistReadingState) return@LaunchedEffect
         try {
-            persistCurrentReadingState()
+            persistCurrentReadingState(flush = true)
         } catch (error: Exception) {
             Logger.e("ThreadReaderScreen", "Failed to persist reading state when drawer opened tid=${tid.value}", error)
         }
@@ -3354,8 +3379,9 @@ internal fun ThreadReaderScreen(
                                 val activeGeneration = readerScrollSession.activeGeneration()
                                 if (activeGeneration != null) {
                                     latestFinishScrollSession.value(activeGeneration)
+                                    persistenceCoordinator.flush()
                                 } else {
-                                    persistCurrentReadingState()
+                                    persistCurrentReadingState(flush = true)
                                 }
                                 if (post != null) {
                                     drawerState.close()
@@ -4633,7 +4659,7 @@ internal fun ThreadReaderScreen(
                         onBack = { saveCurrentHistoryAndPop() },
                         onCatalog = {
                             scope.launch {
-                                persistCurrentReadingState()
+                                persistCurrentReadingState(flush = true)
                                 drawerState.open()
                             }
                         },
