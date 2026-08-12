@@ -118,7 +118,7 @@ class LocalNovelRepositoryImpl(
     }
 }
 
-private fun me.thenano.yamibo.yamiboapp.LocalNovel.toInfo(): LocalNovelInfo = LocalNovelInfo(
+private fun me.thenano.yamibo.yamibo_app.LocalNovel.toInfo(): LocalNovelInfo = LocalNovelInfo(
     id = id,
     fileType = LocalNovelFileType.fromString(fileType),
     title = title,
@@ -133,7 +133,7 @@ private fun me.thenano.yamibo.yamiboapp.LocalNovel.toInfo(): LocalNovelInfo = Lo
     lastReadAt = lastReadAt,
 )
 
-private fun me.thenano.yamibo.yamiboapp.LocalNovelChapter.toInfo(): LocalNovelChapterInfo = LocalNovelChapterInfo(
+private fun me.thenano.yamibo.yamibo_app.LocalNovelChapter.toInfo(): LocalNovelChapterInfo = LocalNovelChapterInfo(
     id = id,
     novelId = novelId,
     title = title,
@@ -143,7 +143,7 @@ private fun me.thenano.yamibo.yamiboapp.LocalNovelChapter.toInfo(): LocalNovelCh
     internalPath = internalPath,
 )
 
-private fun me.thenano.yamibo.yamiboapp.LocalNovelProgress.toInfo(): LocalNovelProgressInfo = LocalNovelProgressInfo(
+private fun me.thenano.yamibo.yamibo_app.LocalNovelProgress.toInfo(): LocalNovelProgressInfo = LocalNovelProgressInfo(
     novelId = novelId,
     chapterId = chapterId,
     charOffset = charOffset,
