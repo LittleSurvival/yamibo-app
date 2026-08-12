@@ -45,7 +45,6 @@ import me.thenano.yamibo.yamibo_app.components.feedback.YamiboDetailedErrorConte
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboHomeTopBar
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.event.AppEventBus
-import me.thenano.yamibo.yamibo_app.event.events.HomePageLoadedEvent
 import me.thenano.yamibo.yamibo_app.event.events.LoginSuccessEvent
 import me.thenano.yamibo.yamibo_app.forum.IForumScreen
 import me.thenano.yamibo.yamibo_app.forum.search.ISearchScreen
@@ -84,10 +83,7 @@ fun HomePageScreen(
         val result = forumRepository.fetchHomePage()
         state =
             when (result) {
-                is YamiboResult.Success -> {
-                    AppEventBus.emit(HomePageLoadedEvent)
-                    HomeState.Success(result.value)
-                }
+                is YamiboResult.Success -> HomeState.Success(result.value)
                 else -> HomeState.Error(i18n(result.message()))
             }
     }
@@ -98,10 +94,7 @@ fun HomePageScreen(
         if (cached != null) {
             state = HomeState.Success(cached)
             when (val result = forumRepository.fetchHomePage()) {
-                is YamiboResult.Success -> {
-                    state = HomeState.Success(result.value)
-                    AppEventBus.emit(HomePageLoadedEvent)
-                }
+                is YamiboResult.Success -> state = HomeState.Success(result.value)
                 else -> Unit
             }
         } else {
