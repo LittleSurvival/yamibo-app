@@ -23,11 +23,16 @@ import me.thenano.yamibo.yamibo_app.navigation.rememberRestorableNavigator
 import me.thenano.yamibo.yamibo_app.network.IOSYamiboClientProvider
 import me.thenano.yamibo.yamibo_app.profile.settings.access.IOSBackgroundAccessRepository
 import me.thenano.yamibo.yamibo_app.profile.settings.backup.IOSBackupScheduler
+import me.thenano.yamibo.yamibo_app.profile.settings.backup.IOSPanCloudBackupScheduler
 import me.thenano.yamibo.yamibo_app.profile.settings.sign.IOSSignReminderScheduler
 import me.thenano.yamibo.yamibo_app.repository.*
 import me.thenano.yamibo.yamibo_app.repository.localnovel.IOSLocalNovelRepository
 import me.thenano.yamibo.yamibo_app.repository.localnovel.PlatformFileOperations
 import me.thenano.yamibo.yamibo_app.repository.backup.BackupRepositoryImpl
+import me.thenano.yamibo.yamibo_app.repository.pancloud.PanCloudAccountRepository
+import me.thenano.yamibo.yamibo_app.repository.pancloud.PanCloudApiClient
+import me.thenano.yamibo.yamibo_app.repository.pancloud.PanCloudBackupStorageProvider
+import me.thenano.yamibo.yamibo_app.factory.HttpClientFactory
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncService
 import me.thenano.yamibo.yamibo_app.repository.chineseconversion.createChineseConversionRepository
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadImageFetcher
@@ -208,6 +213,22 @@ fun MainViewController() = ComposeUIViewController {
     remember(appSyncService, backupRepository) {
         appSyncService.registerLocalSnapshotSource(backupRepository)
     }
+    val panCloudApiClient = remember { PanCloudApiClient(HttpClientFactory.create()) }
+    val panCloudAccountRepository = remember {
+        PanCloudAccountRepository(panCloudApiClient, appSettingsRepository)
+    }
+    val panCloudBackupRepository = remember {
+        BackupRepositoryImpl(
+            db = appDatabase,
+            settingsStore = settingsStore,
+            settingsRegistries = listOf(appSettingsRepository, novelReaderSettingsRepository, mangaReaderSettingsRepository),
+            storageProvider = PanCloudBackupStorageProvider(panCloudApiClient, panCloudAccountRepository),
+            appVersionCode = AppVersion.VersionCode.toInt(),
+        )
+    }
+    androidx.compose.runtime.LaunchedEffect(panCloudAccountRepository) {
+        panCloudAccountRepository.restoreSession()
+    }
     val downloadRepository = remember {
         DownloadRepositoryImpl(
             threadRepository = threadRepository,
@@ -218,6 +239,7 @@ fun MainViewController() = ComposeUIViewController {
         )
     }
     val backupScheduler = remember { IOSBackupScheduler() }
+    val panCloudBackupScheduler = remember { IOSPanCloudBackupScheduler() }
     val appSyncBackgroundScheduler = remember { IOSAppSyncBackgroundScheduler() }
     val appSyncLifecycleController = remember(appSyncService, appSyncBackgroundScheduler) {
         AppSyncLifecycleController(appSyncService, appSyncBackgroundScheduler)
@@ -277,7 +299,10 @@ fun MainViewController() = ComposeUIViewController {
         LocalUserSpaceRepository provides userSpaceRepository,
         LocalBlogRepository provides blogRepository,
         LocalBackupRepository provides backupRepository,
+        LocalPanCloudBackupRepository provides panCloudBackupRepository,
+        LocalPanCloudAccountRepository provides panCloudAccountRepository,
         LocalBackupScheduler provides backupScheduler,
+        LocalPanCloudBackupScheduler provides panCloudBackupScheduler,
         LocalDownloadRepository provides downloadRepository,
         LocalChineseConversionRepository provides chineseConversionRepository,
         LocalDetailNoteRepository provides detailNoteRepository,

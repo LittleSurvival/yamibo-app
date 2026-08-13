@@ -308,6 +308,30 @@ class AppSettingsRepository(store: SettingsStore) : SettingsRegistry(store, pref
         default = "",
     )
 
+    /** 網盤 refresh_token（device-local secret，不進備份） */
+    val panCloudRefreshToken by stringSetting(
+        name = "pan_cloud_refresh_token",
+        default = "",
+    )
+
+    /** 網盤 yamibo 資料夾 ID */
+    val panCloudFolderId by stringSetting(
+        name = "pan_cloud_folder_id",
+        default = "",
+    )
+
+    /** 網盤帳戶使用者名稱 */
+    val panCloudUsername by stringSetting(
+        name = "pan_cloud_username",
+        default = "",
+    )
+
+    /** 網盤雲端備份自動排程開關 */
+    val panCloudAutoBackupEnabled by boolSetting(
+        name = "pan_cloud_auto_backup_enabled",
+        default = false,
+    )
+
     /** 簽到行為 */
     val signInMode by enumSetting(
         name = "sign_in_mode",

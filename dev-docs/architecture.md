@@ -278,6 +278,24 @@ AppSync 把收藏/设置/阅读记录同步到云端，`shared/.../repository/ap
 - 复制本章内容（`ThreadReaderScreen` 的 `copyChapter`，复制当前章 HTML → 纯文本）。
 - 本地阅读分章、断点续读的 UI 重构（本地提交 `dfd09be` 等）。
 
+### 7.4 网盘云端备份（pancloud）
+
+以第三方网盘（Cloud Nine，见仓库根 `API.md`）作为云端备份的唯一方式，替代暂不可用的
+AppSync 云端同步。语义是**快照式整档备份**（上传/下载 + Merge/Overwrite 还原），不是多装置增量同步。
+
+- 设计文档：`dev-docs/pan-cloud-backup-plan.md`。
+- 数据层 `shared/.../repository/pancloud/`：
+  - `PanCloudApiClient`：网盘 REST 客户端（Ktor，`HttpClientFactory`），统一解析
+    `{success, data, message, error}`，401 自动刷新重试；上传按 ≤10MB 单档直传 / >10MB 分块。
+  - `PanCloudAccountRepository`：注册/登录/登出/会话恢复 + `yamibo` 文件夹幂等绑定。
+  - `PanCloudBackupStorageProvider`：实现 `BackupStorageProvider`，把 `.yamibobak` gzip 后
+    上传到网盘 `yamibo` 文件夹，下载时 gunzip；复用 `BackupRepositoryImpl` 的生成/还原逻辑。
+- 凭证：`AppSettingsRepository` 的 `pan_cloud_*` 设置；refresh_token 不进备份
+  （`BackupRepositoryImpl.shouldSkipSetting` 黑名单）。
+- UI：`composeApp/.../profile/settings/backup/PanCloudBackupScreen.kt`（登录/注册/手动备份/恢复/登出/自动备份开关）。
+- 自动备份：`PanCloudBackupWorker` + `AndroidPanCloudBackupScheduler`（WorkManager）；
+  iOS 为 stub（`IOSPanCloudBackupScheduler`）。
+
 ## 8. 平台实现要点
 
 ### 8.1 Android

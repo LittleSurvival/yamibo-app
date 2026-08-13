@@ -855,3 +855,20 @@ Current cache size: {}","清除圖片、頁面與其他暫存資料，釋放目�
 "💡 tips : 標籤頁面類似常規漫畫App, 推薦用於收藏漫畫","💡 Tip: Tag pages are similar to standard comic apps, recommended for saving comics","💡 tips : 標籤頁面類似常規漫畫App, 推薦用於收藏漫畫","💡 tips : 标签页面类似常规漫画App, 推荐用于收藏漫画"
 💬 點評,💬 Comment,💬 點評,💬 点评
 📎 附件,📎 Attachment,📎 附件,📎 附件
+備份檔案將上傳至網盤的 yamibo 資料夾，並可跨裝置恢復。,Backup files are uploaded to the yamibo folder on your cloud drive and can be restored across devices.,備份檔案將上傳至網盤的 yamibo 資料夾，並可跨裝置恢復。,备份文件将上传至网盘的 yamibo 文件夹，并可跨设备恢复。
+已登入網盤：{},Signed in to cloud drive: {},已登入網盤：{},已登录网盘：{}
+已登出網盤,Signed out of cloud drive,已登出網盤,已登出网盘
+帳戶已存在，請改用登入,"Account already exists, please log in instead",帳戶已存在，請改用登入,账户已存在，请改用登录
+帳戶：{},Account: {},帳戶：{},账户：{}
+帳號,Username,帳號,账号
+改用登入,Log in instead,改用登入,改用登录
+改用註冊,Register instead,改用註冊,改用注册
+登入網盤帳戶,Sign in to cloud drive,登入網盤帳戶,登录网盘账户
+登入網盤帳戶，將備份上傳至 yamibo 資料夾,Sign in to your cloud drive to upload backups to the yamibo folder,登入網盤帳戶，將備份上傳至 yamibo 資料夾,登录网盘账户，将备份上传至 yamibo 文件夹
+網盤備份檔案,Cloud drive backup files,網盤備份檔案,网盘备份文件
+網盤操作失敗,Cloud drive operation failed,網盤操作失敗,网盘操作失败
+網盤雲端備份,Cloud drive backup,網盤雲端備份,网盘云端备份
+註冊,Register,註冊,注册
+請輸入帳號與密碼,Please enter username and password,請輸入帳號與密碼,请输入账号与密码
+還原,Restore,還原,还原
+點擊檔案可還原,Tap a file to restore,點擊檔案可還原,点击文件可还原

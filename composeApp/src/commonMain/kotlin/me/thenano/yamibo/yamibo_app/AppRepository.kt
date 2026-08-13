@@ -12,6 +12,7 @@ import me.thenano.yamibo.yamibo_app.appsync.AppSyncBackgroundScheduler
 import me.thenano.yamibo.yamibo_app.repository.AppUpdateRepository
 import me.thenano.yamibo.yamibo_app.repository.BlogRepository
 import me.thenano.yamibo.yamibo_app.repository.BackupRepository
+import me.thenano.yamibo.yamibo_app.repository.pancloud.PanCloudAccountRepository
 import me.thenano.yamibo.yamibo_app.repository.ChineseConversionRepository
 import me.thenano.yamibo.yamibo_app.repository.ContentCoverRepository
 import me.thenano.yamibo.yamibo_app.repository.DetailNoteRepository
@@ -88,8 +89,17 @@ val LocalBlogRepository =
 val LocalBackupRepository =
     compositionLocalOf<BackupRepository> { error("LocalBackupRepository not provided") }
 
+val LocalPanCloudBackupRepository =
+    compositionLocalOf<BackupRepository> { error("LocalPanCloudBackupRepository not provided") }
+
+val LocalPanCloudAccountRepository =
+    compositionLocalOf<PanCloudAccountRepository> { error("LocalPanCloudAccountRepository not provided") }
+
 val LocalBackupScheduler =
     compositionLocalOf<BackupScheduler> { error("LocalBackupScheduler not provided") }
+
+val LocalPanCloudBackupScheduler =
+    compositionLocalOf<BackupScheduler> { error("LocalPanCloudBackupScheduler not provided") }
 
 val LocalDownloadRepository =
     compositionLocalOf<DownloadRepository> { error("LocalDownloadRepository not provided") }
