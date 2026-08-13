@@ -6,12 +6,15 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncCheckpointR
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalLoadResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalPublishResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalRemote
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalRetirementRemoteResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.LoadedAppSyncCheckpoint
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.LoadedAppSyncJournal
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncJournalRetirementIntent
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncAccountBinding
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncReplicaKey
 import me.thenano.yamibo.yamibo_app.repository.pancloud.PanCloudAccountRepository
 import me.thenano.yamibo.yamibo_app.repository.pancloud.PanCloudApiClient
+import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
 
 /**
  * 网盘实现 [AppSyncJournalRemote]：把 AppSync 的 Index / Journal / Checkpoint 映射为
@@ -29,6 +32,7 @@ internal class PanCloudJournalRemote(
     private val journalCodec: AppSyncJournalEnvelopeCodec = AppSyncJournalEnvelopeCodec(),
     private val indexCodec: AppSyncIndexEnvelopeCodec = AppSyncIndexEnvelopeCodec(),
     private val checkpointCodec: AppSyncCheckpointEnvelopeCodec = AppSyncCheckpointEnvelopeCodec(),
+    private val nowMillis: () -> Long = ::currentTimeMillis,
 ) : AppSyncJournalRemote {
 
     @Suppress("UNUSED_PARAMETER")
@@ -237,11 +241,119 @@ internal class PanCloudJournalRemote(
         }
     }
 
+    override suspend fun publishRetirementIndex(
+        intent: AppSyncJournalRetirementIntent,
+        formHash: FormHash,
+    ): AppSyncJournalRetirementRemoteResult {
+        val current = readIndex()
+            ?: return AppSyncJournalRetirementRemoteResult.RetryableFailure(
+                "尚未取得可驗證的同步 index",
+            )
+        val retirement = AppSyncIndexRetirementReference(
+            replicaKey = intent.replicaKey,
+            blogId = intent.sourceBlogId.toInt(),
+            fingerprint = intent.fingerprint,
+            publishedThroughSequence = intent.publishedThroughSequence,
+            checkpointId = intent.checkpointId,
+        )
+        val payload = current.copy(
+            journals = current.journals.filterNot { it.replicaKey == intent.replicaKey },
+            retirements = current.retirements
+                .filterNot { it.replicaKey == intent.replicaKey } + retirement,
+            updatedAtEpochMillis = nowMillis(),
+        )
+        val write = writeIndex(payload)
+        if (write.isFailure) {
+            return AppSyncJournalRetirementRemoteResult.RetryableFailure(
+                write.exceptionOrNull()?.message ?: "index write failed",
+            )
+        }
+        val reloaded = readIndex()
+        if (reloaded != null &&
+            reloaded.retirements.any { it == retirement } &&
+            reloaded.journals.none { it.replicaKey == intent.replicaKey }
+        ) {
+            return AppSyncJournalRetirementRemoteResult.Verified
+        }
+        return AppSyncJournalRetirementRemoteResult.RetryableFailure(
+            "index retirement metadata reload verification failed",
+        )
+    }
+
+    override suspend fun deleteRetiredJournal(
+        intent: AppSyncJournalRetirementIntent,
+        formHash: FormHash,
+    ): AppSyncJournalRetirementRemoteResult {
+        val parentId = folderId()
+            ?: return AppSyncJournalRetirementRemoteResult.RetryableFailure("網盤資料夾尚未綁定")
+        val fileName = JOURNAL_PREFIX + sanitize(intent.replicaKey) + FILE_SUFFIX
+        val files = try {
+            apiClient.listFiles(parentId = parentId)
+        } catch (error: Throwable) {
+            return AppSyncJournalRetirementRemoteResult.RetryableFailure(
+                error.message ?: "list failed",
+            )
+        }
+        val entry = files.firstOrNull { it.name == fileName }
+            ?: return AppSyncJournalRetirementRemoteResult.Verified
+
+        downloadText(entry.id)?.let { text ->
+            when (val result = journalCodec.validate(text)) {
+                is AppSyncJournalValidation.Valid -> {
+                    if (result.envelope.fingerprint != intent.fingerprint ||
+                        result.envelope.payload.resolvedPublishedThroughSequence() !=
+                        intent.publishedThroughSequence
+                    ) {
+                        return AppSyncJournalRetirementRemoteResult.TerminalFailure(
+                            "Journal changed after retirement proof",
+                        )
+                    }
+                }
+                is AppSyncJournalValidation.Invalid ->
+                    return AppSyncJournalRetirementRemoteResult.TerminalFailure(
+                        "Journal 損壞，無法驗證退休",
+                    )
+            }
+        }
+        return try {
+            apiClient.deleteFile(entry.id)
+            AppSyncJournalRetirementRemoteResult.Verified
+        } catch (error: Throwable) {
+            AppSyncJournalRetirementRemoteResult.RetryableFailure(error.message ?: "delete failed")
+        }
+    }
+
     private suspend fun folderId(): String? =
         accountRepository.ensureFolderBound().getOrNull()
 
     private suspend fun downloadText(fileId: String): String? =
         runCatching { apiClient.downloadFile(fileId).decodeToString() }.getOrNull()
+
+    private suspend fun readIndex(): AppSyncIndexPayload? {
+        val parentId = folderId() ?: return null
+        val files = try {
+            apiClient.listFiles(parentId = parentId)
+        } catch (_: Throwable) {
+            return null
+        }
+        val entry = files.firstOrNull { it.name == INDEX_FILE } ?: return null
+        val text = downloadText(entry.id) ?: return null
+        return when (val result = indexCodec.validate(text)) {
+            is AppSyncIndexValidation.Valid -> result.envelope.payload
+            is AppSyncIndexValidation.Invalid -> null
+        }
+    }
+
+    private suspend fun writeIndex(payload: AppSyncIndexPayload): Result<Unit> {
+        val parentId = folderId()
+            ?: return Result.failure(IllegalStateException("網盤資料夾尚未綁定"))
+        return runCatching {
+            val encoded = indexCodec.encode(payload)
+            val files = apiClient.listFiles(parentId = parentId)
+            files.firstOrNull { it.name == INDEX_FILE }?.let { apiClient.deleteFile(it.id) }
+            apiClient.uploadFile(encoded.encodeToByteArray(), INDEX_FILE, MIME_TYPE, parentId)
+        }
+    }
 
     private fun journalFileName(payload: AppSyncJournalPayload): String =
         JOURNAL_PREFIX + sanitize(
