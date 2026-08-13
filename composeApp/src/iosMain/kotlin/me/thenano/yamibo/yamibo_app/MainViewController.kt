@@ -23,7 +23,6 @@ import me.thenano.yamibo.yamibo_app.navigation.rememberRestorableNavigator
 import me.thenano.yamibo.yamibo_app.network.IOSYamiboClientProvider
 import me.thenano.yamibo.yamibo_app.profile.settings.access.IOSBackgroundAccessRepository
 import me.thenano.yamibo.yamibo_app.profile.settings.backup.IOSBackupScheduler
-import me.thenano.yamibo.yamibo_app.profile.settings.backup.IOSPanCloudBackupScheduler
 import me.thenano.yamibo.yamibo_app.profile.settings.sign.IOSSignReminderScheduler
 import me.thenano.yamibo.yamibo_app.repository.*
 import me.thenano.yamibo.yamibo_app.repository.localnovel.IOSLocalNovelRepository
@@ -215,7 +214,7 @@ fun MainViewController() = ComposeUIViewController {
     }
     val panCloudApiClient = remember { PanCloudApiClient(HttpClientFactory.create()) }
     val panCloudAccountRepository = remember {
-        PanCloudAccountRepository(panCloudApiClient, appSettingsRepository)
+        PanCloudAccountRepository(panCloudApiClient, AppSettingsRepository(IOSSettingsStore()))
     }
     val panCloudBackupRepository = remember {
         BackupRepositoryImpl(
@@ -226,7 +225,8 @@ fun MainViewController() = ComposeUIViewController {
             appVersionCode = AppVersion.VersionCode.toInt(),
         )
     }
-    androidx.compose.runtime.LaunchedEffect(panCloudAccountRepository) {
+    androidx.compose.runtime.LaunchedEffect(appSyncService, panCloudApiClient, panCloudAccountRepository) {
+        appSyncService.attachPanCloud(panCloudApiClient, panCloudAccountRepository)
         panCloudAccountRepository.restoreSession()
     }
     val downloadRepository = remember {
@@ -239,7 +239,6 @@ fun MainViewController() = ComposeUIViewController {
         )
     }
     val backupScheduler = remember { IOSBackupScheduler() }
-    val panCloudBackupScheduler = remember { IOSPanCloudBackupScheduler() }
     val appSyncBackgroundScheduler = remember { IOSAppSyncBackgroundScheduler() }
     val appSyncLifecycleController = remember(appSyncService, appSyncBackgroundScheduler) {
         AppSyncLifecycleController(appSyncService, appSyncBackgroundScheduler)
@@ -302,7 +301,6 @@ fun MainViewController() = ComposeUIViewController {
         LocalPanCloudBackupRepository provides panCloudBackupRepository,
         LocalPanCloudAccountRepository provides panCloudAccountRepository,
         LocalBackupScheduler provides backupScheduler,
-        LocalPanCloudBackupScheduler provides panCloudBackupScheduler,
         LocalDownloadRepository provides downloadRepository,
         LocalChineseConversionRepository provides chineseConversionRepository,
         LocalDetailNoteRepository provides detailNoteRepository,

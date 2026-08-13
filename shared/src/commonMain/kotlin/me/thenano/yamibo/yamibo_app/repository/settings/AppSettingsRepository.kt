@@ -120,6 +120,11 @@ enum class SignInMode(val label: String) {
     FULL_MANUAL("full_manual"),
 }
 
+enum class AppSyncBackend(val label: String) {
+    FORUM("forum"),
+    PAN_CLOUD("pan_cloud"),
+}
+
 enum class SignReminderFrequency(val label: String, val timesPerDay: Int) {
     OFF("off", 0),
     ONCE_A_DAY("1x_day", 1),
@@ -314,6 +319,12 @@ class AppSettingsRepository(store: SettingsStore) : SettingsRegistry(store, pref
         default = "",
     )
 
+    /** 網盤密碼（加密落盤，用於 refresh_token 過期後自動重登；不進備份） */
+    val panCloudPassword by stringSetting(
+        name = "pan_cloud_password",
+        default = "",
+    )
+
     /** 網盤 yamibo 資料夾 ID */
     val panCloudFolderId by stringSetting(
         name = "pan_cloud_folder_id",
@@ -326,10 +337,16 @@ class AppSettingsRepository(store: SettingsStore) : SettingsRegistry(store, pref
         default = "",
     )
 
-    /** 網盤雲端備份自動排程開關 */
-    val panCloudAutoBackupEnabled by boolSetting(
-        name = "pan_cloud_auto_backup_enabled",
+    /** 備份時同時上傳到網盤（手動與自動備份都遵循） */
+    val backupToCloudEnabled by boolSetting(
+        name = "backup_to_cloud_enabled",
         default = false,
+    )
+
+    /** 雲端同步後端（論壇 Blog / 網盤，二選一） */
+    val appSyncBackend by enumSetting(
+        name = "app_sync_backend",
+        default = AppSyncBackend.FORUM,
     )
 
     /** 簽到行為 */

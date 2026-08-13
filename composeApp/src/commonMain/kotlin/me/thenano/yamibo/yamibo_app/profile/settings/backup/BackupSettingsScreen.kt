@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -21,6 +22,8 @@ import kotlinx.coroutines.launch
 import me.thenano.yamibo.yamibo_app.LocalAppSettingsRepository
 import me.thenano.yamibo.yamibo_app.LocalBackupRepository
 import me.thenano.yamibo.yamibo_app.LocalBackupScheduler
+import me.thenano.yamibo.yamibo_app.LocalPanCloudAccountRepository
+import me.thenano.yamibo.yamibo_app.LocalPanCloudBackupRepository
 import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBar
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
@@ -29,9 +32,12 @@ import me.thenano.yamibo.yamibo_app.i18n.localizedLabel
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.profile.settings.components.SettingsChipRow
 import me.thenano.yamibo.yamibo_app.repository.BackupRepository
+import me.thenano.yamibo.yamibo_app.repository.pancloud.PanCloudApiException
 import me.thenano.yamibo.yamibo_app.repository.settings.BackupInterval
 import me.thenano.yamibo.yamibo_app.util.formatStorageSize
 import me.thenano.yamibo.yamibo_app.util.state
+import me.thenano.yamibo.yamibo_app.profile.settings.cloud.CloudAuthMode
+import me.thenano.yamibo.yamibo_app.profile.settings.cloud.CloudLoginDialog
 import kotlin.math.roundToInt
 
 @Composable
@@ -39,6 +45,8 @@ internal fun BackupSettingsScreen() {
     val colors = YamiboTheme.colors
     val navigator = LocalNavigator.current
     val repository = LocalBackupRepository.current
+    val cloudRepository = LocalPanCloudBackupRepository.current
+    val cloudAccount = LocalPanCloudAccountRepository.current
     val scheduler = LocalBackupScheduler.current
     val appSettingsRepository = LocalAppSettingsRepository.current
     val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
@@ -49,14 +57,83 @@ internal fun BackupSettingsScreen() {
     var folderLabel by remember { mutableStateOf<String?>(null) }
     var storageBytes by remember { mutableLongStateOf(0L) }
     var backupFiles by remember { mutableStateOf<List<BackupRepository.BackupFileInfo>>(emptyList()) }
+    var cloudLoggedIn by remember { mutableStateOf(false) }
+    var cloudUsername by remember { mutableStateOf<String?>(null) }
+    var cloudStorageBytes by remember { mutableLongStateOf(0L) }
+    var cloudBackupFiles by remember { mutableStateOf<List<BackupRepository.BackupFileInfo>>(emptyList()) }
+    var backupToCloud by remember { mutableStateOf(appSettingsRepository.backupToCloudEnabled.getValue()) }
     var working by remember { mutableStateOf(false) }
     var pendingRestoreUri by remember { mutableStateOf<String?>(null) }
+    var pendingRestoreCloud by remember { mutableStateOf<BackupRepository.BackupFileInfo?>(null) }
     var showCreateBackupDialog by remember { mutableStateOf(false) }
+    var showCloudLogin by remember { mutableStateOf(false) }
 
     suspend fun refresh() {
+        cloudAccount.restoreSession()
         folderLabel = repository.getSelectedFolderLabel()
         storageBytes = repository.getBackupStorageBytes()
         backupFiles = repository.listBackupFiles()
+        cloudLoggedIn = cloudAccount.status.loggedIn
+        cloudUsername = cloudAccount.status.username
+        if (cloudLoggedIn) {
+            cloudStorageBytes = cloudRepository.getBackupStorageBytes()
+            cloudBackupFiles = cloudRepository.listBackupFiles()
+        } else {
+            cloudStorageBytes = 0L
+            cloudBackupFiles = emptyList()
+        }
+    }
+
+    fun createBackup(name: String?) {
+        coroutineScope.launch {
+            working = true
+            val customName = name?.takeIf { it.isNotBlank() }
+            val local = repository.createBackup(automatic = false, customName = customName)
+            val cloud = if (backupToCloud && cloudLoggedIn) {
+                cloudRepository.createBackup(automatic = false, customName = customName)
+            } else {
+                null
+            }
+            refresh()
+            when {
+                local.isSuccess && cloud?.isSuccess != false ->
+                    feedbackController.post(i18n("已建立備份：{}", local.getOrThrow().name))
+                local.isFailure ->
+                    feedbackController.post(local.exceptionOrNull()?.message ?: i18n("建立備份失敗"))
+                cloud?.isFailure == true ->
+                    feedbackController.post(
+                        i18n("網盤備份失敗：{}", cloud.exceptionOrNull()?.message ?: ""),
+                    )
+            }
+            working = false
+        }
+    }
+
+    fun submitCloudAuth(username: String, password: String, mode: CloudAuthMode) {
+        if (username.isBlank() || password.isBlank()) {
+            feedbackController.post(i18n("請輸入帳號與密碼"))
+            return
+        }
+        coroutineScope.launch {
+            working = true
+            val result = when (mode) {
+                CloudAuthMode.Login -> cloudAccount.login(username.trim(), password)
+                CloudAuthMode.Register -> cloudAccount.register(username.trim(), password)
+            }
+            result
+                .onSuccess {
+                    refresh()
+                    feedbackController.post(i18n("已登入網盤：{}", username.trim()))
+                }
+                .onFailure { error ->
+                    if (error is PanCloudApiException && error.statusCode == 409) {
+                        feedbackController.post(i18n("帳戶已存在，請改用登入"))
+                    } else {
+                        feedbackController.post(error.message ?: i18n("網盤操作失敗"))
+                    }
+                }
+            working = false
+        }
     }
 
     val fileActions = rememberBackupFileActions(
@@ -108,6 +185,26 @@ internal fun BackupSettingsScreen() {
                 color = colors.textDark.copy(alpha = 0.68f),
             )
 
+            CloudBackupCard(
+                loggedIn = cloudLoggedIn,
+                username = cloudUsername,
+                storageBytes = cloudStorageBytes,
+                backupCount = cloudBackupFiles.size,
+                backupToCloud = backupToCloud,
+                onToggleBackupToCloud = { enabled ->
+                    backupToCloud = enabled
+                    appSettingsRepository.backupToCloudEnabled.setValue(enabled)
+                },
+                onLogin = { showCloudLogin = true },
+                onLogout = {
+                    coroutineScope.launch {
+                        cloudAccount.logout()
+                        refresh()
+                        feedbackController.post(i18n("已登出網盤"))
+                    }
+                },
+            )
+
             BackupSettingCard(
                 interval = backupInterval,
                 onIntervalChange = { interval ->
@@ -125,7 +222,19 @@ internal fun BackupSettingsScreen() {
             )
 
             if (backupFiles.isNotEmpty()) {
-                BackupFileListCard(backupFiles)
+                BackupFileListCard(
+                    title = i18n("本地備份檔案"),
+                    files = backupFiles,
+                    onRestore = { pendingRestoreUri = it.uri },
+                )
+            }
+
+            if (cloudLoggedIn && cloudBackupFiles.isNotEmpty()) {
+                BackupFileListCard(
+                    title = i18n("網盤備份檔案"),
+                    files = cloudBackupFiles,
+                    onRestore = { pendingRestoreCloud = it },
+                )
             }
         }
     }
@@ -152,24 +261,44 @@ internal fun BackupSettingsScreen() {
         )
     }
 
+    pendingRestoreCloud?.let { file ->
+        RestoreModeDialog(
+            onDismiss = { pendingRestoreCloud = null },
+            onSelect = { mode ->
+                pendingRestoreCloud = null
+                coroutineScope.launch {
+                    working = true
+                    cloudRepository.restoreBackup(file.uri, mode)
+                        .onSuccess {
+                            refresh()
+                            feedbackController.post(restoreSummaryText(it))
+                        }
+                        .onFailure { error ->
+                            feedbackController.post(error.message ?: i18n("還原備份失敗"))
+                        }
+                    working = false
+                }
+            },
+        )
+    }
+
     if (showCreateBackupDialog) {
         CreateBackupDialog(
             onDismiss = { showCreateBackupDialog = false },
             onConfirm = { name ->
                 showCreateBackupDialog = false
-                coroutineScope.launch {
-                    working = true
-                    repository.createBackup(automatic = false, customName = name.takeIf { it.isNotBlank() })
-                        .onSuccess {
-                            refresh()
-                            feedbackController.post(i18n("已建立備份：{}", it.name))
-                        }
-                        .onFailure { error ->
-                            Logger.e("BackupSettingsScreen", "Failed to create backup", error)
-                            feedbackController.post(error.message ?: i18n("建立備份失敗"))
-                        }
-                    working = false
-                }
+                createBackup(name)
+            },
+        )
+    }
+
+    if (showCloudLogin) {
+        CloudLoginDialog(
+            working = working,
+            onDismiss = { showCloudLogin = false },
+            onSubmit = { username, password, mode ->
+                showCloudLogin = false
+                submitCloudAuth(username, password, mode)
             },
         )
     }
@@ -217,6 +346,82 @@ private fun BackupInfoCard(
                 modifier = Modifier.weight(1f),
             )
             SmallBackupButton(text = i18n("選擇資料夾"), onClick = onSelectFolder)
+        }
+    }
+}
+
+@Composable
+private fun CloudBackupCard(
+    loggedIn: Boolean,
+    username: String?,
+    storageBytes: Long,
+    backupCount: Int,
+    backupToCloud: Boolean,
+    onToggleBackupToCloud: (Boolean) -> Unit,
+    onLogin: () -> Unit,
+    onLogout: () -> Unit,
+) {
+    val colors = YamiboTheme.colors
+    BackupCard {
+        Text(i18n("網盤雲端備份"), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = colors.textStrong)
+        Spacer(Modifier.height(6.dp))
+        if (loggedIn) {
+            Text(
+                text = i18n("網盤：{}", username ?: ""),
+                fontSize = 13.sp,
+                color = colors.textDark.copy(alpha = 0.7f),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = i18n("已使用 {}，{} 個備份檔", formatStorageSize(storageBytes), backupCount),
+                fontSize = 13.sp,
+                color = colors.textDark.copy(alpha = 0.65f),
+            )
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = i18n("備份到網盤"),
+                    fontSize = 14.sp,
+                    color = colors.textDark,
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(
+                    checked = backupToCloud,
+                    onCheckedChange = onToggleBackupToCloud,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = colors.brownDeep,
+                        checkedTrackColor = colors.brownPrimary,
+                    ),
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = i18n("備份檔案將上傳至網盤的 yamibo 資料夾"),
+                    fontSize = 12.sp,
+                    color = colors.textDark.copy(alpha = 0.55f),
+                    modifier = Modifier.weight(1f),
+                )
+                SmallBackupButton(text = i18n("登出"), onClick = onLogout)
+            }
+        } else {
+            Text(
+                text = i18n("網盤：未登入"),
+                fontSize = 13.sp,
+                color = colors.textDark.copy(alpha = 0.7f),
+            )
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = i18n("登入網盤帳戶，將備份上傳至 yamibo 資料夾"),
+                    fontSize = 12.sp,
+                    color = colors.textDark.copy(alpha = 0.55f),
+                    modifier = Modifier.weight(1f),
+                )
+                SmallBackupButton(text = i18n("登入"), onClick = onLogin)
+            }
         }
     }
 }
@@ -293,10 +498,14 @@ private fun BackupActionCard(
 }
 
 @Composable
-private fun BackupFileListCard(files: List<BackupRepository.BackupFileInfo>) {
+private fun BackupFileListCard(
+    title: String,
+    files: List<BackupRepository.BackupFileInfo>,
+    onRestore: (BackupRepository.BackupFileInfo) -> Unit,
+) {
     val colors = YamiboTheme.colors
     BackupCard {
-        Text(i18n("備份檔案"), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = colors.textStrong)
+        Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = colors.textStrong)
         Spacer(Modifier.height(8.dp))
         files.sortedByDescending { it.modifiedAt ?: 0L }.take(8).forEach { file ->
             Row(
@@ -305,8 +514,17 @@ private fun BackupFileListCard(files: List<BackupRepository.BackupFileInfo>) {
                     .padding(vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(file.name, fontSize = 13.sp, color = colors.textDark, modifier = Modifier.weight(1f))
+                Text(
+                    text = file.name,
+                    fontSize = 13.sp,
+                    color = colors.textDark,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
                 Text(formatStorageSize(file.bytes), fontSize = 12.sp, color = colors.textDark.copy(alpha = 0.6f))
+                Spacer(Modifier.width(8.dp))
+                SmallBackupButton(text = i18n("還原"), onClick = { onRestore(file) })
             }
         }
     }
@@ -339,14 +557,7 @@ internal fun CreateBackupDialog(
                             color = colors.textDark.copy(alpha = 0.58f),
                         )
                     },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = colors.brownDeep,
-                        unfocusedBorderColor = colors.brownPrimary.copy(alpha = 0.35f),
-                        focusedLabelColor = colors.brownDeep,
-                        cursorColor = colors.brownDeep,
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                    ),
+                    colors = backupTextFieldColors(),
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -475,3 +686,13 @@ private fun BackupActionButton(
         )
     }
 }
+
+@Composable
+private fun backupTextFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedBorderColor = YamiboTheme.colors.brownDeep,
+    unfocusedBorderColor = YamiboTheme.colors.brownPrimary.copy(alpha = 0.35f),
+    focusedLabelColor = YamiboTheme.colors.brownDeep,
+    cursorColor = YamiboTheme.colors.brownDeep,
+    focusedContainerColor = Color.Transparent,
+    unfocusedContainerColor = Color.Transparent,
+)

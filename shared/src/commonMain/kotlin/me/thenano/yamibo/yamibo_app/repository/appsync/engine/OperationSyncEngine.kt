@@ -15,6 +15,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncReplicaKey
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncJournalPayload
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointAcknowledgement
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.ParsedAppSyncCheckpointEnvelope
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCloudResetResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.resolvedPublishedThroughSequence
 import me.thenano.yamibo.yamibo_app.store.appsync.AppSyncOperationStore
 
@@ -135,6 +136,14 @@ internal interface AppSyncJournalRemote {
         AppSyncJournalRetirementRemoteResult.TerminalFailure(
             "Journal retirement deletion is unsupported",
         )
+
+    suspend fun deleteAllVerifiedSyncData(
+        accountBinding: SyncAccountBinding,
+        formHash: FormHash,
+    ): AppSyncCloudResetResult =
+        AppSyncCloudResetResult.TerminalFailure("Cloud reset is unsupported")
+
+    fun clearLinkCache(accountBinding: SyncAccountBinding): Int = 0
 }
 
 internal interface SyncDomainStateAdapter {

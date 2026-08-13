@@ -20,16 +20,29 @@ class BackupWorker(
         val notifications = AndroidBackupNotificationRepository(applicationContext)
         setForeground(createForegroundInfo(notifications, i18n("正在建立備份")))
         return try {
-            val repository = AndroidBackupSupport.createRepository(applicationContext)
             val settings = AppSettingsRepository(AndroidSettingsStore(applicationContext))
             if (settings.backupFolderUri.getValue().isBlank()) {
                 notifications.showFailed(i18n("尚未選擇備份資料夾"))
                 return Result.failure()
             }
+            val repository = AndroidBackupSupport.createRepository(applicationContext)
             val file = repository.createBackup(automatic = true).getOrThrow()
             repository.cleanupAutoBackups(settings.backupMaxAutoFiles.getValue()).getOrThrow()
+
+            var cloudName: String? = null
+            if (settings.backupToCloudEnabled.getValue()) {
+                val components = AndroidPanCloudBackupSupport.createComponents(applicationContext)
+                val restored = components.accountRepository.restoreSession()
+                if (restored.isSuccess && components.accountRepository.status.loggedIn) {
+                    val cloudFile = components.backupRepository.createBackup(automatic = true).getOrThrow()
+                    components.backupRepository.cleanupAutoBackups(settings.backupMaxAutoFiles.getValue()).getOrThrow()
+                    cloudName = cloudFile.name
+                }
+            }
+
             settings.backupLastAutoBackupAt.setValue(currentTimeMillis().toString())
-            notifications.showCompleted("${file.name}，${file.bytes} bytes")
+            val summary = if (cloudName != null) "${file.name} + $cloudName" else "${file.name}，${file.bytes} bytes"
+            notifications.showCompleted(summary)
             Result.success()
         } catch (throwable: Throwable) {
             Logger.e("BackupWorker", "Automatic backup failed", throwable)

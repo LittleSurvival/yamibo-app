@@ -1188,6 +1188,7 @@ class BackupRepositoryImpl(
             "backupfolderuri",
             "backuplastautobackupat",
             "pancloudrefreshtoken",
+            "pancloudpassword",
         )
         val normalized = key.replace(".", "").lowercase()
         return blockedSuffixes.any(normalized::endsWith)

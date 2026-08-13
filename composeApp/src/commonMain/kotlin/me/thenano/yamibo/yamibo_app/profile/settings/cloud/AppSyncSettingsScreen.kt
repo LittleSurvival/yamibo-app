@@ -45,8 +45,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import me.thenano.yamibo.yamibo_app.LocalAppSyncService
+import me.thenano.yamibo.yamibo_app.LocalAppSettingsRepository
+import me.thenano.yamibo.yamibo_app.LocalAppFeedbackController
+import me.thenano.yamibo.yamibo_app.LocalPanCloudAccountRepository
 import me.thenano.yamibo.yamibo_app.LocalAppSyncBackgroundScheduler
 import me.thenano.yamibo.yamibo_app.components.controls.YamiboActionChip
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBar
@@ -54,13 +58,17 @@ import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.i18n.localizedLabel
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
+import me.thenano.yamibo.yamibo_app.profile.settings.backup.SmallBackupButton
 import me.thenano.yamibo.yamibo_app.profile.settings.components.SettingsChipRow
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncChangeAction
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncChangeDirection
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncJournalRetirementMessage
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncServicePhase
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncStatusMessage
+import me.thenano.yamibo.yamibo_app.repository.pancloud.PanCloudSessionState
+import me.thenano.yamibo.yamibo_app.repository.settings.AppSyncBackend
 import me.thenano.yamibo.yamibo_app.util.time.FixedScheduleInterval
+import me.thenano.yamibo.yamibo_app.util.state
 import kotlin.time.Duration.Companion.milliseconds
 
 @Composable
@@ -134,6 +142,9 @@ internal fun AppSyncSettingsContent(
         ) {
             CloudCard {
                 CloudStatusRow(state = state, onRefresh = onRefresh)
+            }
+            CloudCard {
+                BackendSelectionSection()
             }
             state.notice?.let { notice ->
                 CloudSyncInlineNotice(notice)
@@ -278,6 +289,137 @@ private fun ManualOverrideSection(
             )
         }
     }
+}
+
+@Composable
+private fun BackendSelectionSection() {
+    val colors = YamiboTheme.colors
+    val service = LocalAppSyncService.current
+    val appSettingsRepository = LocalAppSettingsRepository.current
+    val scope = rememberCoroutineScope()
+    val backend = appSettingsRepository.appSyncBackend.state()
+
+    Text(
+        text = i18n("同步後端"),
+        color = colors.textStrong,
+        fontSize = 15.sp,
+        fontWeight = FontWeight.SemiBold,
+    )
+    Spacer(Modifier.height(8.dp))
+    SettingsChipRow(
+        options = AppSyncBackend.entries.map { it to it.cloudBackendLabel() },
+        selectedValue = backend,
+        onSelect = { newBackend ->
+            if (newBackend != backend) {
+                appSettingsRepository.appSyncBackend.setValue(newBackend)
+                scope.launch {
+                    service?.resetForBackendSwitch()
+                }
+            }
+        },
+    )
+    Spacer(Modifier.height(6.dp))
+    Text(
+        text = i18n("切換後端會重新同步；論壇 Blog 與網盤資料不互通"),
+        fontSize = 12.sp,
+        color = colors.textDark.copy(alpha = 0.55f),
+    )
+    if (backend == AppSyncBackend.PAN_CLOUD) {
+        Spacer(Modifier.height(12.dp))
+        CloudAccountSection()
+    }
+}
+
+@Composable
+private fun CloudAccountSection() {
+    val colors = YamiboTheme.colors
+    val accountRepository = LocalPanCloudAccountRepository.current
+    val feedbackController = LocalAppFeedbackController.current
+    val scope = rememberCoroutineScope()
+    val status by accountRepository.sessionState.collectAsState()
+    var showLogin by remember { mutableStateOf(false) }
+
+    LaunchedEffect(accountRepository) {
+        accountRepository.restoreSession()
+    }
+
+    Text(
+        text = i18n("網盤帳戶"),
+        color = colors.textStrong,
+        fontSize = 15.sp,
+        fontWeight = FontWeight.SemiBold,
+    )
+    Spacer(Modifier.height(8.dp))
+    when (status.state) {
+        PanCloudSessionState.Active -> {
+            Text(
+                text = i18n("網盤：{}", status.username ?: ""),
+                fontSize = 13.sp,
+                color = colors.textDark.copy(alpha = 0.7f),
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = i18n("網盤同步會使用此帳戶的 yamibo 資料夾"),
+                    fontSize = 12.sp,
+                    color = colors.textDark.copy(alpha = 0.55f),
+                    modifier = Modifier.weight(1f),
+                )
+                SmallBackupButton(text = i18n("登出"), onClick = {
+                    scope.launch {
+                        accountRepository.logout()
+                        feedbackController.post(i18n("已登出網盤"))
+                    }
+                })
+            }
+        }
+        PanCloudSessionState.Expired -> {
+            Text(
+                text = i18n("登入已失效，請重新登入"),
+                fontSize = 13.sp,
+                color = colors.redAccent,
+            )
+            Spacer(Modifier.height(8.dp))
+            SmallBackupButton(text = i18n("登入"), onClick = { showLogin = true })
+        }
+        PanCloudSessionState.LoggedOut,
+        PanCloudSessionState.Unknown,
+        -> {
+            Text(
+                text = i18n("網盤：未登入"),
+                fontSize = 13.sp,
+                color = colors.textDark.copy(alpha = 0.7f),
+            )
+            Spacer(Modifier.height(8.dp))
+            SmallBackupButton(text = i18n("登入網盤"), onClick = { showLogin = true })
+        }
+    }
+
+    if (showLogin) {
+        CloudLoginDialog(
+            working = false,
+            onDismiss = { showLogin = false },
+            onSubmit = { username, password, mode ->
+                showLogin = false
+                scope.launch {
+                    val result = when (mode) {
+                        CloudAuthMode.Login -> accountRepository.login(username.trim(), password)
+                        CloudAuthMode.Register -> accountRepository.register(username.trim(), password)
+                    }
+                    result
+                        .onSuccess { feedbackController.post(i18n("已登入網盤：{}", username.trim())) }
+                        .onFailure { error ->
+                            feedbackController.post(error.message ?: i18n("網盤操作失敗"))
+                        }
+                }
+            },
+        )
+    }
+}
+
+private fun AppSyncBackend.cloudBackendLabel(): String = when (this) {
+    AppSyncBackend.FORUM -> i18n("論壇 Blog")
+    AppSyncBackend.PAN_CLOUD -> i18n("網盤")
 }
 
 @Composable

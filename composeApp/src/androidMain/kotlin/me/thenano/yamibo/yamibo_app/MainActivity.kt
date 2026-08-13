@@ -41,7 +41,6 @@ import me.thenano.yamibo.yamibo_app.network.AndroidYamiboClientProvider
 import me.thenano.yamibo.yamibo_app.notification.dismissActiveSignReminder
 import me.thenano.yamibo.yamibo_app.profile.settings.access.AndroidBackgroundAccessRepository
 import me.thenano.yamibo.yamibo_app.profile.settings.backup.AndroidBackupScheduler
-import me.thenano.yamibo.yamibo_app.profile.settings.backup.AndroidPanCloudBackupScheduler
 import me.thenano.yamibo.yamibo_app.profile.settings.sign.AndroidSignReminderScheduler
 import me.thenano.yamibo.yamibo_app.repository.*
 import me.thenano.yamibo.yamibo_app.repository.localnovel.AndroidLocalNovelRepository
@@ -78,6 +77,7 @@ import me.thenano.yamibo.yamibo_app.store.AndroidCookieStore
 import me.thenano.yamibo.yamibo_app.store.AndroidForumFavoriteStore
 import me.thenano.yamibo.yamibo_app.store.AndroidUserStore
 import me.thenano.yamibo.yamibo_app.store.settings.AndroidSettingsStore
+import me.thenano.yamibo.yamibo_app.store.settings.EncryptedSettingsStore
 import me.thenano.yamibo.yamibo_app.update.AndroidAppUpdatePlatform
 import me.thenano.yamibo.yamibo_app.util.state
 import me.thenano.yamibo.yamibo_app.task.AppTaskManager
@@ -301,7 +301,10 @@ class MainActivity : ComponentActivity() {
             }
             val panCloudApiClient = remember { PanCloudApiClient(HttpClientFactory.create()) }
             val panCloudAccountRepository = remember {
-                PanCloudAccountRepository(panCloudApiClient, appSettingsRepository)
+                PanCloudAccountRepository(
+                    panCloudApiClient,
+                    AppSettingsRepository(EncryptedSettingsStore(context)),
+                )
             }
             val panCloudBackupRepository = remember {
                 BackupRepositoryImpl(
@@ -312,7 +315,8 @@ class MainActivity : ComponentActivity() {
                     appVersionCode = AppVersion.VersionCode.toInt(),
                 )
             }
-            LaunchedEffect(panCloudAccountRepository) {
+            LaunchedEffect(appSyncService, panCloudApiClient, panCloudAccountRepository) {
+                appSyncService.attachPanCloud(panCloudApiClient, panCloudAccountRepository)
                 panCloudAccountRepository.restoreSession()
             }
             val appSyncBackgroundScheduler = remember {
@@ -350,7 +354,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
             val backupScheduler = remember { AndroidBackupScheduler(context) }
-            val panCloudBackupScheduler = remember { AndroidPanCloudBackupScheduler(context) }
             val signReminderScheduler = remember { AndroidSignReminderScheduler(context) }
             LaunchedEffect(backupRepository) {
                 diskCacheFactory.backupStorageUsageProvider = { backupRepository.getBackupStorageBytes() }
@@ -404,7 +407,6 @@ class MainActivity : ComponentActivity() {
                 LocalPanCloudBackupRepository provides panCloudBackupRepository,
                 LocalPanCloudAccountRepository provides panCloudAccountRepository,
                 LocalBackupScheduler provides backupScheduler,
-                LocalPanCloudBackupScheduler provides panCloudBackupScheduler,
                 LocalDownloadRepository provides downloadRepository,
                 LocalChineseConversionRepository provides chineseConversionRepository,
                 LocalDetailNoteRepository provides detailNoteRepository,
