@@ -50,9 +50,13 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationOr
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.YamiboAppSyncBlogProvider
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.YamiboAppSyncJournalRemote
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCloudResetResult
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.PanCloudJournalRemote
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.SwitchableAppSyncJournalRemote
 import me.thenano.yamibo.yamibo_app.repository.bookmark.BookMarkRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.backup.BackupRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.backup.CloudBackupPayloadCodec
+import me.thenano.yamibo.yamibo_app.repository.pancloud.PanCloudAccountRepository
+import me.thenano.yamibo.yamibo_app.repository.pancloud.PanCloudApiClient
 import me.thenano.yamibo.yamibo_app.repository.detailnote.DetailNoteRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.favorite.FavoriteStoreRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.favorite.FavoriteUpdateRepositoryImpl
@@ -63,6 +67,7 @@ import me.thenano.yamibo.yamibo_app.repository.settings.core.FloatSetting
 import me.thenano.yamibo.yamibo_app.repository.settings.core.IntSetting
 import me.thenano.yamibo.yamibo_app.repository.settings.core.SettingsRegistry
 import me.thenano.yamibo.yamibo_app.repository.settings.core.StringSetting
+import me.thenano.yamibo.yamibo_app.repository.settings.AppSettingsRepository
 import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncOperationStore
 import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncRemoteBlogStore
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
@@ -303,15 +308,40 @@ class AppSyncService(
         materializer = DatabaseSyncDomainMaterializer(db, settingsStore),
         nowMillis = nowMillis,
     )
-    private val remote = YamiboAppSyncJournalRemote(
-        provider = YamiboAppSyncBlogProvider(
-            cookieStore = authRepository.cookieStore,
-            yamiboClient = authRepository.yamiboClient,
-        ),
-        store = SqlDelightAppSyncRemoteBlogStore(db),
-        nowMillis = nowMillis,
-        retirementIntents = store::retirementIntents,
-    )
+    private var panCloudRemote: me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalRemote? = null
+    private val remote = buildJournalRemote()
+
+    private fun buildJournalRemote(): me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalRemote {
+        val forum = YamiboAppSyncJournalRemote(
+            provider = YamiboAppSyncBlogProvider(
+                cookieStore = authRepository.cookieStore,
+                yamiboClient = authRepository.yamiboClient,
+            ),
+            store = SqlDelightAppSyncRemoteBlogStore(db),
+            nowMillis = nowMillis,
+            retirementIntents = store::retirementIntents,
+        )
+        val settings = AppSettingsRepository(settingsStore)
+        return SwitchableAppSyncJournalRemote(
+            forumRemote = forum,
+            panCloudRemoteProvider = { panCloudRemote },
+            backendProvider = { settings.appSyncBackend.getValue() },
+        )
+    }
+
+    /** 綁定網盤同步後端（延遲注入，避開 AppSyncService 與網盤帳號服務的建構循環）。 */
+    fun attachPanCloud(
+        apiClient: PanCloudApiClient,
+        accountRepository: PanCloudAccountRepository,
+    ) {
+        panCloudRemote = PanCloudJournalRemote(apiClient, accountRepository)
+    }
+
+    /** 切換同步後端後，重置本機 installation 為 Unbound，讓下次同步重新 Seed/Join。 */
+    suspend fun resetForBackendSwitch(): AppSyncServiceStatus {
+        store.updateState(AppSyncInstallationState.Unbound)
+        return currentStatus()
+    }
     private var localSnapshotSource: BackupRepositoryImpl? = null
     private val migrationPlanner = BackupSnapshotMigrationPlanner()
     private val localProjectionRepairPlanner = LocalProjectionRepairPlanner()

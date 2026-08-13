@@ -44,7 +44,7 @@ internal class YamiboAppSyncJournalRemote(
     private val verifiedCheckpointCache = mutableMapOf<String, LoadedAppSyncCheckpoint>()
     private var verifiedIndexCache: VerifiedIndex? = null
 
-    suspend fun deleteAllVerifiedSyncData(
+    override suspend fun deleteAllVerifiedSyncData(
         accountBinding: SyncAccountBinding,
         formHash: FormHash,
     ): AppSyncCloudResetResult {
@@ -149,7 +149,7 @@ internal class YamiboAppSyncJournalRemote(
         discoverCurrentLinks(accountBinding)
     }
 
-    fun clearLinkCache(accountBinding: SyncAccountBinding): Int {
+    override fun clearLinkCache(accountBinding: SyncAccountBinding): Int {
         val links = AppSyncRemoteBlogKind.entries.sumOf { store.loadKind(it).size }
         store.loadKind(AppSyncRemoteBlogKind.Index)
             .firstNotNullOfOrNull { it.classId }

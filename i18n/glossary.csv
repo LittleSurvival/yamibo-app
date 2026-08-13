@@ -872,3 +872,14 @@ Current cache size: {}","清除圖片、頁面與其他暫存資料，釋放目�
 請輸入帳號與密碼,Please enter username and password,請輸入帳號與密碼,请输入账号与密码
 還原,Restore,還原,还原
 點擊檔案可還原,Tap a file to restore,點擊檔案可還原,点击文件可还原
+備份到網盤,Back up to cloud drive,備份到網盤,备份到网盘
+備份檔案將上傳至網盤的 yamibo 資料夾,Backup files are uploaded to the yamibo folder on your cloud drive,備份檔案將上傳至網盤的 yamibo 資料夾,备份文件将上传至网盘的 yamibo 文件夹
+本地備份檔案,Local backup files,本地備份檔案,本地备份文件
+沒有帳戶？,No account?,沒有帳戶？,没有账户？
+網盤備份失敗：{},Cloud drive backup failed: {},網盤備份失敗：{},网盘备份失败：{}
+網盤：{},Cloud drive: {},網盤：{},网盘：{}
+網盤：未登入,Cloud drive: not signed in,網盤：未登入,网盘：未登录
+切換後端會重新同步；論壇 Blog 與網盤資料不互通,Switching backend re-syncs; forum Blog and cloud drive data are not shared,切換後端會重新同步；論壇 Blog 與網盤資料不互通,切换后端会重新同步；论坛 Blog 与网盘数据不互通
+同步後端,Sync backend,同步後端,同步后端
+網盤,Cloud drive,網盤,网盘
+論壇 Blog,Forum Blog,論壇 Blog,论坛 Blog

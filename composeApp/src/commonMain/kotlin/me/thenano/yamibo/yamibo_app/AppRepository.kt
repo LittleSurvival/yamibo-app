@@ -98,9 +98,6 @@ val LocalPanCloudAccountRepository =
 val LocalBackupScheduler =
     compositionLocalOf<BackupScheduler> { error("LocalBackupScheduler not provided") }
 
-val LocalPanCloudBackupScheduler =
-    compositionLocalOf<BackupScheduler> { error("LocalPanCloudBackupScheduler not provided") }
-
 val LocalDownloadRepository =
     compositionLocalOf<DownloadRepository> { error("LocalDownloadRepository not provided") }
 

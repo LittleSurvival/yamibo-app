@@ -45,8 +45,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import me.thenano.yamibo.yamibo_app.LocalAppSyncService
+import me.thenano.yamibo.yamibo_app.LocalAppSettingsRepository
 import me.thenano.yamibo.yamibo_app.LocalAppSyncBackgroundScheduler
 import me.thenano.yamibo.yamibo_app.components.controls.YamiboActionChip
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBar
@@ -60,7 +62,9 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncChangeDirection
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncJournalRetirementMessage
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncServicePhase
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncStatusMessage
+import me.thenano.yamibo.yamibo_app.repository.settings.AppSyncBackend
 import me.thenano.yamibo.yamibo_app.util.time.FixedScheduleInterval
+import me.thenano.yamibo.yamibo_app.util.state
 import kotlin.time.Duration.Companion.milliseconds
 
 @Composable
@@ -134,6 +138,9 @@ internal fun AppSyncSettingsContent(
         ) {
             CloudCard {
                 CloudStatusRow(state = state, onRefresh = onRefresh)
+            }
+            CloudCard {
+                BackendSelectionSection()
             }
             state.notice?.let { notice ->
                 CloudSyncInlineNotice(notice)
@@ -278,6 +285,46 @@ private fun ManualOverrideSection(
             )
         }
     }
+}
+
+@Composable
+private fun BackendSelectionSection() {
+    val colors = YamiboTheme.colors
+    val service = LocalAppSyncService.current
+    val appSettingsRepository = LocalAppSettingsRepository.current
+    val scope = rememberCoroutineScope()
+    val backend = appSettingsRepository.appSyncBackend.state()
+
+    Text(
+        text = i18n("同步後端"),
+        color = colors.textStrong,
+        fontSize = 15.sp,
+        fontWeight = FontWeight.SemiBold,
+    )
+    Spacer(Modifier.height(8.dp))
+    SettingsChipRow(
+        options = AppSyncBackend.entries.map { it to it.cloudBackendLabel() },
+        selectedValue = backend,
+        onSelect = { newBackend ->
+            if (newBackend != backend) {
+                appSettingsRepository.appSyncBackend.setValue(newBackend)
+                scope.launch {
+                    service?.resetForBackendSwitch()
+                }
+            }
+        },
+    )
+    Spacer(Modifier.height(6.dp))
+    Text(
+        text = i18n("切換後端會重新同步；論壇 Blog 與網盤資料不互通"),
+        fontSize = 12.sp,
+        color = colors.textDark.copy(alpha = 0.55f),
+    )
+}
+
+private fun AppSyncBackend.cloudBackendLabel(): String = when (this) {
+    AppSyncBackend.FORUM -> i18n("論壇 Blog")
+    AppSyncBackend.PAN_CLOUD -> i18n("網盤")
 }
 
 @Composable

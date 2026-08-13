@@ -7,11 +7,14 @@ import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.db.DatabaseFactory
 import me.thenano.yamibo.yamibo_app.network.AndroidYamiboClientProvider
+import me.thenano.yamibo.yamibo_app.factory.HttpClientFactory
 import me.thenano.yamibo.yamibo_app.repository.AndroidAuthRepository
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncService
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncServicePhase
 import me.thenano.yamibo.yamibo_app.repository.appsync.isDurableAutomaticTriggerOutcome
 import me.thenano.yamibo.yamibo_app.repository.backup.BackupRepositoryImpl
+import me.thenano.yamibo.yamibo_app.repository.pancloud.PanCloudAccountRepository
+import me.thenano.yamibo.yamibo_app.repository.pancloud.PanCloudApiClient
 import me.thenano.yamibo.yamibo_app.repository.settings.AppSettingsRepository
 import me.thenano.yamibo.yamibo_app.repository.settings.MangaReaderSettingsRepository
 import me.thenano.yamibo.yamibo_app.repository.settings.NovelReaderSettingsRepository
@@ -44,6 +47,10 @@ class AppSyncWorker(
         val appSettings = AppSettingsRepository(settings)
         val novelSettings = NovelReaderSettingsRepository(settings)
         val mangaSettings = MangaReaderSettingsRepository(settings)
+        val panCloudApiClient = PanCloudApiClient(HttpClientFactory.create())
+        val panCloudAccount = PanCloudAccountRepository(panCloudApiClient, appSettings)
+        service.attachPanCloud(panCloudApiClient, panCloudAccount)
+        panCloudAccount.restoreSession()
         service.registerSyncableSettings(listOf(appSettings, novelSettings, mangaSettings))
         service.registerLocalSnapshotSource(
             BackupRepositoryImpl(

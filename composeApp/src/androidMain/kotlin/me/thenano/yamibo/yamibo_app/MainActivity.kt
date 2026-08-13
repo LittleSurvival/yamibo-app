@@ -41,7 +41,6 @@ import me.thenano.yamibo.yamibo_app.network.AndroidYamiboClientProvider
 import me.thenano.yamibo.yamibo_app.notification.dismissActiveSignReminder
 import me.thenano.yamibo.yamibo_app.profile.settings.access.AndroidBackgroundAccessRepository
 import me.thenano.yamibo.yamibo_app.profile.settings.backup.AndroidBackupScheduler
-import me.thenano.yamibo.yamibo_app.profile.settings.backup.AndroidPanCloudBackupScheduler
 import me.thenano.yamibo.yamibo_app.profile.settings.sign.AndroidSignReminderScheduler
 import me.thenano.yamibo.yamibo_app.repository.*
 import me.thenano.yamibo.yamibo_app.repository.localnovel.AndroidLocalNovelRepository
@@ -312,7 +311,8 @@ class MainActivity : ComponentActivity() {
                     appVersionCode = AppVersion.VersionCode.toInt(),
                 )
             }
-            LaunchedEffect(panCloudAccountRepository) {
+            LaunchedEffect(appSyncService, panCloudApiClient, panCloudAccountRepository) {
+                appSyncService.attachPanCloud(panCloudApiClient, panCloudAccountRepository)
                 panCloudAccountRepository.restoreSession()
             }
             val appSyncBackgroundScheduler = remember {
@@ -350,7 +350,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
             val backupScheduler = remember { AndroidBackupScheduler(context) }
-            val panCloudBackupScheduler = remember { AndroidPanCloudBackupScheduler(context) }
             val signReminderScheduler = remember { AndroidSignReminderScheduler(context) }
             LaunchedEffect(backupRepository) {
                 diskCacheFactory.backupStorageUsageProvider = { backupRepository.getBackupStorageBytes() }
@@ -404,7 +403,6 @@ class MainActivity : ComponentActivity() {
                 LocalPanCloudBackupRepository provides panCloudBackupRepository,
                 LocalPanCloudAccountRepository provides panCloudAccountRepository,
                 LocalBackupScheduler provides backupScheduler,
-                LocalPanCloudBackupScheduler provides panCloudBackupScheduler,
                 LocalDownloadRepository provides downloadRepository,
                 LocalChineseConversionRepository provides chineseConversionRepository,
                 LocalDetailNoteRepository provides detailNoteRepository,
