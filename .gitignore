@@ -33,3 +33,4 @@ node_modules/
 /openspec
 /.reasonix/
 /composeApp/release/
+/composeApp/debug/
