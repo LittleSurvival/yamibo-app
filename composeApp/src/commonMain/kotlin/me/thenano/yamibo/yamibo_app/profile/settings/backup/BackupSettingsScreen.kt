@@ -313,7 +313,7 @@ private fun BackupFileListCard(files: List<BackupRepository.BackupFileInfo>) {
 }
 
 @Composable
-private fun CreateBackupDialog(
+internal fun CreateBackupDialog(
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit,
 ) {
@@ -361,7 +361,7 @@ private fun CreateBackupDialog(
 }
 
 @Composable
-private fun RestoreModeDialog(
+internal fun RestoreModeDialog(
     onDismiss: () -> Unit,
     onSelect: (BackupRepository.RestoreMode) -> Unit,
 ) {
@@ -409,7 +409,7 @@ private fun RestoreOption(title: String, subtitle: String, onClick: () -> Unit) 
 }
 
 @Composable
-private fun BackupCard(content: @Composable ColumnScope.() -> Unit) {
+internal fun BackupCard(content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -421,7 +421,7 @@ private fun BackupCard(content: @Composable ColumnScope.() -> Unit) {
 }
 
 @Composable
-private fun SmallBackupButton(text: String, onClick: () -> Unit) {
+internal fun SmallBackupButton(text: String, onClick: () -> Unit) {
     Text(
         text = text,
         fontSize = 13.sp,
