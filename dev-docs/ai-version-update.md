@@ -43,7 +43,7 @@ val yamiboAppVersionName = "0.0.6" // 显示给用户的版本名
 询问用户本次更新的内容（可一句话描述，也可分点粘贴；或让用户说「根据 git log 自动生成」，此时用
 `git log` 从当前分支未发布的提交中提取要点）。
 
-把内容整理成下面的 **繁体中文** 格式，写入新文件
+把内容整理成下面的 **简体中文** 格式，写入新文件
 `update/changelogs/{新 versionCode}.changelog`：
 
 ```markdown
@@ -51,14 +51,14 @@ val yamiboAppVersionName = "0.0.6" // 显示给用户的版本名
 
 新增 :
 - ...
-修復 :
+修复 :
 - ...
 更改 :
 - ...
 其他 :
 - ...
 
-將來預計的更新 :
+将来预计的更新 :
 - ...
 ```
 
@@ -66,7 +66,7 @@ val yamiboAppVersionName = "0.0.6" // 显示给用户的版本名
 
 - 标题固定为 `# stable-{versionName}`。
 - 没有内容的分类直接省略，不要留空项。
-- 保持繁体中文，与项目现有 changelog 风格一致。
+- 保持简体中文，与项目现有 changelog 风格一致。
 
 ### 第 4 步：修改文件
 
