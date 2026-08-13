@@ -108,4 +108,6 @@ internal fun isAppSyncLocalOnlySetting(key: String): Boolean = key in APP_SYNC_L
 
 private val APP_SYNC_LOCAL_ONLY_SETTINGS = setOf(
     "appsettings.favoritelastcategoryid",
+    "appsettings.signpagehtmlcache",
+    "appsettings.signpagehtmlcacheupdatedat",
 )

@@ -362,7 +362,9 @@ internal class OperationRecordingReadHistoryRepository(
         "authorId" to (authorId?.value ?: 0).toString(),
         "historyOrigin" to historyOrigin.name,
         "threadName" to threadName,
-        "threadCover" to threadCover,
+        // Keep the field present with null so a later valid local mutation also clears any
+        // previously synced non-portable cover instead of leaving stale remote data behind.
+        "threadCover" to appSyncThreadCoverOrNull(threadCover),
         "lastUpdatedTime" to lastUpdatedTime?.toString(),
         "forumName" to forumName,
         "forumId" to forumId?.value?.toString(),

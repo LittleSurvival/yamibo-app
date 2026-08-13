@@ -10,6 +10,12 @@
 
 - Before creating any branch, read [Branch Naming Rule Document](dev-docs/branch-naming.md).
 
+## Main branch integration
+
+- Integrate changes from any other branch into `main` only through a pull request; do not merge locally or push directly to `main` unless the user explicitly authorizes that specific exception.
+- Treat the PR as a checkpoint. Its description must record the problem and root cause, implementation and design decisions, user-visible behavior, verification evidence, and known risks, limits, or rollback notes.
+- Before opening or merging the PR, enforce the OpenSpec isolation guard above. Merge only after required checks pass, and prefer a merge commit to preserve branch lineage unless the user requests another strategy.
+
 ## Git identity guard
 
 - Before every commit, run `python .github/scripts/validate_git_name.py` from the project root.

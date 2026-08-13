@@ -1,8 +1,8 @@
 {
   "channel": "stable",
-  "versionName": "0.0.5",
-  "versionCode": 6,
+  "versionName": "0.0.6",
+  "versionCode": 7,
   "isReady": false,
-  "releaseNotes": "新增雲端同步與閱讀器觸控反轉選項，改善閱讀器效能，並修復簽到通知、系統通知圖標、進度顯示與部分翻譯問題。",
+  "releaseNotes": "強化 HTTP 405/WAF 驗證與登入 Cookie 保存，改善閱讀器順暢度，並修復內嵌圖片",
   "assets": []
 }
