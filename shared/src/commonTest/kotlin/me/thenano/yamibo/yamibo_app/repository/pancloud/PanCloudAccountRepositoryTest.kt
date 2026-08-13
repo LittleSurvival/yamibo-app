@@ -57,6 +57,7 @@ class PanCloudAccountRepositoryTest {
         var refreshUnauthorized = false
         var refreshNetworkFail = false
         var loginUnauthorized = false
+        var loginNetworkFail = false
 
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {
@@ -65,14 +66,14 @@ class PanCloudAccountRepositoryTest {
                     HttpStatusCode.Created,
                     jsonHeaders,
                 )
-                "/api/auth/login" -> if (loginUnauthorized) {
-                    respond(
+                "/api/auth/login" -> when {
+                    loginNetworkFail -> throw java.io.IOException("network down")
+                    loginUnauthorized -> respond(
                         """{"success":false,"error":"用户名或密码错误"}""",
                         HttpStatusCode.Unauthorized,
                         jsonHeaders,
                     )
-                } else {
-                    respond(
+                    else -> respond(
                         """{"success":true,"data":{"user":{"id":1,"username":"alice"},"access_token":"at-login","refresh_token":"rt-login","expires_in":900}}""",
                         HttpStatusCode.OK,
                         jsonHeaders,
@@ -254,5 +255,21 @@ class PanCloudAccountRepositoryTest {
         assertTrue(result.isFailure)
         assertEquals(PanCloudSessionState.Expired, h.repository.status.state)
         assertEquals("", h.appSettings.panCloudPassword.getValue())
+    }
+
+    @Test
+    fun restoreSessionKeepsCredentialWhenReloginNetworkFails() = runBlocking {
+        val h = Harness()
+        h.appSettings.panCloudRefreshToken.setValue("old-rt")
+        h.appSettings.panCloudUsername.setValue("alice")
+        h.appSettings.panCloudPassword.setValue("password123")
+        h.refreshUnauthorized = true
+        h.loginNetworkFail = true
+
+        val result = h.repository.restoreSession()
+
+        assertTrue(result.isFailure)
+        assertEquals("old-rt", h.appSettings.panCloudRefreshToken.getValue())
+        assertEquals("password123", h.appSettings.panCloudPassword.getValue())
     }
 }

@@ -1033,9 +1033,8 @@ private fun appSyncStatusMessageText(message: AppSyncStatusMessage): String = wh
         )
     AppSyncStatusMessage.SyncAlreadyRunning -> i18n("已有同步工作執行中")
     AppSyncStatusMessage.AuthenticationExpired -> i18n("登入狀態已過期，請先刷新登入狀態")
-    // External values are provider/engine diagnostics, not localization keys. Keep them in the
-    // service status for logs and tests, but never leak untranslated implementation text into UI.
-    is AppSyncStatusMessage.External -> i18n("同步失敗")
+    // External values are provider/engine diagnostics; surface them for troubleshooting.
+    is AppSyncStatusMessage.External -> i18n("同步失敗：{}", message.value)
 }
 
 private fun cloudSyncDetailValueText(value: CloudSyncDetailValue): String = when (value) {

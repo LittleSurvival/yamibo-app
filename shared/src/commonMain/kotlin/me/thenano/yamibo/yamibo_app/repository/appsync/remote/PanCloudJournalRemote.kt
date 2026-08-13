@@ -50,7 +50,7 @@ internal class PanCloudJournalRemote(
             apiClient.listFiles(parentId = parentId)
         } catch (error: Throwable) {
             return AppSyncJournalLoadResult.RetryableFailure(
-                error.message ?: "list files failed",
+                "網盤 list 失敗：${error.message ?: error::class.simpleName}",
             )
         }
 
@@ -117,24 +117,34 @@ internal class PanCloudJournalRemote(
         val existing = try {
             apiClient.listFiles(parentId = parentId).firstOrNull { it.name == fileName }
         } catch (error: Throwable) {
-            return AppSyncJournalPublishResult.Unknown(error.message ?: "list failed")
+            return AppSyncJournalPublishResult.Unknown(
+                "網盤 list 失敗：${error.message ?: error::class.simpleName}",
+            )
         }
         if (existing != null) {
             val existingText = downloadText(existing.id)
-            val validation = existingText?.let { journalCodec.validate(it) }
-            if (validation is AppSyncJournalValidation.Valid) {
-                if (validation.envelope.payload.writerNonce != payload.writerNonce) {
-                    return AppSyncJournalPublishResult.Conflict(
-                        "Journal writer nonce belongs to another installation",
-                    )
+            if (existingText == null) {
+                return AppSyncJournalPublishResult.Unknown("網盤下載既有 journal 失敗，未覆蓋")
+            }
+            when (val validation = journalCodec.validate(existingText)) {
+                is AppSyncJournalValidation.Valid -> {
+                    if (validation.envelope.payload.writerNonce != payload.writerNonce) {
+                        return AppSyncJournalPublishResult.Conflict(
+                            "Journal writer nonce belongs to another installation",
+                        )
+                    }
+                    if (expectedFingerprint != null &&
+                        validation.envelope.fingerprint != expectedFingerprint
+                    ) {
+                        return AppSyncJournalPublishResult.Conflict(
+                            "Journal changed after the caller's verified load",
+                        )
+                    }
                 }
-                if (expectedFingerprint != null &&
-                    validation.envelope.fingerprint != expectedFingerprint
-                ) {
-                    return AppSyncJournalPublishResult.Conflict(
-                        "Journal changed after the caller's verified load",
+                is AppSyncJournalValidation.Invalid ->
+                    return AppSyncJournalPublishResult.TerminalFailure(
+                        "既有 journal 檔案損壞，拒絕覆蓋：${validation.reason}",
                     )
-                }
             }
         }
 
@@ -156,7 +166,9 @@ internal class PanCloudJournalRemote(
                 ),
             )
         } catch (error: Throwable) {
-            AppSyncJournalPublishResult.Unknown(error.message ?: "upload failed")
+            AppSyncJournalPublishResult.Unknown(
+                "網盤上傳 journal 失敗：${error.message ?: error::class.simpleName}",
+            )
         }
     }
 
@@ -181,7 +193,9 @@ internal class PanCloudJournalRemote(
                 LoadedAppSyncCheckpoint(uploaded.fileId, envelope),
             )
         } catch (error: Throwable) {
-            AppSyncCheckpointPublishResult.Unknown(error.message ?: "upload failed")
+            AppSyncCheckpointPublishResult.Unknown(
+                "網盤上傳 checkpoint 失敗：${error.message ?: error::class.simpleName}",
+            )
         }
     }
 
@@ -203,7 +217,7 @@ internal class PanCloudJournalRemote(
             apiClient.listFiles(parentId = parentId).filter { isCheckpointFile(it.name) }
         } catch (error: Throwable) {
             return AppSyncCheckpointRetentionResult.RetryableFailure(
-                error.message ?: "list failed",
+                "網盤 list 失敗：${error.message ?: error::class.simpleName}",
             )
         }
         if (files.size <= maximumCheckpoints && pinnedCheckpointIds.isEmpty()) {

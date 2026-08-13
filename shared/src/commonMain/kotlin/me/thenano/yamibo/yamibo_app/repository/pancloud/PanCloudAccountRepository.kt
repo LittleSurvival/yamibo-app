@@ -43,6 +43,12 @@ class PanCloudAccountRepository(
         val loggedIn: Boolean get() = state == PanCloudSessionState.Active
     }
 
+    private sealed interface ReloginResult {
+        data object Success : ReloginResult
+        data object InvalidCredentials : ReloginResult
+        data object NetworkError : ReloginResult
+    }
+
     private val mutableSession = MutableStateFlow(
         AccountStatus(
             state = if (appSettings.panCloudRefreshToken.getValue().isNotBlank()) {
@@ -88,9 +94,14 @@ class PanCloudAccountRepository(
         } else {
             val error = refreshResult.exceptionOrNull()
             if (error is PanCloudApiException && error.statusCode == 401) {
-                if (reloginWithSavedPassword()) return@runCatching status
-                clearAuth()
-                updateSession(PanCloudSessionState.Expired)
+                when (reloginWithSavedPassword()) {
+                    ReloginResult.Success -> return@runCatching status
+                    ReloginResult.InvalidCredentials -> {
+                        clearAuth()
+                        updateSession(PanCloudSessionState.Expired)
+                    }
+                    ReloginResult.NetworkError -> Unit // 保留凭证，继续 throw 以便重试
+                }
             }
             throw error ?: IllegalStateException("refresh failed")
         }
@@ -144,22 +155,32 @@ class PanCloudAccountRepository(
         }
         val error = refreshResult.exceptionOrNull()
         if (error is PanCloudApiException && error.statusCode == 401) {
-            if (reloginWithSavedPassword()) return true
-            clearAuth()
-            updateSession(PanCloudSessionState.Expired)
+            when (reloginWithSavedPassword()) {
+                ReloginResult.Success -> return true
+                ReloginResult.InvalidCredentials -> {
+                    clearAuth()
+                    updateSession(PanCloudSessionState.Expired)
+                }
+                ReloginResult.NetworkError -> Unit // 保留凭证，等待下次重试
+            }
         }
         return false
     }
 
-    /** 用保存的密码重新登录以续期；失败返回 false。 */
-    private suspend fun reloginWithSavedPassword(): Boolean {
+    /** 用保存的密码重新登录以续期；区分「密码错误」与「网络失败」。 */
+    private suspend fun reloginWithSavedPassword(): ReloginResult {
         val username = appSettings.panCloudUsername.getValue()
         val password = appSettings.panCloudPassword.getValue()
-        if (username.isBlank() || password.isBlank()) return false
-        return runCatching {
+        if (username.isBlank() || password.isBlank()) return ReloginResult.InvalidCredentials
+        return try {
             adoptAuth(apiClient.login(username, password), password = null)
-            true
-        }.getOrDefault(false)
+            ReloginResult.Success
+        } catch (error: PanCloudApiException) {
+            if (error.statusCode == 401) ReloginResult.InvalidCredentials
+            else ReloginResult.NetworkError
+        } catch (_: Throwable) {
+            ReloginResult.NetworkError
+        }
     }
 
     private fun clearAuth() {
