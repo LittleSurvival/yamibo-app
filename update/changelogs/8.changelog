@@ -1,19 +1,19 @@
 # stable-v0.1.6
 
 新增 :
-- 網盤雲端備份（pancloud），App 名稱改為簡體「百合會論壇」
-- 網盤備份併入本地備份，並新增網盤雲端同步（AppSync 增量合併）
-- 網盤 Journal retirement 實作
-- 網盤憑證加密落盤 + 登入偵測 + 過期自動重新登入
-- 網盤同步增量下載 + 靜默同步
+- 网盘云端备份（pancloud），App 名称改为简体「百合会论坛」
+- 网盘备份并入本地备份，并新增网盘云端同步（AppSync 增量合并）
+- 网盘 Journal retirement 实现
+- 网盘凭证加密落盘 + 登录检测 + 过期自动重新登录
+- 网盘同步增量下载 + 静默同步
 
-修復 :
-- 網盤會話恢復誤清憑證，以及同步失敗未顯示詳細原因
-- refresh 回應缺少 user 欄位導致網盤會話恢復失敗
+修复 :
+- 网盘会话恢复误清凭证，以及同步失败未显示详细原因
+- refresh 响应缺少 user 字段导致网盘会话恢复失败
 
 更改 :
-- 用戶端更新來源改為自己的 GitHub 倉庫 lmc2007/yamibo-app
+- 客户端更新来源改为 GitHub 仓库 lmc2007/yamibo-app
 
 其他 :
-- 移除 release workflow 的 Gitee/Gitea 鏡像發佈，僅保留 GitHub 發佈
-- 清理已實作的開發計劃文檔、新增給 AI 的版本更新操作文檔、忽略 debug 建置產物
+- 移除 release workflow 的 Gitee/Gitea 镜像发布，仅保留 GitHub 发布
+- 清理已实现的开发计划文档、新增给 AI 的版本更新操作文档、忽略 debug 构建产物
