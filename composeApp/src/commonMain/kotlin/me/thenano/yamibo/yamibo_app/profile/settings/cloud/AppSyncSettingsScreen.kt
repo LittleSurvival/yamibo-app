@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
+import me.thenano.yamibo.yamibo_app.LocalAppCoroutineScope
 import me.thenano.yamibo.yamibo_app.LocalAppSyncService
 import me.thenano.yamibo.yamibo_app.LocalAppSettingsRepository
 import me.thenano.yamibo.yamibo_app.LocalAppFeedbackController
@@ -78,7 +79,7 @@ internal fun AppSyncSettingsScreen(
     val navigator = LocalNavigator.current
     val service = LocalAppSyncService.current
     val scheduler = LocalAppSyncBackgroundScheduler.current
-    val scope = rememberCoroutineScope()
+    val scope = LocalAppCoroutineScope.current
     val activeController = controller ?: remember(service, scope, scheduler) {
         service?.let { AppSyncCloudUiController(it, scope, scheduler) } ?: StubCloudSyncUiController
     }
