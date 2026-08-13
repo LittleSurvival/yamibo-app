@@ -4,18 +4,11 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: mirror-publish-${{ github.repository }}
+  group: release-${{ github.repository }}
   cancel-in-progress: false
 
 permissions:
   contents: write
-
-env:
-  MIRROR_OWNER: LittleSurvival
-  MIRROR_REPO: ymb-apk-release
-  GITEA_BASE_URL: ${{ vars.GITEA_BASE_URL }}
-  GITEA_SSH_HOST: ${{ vars.GITEA_SSH_HOST }}
-  GITEA_SSH_PORT: ${{ vars.GITEA_SSH_PORT }}
 
 jobs:
   release:
@@ -166,118 +159,6 @@ jobs:
             gh release create "$tag" "$apk" --title "$title" --notes-file "$changelog" --verify-tag
           fi
 
-      - name: Start SSH agent for mirrors
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: |
-            ${{ secrets.GITEE_SSH_PRIVATE_KEY }}
-            ${{ secrets.GITEA_SSH_PRIVATE_KEY }}
-
-      - name: Trust mirror SSH hosts
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p ~/.ssh
-          ssh-keyscan -T 60 gitee.com >> ~/.ssh/known_hosts
-          gitea_host="${GITEA_SSH_HOST:-gitea.com}"
-          gitea_port="${GITEA_SSH_PORT:-22}"
-          ssh-keyscan -T 60 -p "$gitea_port" "$gitea_host" >> ~/.ssh/known_hosts
-
-      - name: Prepare mirror release tags
-        timeout-minutes: 60
-        shell: bash
-        env:
-          GIT_SSH_COMMAND: >-
-            ssh -o BatchMode=yes
-            -o ConnectTimeout=60
-            -o ServerAliveInterval=15
-            -o ServerAliveCountMax=2
-        run: |
-          set -euo pipefail
-
-          retry_git() {
-            local label="$1"
-            shift
-            local attempt
-            for attempt in 1 2 3; do
-              if timeout --foreground 30s "$@"; then
-                return 0
-              fi
-              if [ "$attempt" -lt 3 ]; then
-                echo "$label failed (attempt $attempt/3); retrying in $((attempt * 5))s..." >&2
-                sleep "$((attempt * 5))"
-              fi
-            done
-            echo "$label failed after 3 attempts" >&2
-            return 1
-          }
-
-          gitea_remote() {
-            local host="${GITEA_SSH_HOST:-gitea.com}"
-            local port="${GITEA_SSH_PORT:-22}"
-            if [ "$port" = "22" ]; then
-              printf 'git@%s:%s/%s.git' "$host" "$MIRROR_OWNER" "$MIRROR_REPO"
-            else
-              printf 'ssh://git@%s:%s/%s/%s.git' "$host" "$port" "$MIRROR_OWNER" "$MIRROR_REPO"
-            fi
-          }
-
-          prepare_mirror_tag() {
-            local name="$1"
-            local remote="$2"
-            local dir="$RUNNER_TEMP/mirror-tag-$name"
-
-            rm -rf "$dir"
-            mkdir -p "$dir/update"
-            cp update/manifest.json "$dir/update/manifest.json"
-            cp update/stable.json "$dir/update/stable.json"
-
-            git -C "$dir" init
-            git -C "$dir" config user.name "github-actions[bot]"
-            git -C "$dir" config user.email "github-actions[bot]@users.noreply.github.com"
-            git -C "$dir" remote add origin "$remote"
-            git -C "$dir" add update
-            git -C "$dir" commit -m "Prepare mirror release tag ${{ steps.meta.outputs.release_title }}"
-            git -C "$dir" branch -M main
-            retry_git "$name main push" git -C "$dir" push --force origin main
-            git -C "$dir" tag -f "${{ steps.meta.outputs.version_code }}"
-            retry_git "$name tag push" git -C "$dir" push --force origin "${{ steps.meta.outputs.version_code }}"
-          }
-
-          prepare_mirror_tag "gitee" "git@gitee.com:${MIRROR_OWNER}/${MIRROR_REPO}.git"
-          prepare_mirror_tag "gitea" "$(gitea_remote)"
-
-      - name: Publish Gitee release asset
-        id: gitee_release
-        timeout-minutes: 60
-        shell: bash
-        env:
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-          TAG: ${{ steps.meta.outputs.version_code }}
-          TITLE: ${{ steps.meta.outputs.release_title }}
-          CHANGELOG: ${{ steps.meta.outputs.changelog }}
-          APK: ${{ steps.sign.outputs.apk_path }}
-          APK_NAME: ${{ steps.meta.outputs.apk_name }}
-        run: |
-          set -euo pipefail
-          bash .github/scripts/publish-gitee-release-asset.sh
-
-      - name: Publish Gitea release asset
-        id: gitea_release
-        timeout-minutes: 60
-        shell: bash
-        env:
-          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
-          GITEA_BASE_URL: ${{ env.GITEA_BASE_URL }}
-          TAG: ${{ steps.meta.outputs.version_code }}
-          TITLE: ${{ steps.meta.outputs.release_title }}
-          CHANGELOG: ${{ steps.meta.outputs.changelog }}
-          APK: ${{ steps.sign.outputs.apk_path }}
-          APK_NAME: ${{ steps.meta.outputs.apk_name }}
-        run: |
-          set -euo pipefail
-          bash .github/scripts/publish-gitea-release-asset.sh
-
       - name: Generate published update manifests
         shell: bash
         run: |
@@ -290,27 +171,11 @@ jobs:
           APK_SIZE="${{ steps.sign.outputs.size }}" \
             python3 .github/scripts/write-published-update-manifest.py
 
-          OUTPUT_DIR="$RUNNER_TEMP/published-update/gitee/update" \
-          RELEASE_URL="${{ steps.gitee_release.outputs.release_url }}" \
-          ASSET_URL="${{ steps.gitee_release.outputs.asset_url }}" \
-          APK_SHA256="${{ steps.sign.outputs.sha256 }}" \
-          APK_SIZE="${{ steps.sign.outputs.size }}" \
-            python3 .github/scripts/write-published-update-manifest.py
-
-          OUTPUT_DIR="$RUNNER_TEMP/published-update/gitea/update" \
-          RELEASE_URL="${{ steps.gitea_release.outputs.release_url }}" \
-          ASSET_URL="${{ steps.gitea_release.outputs.asset_url }}" \
-          APK_SHA256="${{ steps.sign.outputs.sha256 }}" \
-          APK_SIZE="${{ steps.sign.outputs.size }}" \
-            python3 .github/scripts/write-published-update-manifest.py
-
       - name: Validate published update manifests
         shell: bash
         run: |
           set -euo pipefail
           ./gradlew validatePublishedUpdateManifest -PpublishedUpdateDir="$RUNNER_TEMP/published-update/github/update" --console=plain
-          ./gradlew validatePublishedUpdateManifest -PpublishedUpdateDir="$RUNNER_TEMP/published-update/gitee/update" --console=plain
-          ./gradlew validatePublishedUpdateManifest -PpublishedUpdateDir="$RUNNER_TEMP/published-update/gitea/update" --console=plain
 
       - name: Push published update folder to GitHub update-release branch
         shell: bash
@@ -329,66 +194,3 @@ jobs:
           git -C "$dir" commit -m "Publish update manifest for ${{ steps.meta.outputs.release_title }}"
           git -C "$dir" branch -M update-release
           git -C "$dir" push --force origin update-release
-
-      - name: Push update folder to mirror repositories
-        timeout-minutes: 60
-        shell: bash
-        env:
-          GIT_SSH_COMMAND: >-
-            ssh -o BatchMode=yes
-            -o ConnectTimeout=60
-            -o ServerAliveInterval=15
-            -o ServerAliveCountMax=2
-        run: |
-          set -euo pipefail
-
-          retry_git() {
-            local label="$1"
-            shift
-            local attempt
-            for attempt in 1 2 3; do
-              if timeout --foreground 30s "$@"; then
-                return 0
-              fi
-              if [ "$attempt" -lt 3 ]; then
-                echo "$label failed (attempt $attempt/3); retrying in $((attempt * 5))s..." >&2
-                sleep "$((attempt * 5))"
-              fi
-            done
-            echo "$label failed after 3 attempts" >&2
-            return 1
-          }
-
-          gitea_remote() {
-            local host="${GITEA_SSH_HOST:-gitea.com}"
-            local port="${GITEA_SSH_PORT:-22}"
-            if [ "$port" = "22" ]; then
-              printf 'git@%s:%s/%s.git' "$host" "$MIRROR_OWNER" "$MIRROR_REPO"
-            else
-              printf 'ssh://git@%s:%s/%s/%s.git' "$host" "$port" "$MIRROR_OWNER" "$MIRROR_REPO"
-            fi
-          }
-
-          push_mirror() {
-            local name="$1"
-            local remote="$2"
-            local dir="$RUNNER_TEMP/mirror-$name"
-
-            rm -rf "$dir"
-            mkdir -p "$dir"
-            cp -R "$RUNNER_TEMP/published-update/$name/update" "$dir/update"
-
-            git -C "$dir" init
-            git -C "$dir" config user.name "github-actions[bot]"
-            git -C "$dir" config user.email "github-actions[bot]@users.noreply.github.com"
-            git -C "$dir" remote add origin "$remote"
-            git -C "$dir" add update
-            git -C "$dir" commit -m "Update release manifest"
-            git -C "$dir" branch -M main
-            retry_git "$name main push" git -C "$dir" push --force origin main
-            git -C "$dir" tag -f "${{ steps.meta.outputs.version_code }}"
-            retry_git "$name tag push" git -C "$dir" push --force origin "${{ steps.meta.outputs.version_code }}"
-          }
-
-          push_mirror "gitee" "git@gitee.com:${MIRROR_OWNER}/${MIRROR_REPO}.git"
-          push_mirror "gitea" "$(gitea_remote)"
