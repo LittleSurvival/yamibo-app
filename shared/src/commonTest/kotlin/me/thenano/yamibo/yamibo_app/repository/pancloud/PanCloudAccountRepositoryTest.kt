@@ -87,7 +87,7 @@ class PanCloudAccountRepositoryTest {
                         jsonHeaders,
                     )
                     else -> respond(
-                        """{"success":true,"data":{"user":{"id":1,"username":"alice"},"access_token":"at-refreshed","refresh_token":"rt-refreshed","expires_in":900}}""",
+                        """{"success":true,"data":{"access_token":"at-refreshed","refresh_token":"rt-refreshed","expires_in":900}}""",
                         HttpStatusCode.OK,
                         jsonHeaders,
                     )

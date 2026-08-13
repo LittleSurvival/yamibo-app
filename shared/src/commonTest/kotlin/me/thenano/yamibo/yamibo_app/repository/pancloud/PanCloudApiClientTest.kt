@@ -41,7 +41,7 @@ class PanCloudApiClientTest {
         assertEquals("at", result.accessToken)
         assertEquals("rt", result.refreshToken)
         assertEquals(900, result.expiresIn)
-        assertEquals(1L, result.user.id)
+        assertEquals(1L, result.user?.id)
     }
 
     @Test

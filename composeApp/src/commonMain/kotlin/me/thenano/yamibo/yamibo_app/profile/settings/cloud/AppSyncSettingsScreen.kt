@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
+import me.thenano.yamibo.yamibo_app.LocalAppCoroutineScope
 import me.thenano.yamibo.yamibo_app.LocalAppSyncService
 import me.thenano.yamibo.yamibo_app.LocalAppSettingsRepository
 import me.thenano.yamibo.yamibo_app.LocalAppFeedbackController
@@ -78,7 +79,7 @@ internal fun AppSyncSettingsScreen(
     val navigator = LocalNavigator.current
     val service = LocalAppSyncService.current
     val scheduler = LocalAppSyncBackgroundScheduler.current
-    val scope = rememberCoroutineScope()
+    val scope = LocalAppCoroutineScope.current
     val activeController = controller ?: remember(service, scope, scheduler) {
         service?.let { AppSyncCloudUiController(it, scope, scheduler) } ?: StubCloudSyncUiController
     }
@@ -375,16 +376,14 @@ private fun CloudAccountSection() {
         }
         PanCloudSessionState.Expired -> {
             Text(
-                text = i18n("登入已失效，請重新登入"),
+                text = status.diagnostic ?: i18n("登入已失效，請重新登入"),
                 fontSize = 13.sp,
                 color = colors.redAccent,
             )
             Spacer(Modifier.height(8.dp))
             SmallBackupButton(text = i18n("登入"), onClick = { showLogin = true })
         }
-        PanCloudSessionState.LoggedOut,
-        PanCloudSessionState.Unknown,
-        -> {
+        PanCloudSessionState.LoggedOut -> {
             Text(
                 text = i18n("網盤：未登入"),
                 fontSize = 13.sp,
@@ -392,6 +391,13 @@ private fun CloudAccountSection() {
             )
             Spacer(Modifier.height(8.dp))
             SmallBackupButton(text = i18n("登入網盤"), onClick = { showLogin = true })
+        }
+        PanCloudSessionState.Unknown -> {
+            Text(
+                text = status.diagnostic ?: i18n("網盤：登入中..."),
+                fontSize = 13.sp,
+                color = colors.textDark.copy(alpha = 0.7f),
+            )
         }
     }
 

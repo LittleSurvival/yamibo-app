@@ -3,6 +3,7 @@ package me.thenano.yamibo.yamibo_app.repository.pancloud
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.repository.settings.AppSettingsRepository
 
 /** 网盘会话状态。 */
@@ -39,6 +40,7 @@ class PanCloudAccountRepository(
         val state: PanCloudSessionState,
         val username: String?,
         val folderId: String?,
+        val diagnostic: String? = null,
     ) {
         val loggedIn: Boolean get() = state == PanCloudSessionState.Active
     }
@@ -84,24 +86,40 @@ class PanCloudAccountRepository(
     /** 用已保存的 refresh_token 恢复登录态；refresh 过期则尝试密码自动重登。 */
     suspend fun restoreSession(): Result<AccountStatus> = runCatching {
         val refreshToken = appSettings.panCloudRefreshToken.getValue()
+        Logger.d(TAG, "restoreSession: refreshToken blank=${refreshToken.isBlank()}")
         if (refreshToken.isBlank()) {
             updateSession(PanCloudSessionState.LoggedOut)
             return@runCatching status
         }
         val refreshResult = runCatching { apiClient.refresh(refreshToken) }
         if (refreshResult.isSuccess) {
+            Logger.d(TAG, "restoreSession: refresh success")
             adoptAuth(refreshResult.getOrThrow(), password = null)
         } else {
             val error = refreshResult.exceptionOrNull()
+            Logger.w(TAG, "restoreSession: refresh failed: ${error?.message}", error)
+            var diagnostic = "refresh 失敗：${error?.message ?: error?.toString()}"
             if (error is PanCloudApiException && error.statusCode == 401) {
                 when (reloginWithSavedPassword()) {
-                    ReloginResult.Success -> return@runCatching status
+                    ReloginResult.Success -> {
+                        Logger.d(TAG, "restoreSession: relogin success")
+                        return@runCatching status
+                    }
                     ReloginResult.InvalidCredentials -> {
                         clearAuth()
-                        updateSession(PanCloudSessionState.Expired)
+                        updateSession(
+                            PanCloudSessionState.Expired,
+                            diagnostic = "密碼重登失敗，請重新登入",
+                        )
                     }
-                    ReloginResult.NetworkError -> Unit // 保留凭证，继续 throw 以便重试
+                    ReloginResult.NetworkError -> {
+                        Logger.w(TAG, "restoreSession: relogin network error")
+                        diagnostic = "refresh 已過期，密碼重登網路失敗"
+                    }
                 }
+            }
+            if (mutableSession.value.state != PanCloudSessionState.Expired) {
+                updateSession(PanCloudSessionState.Unknown, diagnostic = diagnostic)
             }
             throw error ?: IllegalStateException("refresh failed")
         }
@@ -138,7 +156,7 @@ class PanCloudAccountRepository(
     private fun applyTokens(result: PanCloudAuthResult) {
         apiClient.accessToken = result.accessToken
         appSettings.panCloudRefreshToken.setValue(result.refreshToken)
-        appSettings.panCloudUsername.setValue(result.user.username)
+        result.user?.username?.let { appSettings.panCloudUsername.setValue(it) }
     }
 
     private suspend fun refreshAccessToken(): Boolean {
@@ -191,16 +209,18 @@ class PanCloudAccountRepository(
         appSettings.panCloudPassword.setValue("")
     }
 
-    private fun updateSession(state: PanCloudSessionState) {
+    private fun updateSession(state: PanCloudSessionState, diagnostic: String? = null) {
         mutableSession.value = AccountStatus(
             state = state,
             username = appSettings.panCloudUsername.getValue().takeIf { it.isNotBlank() },
             folderId = appSettings.panCloudFolderId.getValue().takeIf { it.isNotBlank() },
+            diagnostic = diagnostic,
         )
     }
 
     companion object {
         const val FOLDER_NAME = "yamibo"
         const val FOLDER_TYPE = "folder"
+        const val TAG = "PanCloudAccountRepository"
     }
 }

@@ -317,7 +317,12 @@ class MainActivity : ComponentActivity() {
             }
             LaunchedEffect(appSyncService, panCloudApiClient, panCloudAccountRepository) {
                 appSyncService.attachPanCloud(panCloudApiClient, panCloudAccountRepository)
-                panCloudAccountRepository.restoreSession()
+                // 启动时网络可能尚未就绪，带退避重试恢复会话。
+                repeat(3) { attempt ->
+                    val restored = panCloudAccountRepository.restoreSession()
+                    if (restored.isSuccess) return@LaunchedEffect
+                    delay(1000L * (attempt + 1))
+                }
             }
             val appSyncBackgroundScheduler = remember {
                 AndroidAppSyncBackgroundScheduler(context)

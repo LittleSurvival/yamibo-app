@@ -35,6 +35,25 @@ internal class PanCloudJournalRemote(
     private val nowMillis: () -> Long = ::currentTimeMillis,
 ) : AppSyncJournalRemote {
 
+    private data class CachedJournal(
+        val updatedAt: Long?,
+        val loaded: LoadedAppSyncJournal,
+    )
+
+    private data class CachedCheckpoint(
+        val updatedAt: Long?,
+        val loaded: LoadedAppSyncCheckpoint,
+    )
+
+    private data class CachedIndex(
+        val updatedAt: Long?,
+        val payload: AppSyncIndexPayload,
+    )
+
+    private val journalCache = mutableMapOf<String, CachedJournal>()
+    private val checkpointCache = mutableMapOf<String, CachedCheckpoint>()
+    private var indexCache: CachedIndex? = null
+
     @Suppress("UNUSED_PARAMETER")
     override suspend fun loadJournals(
         accountBinding: SyncAccountBinding,
@@ -58,41 +77,73 @@ internal class PanCloudJournalRemote(
         val checkpoints = mutableListOf<LoadedAppSyncCheckpoint>()
         var indexedReplicaKeys = emptySet<String>()
 
-        files.firstOrNull { it.name == INDEX_FILE }?.let { indexEntry ->
-            downloadText(indexEntry.id)?.let { text ->
-                when (val result = indexCodec.validate(text)) {
-                    is AppSyncIndexValidation.Valid ->
-                        indexedReplicaKeys = result.envelope.payload.journals
-                            .map { it.replicaKey }
-                            .toSet()
-                    is AppSyncIndexValidation.Invalid -> Unit
+        // index 增量
+        val indexEntry = files.firstOrNull { it.name == INDEX_FILE }
+        if (indexEntry == null) {
+            indexCache = null
+        } else {
+            val cached = indexCache
+            if (cached != null && cached.updatedAt != null && cached.updatedAt == indexEntry.updatedAt) {
+                indexedReplicaKeys = cached.payload.journals.map { it.replicaKey }.toSet()
+            } else {
+                downloadText(indexEntry.id)?.let { text ->
+                    when (val result = indexCodec.validate(text)) {
+                        is AppSyncIndexValidation.Valid -> {
+                            indexedReplicaKeys = result.envelope.payload.journals
+                                .map { it.replicaKey }
+                                .toSet()
+                            indexCache = CachedIndex(indexEntry.updatedAt, result.envelope.payload)
+                        }
+                        is AppSyncIndexValidation.Invalid -> indexCache = null
+                    }
                 }
             }
         }
 
-        for (file in files.filter { isJournalFile(it.name) }) {
-            downloadText(file.id)?.let { text ->
-                when (val result = journalCodec.validate(text)) {
-                    is AppSyncJournalValidation.Valid ->
-                        journals += LoadedAppSyncJournal(
-                            remoteId = file.id,
-                            fingerprint = result.envelope.fingerprint,
-                            payload = result.envelope.payload,
-                        )
-                    is AppSyncJournalValidation.Invalid -> Unit
+        // journal 增量
+        val journalFiles = files.filter { isJournalFile(it.name) }
+        val presentJournalNames = journalFiles.mapTo(hashSetOf()) { it.name }
+        journalCache.keys.retainAll(presentJournalNames)
+        for (file in journalFiles) {
+            val cached = journalCache[file.name]
+            if (cached != null && cached.updatedAt != null && cached.updatedAt == file.updatedAt) {
+                journals += cached.loaded
+            } else {
+                downloadText(file.id)?.let { text ->
+                    when (val result = journalCodec.validate(text)) {
+                        is AppSyncJournalValidation.Valid -> {
+                            val loaded = LoadedAppSyncJournal(
+                                remoteId = file.id,
+                                fingerprint = result.envelope.fingerprint,
+                                payload = result.envelope.payload,
+                            )
+                            journals += loaded
+                            journalCache[file.name] = CachedJournal(file.updatedAt, loaded)
+                        }
+                        is AppSyncJournalValidation.Invalid -> journalCache.remove(file.name)
+                    }
                 }
             }
         }
 
-        for (file in files.filter { isCheckpointFile(it.name) }) {
-            downloadText(file.id)?.let { text ->
-                when (val result = checkpointCodec.validate(text)) {
-                    is AppSyncCheckpointValidation.Valid ->
-                        checkpoints += LoadedAppSyncCheckpoint(
-                            remoteId = file.id,
-                            envelope = result.envelope,
-                        )
-                    is AppSyncCheckpointValidation.Invalid -> Unit
+        // checkpoint 增量
+        val checkpointFiles = files.filter { isCheckpointFile(it.name) }
+        val presentCheckpointNames = checkpointFiles.mapTo(hashSetOf()) { it.name }
+        checkpointCache.keys.retainAll(presentCheckpointNames)
+        for (file in checkpointFiles) {
+            val cached = checkpointCache[file.name]
+            if (cached != null && cached.updatedAt != null && cached.updatedAt == file.updatedAt) {
+                checkpoints += cached.loaded
+            } else {
+                downloadText(file.id)?.let { text ->
+                    when (val result = checkpointCodec.validate(text)) {
+                        is AppSyncCheckpointValidation.Valid -> {
+                            val loaded = LoadedAppSyncCheckpoint(file.id, result.envelope)
+                            checkpoints += loaded
+                            checkpointCache[file.name] = CachedCheckpoint(file.updatedAt, loaded)
+                        }
+                        is AppSyncCheckpointValidation.Invalid -> checkpointCache.remove(file.name)
+                    }
                 }
             }
         }
@@ -158,13 +209,13 @@ internal class PanCloudJournalRemote(
                 mimeType = MIME_TYPE,
                 parentId = parentId,
             )
-            AppSyncJournalPublishResult.Verified(
-                LoadedAppSyncJournal(
-                    remoteId = uploaded.fileId,
-                    fingerprint = envelope.fingerprint,
-                    payload = payload,
-                ),
+            val journal = LoadedAppSyncJournal(
+                remoteId = uploaded.fileId,
+                fingerprint = envelope.fingerprint,
+                payload = payload,
             )
+            journalCache[fileName] = CachedJournal(nowMillis(), journal)
+            AppSyncJournalPublishResult.Verified(journal)
         } catch (error: Throwable) {
             AppSyncJournalPublishResult.Unknown(
                 "網盤上傳 journal 失敗：${error.message ?: error::class.simpleName}",
@@ -189,9 +240,9 @@ internal class PanCloudJournalRemote(
                 mimeType = MIME_TYPE,
                 parentId = parentId,
             )
-            AppSyncCheckpointPublishResult.Verified(
-                LoadedAppSyncCheckpoint(uploaded.fileId, envelope),
-            )
+            val loaded = LoadedAppSyncCheckpoint(uploaded.fileId, envelope)
+            checkpointCache[fileName] = CachedCheckpoint(nowMillis(), loaded)
+            AppSyncCheckpointPublishResult.Verified(loaded)
         } catch (error: Throwable) {
             AppSyncCheckpointPublishResult.Unknown(
                 "網盤上傳 checkpoint 失敗：${error.message ?: error::class.simpleName}",
@@ -236,7 +287,10 @@ internal class PanCloudJournalRemote(
         var deleted = 0
         for (file in toDelete) {
             runCatching { apiClient.deleteFile(file.id) }
-                .onSuccess { deleted += 1 }
+                .onSuccess {
+                    deleted += 1
+                    checkpointCache.remove(file.name)
+                }
                 .onFailure { return AppSyncCheckpointRetentionResult.RetryableFailure(it.message ?: "delete failed") }
         }
 
@@ -331,6 +385,7 @@ internal class PanCloudJournalRemote(
         }
         return try {
             apiClient.deleteFile(entry.id)
+            journalCache.remove(fileName)
             AppSyncJournalRetirementRemoteResult.Verified
         } catch (error: Throwable) {
             AppSyncJournalRetirementRemoteResult.RetryableFailure(error.message ?: "delete failed")

@@ -66,7 +66,7 @@ data class PanCloudUser(
 
 @Serializable
 data class PanCloudAuthResult(
-    val user: PanCloudUser,
+    val user: PanCloudUser? = null,
     val accessToken: String,
     val refreshToken: String,
     val expiresIn: Int,
