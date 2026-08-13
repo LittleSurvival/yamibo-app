@@ -54,6 +54,9 @@ class PanCloudAccountRepositoryTest {
         val appSettings = AppSettingsRepository(settingsStore)
         val listFilesCalls = mutableListOf<String?>()
         val createFolderCalls = mutableListOf<String>()
+        var refreshUnauthorized = false
+        var refreshNetworkFail = false
+        var loginUnauthorized = false
 
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {
@@ -62,16 +65,32 @@ class PanCloudAccountRepositoryTest {
                     HttpStatusCode.Created,
                     jsonHeaders,
                 )
-                "/api/auth/login" -> respond(
-                    """{"success":true,"data":{"user":{"id":1,"username":"alice"},"access_token":"at-login","refresh_token":"rt-login","expires_in":900}}""",
-                    HttpStatusCode.OK,
-                    jsonHeaders,
-                )
-                "/api/auth/refresh" -> respond(
-                    """{"success":true,"data":{"user":{"id":1,"username":"alice"},"access_token":"at-refreshed","refresh_token":"rt-refreshed","expires_in":900}}""",
-                    HttpStatusCode.OK,
-                    jsonHeaders,
-                )
+                "/api/auth/login" -> if (loginUnauthorized) {
+                    respond(
+                        """{"success":false,"error":"用户名或密码错误"}""",
+                        HttpStatusCode.Unauthorized,
+                        jsonHeaders,
+                    )
+                } else {
+                    respond(
+                        """{"success":true,"data":{"user":{"id":1,"username":"alice"},"access_token":"at-login","refresh_token":"rt-login","expires_in":900}}""",
+                        HttpStatusCode.OK,
+                        jsonHeaders,
+                    )
+                }
+                "/api/auth/refresh" -> when {
+                    refreshNetworkFail -> throw java.io.IOException("network down")
+                    refreshUnauthorized -> respond(
+                        """{"success":false,"error":"Unauthorized"}""",
+                        HttpStatusCode.Unauthorized,
+                        jsonHeaders,
+                    )
+                    else -> respond(
+                        """{"success":true,"data":{"user":{"id":1,"username":"alice"},"access_token":"at-refreshed","refresh_token":"rt-refreshed","expires_in":900}}""",
+                        HttpStatusCode.OK,
+                        jsonHeaders,
+                    )
+                }
                 "/api/auth/logout" -> respond(
                     """{"success":true,"message":"已登出"}""",
                     HttpStatusCode.OK,
@@ -160,5 +179,80 @@ class PanCloudAccountRepositoryTest {
         assertNull(h.apiClient.accessToken)
         assertEquals("", h.appSettings.panCloudRefreshToken.getValue())
         assertEquals("", h.appSettings.panCloudFolderId.getValue())
+    }
+
+    @Test
+    fun restoreSessionMarksExpiredOn401() = runBlocking {
+        val h = Harness()
+        h.appSettings.panCloudRefreshToken.setValue("old-rt")
+        h.refreshUnauthorized = true
+
+        val result = h.repository.restoreSession()
+
+        assertTrue(result.isFailure)
+        assertEquals(PanCloudSessionState.Expired, h.repository.status.state)
+        assertEquals("", h.appSettings.panCloudRefreshToken.getValue())
+        assertNull(h.apiClient.accessToken)
+    }
+
+    @Test
+    fun restoreSessionKeepsCredentialOnNetworkFailure() = runBlocking {
+        val h = Harness()
+        h.appSettings.panCloudRefreshToken.setValue("old-rt")
+        h.refreshNetworkFail = true
+
+        val result = h.repository.restoreSession()
+
+        assertTrue(result.isFailure)
+        assertEquals("old-rt", h.appSettings.panCloudRefreshToken.getValue())
+    }
+
+    @Test
+    fun loginStoresPassword() = runBlocking {
+        val h = Harness()
+        h.repository.login("alice", "password123")
+
+        assertEquals("password123", h.appSettings.panCloudPassword.getValue())
+    }
+
+    @Test
+    fun logoutClearsPassword() = runBlocking {
+        val h = Harness()
+        h.repository.login("alice", "password123")
+
+        h.repository.logout()
+
+        assertEquals("", h.appSettings.panCloudPassword.getValue())
+    }
+
+    @Test
+    fun restoreSessionReloginOnExpiredRefresh() = runBlocking {
+        val h = Harness()
+        h.appSettings.panCloudRefreshToken.setValue("old-rt")
+        h.appSettings.panCloudUsername.setValue("alice")
+        h.appSettings.panCloudPassword.setValue("password123")
+        h.refreshUnauthorized = true
+
+        val result = h.repository.restoreSession()
+
+        assertTrue(result.isSuccess)
+        assertEquals("rt-login", h.appSettings.panCloudRefreshToken.getValue())
+        assertEquals(PanCloudSessionState.Active, h.repository.status.state)
+    }
+
+    @Test
+    fun restoreSessionMarksExpiredWhenReloginFails() = runBlocking {
+        val h = Harness()
+        h.appSettings.panCloudRefreshToken.setValue("old-rt")
+        h.appSettings.panCloudUsername.setValue("alice")
+        h.appSettings.panCloudPassword.setValue("password123")
+        h.refreshUnauthorized = true
+        h.loginUnauthorized = true
+
+        val result = h.repository.restoreSession()
+
+        assertTrue(result.isFailure)
+        assertEquals(PanCloudSessionState.Expired, h.repository.status.state)
+        assertEquals("", h.appSettings.panCloudPassword.getValue())
     }
 }

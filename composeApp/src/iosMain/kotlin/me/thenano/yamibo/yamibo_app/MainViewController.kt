@@ -214,7 +214,7 @@ fun MainViewController() = ComposeUIViewController {
     }
     val panCloudApiClient = remember { PanCloudApiClient(HttpClientFactory.create()) }
     val panCloudAccountRepository = remember {
-        PanCloudAccountRepository(panCloudApiClient, appSettingsRepository)
+        PanCloudAccountRepository(panCloudApiClient, AppSettingsRepository(IOSSettingsStore()))
     }
     val panCloudBackupRepository = remember {
         BackupRepositoryImpl(

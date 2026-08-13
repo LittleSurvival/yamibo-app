@@ -36,9 +36,9 @@ import me.thenano.yamibo.yamibo_app.repository.pancloud.PanCloudApiException
 import me.thenano.yamibo.yamibo_app.repository.settings.BackupInterval
 import me.thenano.yamibo.yamibo_app.util.formatStorageSize
 import me.thenano.yamibo.yamibo_app.util.state
+import me.thenano.yamibo.yamibo_app.profile.settings.cloud.CloudAuthMode
+import me.thenano.yamibo.yamibo_app.profile.settings.cloud.CloudLoginDialog
 import kotlin.math.roundToInt
-
-private enum class CloudAuthMode { Login, Register }
 
 @Composable
 internal fun BackupSettingsScreen() {
@@ -69,6 +69,7 @@ internal fun BackupSettingsScreen() {
     var showCloudLogin by remember { mutableStateOf(false) }
 
     suspend fun refresh() {
+        cloudAccount.restoreSession()
         folderLabel = repository.getSelectedFolderLabel()
         storageBytes = repository.getBackupStorageBytes()
         backupFiles = repository.listBackupFiles()
@@ -527,71 +528,6 @@ private fun BackupFileListCard(
             }
         }
     }
-}
-
-@Composable
-private fun CloudLoginDialog(
-    working: Boolean,
-    onDismiss: () -> Unit,
-    onSubmit: (username: String, password: String, mode: CloudAuthMode) -> Unit,
-) {
-    val colors = YamiboTheme.colors
-    var username by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var mode by remember { mutableStateOf(CloudAuthMode.Login) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = colors.creamBackground,
-        titleContentColor = colors.textDark,
-        title = { Text(i18n("登入網盤帳戶"), fontWeight = FontWeight.Bold) },
-        text = {
-            Column {
-                OutlinedTextField(
-                    value = username,
-                    onValueChange = { username = it },
-                    singleLine = true,
-                    label = { Text(i18n("帳號")) },
-                    enabled = !working,
-                    colors = backupTextFieldColors(),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    singleLine = true,
-                    label = { Text(i18n("密碼")) },
-                    visualTransformation = PasswordVisualTransformation(),
-                    enabled = !working,
-                    colors = backupTextFieldColors(),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = i18n("沒有帳戶？"),
-                        fontSize = 12.sp,
-                        color = colors.textDark.copy(alpha = 0.6f),
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    SmallBackupButton(
-                        text = if (mode == CloudAuthMode.Login) i18n("改用註冊") else i18n("改用登入"),
-                        onClick = { mode = if (mode == CloudAuthMode.Login) CloudAuthMode.Register else CloudAuthMode.Login },
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            SmallBackupButton(
-                text = if (working) i18n("處理中...") else if (mode == CloudAuthMode.Login) i18n("登入") else i18n("註冊"),
-                onClick = { onSubmit(username, password, mode) },
-            )
-        },
-        dismissButton = {
-            SmallBackupButton(text = i18n("取消"), onClick = onDismiss)
-        },
-    )
 }
 
 @Composable

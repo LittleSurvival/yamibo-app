@@ -23,6 +23,7 @@ import me.thenano.yamibo.yamibo_app.AppVersion
 import me.thenano.yamibo.yamibo_app.store.AndroidCookieStore
 import me.thenano.yamibo.yamibo_app.store.AndroidUserStore
 import me.thenano.yamibo.yamibo_app.store.settings.AndroidSettingsStore
+import me.thenano.yamibo.yamibo_app.store.settings.EncryptedSettingsStore
 
 class AppSyncWorker(
     context: Context,
@@ -48,7 +49,10 @@ class AppSyncWorker(
         val novelSettings = NovelReaderSettingsRepository(settings)
         val mangaSettings = MangaReaderSettingsRepository(settings)
         val panCloudApiClient = PanCloudApiClient(HttpClientFactory.create())
-        val panCloudAccount = PanCloudAccountRepository(panCloudApiClient, appSettings)
+        val panCloudAccount = PanCloudAccountRepository(
+            panCloudApiClient,
+            AppSettingsRepository(EncryptedSettingsStore(applicationContext)),
+        )
         service.attachPanCloud(panCloudApiClient, panCloudAccount)
         panCloudAccount.restoreSession()
         service.registerSyncableSettings(listOf(appSettings, novelSettings, mangaSettings))

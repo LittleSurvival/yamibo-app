@@ -319,6 +319,12 @@ class AppSettingsRepository(store: SettingsStore) : SettingsRegistry(store, pref
         default = "",
     )
 
+    /** 網盤密碼（加密落盤，用於 refresh_token 過期後自動重登；不進備份） */
+    val panCloudPassword by stringSetting(
+        name = "pan_cloud_password",
+        default = "",
+    )
+
     /** 網盤 yamibo 資料夾 ID */
     val panCloudFolderId by stringSetting(
         name = "pan_cloud_folder_id",

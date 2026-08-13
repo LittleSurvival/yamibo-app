@@ -134,7 +134,7 @@ private suspend fun runAppSyncOnce(): IOSAppSyncRunOutcome {
     val novelSettings = NovelReaderSettingsRepository(settings)
     val mangaSettings = MangaReaderSettingsRepository(settings)
     val panCloudApiClient = PanCloudApiClient(HttpClientFactory.create())
-    val panCloudAccount = PanCloudAccountRepository(panCloudApiClient, appSettings)
+    val panCloudAccount = PanCloudAccountRepository(panCloudApiClient, AppSettingsRepository(IOSSettingsStore()))
     service.attachPanCloud(panCloudApiClient, panCloudAccount)
     panCloudAccount.restoreSession()
     service.registerSyncableSettings(listOf(appSettings, novelSettings, mangaSettings))

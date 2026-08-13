@@ -77,6 +77,7 @@ import me.thenano.yamibo.yamibo_app.store.AndroidCookieStore
 import me.thenano.yamibo.yamibo_app.store.AndroidForumFavoriteStore
 import me.thenano.yamibo.yamibo_app.store.AndroidUserStore
 import me.thenano.yamibo.yamibo_app.store.settings.AndroidSettingsStore
+import me.thenano.yamibo.yamibo_app.store.settings.EncryptedSettingsStore
 import me.thenano.yamibo.yamibo_app.update.AndroidAppUpdatePlatform
 import me.thenano.yamibo.yamibo_app.util.state
 import me.thenano.yamibo.yamibo_app.task.AppTaskManager
@@ -300,7 +301,10 @@ class MainActivity : ComponentActivity() {
             }
             val panCloudApiClient = remember { PanCloudApiClient(HttpClientFactory.create()) }
             val panCloudAccountRepository = remember {
-                PanCloudAccountRepository(panCloudApiClient, appSettingsRepository)
+                PanCloudAccountRepository(
+                    panCloudApiClient,
+                    AppSettingsRepository(EncryptedSettingsStore(context)),
+                )
             }
             val panCloudBackupRepository = remember {
                 BackupRepositoryImpl(

@@ -883,3 +883,7 @@ Current cache size: {}","清除圖片、頁面與其他暫存資料，釋放目�
 同步後端,Sync backend,同步後端,同步后端
 網盤,Cloud drive,網盤,网盘
 論壇 Blog,Forum Blog,論壇 Blog,论坛 Blog
+登入已失效，請重新登入,"Login expired, please sign in again",登入已失效，請重新登入,登录已失效，请重新登录
+登入網盤,Sign in to cloud drive,登入網盤,登录网盘
+網盤同步會使用此帳戶的 yamibo 資料夾,Cloud sync uses this account's yamibo folder,網盤同步會使用此帳戶的 yamibo 資料夾,网盘同步会使用此账户的 yamibo 文件夹
+網盤帳戶,Cloud drive account,網盤帳戶,网盘账户

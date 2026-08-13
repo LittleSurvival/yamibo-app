@@ -13,6 +13,7 @@ import me.thenano.yamibo.yamibo_app.repository.settings.AppSettingsRepository
 import me.thenano.yamibo.yamibo_app.repository.settings.MangaReaderSettingsRepository
 import me.thenano.yamibo.yamibo_app.repository.settings.NovelReaderSettingsRepository
 import me.thenano.yamibo.yamibo_app.store.settings.AndroidSettingsStore
+import me.thenano.yamibo.yamibo_app.store.settings.EncryptedSettingsStore
 
 internal data class PanCloudBackupComponents(
     val backupRepository: BackupRepositoryImpl,
@@ -28,7 +29,10 @@ internal object AndroidPanCloudBackupSupport {
         val mangaSettingsRepository = MangaReaderSettingsRepository(settingsStore)
         val db = Database(DatabaseFactory(appContext).createDriver())
         val apiClient = PanCloudApiClient(HttpClientFactory.create())
-        val accountRepository = PanCloudAccountRepository(apiClient, appSettingsRepository)
+        val accountRepository = PanCloudAccountRepository(
+            apiClient,
+            AppSettingsRepository(EncryptedSettingsStore(appContext)),
+        )
         val backupRepository = BackupRepositoryImpl(
             db = db,
             settingsStore = settingsStore,

@@ -54,7 +54,8 @@ class PanCloudBackupStorageProviderTest {
 
     private class Harness {
         private val jsonHeaders = headersOf(HttpHeaders.ContentType, "application/json")
-        val appSettings = AppSettingsRepository(MemorySettingsStore())
+        val settingsStore = MemorySettingsStore()
+        val appSettings = AppSettingsRepository(settingsStore)
         var singleUploadCount = 0
         var chunkUploadCount = 0
         val chunkSizes = mutableListOf<Long>()
