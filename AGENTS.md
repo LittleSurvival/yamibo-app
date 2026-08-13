@@ -51,8 +51,8 @@
 ### Settings & credentials
 
 - Settings use the `SettingsRegistry` DSL (`enumSetting`/`stringSetting`/`boolSetting`/`intSetting`); the storage key is `"$prefix.$propertyName.lowercase()"`.
-- Sensitive/device-local settings (e.g. cloud drive `refresh_token`) must be added to the `BackupRepositoryImpl.shouldSkipSetting` blacklist so they are excluded from backups.
-- Cloud `access_token` lives only in memory (`PanCloudApiClient`); the `refresh_token` is persisted in `SettingsStore`.
+- Sensitive/device-local settings (e.g. cloud drive `refresh_token`, `pan_cloud_password`) must be added to the `BackupRepositoryImpl.shouldSkipSetting` blacklist so they are excluded from backups.
+- Cloud `access_token` lives only in memory (`PanCloudApiClient`); `refresh_token` and password persist via `EncryptedSettingsStore` (Android Keystore) / `NSUserDefaults` (iOS, not yet encrypted).
 
 ### Testing
 
