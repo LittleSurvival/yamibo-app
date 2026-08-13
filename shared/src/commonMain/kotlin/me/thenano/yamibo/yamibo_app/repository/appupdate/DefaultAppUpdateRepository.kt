@@ -37,15 +37,7 @@ class DefaultAppUpdateRepository(
     override val sources: List<AppUpdateSource> = listOf(
         AppUpdateSource(
             name = "GitHub",
-            manifestUrl = "https://raw.githubusercontent.com/LittleSurvival/yamibo-app/update-release/update/stable.json",
-        ),
-        AppUpdateSource(
-            name = "Gitee",
-            manifestUrl = "https://gitee.com/LittleSurvival/ymb-apk-release/raw/main/update/stable.json",
-        ),
-        AppUpdateSource(
-            name = "Gitea",
-            manifestUrl = "https://gitea.com/api/v1/repos/LittleSurvival/ymb-apk-release/raw/update/stable.json?ref=main",
+            manifestUrl = "https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json",
         ),
     )
 
