@@ -42,10 +42,6 @@ class DefaultAppUpdateRepository(
 
     override val sources: List<AppUpdateSource> = listOf(
         AppUpdateSource(
-            name = "gh-proxy.com",
-            manifestUrl = "https://gh-proxy.com/$GITHUB_RAW_MANIFEST_URL",
-        ),
-        AppUpdateSource(
             name = "ghfast.top",
             manifestUrl = "https://ghfast.top/$GITHUB_RAW_MANIFEST_URL",
         ),

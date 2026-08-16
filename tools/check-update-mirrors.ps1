@@ -6,10 +6,11 @@ All feeds point at the same GitHub repository lmc2007/yamibo-app
 (raw.githubusercontent.com update-release/update/stable.json), reached either
 directly or through third-party GitHub acceleration mirrors. The script:
 
-- Requests every feed and verifies HTTP 200 + parseable JSON.
+- Requests every update-check feed and verifies HTTP 200 + parseable JSON.
 - Warns when versionCode values disagree (a mirror may be serving stale cache).
 - HEAD-checks the GitHub release APK asset directly and through
-  https://gh-proxy.com/, and rejects HTML responses (login/error pages).
+  https://gh-proxy.com/ (gh-proxy.com is only used for downloads, not checks),
+  and rejects HTML responses (login/error pages).
 
 Usage:
   powershell -NoProfile -File .\tools\check-update-mirrors.ps1
@@ -25,7 +26,6 @@ $failed = @()
 $githubRaw = 'https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json'
 
 $manifestUrls = [ordered]@{
-    'gh-proxy.com'  = "https://gh-proxy.com/$githubRaw"
     'ghfast.top'    = "https://ghfast.top/$githubRaw"
     'gh.llkk.cc'    = "https://gh.llkk.cc/$githubRaw"
     'gh.ddlc.top'   = "https://gh.ddlc.top/$githubRaw"
