@@ -80,6 +80,14 @@ def read_versions() -> tuple[int, str]:
     return int(code_match.group(1)), name_match.group(1)
 
 
+def suggest_next_version_name(current: str) -> str:
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", current)
+    if not match:
+        fail(f"当前 versionName {current} 不是 x.y.z 格式，无法自动递增；请手动填写 version_name")
+    major, minor, patch = (int(part) for part in match.groups())
+    return f"{major}.{minor}.{patch + 1}"
+
+
 def read_manifest() -> dict:
     return json.loads(MANIFEST_FILE.read_text(encoding="utf-8"))
 
@@ -258,10 +266,14 @@ def main() -> None:
 
     if mode not in ("auto", "auto+extra", "manual"):
         fail(f"changelog_mode 只能是 auto / auto+extra / manual，当前为 {mode}")
+
+    current_code, current_name = read_versions()
+    if not version_name:
+        version_name = suggest_next_version_name(current_name)
+        print(f"未填写 version_name：当前版本 {current_name}，自动使用补丁号 +1 = {version_name}")
     if not VERSION_NAME_PATTERN.match(version_name):
         fail(f"versionName 格式必须是 x.y.z（例如 0.2.6），当前为 {version_name}")
 
-    current_code, current_name = read_versions()
     try:
         version_code = int(version_code_raw) if version_code_raw else current_code + 1
     except ValueError:

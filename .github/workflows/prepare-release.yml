@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       version_name:
-        description: '新版本号，例如 0.2.6'
-        required: true
+        description: '新版本号（留空 = 当前版本补丁号 +1，例如当前 0.3.6 → 0.3.7）'
+        required: false
         type: string
       version_code:
         description: 'versionCode（留空 = 当前 + 1）'
