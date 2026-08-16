@@ -3,6 +3,7 @@ package me.thenano.yamibo.yamibo_app.repository.appupdate
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.plugins.timeout
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.isSuccess
@@ -42,16 +43,8 @@ class DefaultAppUpdateRepository(
 
     override val sources: List<AppUpdateSource> = listOf(
         AppUpdateSource(
-            name = "ghfast.top",
-            manifestUrl = "https://ghfast.top/$GITHUB_RAW_MANIFEST_URL",
-        ),
-        AppUpdateSource(
-            name = "gh.llkk.cc",
-            manifestUrl = "https://gh.llkk.cc/$GITHUB_RAW_MANIFEST_URL",
-        ),
-        AppUpdateSource(
-            name = "gh.ddlc.top",
-            manifestUrl = "https://gh.ddlc.top/$GITHUB_RAW_MANIFEST_URL",
+            name = "ghproxy.net",
+            manifestUrl = "https://ghproxy.net/$GITHUB_RAW_MANIFEST_URL",
         ),
         AppUpdateSource(
             name = "GitHub",
@@ -72,7 +65,9 @@ class DefaultAppUpdateRepository(
 
         for (source in orderedSources) {
             val result = runCatching {
-                val response = httpClient.get(source.manifestUrl)
+                val response = httpClient.get(source.manifestUrl) {
+                    timeout { requestTimeoutMillis = UPDATE_SOURCE_TIMEOUT_MILLIS }
+                }
                 if (!response.status.isSuccess()) {
                     error("HTTP ${response.status.value}")
                 }
@@ -111,7 +106,9 @@ class DefaultAppUpdateRepository(
             // Fetch remote changelog if possible
             val changelogText = runCatching {
                 val changelogUrl = resolveChangelogUrl(source.manifestUrl, manifest.versionCode)
-                val response = httpClient.get(changelogUrl)
+                val response = httpClient.get(changelogUrl) {
+                    timeout { requestTimeoutMillis = UPDATE_SOURCE_TIMEOUT_MILLIS }
+                }
                 if (response.status.isSuccess()) {
                     response.bodyAsText()
                 } else {
@@ -185,6 +182,9 @@ class DefaultAppUpdateRepository(
 }
 
 private const val TAG = "AppUpdateRepository"
+
+/** 单个更新源请求超过 3 秒自动切换下一个镜像 */
+private const val UPDATE_SOURCE_TIMEOUT_MILLIS = 3_000L
 
 private const val GITHUB_RAW_MANIFEST_URL =
     "https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json"

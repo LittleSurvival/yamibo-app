@@ -3,9 +3,11 @@ package me.thenano.yamibo.yamibo_app.repository.appupdate
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import me.thenano.yamibo.yamibo_app.repository.settings.AppSettingsRepository
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
@@ -17,112 +19,100 @@ import kotlin.test.assertTrue
 class DefaultAppUpdateRepositoryTest {
 
     @Test
-    fun sourcesAreProxyMirrorsFirstThenGitHubDirect() {
+    fun sourcesAreProxyMirrorFirstThenGitHubDirect() {
         val environment = environment()
 
         assertEquals(
-            listOf("ghfast.top", "gh.llkk.cc", "gh.ddlc.top", "GitHub"),
+            listOf("ghproxy.net", "GitHub"),
             environment.repository.sources.map { it.name },
         )
         assertEquals(
-            "https://ghfast.top/https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json",
+            "https://ghproxy.net/https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json",
             environment.repository.sources[0].manifestUrl,
         )
         assertEquals(
-            "https://gh.llkk.cc/https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json",
-            environment.repository.sources[1].manifestUrl,
-        )
-        assertEquals(
-            "https://gh.ddlc.top/https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json",
-            environment.repository.sources[2].manifestUrl,
-        )
-        assertEquals(
             "https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json",
-            environment.repository.sources[3].manifestUrl,
+            environment.repository.sources[1].manifestUrl,
         )
     }
 
     @Test
-    fun ghfastMirrorIsUsedFirstByDefault() = runBlocking {
+    fun ghproxyMirrorIsUsedFirstByDefault() = runBlocking {
         val environment = environment(currentVersionCode = 8)
 
         val result = assertIs<AppUpdateCheckResult.UpdateAvailable>(environment.repository.checkForUpdate(force = true))
 
-        assertEquals("ghfast.top", result.release.source.name)
+        assertEquals("ghproxy.net", result.release.source.name)
         assertEquals(9, result.release.versionCode)
         assertEquals(0, environment.settings.appUpdatePreferredSourceIndex.getValue())
-        assertTrue("ghfast.top" in environment.requests.first())
+        assertTrue("ghproxy.net" in environment.requests.first())
     }
 
     @Test
-    fun failingPrimaryProxyFallsBackToNextProxy() = runBlocking {
+    fun failingProxyFallsBackToGitHubDirect() = runBlocking {
         val environment = environment(
             currentVersionCode = 8,
-            failingSources = setOf("ghfast.top"),
-        )
-
-        val result = assertIs<AppUpdateCheckResult.UpdateAvailable>(environment.repository.checkForUpdate(force = true))
-
-        assertEquals("gh.llkk.cc", result.release.source.name)
-        assertEquals(1, environment.settings.appUpdatePreferredSourceIndex.getValue())
-    }
-
-    @Test
-    fun allProxiesFailFallsBackToGitHubDirect() = runBlocking {
-        val environment = environment(
-            currentVersionCode = 8,
-            failingSources = setOf("ghfast.top", "gh.llkk.cc", "gh.ddlc.top"),
+            failingSources = setOf("ghproxy.net"),
         )
 
         val result = assertIs<AppUpdateCheckResult.UpdateAvailable>(environment.repository.checkForUpdate(force = true))
 
         assertEquals("GitHub", result.release.source.name)
-        assertEquals(3, environment.settings.appUpdatePreferredSourceIndex.getValue())
+        assertEquals(1, environment.settings.appUpdatePreferredSourceIndex.getValue())
     }
 
     @Test
-    fun htmlResponseFromMirrorFallsBackToNextMirror() = runBlocking {
+    fun sourceSlowerThanThreeSecondsSwitchesToNextSource() = runBlocking {
         val environment = environment(
             currentVersionCode = 8,
-            htmlSources = setOf("ghfast.top"),
+            slowSources = setOf("ghproxy.net"),
         )
 
         val result = assertIs<AppUpdateCheckResult.UpdateAvailable>(environment.repository.checkForUpdate(force = true))
 
-        assertEquals("gh.llkk.cc", result.release.source.name)
+        assertEquals("GitHub", result.release.source.name)
+    }
+
+    @Test
+    fun htmlResponseFromMirrorFallsBackToGitHubDirect() = runBlocking {
+        val environment = environment(
+            currentVersionCode = 8,
+            htmlSources = setOf("ghproxy.net"),
+        )
+
+        val result = assertIs<AppUpdateCheckResult.UpdateAvailable>(environment.repository.checkForUpdate(force = true))
+
+        assertEquals("GitHub", result.release.source.name)
         assertEquals(1, environment.settings.appUpdatePreferredSourceIndex.getValue())
     }
 
     @Test
     fun allSourcesFailReturnsFailedWithEverySourceName() = runBlocking {
         val environment = environment(
-            failingSources = setOf("ghfast.top", "gh.llkk.cc", "gh.ddlc.top", "GitHub"),
+            failingSources = setOf("ghproxy.net", "GitHub"),
         )
 
         val result = assertIs<AppUpdateCheckResult.Failed>(environment.repository.checkForUpdate(force = true))
 
-        assertTrue("ghfast.top" in result.message)
-        assertTrue("gh.llkk.cc" in result.message)
-        assertTrue("gh.ddlc.top" in result.message)
+        assertTrue("ghproxy.net" in result.message)
         assertTrue("GitHub" in result.message)
     }
 
     @Test
-    fun staleMirrorDoesNotMaskNewerMirror() = runBlocking {
+    fun staleMirrorDoesNotMaskNewerGitHubDirect() = runBlocking {
         val environment = environment(
             currentVersionCode = 8,
-            preferredIndex = 1,
             manifests = mapOf(
-                "gh.llkk.cc" to readyManifest(7),
-                "gh.ddlc.top" to readyManifest(9),
+                "ghproxy.net" to readyManifest(7),
+                "GitHub" to readyManifest(9),
             ),
         )
 
         val result = assertIs<AppUpdateCheckResult.UpdateAvailable>(environment.repository.checkForUpdate(force = true))
 
-        assertEquals("gh.ddlc.top", result.release.source.name)
+        assertEquals("GitHub", result.release.source.name)
         assertEquals(9, result.release.versionCode)
-        assertEquals(2, environment.settings.appUpdatePreferredSourceIndex.getValue())
+        assertEquals(1, environment.settings.appUpdatePreferredSourceIndex.getValue())
     }
 
     @Test
@@ -130,9 +120,7 @@ class DefaultAppUpdateRepositoryTest {
         val environment = environment(
             currentVersionCode = 8,
             manifests = mapOf(
-                "ghfast.top" to readyManifest(7),
-                "gh.llkk.cc" to readyManifest(7),
-                "gh.ddlc.top" to readyManifest(7),
+                "ghproxy.net" to readyManifest(7),
                 "GitHub" to readyManifest(7),
             ),
         )
@@ -142,20 +130,20 @@ class DefaultAppUpdateRepositoryTest {
     }
 
     @Test
-    fun ignoredVersionSkipsToNewerMirror() = runBlocking {
+    fun ignoredVersionSkipsToNewerGitHubDirect() = runBlocking {
         val environment = environment(
             currentVersionCode = 7,
             ignoredVersionCode = 8,
             manifests = mapOf(
-                "ghfast.top" to readyManifest(8),
-                "gh.llkk.cc" to readyManifest(9),
+                "ghproxy.net" to readyManifest(8),
+                "GitHub" to readyManifest(9),
             ),
         )
 
         val result = assertIs<AppUpdateCheckResult.UpdateAvailable>(environment.repository.checkForUpdate(force = false))
 
         assertEquals(9, result.release.versionCode)
-        assertEquals("gh.llkk.cc", result.release.source.name)
+        assertEquals("GitHub", result.release.source.name)
     }
 
     @Test
@@ -164,15 +152,15 @@ class DefaultAppUpdateRepositoryTest {
             currentVersionCode = 7,
             ignoredVersionCode = 8,
             manifests = mapOf(
-                "ghfast.top" to readyManifest(8),
-                "gh.llkk.cc" to readyManifest(7),
+                "ghproxy.net" to readyManifest(8),
+                "GitHub" to readyManifest(7),
             ),
         )
 
         val result = assertIs<AppUpdateCheckResult.Ignored>(environment.repository.checkForUpdate(force = false))
 
         assertEquals(8, result.release.versionCode)
-        assertEquals("ghfast.top", result.release.source.name)
+        assertEquals("ghproxy.net", result.release.source.name)
     }
 
     @Test
@@ -180,15 +168,15 @@ class DefaultAppUpdateRepositoryTest {
         val environment = environment(
             currentVersionCode = 8,
             manifests = mapOf(
-                "ghfast.top" to notReadyManifest(9),
-                "gh.llkk.cc" to readyManifest(7),
+                "ghproxy.net" to notReadyManifest(9),
+                "GitHub" to readyManifest(7),
             ),
         )
 
         val result = assertIs<AppUpdateCheckResult.Preparing>(environment.repository.checkForUpdate(force = true))
 
         assertEquals(9, result.versionCode)
-        assertEquals("ghfast.top", result.sourceName)
+        assertEquals("ghproxy.net", result.sourceName)
     }
 
     private fun environment(
@@ -197,10 +185,9 @@ class DefaultAppUpdateRepositoryTest {
         ignoredVersionCode: Int? = null,
         failingSources: Set<String> = emptySet(),
         htmlSources: Set<String> = emptySet(),
+        slowSources: Set<String> = emptySet(),
         manifests: Map<String, String> = mapOf(
-            "ghfast.top" to readyManifest(9),
-            "gh.llkk.cc" to readyManifest(9),
-            "gh.ddlc.top" to readyManifest(9),
+            "ghproxy.net" to readyManifest(9),
             "GitHub" to readyManifest(9),
         ),
     ): TestAppUpdateEnvironment {
@@ -213,17 +200,22 @@ class DefaultAppUpdateRepositoryTest {
         val engine = MockEngine { request ->
             val url = request.url.toString()
             requests += url
-            // 镜像域名必须排在 raw.githubusercontent.com 之前匹配
             val sourceName = when {
-                "ghfast.top" in url -> "ghfast.top"
-                "gh.llkk.cc" in url -> "gh.llkk.cc"
-                "gh.ddlc.top" in url -> "gh.ddlc.top"
+                "ghproxy.net" in url -> "ghproxy.net"
                 "raw.githubusercontent.com" in url -> "GitHub"
                 else -> null
             }
             when {
                 sourceName == null -> respond("{}", HttpStatusCode.NotFound)
                 "/changelogs/" in url -> respond("changelog", HttpStatusCode.NotFound)
+                sourceName in slowSources -> {
+                    delay(3_500)
+                    respond(
+                        manifests[sourceName] ?: "{}",
+                        HttpStatusCode.OK,
+                        headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
                 sourceName in failingSources -> respond("{}", HttpStatusCode.InternalServerError)
                 sourceName in htmlSources -> respond(
                     "<html><body>mirror error</body></html>",
@@ -241,7 +233,9 @@ class DefaultAppUpdateRepositoryTest {
         val repository = DefaultAppUpdateRepository(
             appSettingsRepository = settings,
             platform = platform,
-            httpClient = HttpClient(engine),
+            httpClient = HttpClient(engine) {
+                install(HttpTimeout)
+            },
         )
         return TestAppUpdateEnvironment(settings, repository, requests)
     }

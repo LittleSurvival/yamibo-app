@@ -26,9 +26,7 @@ $failed = @()
 $githubRaw = 'https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json'
 
 $manifestUrls = [ordered]@{
-    'ghfast.top'    = "https://ghfast.top/$githubRaw"
-    'gh.llkk.cc'    = "https://gh.llkk.cc/$githubRaw"
-    'gh.ddlc.top'   = "https://gh.ddlc.top/$githubRaw"
+    'ghproxy.net'   = "https://ghproxy.net/$githubRaw"
     'GitHub'        = $githubRaw
 }
 
