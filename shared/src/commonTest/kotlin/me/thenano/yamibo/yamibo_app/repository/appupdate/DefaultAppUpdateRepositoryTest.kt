@@ -17,76 +17,94 @@ import kotlin.test.assertTrue
 class DefaultAppUpdateRepositoryTest {
 
     @Test
-    fun sourcesAreGitHubDirectThenThirdPartyGitHubMirrors() {
+    fun sourcesAreProxyMirrorsFirstThenGitHubDirect() {
         val environment = environment()
 
         assertEquals(
-            listOf("GitHub", "gh-proxy.com", "ghfast.top", "gh.llkk.cc", "gh.ddlc.top"),
+            listOf("ghfast.top", "gh.llkk.cc", "gh.ddlc.top", "GitHub"),
             environment.repository.sources.map { it.name },
         )
         assertEquals(
-            "https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json",
+            "https://ghfast.top/https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json",
             environment.repository.sources[0].manifestUrl,
         )
         assertEquals(
-            "https://gh-proxy.com/https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json",
+            "https://gh.llkk.cc/https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json",
             environment.repository.sources[1].manifestUrl,
         )
         assertEquals(
-            "https://ghfast.top/https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json",
+            "https://gh.ddlc.top/https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json",
             environment.repository.sources[2].manifestUrl,
         )
         assertEquals(
-            "https://gh.llkk.cc/https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json",
+            "https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json",
             environment.repository.sources[3].manifestUrl,
-        )
-        assertEquals(
-            "https://gh.ddlc.top/https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json",
-            environment.repository.sources[4].manifestUrl,
         )
     }
 
     @Test
-    fun failingGitHubFallsBackToGhProxyMirror() = runBlocking {
+    fun ghfastMirrorIsUsedFirstByDefault() = runBlocking {
+        val environment = environment(currentVersionCode = 8)
+
+        val result = assertIs<AppUpdateCheckResult.UpdateAvailable>(environment.repository.checkForUpdate(force = true))
+
+        assertEquals("ghfast.top", result.release.source.name)
+        assertEquals(9, result.release.versionCode)
+        assertEquals(0, environment.settings.appUpdatePreferredSourceIndex.getValue())
+        assertTrue("ghfast.top" in environment.requests.first())
+    }
+
+    @Test
+    fun failingPrimaryProxyFallsBackToNextProxy() = runBlocking {
         val environment = environment(
             currentVersionCode = 8,
-            failingSources = setOf("GitHub"),
+            failingSources = setOf("ghfast.top"),
         )
 
         val result = assertIs<AppUpdateCheckResult.UpdateAvailable>(environment.repository.checkForUpdate(force = true))
 
-        assertEquals("gh-proxy.com", result.release.source.name)
-        assertEquals(9, result.release.versionCode)
+        assertEquals("gh.llkk.cc", result.release.source.name)
         assertEquals(1, environment.settings.appUpdatePreferredSourceIndex.getValue())
+    }
+
+    @Test
+    fun allProxiesFailFallsBackToGitHubDirect() = runBlocking {
+        val environment = environment(
+            currentVersionCode = 8,
+            failingSources = setOf("ghfast.top", "gh.llkk.cc", "gh.ddlc.top"),
+        )
+
+        val result = assertIs<AppUpdateCheckResult.UpdateAvailable>(environment.repository.checkForUpdate(force = true))
+
+        assertEquals("GitHub", result.release.source.name)
+        assertEquals(3, environment.settings.appUpdatePreferredSourceIndex.getValue())
     }
 
     @Test
     fun htmlResponseFromMirrorFallsBackToNextMirror() = runBlocking {
         val environment = environment(
             currentVersionCode = 8,
-            failingSources = setOf("GitHub"),
-            htmlSources = setOf("gh-proxy.com"),
+            htmlSources = setOf("ghfast.top"),
         )
 
         val result = assertIs<AppUpdateCheckResult.UpdateAvailable>(environment.repository.checkForUpdate(force = true))
 
-        assertEquals("ghfast.top", result.release.source.name)
-        assertEquals(2, environment.settings.appUpdatePreferredSourceIndex.getValue())
+        assertEquals("gh.llkk.cc", result.release.source.name)
+        assertEquals(1, environment.settings.appUpdatePreferredSourceIndex.getValue())
     }
 
     @Test
     fun allSourcesFailReturnsFailedWithEverySourceName() = runBlocking {
         val environment = environment(
-            failingSources = setOf("GitHub", "gh-proxy.com", "ghfast.top", "gh.llkk.cc", "gh.ddlc.top"),
+            failingSources = setOf("ghfast.top", "gh.llkk.cc", "gh.ddlc.top", "GitHub"),
         )
 
         val result = assertIs<AppUpdateCheckResult.Failed>(environment.repository.checkForUpdate(force = true))
 
-        assertTrue("GitHub" in result.message)
-        assertTrue("gh-proxy.com" in result.message)
         assertTrue("ghfast.top" in result.message)
         assertTrue("gh.llkk.cc" in result.message)
         assertTrue("gh.ddlc.top" in result.message)
+        assertTrue("GitHub" in result.message)
     }
 
     @Test
@@ -95,14 +113,14 @@ class DefaultAppUpdateRepositoryTest {
             currentVersionCode = 8,
             preferredIndex = 1,
             manifests = mapOf(
-                "gh-proxy.com" to readyManifest(7),
-                "ghfast.top" to readyManifest(9),
+                "gh.llkk.cc" to readyManifest(7),
+                "gh.ddlc.top" to readyManifest(9),
             ),
         )
 
         val result = assertIs<AppUpdateCheckResult.UpdateAvailable>(environment.repository.checkForUpdate(force = true))
 
-        assertEquals("ghfast.top", result.release.source.name)
+        assertEquals("gh.ddlc.top", result.release.source.name)
         assertEquals(9, result.release.versionCode)
         assertEquals(2, environment.settings.appUpdatePreferredSourceIndex.getValue())
     }
@@ -112,11 +130,10 @@ class DefaultAppUpdateRepositoryTest {
         val environment = environment(
             currentVersionCode = 8,
             manifests = mapOf(
-                "GitHub" to readyManifest(7),
-                "gh-proxy.com" to readyManifest(7),
                 "ghfast.top" to readyManifest(7),
                 "gh.llkk.cc" to readyManifest(7),
                 "gh.ddlc.top" to readyManifest(7),
+                "GitHub" to readyManifest(7),
             ),
         )
 
@@ -130,15 +147,15 @@ class DefaultAppUpdateRepositoryTest {
             currentVersionCode = 7,
             ignoredVersionCode = 8,
             manifests = mapOf(
-                "GitHub" to readyManifest(8),
-                "gh-proxy.com" to readyManifest(9),
+                "ghfast.top" to readyManifest(8),
+                "gh.llkk.cc" to readyManifest(9),
             ),
         )
 
         val result = assertIs<AppUpdateCheckResult.UpdateAvailable>(environment.repository.checkForUpdate(force = false))
 
         assertEquals(9, result.release.versionCode)
-        assertEquals("gh-proxy.com", result.release.source.name)
+        assertEquals("gh.llkk.cc", result.release.source.name)
     }
 
     @Test
@@ -147,15 +164,15 @@ class DefaultAppUpdateRepositoryTest {
             currentVersionCode = 7,
             ignoredVersionCode = 8,
             manifests = mapOf(
-                "GitHub" to readyManifest(8),
-                "gh-proxy.com" to readyManifest(7),
+                "ghfast.top" to readyManifest(8),
+                "gh.llkk.cc" to readyManifest(7),
             ),
         )
 
         val result = assertIs<AppUpdateCheckResult.Ignored>(environment.repository.checkForUpdate(force = false))
 
         assertEquals(8, result.release.versionCode)
-        assertEquals("GitHub", result.release.source.name)
+        assertEquals("ghfast.top", result.release.source.name)
     }
 
     @Test
@@ -163,15 +180,15 @@ class DefaultAppUpdateRepositoryTest {
         val environment = environment(
             currentVersionCode = 8,
             manifests = mapOf(
-                "GitHub" to notReadyManifest(9),
-                "gh-proxy.com" to readyManifest(7),
+                "ghfast.top" to notReadyManifest(9),
+                "gh.llkk.cc" to readyManifest(7),
             ),
         )
 
         val result = assertIs<AppUpdateCheckResult.Preparing>(environment.repository.checkForUpdate(force = true))
 
         assertEquals(9, result.versionCode)
-        assertEquals("GitHub", result.sourceName)
+        assertEquals("ghfast.top", result.sourceName)
     }
 
     private fun environment(
@@ -181,11 +198,10 @@ class DefaultAppUpdateRepositoryTest {
         failingSources: Set<String> = emptySet(),
         htmlSources: Set<String> = emptySet(),
         manifests: Map<String, String> = mapOf(
-            "GitHub" to readyManifest(9),
-            "gh-proxy.com" to readyManifest(9),
             "ghfast.top" to readyManifest(9),
             "gh.llkk.cc" to readyManifest(9),
             "gh.ddlc.top" to readyManifest(9),
+            "GitHub" to readyManifest(9),
         ),
     ): TestAppUpdateEnvironment {
         val settingsStore = MemorySettingsStore()
@@ -193,11 +209,12 @@ class DefaultAppUpdateRepositoryTest {
         settings.appUpdatePreferredSourceIndex.setValue(preferredIndex)
         ignoredVersionCode?.let { settings.appUpdateIgnoredVersionCode.setValue(it) }
 
+        val requests = mutableListOf<String>()
         val engine = MockEngine { request ->
             val url = request.url.toString()
-            // gh-proxy.com URL 内包含 raw.githubusercontent.com，镜像域名必须先匹配
+            requests += url
+            // 镜像域名必须排在 raw.githubusercontent.com 之前匹配
             val sourceName = when {
-                "gh-proxy.com" in url -> "gh-proxy.com"
                 "ghfast.top" in url -> "ghfast.top"
                 "gh.llkk.cc" in url -> "gh.llkk.cc"
                 "gh.ddlc.top" in url -> "gh.ddlc.top"
@@ -226,12 +243,13 @@ class DefaultAppUpdateRepositoryTest {
             platform = platform,
             httpClient = HttpClient(engine),
         )
-        return TestAppUpdateEnvironment(settings, repository)
+        return TestAppUpdateEnvironment(settings, repository, requests)
     }
 
     private data class TestAppUpdateEnvironment(
         val settings: AppSettingsRepository,
         val repository: DefaultAppUpdateRepository,
+        val requests: List<String>,
     )
 
     private class FakePlatform(override val currentVersionCode: Long) : AppUpdatePlatform {

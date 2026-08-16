@@ -6,21 +6,21 @@ import kotlin.test.assertEquals
 class AndroidAppUpdatePlatformUrlTest {
 
     @Test
-    fun githubReleaseAssetFallsBackToGhProxy() {
+    fun githubReleaseAssetPrefersGhProxyThenDirect() {
         val url = "https://github.com/lmc2007/yamibo-app/releases/download/8/yamibo-stable-v0.1.6.apk"
 
         assertEquals(
-            listOf(url, "https://gh-proxy.com/$url"),
+            listOf("https://gh-proxy.com/$url", url),
             resolveApkDownloadUrls(url),
         )
     }
 
     @Test
-    fun githubusercontentObjectAssetFallsBackToGhProxy() {
+    fun githubusercontentObjectAssetPrefersGhProxyThenDirect() {
         val url = "https://objects.githubusercontent.com/github-production-release/asset/123.apk"
 
         assertEquals(
-            listOf(url, "https://gh-proxy.com/$url"),
+            listOf("https://gh-proxy.com/$url", url),
             resolveApkDownloadUrls(url),
         )
     }
