@@ -1,8 +1,8 @@
 {
   "channel": "stable",
-  "versionName": "0.2.6",
-  "versionCode": 9,
+  "versionName": "0.3.6",
+  "versionCode": 10,
   "isReady": false,
-  "releaseNotes": "定期备份规则完善；更新检测支持 GitHub 镜像站与 gh-proxy 代理下载",
+  "releaseNotes": "0.2.6更新测试",
   "assets": []
 }

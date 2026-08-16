@@ -1,0 +1,7 @@
+# stable-0.3.6
+
+新增 :
+- 新增一键准备版本更新的 GitHub Action（Prepare Version Update）
+
+修复 :
+- prepare-version-update 脚本在 Windows 下强制 UTF-8 读取 git 输出
