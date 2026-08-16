@@ -9,6 +9,7 @@ import androidx.core.net.toUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import me.thenano.yamibo.yamibo_app.Logger
+import me.thenano.yamibo.yamibo_app.repository.appupdate.AppUpdateAsset
 import me.thenano.yamibo.yamibo_app.repository.appupdate.AppUpdateDownloadState
 import me.thenano.yamibo.yamibo_app.repository.appupdate.AppUpdatePlatform
 import me.thenano.yamibo.yamibo_app.repository.appupdate.AppUpdateRelease
@@ -45,72 +46,44 @@ class AndroidAppUpdatePlatform(
         val updatesDir = File(context.cacheDir, "updates").apply { mkdirs() }
         val apkFile = File(updatesDir, "yamibo-${release.versionName}.apk")
 
-        val sha = asset.sha256
-        val fileIsValid = apkFile.exists() && apkFile.hasApkZipSignature() && runCatching {
-            sha.isNullOrBlank() || apkFile.sha256().equals(sha, ignoreCase = true)
-        }
-            .onFailure { Logger.d(TAG, "Cached APK validation failed; downloading a fresh asset", it) }
-            .getOrDefault(false)
-
-        if (fileIsValid) {
+        if (apkFile.isValidCachedApk(asset)) {
             return@withContext requestInstall(apkFile, release)
         }
 
-        runCatching {
-            if (apkFile.exists()) apkFile.delete()
-            val connection = (URL(asset.url).openConnection() as HttpURLConnection).apply {
-                connectTimeout = 30_000
-                readTimeout = 60_000
-                instanceFollowRedirects = true
-                setRequestProperty("Accept", "application/vnd.android.package-archive, application/octet-stream")
-            }
-            try {
-                val status = connection.responseCode
-                if (status !in 200..299) error("APK download failed: HTTP $status")
-                val contentType = connection.contentType.orEmpty().lowercase()
-                if (contentType.contains("text/html")) {
-                    error("APK download returned HTML instead of an APK")
-                }
-                connection.inputStream.use { input ->
-                    apkFile.outputStream().use { output ->
-                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                        var downloaded = 0L
-                        val total = asset.size ?: connection.contentLengthLong.takeIf { it >= 0L }
-                        while (true) {
-                            if (canceled) throw CancellationException()
-                            val read = input.read(buffer)
-                            if (read < 0) break
-                            output.write(buffer, 0, read)
-                            downloaded += read
-                            onProgress(downloaded, total)
-                        }
-                    }
-                }
-            } finally {
-                connection.disconnect()
-            }
-            if (!apkFile.hasApkZipSignature()) error("Downloaded file is not a valid APK/ZIP payload")
-            asset.sha256?.takeIf { it.isNotBlank() }?.let { expected ->
-                val actual = apkFile.sha256()
-                if (!actual.equals(expected, ignoreCase = true)) {
-                    error("APK sha256 mismatch: expected $expected, actual $actual")
-                }
-            }
-            requestInstall(apkFile, release)
+        val urls = resolveApkDownloadUrls(asset.url)
+        if (urls.isEmpty()) {
+            return@withContext AppUpdateDownloadState.Failed(release, "APK asset URL is blank")
         }
-            .onFailure { error ->
-                if (error !is CancellationException) {
-                    Logger.e(TAG, "APK download or install request failed version=${release.versionName}", error)
-                }
+
+        var lastError: Throwable? = null
+        for (url in urls) {
+            if (canceled) {
+                lastError = CancellationException()
+                break
             }
-            .getOrElse { error ->
+            val attempt = runCatching {
+                downloadApkToFile(url, apkFile, asset, onProgress)
+            }
+            if (attempt.isSuccess) {
+                lastError = null
+                break
+            }
+            lastError = attempt.exceptionOrNull()
             apkFile.delete()
-            if (error is CancellationException) {
-                AppUpdateDownloadState.Failed(release, "Download canceled")
-            } else {
-                AppUpdateDownloadState.Failed(release, error.message ?: "Download failed")
-            }
+            if (lastError is CancellationException) break
+            Logger.w(TAG, "APK download attempt failed; switching to next download URL url=$url", lastError)
         }
+
+        if (lastError != null) {
+            apkFile.delete()
+            val message = if (lastError is CancellationException) {
+                "Download canceled"
+            } else {
+                lastError.message ?: "Download failed"
+            }
+            return@withContext AppUpdateDownloadState.Failed(release, message)
+        }
+        requestInstall(apkFile, release)
     }
 
     override fun cancelDownload() {
@@ -122,6 +95,62 @@ class AndroidAppUpdatePlatform(
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(intent)
+    }
+
+    private fun downloadApkToFile(
+        url: String,
+        apkFile: File,
+        asset: AppUpdateAsset,
+        onProgress: (downloadedBytes: Long, totalBytes: Long?) -> Unit,
+    ) {
+        if (apkFile.exists()) apkFile.delete()
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 30_000
+            readTimeout = 60_000
+            instanceFollowRedirects = true
+            setRequestProperty("Accept", "application/vnd.android.package-archive, application/octet-stream")
+        }
+        try {
+            val status = connection.responseCode
+            if (status !in 200..299) error("APK download failed: HTTP $status")
+            val contentType = connection.contentType.orEmpty().lowercase()
+            if (contentType.contains("text/html")) {
+                error("APK download returned HTML instead of an APK")
+            }
+            connection.inputStream.use { input ->
+                apkFile.outputStream().use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    var downloaded = 0L
+                    val total = asset.size ?: connection.contentLengthLong.takeIf { it >= 0L }
+                    while (true) {
+                        if (canceled) throw CancellationException()
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        output.write(buffer, 0, read)
+                        downloaded += read
+                        onProgress(downloaded, total)
+                    }
+                }
+            }
+        } finally {
+            connection.disconnect()
+        }
+        if (!apkFile.hasApkZipSignature()) error("Downloaded file is not a valid APK/ZIP payload")
+        asset.sha256?.takeIf { it.isNotBlank() }?.let { expected ->
+            val actual = apkFile.sha256()
+            if (!actual.equals(expected, ignoreCase = true)) {
+                error("APK sha256 mismatch: expected $expected, actual $actual")
+            }
+        }
+    }
+
+    private fun File.isValidCachedApk(asset: AppUpdateAsset): Boolean {
+        val sha = asset.sha256
+        return exists() && hasApkZipSignature() && runCatching {
+            sha.isNullOrBlank() || sha256().equals(sha, ignoreCase = true)
+        }
+            .onFailure { Logger.d(TAG, "Cached APK validation failed; downloading a fresh asset", it) }
+            .getOrDefault(false)
     }
 
     private fun requestInstall(apkFile: File, release: AppUpdateRelease): AppUpdateDownloadState {
@@ -146,6 +175,25 @@ class AndroidAppUpdatePlatform(
         }
         context.startActivity(intent)
         return AppUpdateDownloadState.Completed(release)
+    }
+}
+
+internal const val GH_PROXY_BASE_URL = "https://gh-proxy.com/"
+
+/**
+ * GitHub Release 资产直连失败时，通过 gh-proxy.com 代理重试。
+ * 其余来源（Gitee/Gitea 等）保持直连。
+ */
+internal fun resolveApkDownloadUrls(assetUrl: String): List<String> {
+    val normalized = assetUrl.trim()
+    if (normalized.isEmpty()) return emptyList()
+    val host = runCatching { URL(normalized).host.lowercase() }.getOrNull()
+    val isGitHubHosted = host != null &&
+        (host == "github.com" || host == "objects.githubusercontent.com" || host.endsWith(".github.com"))
+    return if (isGitHubHosted) {
+        listOf(normalized, GH_PROXY_BASE_URL + normalized)
+    } else {
+        listOf(normalized)
     }
 }
 

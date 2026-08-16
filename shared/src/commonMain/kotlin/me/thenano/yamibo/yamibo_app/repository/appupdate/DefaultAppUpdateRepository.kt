@@ -1,6 +1,7 @@
 package me.thenano.yamibo.yamibo_app.repository.appupdate
 
 import io.ktor.client.HttpClient
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
@@ -25,6 +26,11 @@ class DefaultAppUpdateRepository(
         isLenient = true
     },
     private val httpClient: HttpClient = HttpClient {
+        install(HttpTimeout) {
+            requestTimeoutMillis = 30_000
+            connectTimeoutMillis = 15_000
+            socketTimeoutMillis = 30_000
+        }
         install(ContentNegotiation) {
             json(json)
         }
@@ -37,7 +43,23 @@ class DefaultAppUpdateRepository(
     override val sources: List<AppUpdateSource> = listOf(
         AppUpdateSource(
             name = "GitHub",
-            manifestUrl = "https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json",
+            manifestUrl = GITHUB_RAW_MANIFEST_URL,
+        ),
+        AppUpdateSource(
+            name = "gh-proxy.com",
+            manifestUrl = "https://gh-proxy.com/$GITHUB_RAW_MANIFEST_URL",
+        ),
+        AppUpdateSource(
+            name = "ghfast.top",
+            manifestUrl = "https://ghfast.top/$GITHUB_RAW_MANIFEST_URL",
+        ),
+        AppUpdateSource(
+            name = "gh.llkk.cc",
+            manifestUrl = "https://gh.llkk.cc/$GITHUB_RAW_MANIFEST_URL",
+        ),
+        AppUpdateSource(
+            name = "gh.ddlc.top",
+            manifestUrl = "https://gh.ddlc.top/$GITHUB_RAW_MANIFEST_URL",
         ),
     )
 
@@ -49,6 +71,7 @@ class DefaultAppUpdateRepository(
         val orderedSources = sources.drop(startIndex) + sources.take(startIndex)
         val errors = mutableListOf<String>()
         var preparing: AppUpdateCheckResult.Preparing? = null
+        var ignored: AppUpdateRelease? = null
         var sawManifest = false
 
         for (source in orderedSources) {
@@ -57,8 +80,7 @@ class DefaultAppUpdateRepository(
                 if (!response.status.isSuccess()) {
                     error("HTTP ${response.status.value}")
                 }
-                val manifest = json.decodeFromString<AppUpdateManifestDto>(response.bodyAsText())
-                manifest
+                json.decodeFromString<AppUpdateManifestDto>(response.bodyAsText())
             }
             val manifest = result
                 .onFailure { error ->
@@ -104,18 +126,31 @@ class DefaultAppUpdateRepository(
                 .getOrNull()
 
             val release = manifest.toRelease(source, platform, changelogText)
-            appSettingsRepository.appUpdatePreferredSourceIndex.setValue(sources.indexOf(source).coerceAtLeast(0))
 
-            return when {
-                release.versionCode <= platform.currentVersionCode -> AppUpdateCheckResult.UpToDate(platform.currentVersionName)
-                !force && appSettingsRepository.appUpdateIgnoredVersionCode.getValue().toLong() == release.versionCode -> {
-                    AppUpdateCheckResult.Ignored(release)
+            when {
+                release.versionCode <= platform.currentVersionCode -> {
+                    // 该源是旧版本或与当前一致：继续尝试其余镜像，避免陈旧镜像掩盖更新或错误报「已是最新」
+                    Logger.d(TAG, "Update source is stale source=${source.name} version=${release.versionCode}")
                 }
-                else -> AppUpdateCheckResult.UpdateAvailable(release)
+                !force && appSettingsRepository.appUpdateIgnoredVersionCode.getValue().toLong() == release.versionCode -> {
+                    if (ignored == null) ignored = release
+                }
+                else -> {
+                    appSettingsRepository.appUpdatePreferredSourceIndex.setValue(
+                        sources.indexOf(source).coerceAtLeast(0),
+                    )
+                    return AppUpdateCheckResult.UpdateAvailable(release)
+                }
             }
         }
 
         preparing?.let { return it }
+        ignored?.let {
+            appSettingsRepository.appUpdatePreferredSourceIndex.setValue(
+                sources.indexOf(it.source).coerceAtLeast(0),
+            )
+            return AppUpdateCheckResult.Ignored(it)
+        }
         if (sawManifest) {
             return AppUpdateCheckResult.UpToDate(platform.currentVersionName)
         }
@@ -154,6 +189,9 @@ class DefaultAppUpdateRepository(
 }
 
 private const val TAG = "AppUpdateRepository"
+
+private const val GITHUB_RAW_MANIFEST_URL =
+    "https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json"
 
 @Serializable
 private data class AppUpdateManifestDto(

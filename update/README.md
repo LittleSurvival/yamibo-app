@@ -82,11 +82,15 @@ Important asset URL rule:
 - Gitea mirror manifests must use the Gitea Release APK URL.
 - Do not publish mirror manifests that point back to GitHub APK assets.
 
-Client update source order:
+Client update source order (all serve the same GitHub `lmc2007/yamibo-app` feed):
 
-1. GitHub `update-release` branch: `update/stable.json`
-2. Gitee mirror repo: `update/stable.json`
-3. Gitea mirror repo: `update/stable.json`
+1. GitHub direct: `raw.githubusercontent.com/.../update-release/update/stable.json`
+2. `gh-proxy.com` mirror
+3. `ghfast.top` mirror
+4. `gh.llkk.cc` mirror
+5. `gh.ddlc.top` mirror
+
+The client automatically falls back to the next mirror when a source fails to fetch or decode, and skips stale mirrors (ready manifests not newer than the installed version) instead of stopping at them. Android downloads of GitHub Release APK assets automatically retry through `https://gh-proxy.com/<asset-url>` when the direct download fails.
 
 ## Sync Update Folder To Mirrors Workflow
 
