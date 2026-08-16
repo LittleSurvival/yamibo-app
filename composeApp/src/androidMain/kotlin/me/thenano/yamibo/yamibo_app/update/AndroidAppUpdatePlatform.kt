@@ -181,7 +181,8 @@ class AndroidAppUpdatePlatform(
 internal const val GH_PROXY_BASE_URL = "https://gh-proxy.com/"
 
 /**
- * GitHub Release 资产直连失败时，通过 gh-proxy.com 代理重试。
+ * GitHub Release 资产优先通过 gh-proxy.com 代理下载（加速），
+ * 代理不可用时回退到 GitHub 直连。
  * 其余来源（Gitee/Gitea 等）保持直连。
  */
 internal fun resolveApkDownloadUrls(assetUrl: String): List<String> {
@@ -191,7 +192,7 @@ internal fun resolveApkDownloadUrls(assetUrl: String): List<String> {
     val isGitHubHosted = host != null &&
         (host == "github.com" || host == "objects.githubusercontent.com" || host.endsWith(".github.com"))
     return if (isGitHubHosted) {
-        listOf(normalized, GH_PROXY_BASE_URL + normalized)
+        listOf(GH_PROXY_BASE_URL + normalized, normalized)
     } else {
         listOf(normalized)
     }

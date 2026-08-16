@@ -25,11 +25,11 @@ $failed = @()
 $githubRaw = 'https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json'
 
 $manifestUrls = [ordered]@{
-    'GitHub'        = $githubRaw
     'gh-proxy.com'  = "https://gh-proxy.com/$githubRaw"
     'ghfast.top'    = "https://ghfast.top/$githubRaw"
     'gh.llkk.cc'    = "https://gh.llkk.cc/$githubRaw"
     'gh.ddlc.top'   = "https://gh.ddlc.top/$githubRaw"
+    'GitHub'        = $githubRaw
 }
 
 $feeds = @{}
@@ -55,7 +55,7 @@ if ($null -eq $githubAsset) {
     $githubAsset = $feeds.Values | ForEach-Object { $_.assets } | Where-Object { $_.type -in @('universal-apk', 'apk') } | Select-Object -First 1
 }
 if ($null -ne $githubAsset) {
-    foreach ($url in @($githubAsset.url, "https://gh-proxy.com/$($githubAsset.url)")) {
+    foreach ($url in @("https://gh-proxy.com/$($githubAsset.url)", $githubAsset.url)) {
         try {
             $head = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec $TimeoutSec -Method Head
             $contentType = $head.Headers['Content-Type']
