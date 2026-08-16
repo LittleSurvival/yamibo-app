@@ -406,6 +406,14 @@ private fun CloudBackupCard(
                 )
                 SmallBackupButton(text = i18n("登出"), onClick = onLogout)
             }
+            if (backupToCloud) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = i18n("開啟後，定期備份只上傳網盤，不再另外存到本機"),
+                    fontSize = 12.sp,
+                    color = colors.textDark.copy(alpha = 0.55f),
+                )
+            }
         } else {
             Text(
                 text = i18n("網盤：未登入"),
@@ -467,6 +475,12 @@ private fun BackupSettingCard(
                 activeTrackColor = colors.brownPrimary,
                 inactiveTrackColor = colors.brownLight.copy(alpha = 0.45f),
             ),
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = i18n("本地與網盤定期備份共用此上限"),
+            fontSize = 12.sp,
+            color = colors.textDark.copy(alpha = 0.55f),
         )
     }
 }

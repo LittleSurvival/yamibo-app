@@ -874,6 +874,9 @@ Current cache size: {}","清除圖片、頁面與其他暫存資料，釋放目�
 點擊檔案可還原,Tap a file to restore,點擊檔案可還原,点击文件可还原
 備份到網盤,Back up to cloud drive,備份到網盤,备份到网盘
 備份檔案將上傳至網盤的 yamibo 資料夾,Backup files are uploaded to the yamibo folder on your cloud drive,備份檔案將上傳至網盤的 yamibo 資料夾,备份文件将上传至网盘的 yamibo 文件夹
+開啟後，定期備份只上傳網盤，不再另外存到本機,When enabled, periodic backups are uploaded to the cloud drive only and are not saved locally,開啟後，定期備份只上傳網盤，不再另外存到本機,开启后，定期备份只上传网盘，不再另外存到本机
+本地與網盤定期備份共用此上限,Local and cloud drive periodic backups share this limit,本地與網盤定期備份共用此上限,本地与网盘定期备份共用此上限
+網盤未登入，無法建立定期備份,Cloud drive is not signed in; periodic backup was not created,網盤未登入，無法建立定期備份,网盘未登录，无法建立定期备份
 本地備份檔案,Local backup files,本地備份檔案,本地备份文件
 沒有帳戶？,No account?,沒有帳戶？,没有账户？
 網盤備份失敗：{},Cloud drive backup failed: {},網盤備份失敗：{},网盘备份失败：{}

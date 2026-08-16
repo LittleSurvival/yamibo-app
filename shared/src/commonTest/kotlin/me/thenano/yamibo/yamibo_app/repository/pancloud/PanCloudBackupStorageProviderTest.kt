@@ -67,6 +67,7 @@ class PanCloudBackupStorageProviderTest {
                 request.url.encodedPath == "/api/files" && request.method == HttpMethod.Get -> respond(
                     """{"success":true,"data":[
                         {"id":"file-bak","name":"YamiboApp-20240101-000000.yamibobak","type":"file","size":100,"is_chunks":false},
+                        {"id":"file-auto","name":"YamiboApp-20240101-000000-autobackup.yamibobak","type":"file","size":200,"is_chunks":false},
                         {"id":"file-other","name":"notes.txt","type":"file","size":10,"is_chunks":false},
                         {"id":"folder-x","name":"sub","type":"folder","size":0,"child_count":0}
                     ]}""",
@@ -170,9 +171,23 @@ class PanCloudBackupStorageProviderTest {
 
         val files = h.provider.listBackupFiles()
 
-        assertEquals(1, files.size)
-        assertEquals("YamiboApp-20240101-000000.yamibobak", files[0].name)
-        assertEquals("file-bak", files[0].uri)
+        assertEquals(2, files.size)
+        assertEquals(
+            setOf("YamiboApp-20240101-000000.yamibobak", "YamiboApp-20240101-000000-autobackup.yamibobak"),
+            files.map { it.name }.toSet(),
+        )
+    }
+
+    @Test
+    fun listBackupFilesMarksAutomaticBackups() = runBlocking {
+        val h = Harness()
+
+        val files = h.provider.listBackupFiles()
+
+        val automatic = files.single { it.uri == "file-auto" }
+        assertEquals("YamiboApp-20240101-000000-autobackup.yamibobak", automatic.name)
+        assertTrue(automatic.automatic)
+        assertTrue(!files.single { it.uri == "file-bak" }.automatic)
     }
 
     @Test

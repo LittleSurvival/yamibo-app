@@ -119,6 +119,31 @@ class BackupRepositoryImplTest {
     }
 
     @Test
+    fun cleanupAutoBackupsKeepsNewestAutomaticFilesAndSparesManualFiles() = runBlocking {
+        val fixture = fixture()
+        repeat(5) { index ->
+            fixture.storage.writeBackupFile(
+                "YamiboApp-20240101-00000$index-autobackup.yamibobak",
+                ByteArray(1),
+            ).getOrThrow()
+        }
+        fixture.storage.writeBackupFile("manual.yamibobak", ByteArray(1)).getOrThrow()
+
+        val removed = fixture.repository.cleanupAutoBackups(2).getOrThrow()
+
+        assertEquals(3, removed)
+        val remaining = fixture.repository.listBackupFiles()
+        assertEquals(2, remaining.count { it.automatic })
+        assertEquals(1, remaining.count { !it.automatic })
+        assertTrue(remaining.none { it.name == "YamiboApp-20240101-000000-autobackup.yamibobak" })
+        assertTrue(remaining.none { it.name == "YamiboApp-20240101-000001-autobackup.yamibobak" })
+        assertTrue(remaining.none { it.name == "YamiboApp-20240101-000002-autobackup.yamibobak" })
+        assertTrue(remaining.any { it.name == "YamiboApp-20240101-000003-autobackup.yamibobak" })
+        assertTrue(remaining.any { it.name == "YamiboApp-20240101-000004-autobackup.yamibobak" })
+        assertTrue(remaining.any { it.name == "manual.yamibobak" })
+    }
+
+    @Test
     fun overwriteFailureAfterClearRollsBackSqlAndSettings() = runBlocking {
         val fixture = fixture()
         seedPortableData(fixture.db, fixture.settings, settingValue = 7)
@@ -374,7 +399,10 @@ class BackupRepositoryImplTest {
     }
 
     private class MemoryBackupStorage : BackupStorageProvider {
-        private val files = linkedMapOf<String, ByteArray>()
+        private data class StoredBackup(val bytes: ByteArray, val modifiedAt: Long)
+
+        private val files = linkedMapOf<String, StoredBackup>()
+        private var writeCounter = 0L
 
         override suspend fun getSelectedFolderLabel(): String? = "memory"
         override suspend fun setSelectedFolder(uri: String) = Result.success(Unit)
@@ -382,25 +410,44 @@ class BackupRepositoryImplTest {
             fileName: String,
             bytes: ByteArray,
         ): Result<BackupRepository.BackupFileInfo> {
-            files[fileName] = bytes
+            val modifiedAt = ++writeCounter
+            files[fileName] = StoredBackup(bytes, modifiedAt)
             return Result.success(
-                BackupRepository.BackupFileInfo(fileName, bytes.size.toLong(), fileName, false, 1),
+                BackupRepository.BackupFileInfo(
+                    name = fileName,
+                    bytes = bytes.size.toLong(),
+                    uri = fileName,
+                    automatic = fileName.endsWith(AUTO_BACKUP_SUFFIX),
+                    modifiedAt = modifiedAt,
+                ),
             )
         }
 
         override suspend fun readBackupFile(sourceUri: String): Result<ByteArray> =
-            files[sourceUri]?.let(Result.Companion::success)
+            files[sourceUri]?.let { Result.success(it.bytes) }
                 ?: Result.failure(IllegalArgumentException("missing backup"))
 
         override suspend fun listBackupFiles(): List<BackupRepository.BackupFileInfo> =
-            files.map { (name, bytes) ->
-                BackupRepository.BackupFileInfo(name, bytes.size.toLong(), name, false, 1)
+            files.map { (name, stored) ->
+                BackupRepository.BackupFileInfo(
+                    name = name,
+                    bytes = stored.bytes.size.toLong(),
+                    uri = name,
+                    automatic = name.endsWith(AUTO_BACKUP_SUFFIX),
+                    modifiedAt = stored.modifiedAt,
+                )
             }
 
-        override suspend fun getBackupStorageBytes(): Long = files.values.sumOf { it.size.toLong() }
+        override suspend fun getBackupStorageBytes(): Long =
+            files.values.sumOf { it.bytes.size.toLong() }
+
         override suspend fun deleteBackupFile(fileInfo: BackupRepository.BackupFileInfo): Result<Unit> {
             files.remove(fileInfo.uri)
             return Result.success(Unit)
+        }
+
+        private companion object {
+            const val AUTO_BACKUP_SUFFIX = "-autobackup.yamibobak"
         }
     }
 }

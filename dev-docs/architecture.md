@@ -317,7 +317,8 @@ AppSync 把收藏/设置/阅读记录同步到云端，`shared/.../repository/ap
 
 #### 调度
 
-- `BackupWorker` 聚合本地 + 网盘自动备份（`backupToCloudEnabled` 开关）。
+- `BackupWorker`：`backupToCloudEnabled` OFF → 仅本地定期备份；ON → 仅网盘（不落本地、不要求已选本地文件夹）。
+  本地与网盘自动备份都按 `backupMaxAutoFiles` 清理。
 - 云端同步静默执行：同步用应用级 `LocalAppCoroutineScope`，返回主页不中断。
 
 ## 8. 平台实现要点
