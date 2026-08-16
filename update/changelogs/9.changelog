@@ -1,0 +1,13 @@
+# stable-v0.2.6
+
+新增 :
+- 定期备份数量上限同样限制网盘定期备份；开启网盘定期备份后不再在本地保存文件
+- 更新检测支持 GitHub 第三方镜像站（gh-proxy.com / ghfast.top / gh.llkk.cc / gh.ddlc.top），检测失败自动切换
+- 更新下载支持 gh-proxy.com 代理，直连失败自动切换代理下载
+
+更改 :
+- 架构与更新发布文档同步更新（architecture、app-updater-release、update README）
+
+其他 :
+- 新增镜像站可用性检查脚本 tools/check-update-mirrors.ps1
+- 为更新源回退与备份清理逻辑补充单元测试
