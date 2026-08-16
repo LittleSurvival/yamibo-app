@@ -160,7 +160,7 @@ git push origin HEAD
 
 触发方式：Actions → `Prepare Version Update` → Run workflow，表单字段：
 
-- `version_name`（必填）：例如 `0.2.6`
+- `version_name`（可空）：例如 `0.2.6`；留空时自动使用当前版本补丁号 +1（例如当前 `0.3.6` → `0.3.7`）
 - `version_code`（可空）：默认 = 当前 + 1；脚本校验必须递增且远端 tag 不存在
 - `changelog_mode`：`auto`（自动整理 git log）/ `auto+extra`（自动整理 + 补充内容）/ `manual`（完全手写）
 - `changelog_extra`：补充或手写的更新内容，多行；`manual` 模式必填
