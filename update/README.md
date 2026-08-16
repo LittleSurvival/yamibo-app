@@ -88,6 +88,8 @@ Client update source order:
 2. Gitee mirror repo: `update/stable.json`
 3. Gitea mirror repo: `update/stable.json`
 
+The client automatically falls back to the next source when a manifest fails to fetch or decode, and skips stale mirrors (ready manifests not newer than the installed version) instead of stopping at them. Android downloads of GitHub Release APK assets automatically retry through `https://gh-proxy.com/<asset-url>` when the direct download fails; Gitee/Gitea assets are downloaded directly.
+
 ## Sync Update Folder To Mirrors Workflow
 
 Workflow file:

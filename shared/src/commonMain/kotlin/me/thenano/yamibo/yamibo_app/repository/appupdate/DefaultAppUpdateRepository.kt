@@ -39,6 +39,14 @@ class DefaultAppUpdateRepository(
             name = "GitHub",
             manifestUrl = "https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json",
         ),
+        AppUpdateSource(
+            name = "Gitee",
+            manifestUrl = "https://gitee.com/LittleSurvival/ymb-apk-release/raw/main/update/stable.json",
+        ),
+        AppUpdateSource(
+            name = "Gitea",
+            manifestUrl = "https://gitea.com/api/v1/repos/LittleSurvival/ymb-apk-release/raw/update/stable.json?ref=main",
+        ),
     )
 
     override suspend fun checkForUpdate(force: Boolean): AppUpdateCheckResult {
@@ -49,6 +57,7 @@ class DefaultAppUpdateRepository(
         val orderedSources = sources.drop(startIndex) + sources.take(startIndex)
         val errors = mutableListOf<String>()
         var preparing: AppUpdateCheckResult.Preparing? = null
+        var ignored: AppUpdateRelease? = null
         var sawManifest = false
 
         for (source in orderedSources) {
@@ -57,8 +66,7 @@ class DefaultAppUpdateRepository(
                 if (!response.status.isSuccess()) {
                     error("HTTP ${response.status.value}")
                 }
-                val manifest = json.decodeFromString<AppUpdateManifestDto>(response.bodyAsText())
-                manifest
+                json.decodeFromString<AppUpdateManifestDto>(response.bodyAsText())
             }
             val manifest = result
                 .onFailure { error ->
@@ -104,18 +112,31 @@ class DefaultAppUpdateRepository(
                 .getOrNull()
 
             val release = manifest.toRelease(source, platform, changelogText)
-            appSettingsRepository.appUpdatePreferredSourceIndex.setValue(sources.indexOf(source).coerceAtLeast(0))
 
-            return when {
-                release.versionCode <= platform.currentVersionCode -> AppUpdateCheckResult.UpToDate(platform.currentVersionName)
-                !force && appSettingsRepository.appUpdateIgnoredVersionCode.getValue().toLong() == release.versionCode -> {
-                    AppUpdateCheckResult.Ignored(release)
+            when {
+                release.versionCode <= platform.currentVersionCode -> {
+                    // 该源是旧版本或与当前一致：继续尝试其余镜像，避免陈旧镜像掩盖更新或错误报「已是最新」
+                    Logger.d(TAG, "Update source is stale source=${source.name} version=${release.versionCode}")
                 }
-                else -> AppUpdateCheckResult.UpdateAvailable(release)
+                !force && appSettingsRepository.appUpdateIgnoredVersionCode.getValue().toLong() == release.versionCode -> {
+                    if (ignored == null) ignored = release
+                }
+                else -> {
+                    appSettingsRepository.appUpdatePreferredSourceIndex.setValue(
+                        sources.indexOf(source).coerceAtLeast(0),
+                    )
+                    return AppUpdateCheckResult.UpdateAvailable(release)
+                }
             }
         }
 
         preparing?.let { return it }
+        ignored?.let {
+            appSettingsRepository.appUpdatePreferredSourceIndex.setValue(
+                sources.indexOf(it.source).coerceAtLeast(0),
+            )
+            return AppUpdateCheckResult.Ignored(it)
+        }
         if (sawManifest) {
             return AppUpdateCheckResult.UpToDate(platform.currentVersionName)
         }
