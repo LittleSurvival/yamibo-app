@@ -1,0 +1,10 @@
+# stable-0.4.6
+
+新增 :
+- Prepare Version Update 不填版本号时自动当前补丁号+1
+
+修复 :
+- gh-proxy.com 仅用于下载加速，检测更新使用 ghfast/llkk/ddlc 镜像
+
+更改 :
+- 更新检测与下载改为代理优先，GitHub 直连作为兜底
