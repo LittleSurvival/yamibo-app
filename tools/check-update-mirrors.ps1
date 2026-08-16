@@ -1,11 +1,13 @@
 #Requires -Version 5.1
 <#
-Checks that the app update feeds and the download proxy are usable:
+Checks that the GitHub update feed and its third-party mirrors are usable.
 
-- Requests the GitHub / Gitee / Gitea update manifests in order and verifies
-  HTTP 200 + parseable JSON.
-- Warns when mirror versionCode values disagree (mirror release workflow
-  should keep them in sync).
+All feeds point at the same GitHub repository lmc2007/yamibo-app
+(raw.githubusercontent.com update-release/update/stable.json), reached either
+directly or through third-party GitHub acceleration mirrors. The script:
+
+- Requests every feed and verifies HTTP 200 + parseable JSON.
+- Warns when versionCode values disagree (a mirror may be serving stale cache).
 - HEAD-checks the GitHub release APK asset directly and through
   https://gh-proxy.com/, and rejects HTML responses (login/error pages).
 
@@ -20,10 +22,14 @@ param(
 $ErrorActionPreference = 'Stop'
 $failed = @()
 
+$githubRaw = 'https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json'
+
 $manifestUrls = [ordered]@{
-    'GitHub' = 'https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json'
-    'Gitee'  = 'https://gitee.com/LittleSurvival/ymb-apk-release/raw/main/update/stable.json'
-    'Gitea'  = 'https://gitea.com/api/v1/repos/LittleSurvival/ymb-apk-release/raw/update/stable.json?ref=main'
+    'GitHub'        = $githubRaw
+    'gh-proxy.com'  = "https://gh-proxy.com/$githubRaw"
+    'ghfast.top'    = "https://ghfast.top/$githubRaw"
+    'gh.llkk.cc'    = "https://gh.llkk.cc/$githubRaw"
+    'gh.ddlc.top'   = "https://gh.ddlc.top/$githubRaw"
 }
 
 $feeds = @{}
@@ -41,10 +47,13 @@ foreach ($entry in $manifestUrls.GetEnumerator()) {
 
 $versions = @($feeds.Values | ForEach-Object { $_.versionCode } | Sort-Object -Unique)
 if ($versions.Count -gt 1) {
-    "WARN mirror versionCode mismatch: $($versions -join ', ') (run the mirror release workflow to sync)"
+    "WARN versionCode mismatch: $($versions -join ', ') (a mirror may be serving stale cache)"
 }
 
 $githubAsset = $feeds['GitHub'].assets | Where-Object { $_.type -in @('universal-apk', 'apk') } | Select-Object -First 1
+if ($null -eq $githubAsset) {
+    $githubAsset = $feeds.Values | ForEach-Object { $_.assets } | Where-Object { $_.type -in @('universal-apk', 'apk') } | Select-Object -First 1
+}
 if ($null -ne $githubAsset) {
     foreach ($url in @($githubAsset.url, "https://gh-proxy.com/$($githubAsset.url)")) {
         try {
@@ -62,7 +71,7 @@ if ($null -ne $githubAsset) {
         }
     }
 } else {
-    "WARN GitHub manifest has no installable APK asset"
+    "WARN no installable APK asset in any feed"
 }
 
 if ($failed.Count -gt 0) {

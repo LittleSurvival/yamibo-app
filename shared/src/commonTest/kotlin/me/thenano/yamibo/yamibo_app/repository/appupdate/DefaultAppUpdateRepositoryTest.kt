@@ -17,79 +17,106 @@ import kotlin.test.assertTrue
 class DefaultAppUpdateRepositoryTest {
 
     @Test
-    fun sourcesListGitHubFirstThenGiteeThenGitea() {
+    fun sourcesAreGitHubDirectThenThirdPartyGitHubMirrors() {
         val environment = environment()
 
-        assertEquals(listOf("GitHub", "Gitee", "Gitea"), environment.repository.sources.map { it.name })
+        assertEquals(
+            listOf("GitHub", "gh-proxy.com", "ghfast.top", "gh.llkk.cc", "gh.ddlc.top"),
+            environment.repository.sources.map { it.name },
+        )
         assertEquals(
             "https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json",
             environment.repository.sources[0].manifestUrl,
         )
         assertEquals(
-            "https://gitee.com/LittleSurvival/ymb-apk-release/raw/main/update/stable.json",
+            "https://gh-proxy.com/https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json",
             environment.repository.sources[1].manifestUrl,
         )
         assertEquals(
-            "https://gitea.com/api/v1/repos/LittleSurvival/ymb-apk-release/raw/update/stable.json?ref=main",
+            "https://ghfast.top/https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json",
             environment.repository.sources[2].manifestUrl,
+        )
+        assertEquals(
+            "https://gh.llkk.cc/https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json",
+            environment.repository.sources[3].manifestUrl,
+        )
+        assertEquals(
+            "https://gh.ddlc.top/https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json",
+            environment.repository.sources[4].manifestUrl,
         )
     }
 
     @Test
-    fun failingGitHubFallsBackToGiteeMirror() = runBlocking {
+    fun failingGitHubFallsBackToGhProxyMirror() = runBlocking {
         val environment = environment(
             currentVersionCode = 8,
             failingSources = setOf("GitHub"),
-            manifests = mapOf(
-                "GitHub" to readyManifest(9),
-                "Gitee" to readyManifest(9, assetUrl = "https://gitee.com/asset/9.apk"),
-            ),
         )
 
         val result = assertIs<AppUpdateCheckResult.UpdateAvailable>(environment.repository.checkForUpdate(force = true))
 
-        assertEquals("Gitee", result.release.source.name)
+        assertEquals("gh-proxy.com", result.release.source.name)
         assertEquals(9, result.release.versionCode)
         assertEquals(1, environment.settings.appUpdatePreferredSourceIndex.getValue())
     }
 
     @Test
+    fun htmlResponseFromMirrorFallsBackToNextMirror() = runBlocking {
+        val environment = environment(
+            currentVersionCode = 8,
+            failingSources = setOf("GitHub"),
+            htmlSources = setOf("gh-proxy.com"),
+        )
+
+        val result = assertIs<AppUpdateCheckResult.UpdateAvailable>(environment.repository.checkForUpdate(force = true))
+
+        assertEquals("ghfast.top", result.release.source.name)
+        assertEquals(2, environment.settings.appUpdatePreferredSourceIndex.getValue())
+    }
+
+    @Test
     fun allSourcesFailReturnsFailedWithEverySourceName() = runBlocking {
-        val environment = environment(failingSources = setOf("GitHub", "Gitee", "Gitea"))
+        val environment = environment(
+            failingSources = setOf("GitHub", "gh-proxy.com", "ghfast.top", "gh.llkk.cc", "gh.ddlc.top"),
+        )
 
         val result = assertIs<AppUpdateCheckResult.Failed>(environment.repository.checkForUpdate(force = true))
 
         assertTrue("GitHub" in result.message)
-        assertTrue("Gitee" in result.message)
-        assertTrue("Gitea" in result.message)
+        assertTrue("gh-proxy.com" in result.message)
+        assertTrue("ghfast.top" in result.message)
+        assertTrue("gh.llkk.cc" in result.message)
+        assertTrue("gh.ddlc.top" in result.message)
     }
 
     @Test
-    fun staleMirrorDoesNotMaskNewerSource() = runBlocking {
+    fun staleMirrorDoesNotMaskNewerMirror() = runBlocking {
         val environment = environment(
             currentVersionCode = 8,
             preferredIndex = 1,
             manifests = mapOf(
-                "Gitee" to readyManifest(7),
-                "Gitea" to readyManifest(9, assetUrl = "https://gitea.com/asset/9.apk"),
+                "gh-proxy.com" to readyManifest(7),
+                "ghfast.top" to readyManifest(9),
             ),
         )
 
         val result = assertIs<AppUpdateCheckResult.UpdateAvailable>(environment.repository.checkForUpdate(force = true))
 
-        assertEquals("Gitea", result.release.source.name)
+        assertEquals("ghfast.top", result.release.source.name)
         assertEquals(9, result.release.versionCode)
         assertEquals(2, environment.settings.appUpdatePreferredSourceIndex.getValue())
     }
 
     @Test
-    fun allMirrorsStaleReturnsUpToDate() = runBlocking {
+    fun allSourcesStaleReturnsUpToDate() = runBlocking {
         val environment = environment(
             currentVersionCode = 8,
             manifests = mapOf(
                 "GitHub" to readyManifest(7),
-                "Gitee" to readyManifest(7),
-                "Gitea" to readyManifest(7),
+                "gh-proxy.com" to readyManifest(7),
+                "ghfast.top" to readyManifest(7),
+                "gh.llkk.cc" to readyManifest(7),
+                "gh.ddlc.top" to readyManifest(7),
             ),
         )
 
@@ -104,14 +131,14 @@ class DefaultAppUpdateRepositoryTest {
             ignoredVersionCode = 8,
             manifests = mapOf(
                 "GitHub" to readyManifest(8),
-                "Gitee" to readyManifest(9, assetUrl = "https://gitee.com/asset/9.apk"),
+                "gh-proxy.com" to readyManifest(9),
             ),
         )
 
         val result = assertIs<AppUpdateCheckResult.UpdateAvailable>(environment.repository.checkForUpdate(force = false))
 
         assertEquals(9, result.release.versionCode)
-        assertEquals("Gitee", result.release.source.name)
+        assertEquals("gh-proxy.com", result.release.source.name)
     }
 
     @Test
@@ -121,7 +148,7 @@ class DefaultAppUpdateRepositoryTest {
             ignoredVersionCode = 8,
             manifests = mapOf(
                 "GitHub" to readyManifest(8),
-                "Gitee" to readyManifest(7),
+                "gh-proxy.com" to readyManifest(7),
             ),
         )
 
@@ -137,7 +164,7 @@ class DefaultAppUpdateRepositoryTest {
             currentVersionCode = 8,
             manifests = mapOf(
                 "GitHub" to notReadyManifest(9),
-                "Gitee" to readyManifest(7),
+                "gh-proxy.com" to readyManifest(7),
             ),
         )
 
@@ -152,10 +179,13 @@ class DefaultAppUpdateRepositoryTest {
         preferredIndex: Int = 0,
         ignoredVersionCode: Int? = null,
         failingSources: Set<String> = emptySet(),
+        htmlSources: Set<String> = emptySet(),
         manifests: Map<String, String> = mapOf(
             "GitHub" to readyManifest(9),
-            "Gitee" to readyManifest(9, assetUrl = "https://gitee.com/asset/9.apk"),
-            "Gitea" to readyManifest(9, assetUrl = "https://gitea.com/asset/9.apk"),
+            "gh-proxy.com" to readyManifest(9),
+            "ghfast.top" to readyManifest(9),
+            "gh.llkk.cc" to readyManifest(9),
+            "gh.ddlc.top" to readyManifest(9),
         ),
     ): TestAppUpdateEnvironment {
         val settingsStore = MemorySettingsStore()
@@ -165,16 +195,24 @@ class DefaultAppUpdateRepositoryTest {
 
         val engine = MockEngine { request ->
             val url = request.url.toString()
+            // gh-proxy.com URL 内包含 raw.githubusercontent.com，镜像域名必须先匹配
             val sourceName = when {
+                "gh-proxy.com" in url -> "gh-proxy.com"
+                "ghfast.top" in url -> "ghfast.top"
+                "gh.llkk.cc" in url -> "gh.llkk.cc"
+                "gh.ddlc.top" in url -> "gh.ddlc.top"
                 "raw.githubusercontent.com" in url -> "GitHub"
-                "gitee.com" in url -> "Gitee"
-                "gitea.com" in url -> "Gitea"
                 else -> null
             }
             when {
                 sourceName == null -> respond("{}", HttpStatusCode.NotFound)
                 "/changelogs/" in url -> respond("changelog", HttpStatusCode.NotFound)
                 sourceName in failingSources -> respond("{}", HttpStatusCode.InternalServerError)
+                sourceName in htmlSources -> respond(
+                    "<html><body>mirror error</body></html>",
+                    HttpStatusCode.OK,
+                    headersOf(HttpHeaders.ContentType, "text/html"),
+                )
                 else -> respond(
                     manifests[sourceName] ?: "{}",
                     HttpStatusCode.OK,

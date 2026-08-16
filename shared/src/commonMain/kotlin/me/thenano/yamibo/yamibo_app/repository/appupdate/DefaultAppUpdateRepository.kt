@@ -1,6 +1,7 @@
 package me.thenano.yamibo.yamibo_app.repository.appupdate
 
 import io.ktor.client.HttpClient
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
@@ -25,6 +26,11 @@ class DefaultAppUpdateRepository(
         isLenient = true
     },
     private val httpClient: HttpClient = HttpClient {
+        install(HttpTimeout) {
+            requestTimeoutMillis = 30_000
+            connectTimeoutMillis = 15_000
+            socketTimeoutMillis = 30_000
+        }
         install(ContentNegotiation) {
             json(json)
         }
@@ -37,15 +43,23 @@ class DefaultAppUpdateRepository(
     override val sources: List<AppUpdateSource> = listOf(
         AppUpdateSource(
             name = "GitHub",
-            manifestUrl = "https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json",
+            manifestUrl = GITHUB_RAW_MANIFEST_URL,
         ),
         AppUpdateSource(
-            name = "Gitee",
-            manifestUrl = "https://gitee.com/LittleSurvival/ymb-apk-release/raw/main/update/stable.json",
+            name = "gh-proxy.com",
+            manifestUrl = "https://gh-proxy.com/$GITHUB_RAW_MANIFEST_URL",
         ),
         AppUpdateSource(
-            name = "Gitea",
-            manifestUrl = "https://gitea.com/api/v1/repos/LittleSurvival/ymb-apk-release/raw/update/stable.json?ref=main",
+            name = "ghfast.top",
+            manifestUrl = "https://ghfast.top/$GITHUB_RAW_MANIFEST_URL",
+        ),
+        AppUpdateSource(
+            name = "gh.llkk.cc",
+            manifestUrl = "https://gh.llkk.cc/$GITHUB_RAW_MANIFEST_URL",
+        ),
+        AppUpdateSource(
+            name = "gh.ddlc.top",
+            manifestUrl = "https://gh.ddlc.top/$GITHUB_RAW_MANIFEST_URL",
         ),
     )
 
@@ -175,6 +189,9 @@ class DefaultAppUpdateRepository(
 }
 
 private const val TAG = "AppUpdateRepository"
+
+private const val GITHUB_RAW_MANIFEST_URL =
+    "https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json"
 
 @Serializable
 private data class AppUpdateManifestDto(

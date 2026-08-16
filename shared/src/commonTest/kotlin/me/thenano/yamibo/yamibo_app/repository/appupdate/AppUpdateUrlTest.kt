@@ -32,4 +32,13 @@ class AppUpdateUrlTest {
             resolveChangelogUrl(giteaUrl, 3)
         )
     }
+
+    @Test
+    fun testResolveChangelogUrlForGhProxyMirror() {
+        val mirrorUrl = "https://gh-proxy.com/https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json"
+        assertEquals(
+            "https://gh-proxy.com/https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/changelogs/3.changelog",
+            resolveChangelogUrl(mirrorUrl, 3)
+        )
+    }
 }
