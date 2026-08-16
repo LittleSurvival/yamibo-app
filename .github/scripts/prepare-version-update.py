@@ -47,6 +47,8 @@ def git(*args: str, check: bool = True) -> subprocess.CompletedProcess:
         cwd=ROOT,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=check,
     )
 
@@ -88,6 +90,8 @@ def remote_tag_exists(version_code: int) -> bool:
         cwd=ROOT,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if result.returncode != 0:
         fail(f"无法查询远端 tag {version_code}：{result.stderr.strip() or 'git ls-remote 失败'}")
@@ -141,6 +145,8 @@ def collect_changelog() -> dict[str, list[str]]:
         cwd=ROOT,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     base = base_result.stdout.strip()
     if base:
