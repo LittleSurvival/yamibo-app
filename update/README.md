@@ -155,7 +155,8 @@ Purpose:
 
 ## Which Workflow To Use
 
-- Normal release: run `Release Android APK` manually from GitHub Actions.
+- Prepare a new version (recommended): run `Prepare Version Update` manually — enter the version number; it updates version files, generates the changelog, validates, commits, and pushes. Optionally tick `trigger_release_after` to start the release workflow right after.
+- Normal release: run `Release Android APK` manually from GitHub Actions (on the same branch that `Prepare Version Update` pushed to).
 - Update feed did not sync correctly after a release: run `Sync Update Folder To Mirrors` manually with `use_latest_release_asset=true`.
 - APK assets already exist and only the public feeds should become ready: run `Manual Ready Update Manifests`.
 - A released APK has a problem and app-side update prompts should be paused: run `Sync Update Folder To Mirrors` manually with `use_latest_release_asset=false`.

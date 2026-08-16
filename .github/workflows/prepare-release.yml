@@ -1,0 +1,116 @@
+name: Prepare Version Update
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: '新版本号，例如 0.2.6'
+        required: true
+        type: string
+      version_code:
+        description: 'versionCode（留空 = 当前 + 1）'
+        required: false
+        type: string
+      changelog_mode:
+        description: '更新内容来源'
+        required: true
+        default: auto
+        type: choice
+        options:
+          - auto
+          - auto+extra
+          - manual
+      changelog_extra:
+        description: '补充/手写的更新内容（多行；manual 模式必填）'
+        required: false
+        type: string
+      release_notes:
+        description: 'manifest 一句话简介（留空自动取第一条更新）'
+        required: false
+        type: string
+      target_branch:
+        description: '提交目标分支（留空 = 当前分支，且必须与当前分支一致）'
+        required: false
+        type: string
+      allow_main_push:
+        description: '显式允许推送到 main（默认禁止，遵守仓库 main 保护）'
+        required: false
+        default: false
+        type: boolean
+      dry_run:
+        description: '只预览不写文件、不提交、不推送'
+        required: false
+        default: false
+        type: boolean
+      trigger_release_after:
+        description: '准备完成后自动触发 Release Android APK'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: prepare-release-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Prepare version files
+        id: prepare
+        env:
+          INPUT_VERSION_NAME: ${{ inputs.version_name }}
+          INPUT_VERSION_CODE: ${{ inputs.version_code }}
+          INPUT_CHANGELOG_MODE: ${{ inputs.changelog_mode }}
+          INPUT_CHANGELOG_EXTRA: ${{ inputs.changelog_extra }}
+          INPUT_RELEASE_NOTES: ${{ inputs.release_notes }}
+          INPUT_TARGET_BRANCH: ${{ inputs.target_branch }}
+          INPUT_ALLOW_MAIN_PUSH: ${{ inputs.allow_main_push }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          INPUT_TRIGGER_RELEASE_AFTER: ${{ inputs.trigger_release_after }}
+        run: python3 .github/scripts/prepare-version-update.py
+
+      - name: Sync and validate stable manifest
+        if: ${{ !inputs.dry_run }}
+        run: ./gradlew syncStableManifest validateUpdateManifest --console=plain
+
+      - name: Commit and push version update
+        if: ${{ !inputs.dry_run && steps.prepare.outputs.already_prepared != 'true' }}
+        env:
+          VERSION_CODE: ${{ steps.prepare.outputs.version_code }}
+          VERSION_NAME: ${{ steps.prepare.outputs.version_name }}
+          TARGET_BRANCH: ${{ steps.prepare.outputs.target_branch }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add composeApp/build.gradle.kts update/manifest.json update/stable.json "update/changelogs/${VERSION_CODE}.changelog"
+          git commit -m "release: 版本更新到 ${VERSION_NAME} (versionCode ${VERSION_CODE})"
+          git push origin "HEAD:${TARGET_BRANCH}"
+
+      - name: Trigger release workflow
+        if: ${{ !inputs.dry_run && inputs.trigger_release_after }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_BRANCH: ${{ steps.prepare.outputs.target_branch }}
+        run: gh workflow run "Release Android APK" --ref "${TARGET_BRANCH}"

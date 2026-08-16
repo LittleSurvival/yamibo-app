@@ -145,3 +145,35 @@ git push origin HEAD
 - `versionCode` 只能递增，不能小于或等于上一次发布的值。
 - 每次 commit 前必须运行 `python .github/scripts/validate_git_name.py`，且只在它通过后 commit。
 - 若同一 `versionCode` 的 tag / Release 已存在（例如上次发布失败残留），先提示用户处理或改用更大的 versionCode。
+
+## 六、使用 GitHub Action 一键准备（推荐）
+
+仓库新增 `.github/workflows/prepare-release.yml`（`Prepare Version Update`），在 Actions 页面手动触发，
+输入新版本号后自动完成上面第 3-6 步：
+
+1. 修改 `composeApp/build.gradle.kts` 的 versionCode / versionName；
+2. 从当前分支「最近一条 release 提交之后的未发布提交」自动整理 changelog，生成
+   `update/changelogs/{versionCode}.changelog`；
+3. 更新 `update/manifest.json`（保持 `isReady=false`、`assets=[]`、无 `releaseUrl`）；
+4. 运行 `syncStableManifest validateUpdateManifest`；
+5. 以 `release: 版本更新到 {versionName} (versionCode {versionCode})` 提交并推送到当前分支。
+
+触发方式：Actions → `Prepare Version Update` → Run workflow，表单字段：
+
+- `version_name`（必填）：例如 `0.2.6`
+- `version_code`（可空）：默认 = 当前 + 1；脚本校验必须递增且远端 tag 不存在
+- `changelog_mode`：`auto`（自动整理 git log）/ `auto+extra`（自动整理 + 补充内容）/ `manual`（完全手写）
+- `changelog_extra`：补充或手写的更新内容，多行；`manual` 模式必填
+- `release_notes`：manifest 一句话简介，留空自动取第一条更新
+- `target_branch`：提交目标分支，留空 = 当前分支；必须与当前分支一致
+- `allow_main_push`：显式允许推送到 `main`（默认禁止，遵守仓库 main 保护）
+- `dry_run`：勾选后只输出预览，不写文件、不提交、不推送（建议首次先跑一次预览）
+- `trigger_release_after`：勾选后准备完成自动触发 `Release Android APK`
+
+注意：
+
+- workflow 文件只会在仓库默认分支的 Actions 列表里显示；首次使用前先把
+  `.github/workflows/prepare-release.yml` 合入默认分支。
+- 在哪个分支运行，就提交到哪个分支；发布时 `Release Android APK` 也选同一分支。
+- 若远端已存在相同 `versionCode` 的 tag，脚本会直接失败，避免再次出现 tag 冲突。
+- 幂等：版本文件已准备好时，重复运行会提示「已准备过」，不会覆盖或重复提交。
