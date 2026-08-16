@@ -278,22 +278,48 @@ AppSync 把收藏/设置/阅读记录同步到云端，`shared/.../repository/ap
 - 复制本章内容（`ThreadReaderScreen` 的 `copyChapter`，复制当前章 HTML → 纯文本）。
 - 本地阅读分章、断点续读的 UI 重构（本地提交 `dfd09be` 等）。
 
-### 7.4 网盘云端备份（pancloud）
+### 7.4 网盘云端备份与同步（pancloud）
 
-以第三方网盘（Cloud Nine，见仓库根 `API.md`）作为云端备份的唯一方式，替代暂不可用的
-AppSync 云端同步。语义是**快照式整档备份**（上传/下载 + Merge/Overwrite 还原），不是多装置增量同步。
+以第三方网盘（Cloud Nine，见仓库根 `API.md`，base `https://pan.muleng.dpdns.org/api`）作为云端存储，
+提供两种能力：**快照式云端备份**（并入「本地資料備份」）与**多设备增量同步**（AppSync 引擎 + 网盘 remote，二选一）。
 
-- 数据层 `shared/.../repository/pancloud/`：
-  - `PanCloudApiClient`：网盘 REST 客户端（Ktor，`HttpClientFactory`），统一解析
-    `{success, data, message, error}`，401 自动刷新重试；上传按 ≤10MB 单档直传 / >10MB 分块。
-  - `PanCloudAccountRepository`：注册/登录/登出/会话恢复 + `yamibo` 文件夹幂等绑定。
-  - `PanCloudBackupStorageProvider`：实现 `BackupStorageProvider`，把 `.yamibobak` gzip 后
-    上传到网盘 `yamibo` 文件夹，下载时 gunzip；复用 `BackupRepositoryImpl` 的生成/还原逻辑。
-- 凭证：`AppSettingsRepository` 的 `pan_cloud_*` 设置；refresh_token 不进备份
-  （`BackupRepositoryImpl.shouldSkipSetting` 黑名单）。
-- UI：`composeApp/.../profile/settings/backup/PanCloudBackupScreen.kt`（登录/注册/手动备份/恢复/登出/自动备份开关）。
-- 自动备份：`PanCloudBackupWorker` + `AndroidPanCloudBackupScheduler`（WorkManager）；
-  iOS 为 stub（`IOSPanCloudBackupScheduler`）。
+#### 数据层 `shared/.../repository/pancloud/`
+
+- `PanCloudApiClient`：网盘 REST 客户端（Ktor + `HttpClientFactory`），统一解析
+  `{success, data, message, error}`，401 自动刷新重试；上传 ≤10MB 直传 / >10MB 分块。
+- `PanCloudAccountRepository`：注册/登录/登出/会话恢复，`yamibo` 文件夹幂等绑定；维护会话状态
+  `PanCloudSessionState`（`Active`/`LoggedOut`/`Expired`/`Unknown`），refresh 过期时用保存的密码自动重登。
+- `PanCloudBackupStorageProvider`：实现 `BackupStorageProvider`，把 `.yamibobak` gzip 后上传到网盘
+  `yamibo` 文件夹、下载时 gunzip，复用 `BackupRepositoryImpl` 的快照生成/还原逻辑。
+
+#### 增量同步 remote `shared/.../repository/appsync/remote/`
+
+- `PanCloudJournalRemote`：实现 `AppSyncJournalRemote`，把 Index / Journal / Checkpoint 映射为网盘文件
+  `index.json` / `journal-<replicaKey>.json` / `checkpoint-<id>.json`；single-writer（每设备只写自己的
+  Journal）规避网盘无 CAS 的并发覆盖；按 `updated_at` 做进程内增量下载。
+- `SwitchableAppSyncJournalRemote` + `AppSyncBackend` 设置：按 `appsync.backend` 在论坛 Blog / 网盘间
+  **二选一**。`AppSyncService.attachPanCloud(...)` 延迟注入网盘 remote，`resetForBackendSwitch()` 切换后
+  重置 installation 重新 Seed/Join。
+
+#### 凭证与安全
+
+- `refresh_token` / 密码存 Android `EncryptedSettingsStore`（AndroidX Security Crypto，AES256-GCM，Keystore），
+  iOS 暂用 `NSUserDefaults`。
+- 敏感 key（`pancloudrefreshtoken` / `pancloudpassword`）进 `BackupRepositoryImpl.shouldSkipSetting` 黑名单，
+  不进 `.yamibobak` 备份。
+
+#### UI
+
+- `BackupSettingsScreen`（`profile/settings/backup/`）：网盘登录/绑定、「备份到网盘」开关（本地 + 网盘并存）、
+  备份文件列表分「本地 / 网盘」来源、按来源恢复。
+- `AppSyncSettingsScreen`（`profile/settings/cloud/`）：同步后端二选一（论坛 Blog / 网盘）+ 网盘账号区
+  （登录/注册/登出/诊断）+ 共享 `CloudLoginDialog`。
+
+#### 调度
+
+- `BackupWorker`：`backupToCloudEnabled` OFF → 仅本地定期备份；ON → 仅网盘（不落本地、不要求已选本地文件夹）。
+  本地与网盘自动备份都按 `backupMaxAutoFiles` 清理。
+- 云端同步静默执行：同步用应用级 `LocalAppCoroutineScope`，返回主页不中断。
 
 ## 8. 平台实现要点
 

@@ -8,6 +8,7 @@ import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.i18n.i18n
+import me.thenano.yamibo.yamibo_app.repository.BackupRepository
 import me.thenano.yamibo.yamibo_app.repository.settings.AppSettingsRepository
 import me.thenano.yamibo.yamibo_app.store.settings.AndroidSettingsStore
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
@@ -21,28 +22,44 @@ class BackupWorker(
         setForeground(createForegroundInfo(notifications, i18n("正在建立備份")))
         return try {
             val settings = AppSettingsRepository(AndroidSettingsStore(applicationContext))
-            if (settings.backupFolderUri.getValue().isBlank()) {
-                notifications.showFailed(i18n("尚未選擇備份資料夾"))
-                return Result.failure()
-            }
-            val repository = AndroidBackupSupport.createRepository(applicationContext)
-            val file = repository.createBackup(automatic = true).getOrThrow()
-            repository.cleanupAutoBackups(settings.backupMaxAutoFiles.getValue()).getOrThrow()
+            val maxAutoFiles = settings.backupMaxAutoFiles.getValue()
+            val cloudEnabled = settings.backupToCloudEnabled.getValue()
 
-            var cloudName: String? = null
-            if (settings.backupToCloudEnabled.getValue()) {
+            var cloudComponents: PanCloudBackupComponents? = null
+            var cloudLoggedIn = false
+            if (cloudEnabled) {
                 val components = AndroidPanCloudBackupSupport.createComponents(applicationContext)
-                val restored = components.accountRepository.restoreSession()
-                if (restored.isSuccess && components.accountRepository.status.loggedIn) {
-                    val cloudFile = components.backupRepository.createBackup(automatic = true).getOrThrow()
-                    components.backupRepository.cleanupAutoBackups(settings.backupMaxAutoFiles.getValue()).getOrThrow()
-                    cloudName = cloudFile.name
+                cloudComponents = components
+                cloudLoggedIn = components.accountRepository.restoreSession()
+                    .fold(
+                        onSuccess = { components.accountRepository.status.loggedIn },
+                        onFailure = { false },
+                    )
+            }
+
+            val file = when (resolveAutomaticBackupTarget(cloudEnabled, cloudLoggedIn)) {
+                AutomaticBackupTarget.LOCAL -> {
+                    if (settings.backupFolderUri.getValue().isBlank()) {
+                        notifications.showFailed(i18n("尚未選擇備份資料夾"))
+                        return Result.failure()
+                    }
+                    createAutomaticBackupAndCleanup(
+                        repository = AndroidBackupSupport.createRepository(applicationContext),
+                        maxAutoFiles = maxAutoFiles,
+                    )
+                }
+                AutomaticBackupTarget.CLOUD -> createAutomaticBackupAndCleanup(
+                    repository = checkNotNull(cloudComponents).backupRepository,
+                    maxAutoFiles = maxAutoFiles,
+                )
+                AutomaticBackupTarget.CLOUD_UNAVAILABLE -> {
+                    notifications.showFailed(i18n("網盤未登入，無法建立定期備份"))
+                    return Result.failure()
                 }
             }
 
             settings.backupLastAutoBackupAt.setValue(currentTimeMillis().toString())
-            val summary = if (cloudName != null) "${file.name} + $cloudName" else "${file.name}，${file.bytes} bytes"
-            notifications.showCompleted(summary)
+            notifications.showCompleted(automaticBackupSummary(file))
             Result.success()
         } catch (throwable: Throwable) {
             Logger.e("BackupWorker", "Automatic backup failed", throwable)
@@ -66,4 +83,31 @@ class BackupWorker(
             ForegroundInfo(AndroidBackupNotificationRepository.NOTIFICATION_ID, notification)
         }
     }
+}
+
+internal enum class AutomaticBackupTarget {
+    LOCAL,
+    CLOUD,
+    CLOUD_UNAVAILABLE,
+}
+
+internal fun resolveAutomaticBackupTarget(
+    backupToCloudEnabled: Boolean,
+    cloudLoggedIn: Boolean,
+): AutomaticBackupTarget = when {
+    backupToCloudEnabled && cloudLoggedIn -> AutomaticBackupTarget.CLOUD
+    backupToCloudEnabled -> AutomaticBackupTarget.CLOUD_UNAVAILABLE
+    else -> AutomaticBackupTarget.LOCAL
+}
+
+internal fun automaticBackupSummary(file: BackupRepository.BackupFileInfo): String =
+    "${file.name}，${file.bytes} bytes"
+
+internal suspend fun createAutomaticBackupAndCleanup(
+    repository: BackupRepository,
+    maxAutoFiles: Int,
+): BackupRepository.BackupFileInfo {
+    val file = repository.createBackup(automatic = true).getOrThrow()
+    repository.cleanupAutoBackups(maxAutoFiles).getOrThrow()
+    return file
 }

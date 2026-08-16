@@ -337,7 +337,7 @@ class AppSettingsRepository(store: SettingsStore) : SettingsRegistry(store, pref
         default = "",
     )
 
-    /** 備份時同時上傳到網盤（手動與自動備份都遵循） */
+    /** 備份到網盤：手動備份=本地+網盤；定期備份=僅網盤不落本地（關閉時定期備份僅本地） */
     val backupToCloudEnabled by boolSetting(
         name = "backup_to_cloud_enabled",
         default = false,
