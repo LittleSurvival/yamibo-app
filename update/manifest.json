@@ -1,8 +1,8 @@
 {
   "channel": "stable",
-  "versionName": "0.5.6",
-  "versionCode": 12,
+  "versionName": "0.6.6",
+  "versionCode": 13,
   "isReady": false,
-  "releaseNotes": "更新检测单源3秒超时自动切换；移除无法正常检测的镜像",
+  "releaseNotes": "优化阅读器卡顿：HTML 解析线性化、增量转换/分段、滚动重组隔离",
   "assets": []
 }
