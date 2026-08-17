@@ -1,8 +1,8 @@
 {
   "channel": "stable",
-  "versionName": "0.6.6",
-  "versionCode": 13,
+  "versionName": "0.7.6",
+  "versionCode": 14,
   "isReady": false,
-  "releaseNotes": "优化阅读器卡顿：HTML 解析线性化、增量转换/分段、滚动重组隔离",
+  "releaseNotes": "更换更新检测镜像并设置分源超时（代理5s/GitHub10s）",
   "assets": []
 }
