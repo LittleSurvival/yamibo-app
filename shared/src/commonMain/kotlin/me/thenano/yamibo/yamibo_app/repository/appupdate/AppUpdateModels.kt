@@ -1,8 +1,12 @@
 package me.thenano.yamibo.yamibo_app.repository.appupdate
 
+const val APP_UPDATE_PROXY_TIMEOUT_MILLIS = 5_000L
+const val APP_UPDATE_GITHUB_TIMEOUT_MILLIS = 10_000L
+
 data class AppUpdateSource(
     val name: String,
     val manifestUrl: String,
+    val requestTimeoutMillis: Long,
 )
 
 data class AppUpdateAsset(

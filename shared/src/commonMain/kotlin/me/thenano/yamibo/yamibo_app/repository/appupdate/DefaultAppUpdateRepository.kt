@@ -2,8 +2,8 @@ package me.thenano.yamibo.yamibo_app.repository.appupdate
 
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
-import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.timeout
+import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.isSuccess
@@ -28,9 +28,9 @@ class DefaultAppUpdateRepository(
     },
     private val httpClient: HttpClient = HttpClient {
         install(HttpTimeout) {
-            requestTimeoutMillis = 30_000
-            connectTimeoutMillis = 15_000
-            socketTimeoutMillis = 30_000
+            requestTimeoutMillis = APP_UPDATE_GITHUB_TIMEOUT_MILLIS
+            connectTimeoutMillis = APP_UPDATE_GITHUB_TIMEOUT_MILLIS
+            socketTimeoutMillis = APP_UPDATE_GITHUB_TIMEOUT_MILLIS
         }
         install(ContentNegotiation) {
             json(json)
@@ -43,12 +43,39 @@ class DefaultAppUpdateRepository(
 
     override val sources: List<AppUpdateSource> = listOf(
         AppUpdateSource(
-            name = "ghproxy.net",
-            manifestUrl = "https://ghproxy.net/$GITHUB_RAW_MANIFEST_URL",
+            name = "github.cnxiaobai.com",
+            manifestUrl = "https://github.cnxiaobai.com/$GITHUB_RAW_MANIFEST_URL",
+            requestTimeoutMillis = APP_UPDATE_PROXY_TIMEOUT_MILLIS,
+        ),
+        AppUpdateSource(
+            name = "gh.halonice.com",
+            manifestUrl = "https://gh.halonice.com/$GITHUB_RAW_MANIFEST_URL",
+            requestTimeoutMillis = APP_UPDATE_PROXY_TIMEOUT_MILLIS,
+        ),
+        AppUpdateSource(
+            name = "ghproxy.sakuramoe.dev",
+            manifestUrl = "https://ghproxy.sakuramoe.dev/$GITHUB_RAW_MANIFEST_URL",
+            requestTimeoutMillis = APP_UPDATE_PROXY_TIMEOUT_MILLIS,
+        ),
+        AppUpdateSource(
+            name = "gh.padao.fun",
+            manifestUrl = "https://gh.padao.fun/$GITHUB_RAW_MANIFEST_URL",
+            requestTimeoutMillis = APP_UPDATE_PROXY_TIMEOUT_MILLIS,
+        ),
+        AppUpdateSource(
+            name = "gh.jasonzeng.dev",
+            manifestUrl = "https://gh.jasonzeng.dev/$GITHUB_RAW_MANIFEST_URL",
+            requestTimeoutMillis = APP_UPDATE_PROXY_TIMEOUT_MILLIS,
+        ),
+        AppUpdateSource(
+            name = "ghproxy.mirror.skybyte.me",
+            manifestUrl = "https://ghproxy.mirror.skybyte.me/$GITHUB_RAW_MANIFEST_URL",
+            requestTimeoutMillis = APP_UPDATE_PROXY_TIMEOUT_MILLIS,
         ),
         AppUpdateSource(
             name = "GitHub",
             manifestUrl = GITHUB_RAW_MANIFEST_URL,
+            requestTimeoutMillis = APP_UPDATE_GITHUB_TIMEOUT_MILLIS,
         ),
     )
 
@@ -66,7 +93,11 @@ class DefaultAppUpdateRepository(
         for (source in orderedSources) {
             val result = runCatching {
                 val response = httpClient.get(source.manifestUrl) {
-                    timeout { requestTimeoutMillis = UPDATE_SOURCE_TIMEOUT_MILLIS }
+                    timeout {
+                        requestTimeoutMillis = source.requestTimeoutMillis
+                        connectTimeoutMillis = source.requestTimeoutMillis
+                        socketTimeoutMillis = source.requestTimeoutMillis
+                    }
                 }
                 if (!response.status.isSuccess()) {
                     error("HTTP ${response.status.value}")
@@ -107,7 +138,11 @@ class DefaultAppUpdateRepository(
             val changelogText = runCatching {
                 val changelogUrl = resolveChangelogUrl(source.manifestUrl, manifest.versionCode)
                 val response = httpClient.get(changelogUrl) {
-                    timeout { requestTimeoutMillis = UPDATE_SOURCE_TIMEOUT_MILLIS }
+                    timeout {
+                        requestTimeoutMillis = source.requestTimeoutMillis
+                        connectTimeoutMillis = source.requestTimeoutMillis
+                        socketTimeoutMillis = source.requestTimeoutMillis
+                    }
                 }
                 if (response.status.isSuccess()) {
                     response.bodyAsText()
@@ -182,9 +217,6 @@ class DefaultAppUpdateRepository(
 }
 
 private const val TAG = "AppUpdateRepository"
-
-/** 单个更新源请求超过 3 秒自动切换下一个镜像 */
-private const val UPDATE_SOURCE_TIMEOUT_MILLIS = 3_000L
 
 private const val GITHUB_RAW_MANIFEST_URL =
     "https://raw.githubusercontent.com/lmc2007/yamibo-app/update-release/update/stable.json"

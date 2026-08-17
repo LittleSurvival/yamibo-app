@@ -148,6 +148,7 @@ private fun PreviewUpdatePromptDialog(onDismiss: () -> Unit) {
         source = AppUpdateSource(
             name = "Preview",
             manifestUrl = "preview://app-update",
+            requestTimeoutMillis = APP_UPDATE_GITHUB_TIMEOUT_MILLIS,
         ),
         channel = "stable",
         versionName = "0.0.2",
