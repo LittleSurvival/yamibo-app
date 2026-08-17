@@ -328,7 +328,7 @@ fun HtmlRenderer(
     onImageHeightChanged: ((String, Int) -> Unit)? = null,
     onImageAspectRatioChanged: ((String, Float) -> Unit)? = null,
 ) {
-    DebugRecomposeProbe("HtmlRenderer", html.hashCode().toString())
+    DebugRecomposeProbe("HtmlRenderer") { html.hashCode().toString() }
     val convertedHtml = rememberConvertedText(html)
     val rawBlocks = remember(convertedHtml) { HtmlParser.parseHtml(convertedHtml) }
     val blocks = remember(rawBlocks) { normalizeHtmlBlocks(rawBlocks) }
@@ -545,7 +545,7 @@ private fun HtmlBlockRenderer(
     onImageAspectRatioChanged: ((String, Float) -> Unit)? = null,
     fontFamily: FontFamily = HtmlDefaultFontFamily,
 ) {
-    DebugRecomposeProbe("HtmlBlockRenderer", "${block::class.simpleName}:${block.hashCode()}")
+    DebugRecomposeProbe("HtmlBlockRenderer") { "${block::class.simpleName}:${block.hashCode()}" }
     val colors = YamiboTheme.colors
     val uriHandler = LocalUriHandler.current
     val navigator = LocalNavigator.current

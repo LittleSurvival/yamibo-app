@@ -58,6 +58,13 @@ object HtmlParser {
         
         val blocks = mutableListOf<HtmlBlock>()
         val globalBuilder = AnnotatedString.Builder()
+        // Cheap text mirror for the AnnotatedString builder. Looking at the builder
+        // through toAnnotatedString() on every appended space/newline copies the whole
+        // accumulated text and turns long posts into O(n^2) work, so the tail state is
+        // tracked incrementally instead.
+        val plainText = StringBuilder()
+        var lastAppendedChar: Char? = null
+        var trailingNewlineCount = 0
         var lastCommitIndex = 0
         var currentLinkHref: String? = null
         var blockCounter = 0
@@ -65,41 +72,41 @@ object HtmlParser {
         var explicitBreaksSinceCommit = 0
         val pendingRubies = mutableListOf<PendingRuby>()
 
-        fun trailingNewlineCount(): Int {
-            val text = globalBuilder.toAnnotatedString().text
-            var count = 0
-            var index = text.length - 1
-            while (index >= 0 && text[index] == '\n') {
-                count++
-                index--
+        fun appendChar(char: Char) {
+            globalBuilder.append(char.toString())
+            plainText.append(char)
+            if (char == '\n') {
+                trailingNewlineCount++
+            } else {
+                trailingNewlineCount = 0
             }
-            return count
+            lastAppendedChar = char
         }
 
         fun appendLineBreak(maxConsecutive: Int = 2, explicit: Boolean = false) {
             if (explicit) {
                 explicitBreaksSinceCommit++
             }
-            if (globalBuilder.length == 0 && !explicit) return
-            if (trailingNewlineCount() < maxConsecutive) {
-                globalBuilder.append("\n")
+            if (plainText.isEmpty() && !explicit) return
+            if (trailingNewlineCount < maxConsecutive) {
+                appendChar('\n')
             }
         }
 
         fun appendCollapsibleSpace() {
-            if (globalBuilder.length == 0) return
-            val last = globalBuilder.toAnnotatedString().lastOrNull()
+            if (plainText.isEmpty()) return
+            val last = lastAppendedChar
             if (last != null && last != ' ' && last != '\n' && last != '\u3000') {
-                globalBuilder.append(" ")
+                appendChar(' ')
             }
         }
 
         fun appendTextNodeText(text: String) {
             text.forEach { char ->
                 when (char) {
-                    '\u00A0' -> globalBuilder.append("\u3000")
+                    '\u00A0' -> appendChar('\u3000')
                     ' ', '\n', '\t', '\u000C' -> appendCollapsibleSpace()
-                    else -> globalBuilder.append(char.toString())
+                    else -> appendChar(char)
                 }
             }
         }
@@ -298,7 +305,7 @@ object HtmlParser {
                                 }
                                 .forEach { parseNode(it, parentAlign) }
                             val end = globalBuilder.length
-                            val baseText = globalBuilder.toAnnotatedString().substring(start, end).trim()
+                            val baseText = plainText.substring(start, end).trim()
                             if (start < end && baseText.isNotBlank() && rubyText.isNotBlank()) {
                                 val id = hashId("ruby", "$baseText|$rubyText", pendingRubies.size)
                                 pendingRubies += PendingRuby(
@@ -338,7 +345,7 @@ object HtmlParser {
                             val end = globalBuilder.length
                             
                             if (href.isNotBlank() && start < end) {
-                                val textContent = globalBuilder.toAnnotatedString().substring(start, end)
+                                val textContent = plainText.substring(start, end)
                                 if (textContent.trim().isNotEmpty()) {
                                     globalBuilder.addStringAnnotation("URL", href, start, end)
                                     globalBuilder.addStyle(SpanStyle(textDecoration = TextDecoration.Underline), start, end)

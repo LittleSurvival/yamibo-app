@@ -1,4 +1,4 @@
-﻿package me.thenano.yamibo.yamibo_app.thread.reader.components.post
+package me.thenano.yamibo.yamibo_app.thread.reader.components.post
 
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 
@@ -109,7 +109,7 @@ fun PostRenderer(
     totalReplies: Int? = null,
     linkContext: InAppLinkContext = InAppLinkContext(),
 ) {
-    DebugRecomposeProbe("PostRenderer", "${post.pid.value}#${post.floor}")
+    DebugRecomposeProbe("PostRenderer") { "${post.pid.value}#${post.floor}" }
 
     var showRateDialog by remember { mutableStateOf(false) }
     var showRateResultsDialog by remember { mutableStateOf(false) }

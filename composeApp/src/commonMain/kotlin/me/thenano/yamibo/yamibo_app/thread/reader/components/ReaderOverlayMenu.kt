@@ -38,7 +38,7 @@ internal fun ReaderOverlayMenu(
     onSinglePageProgressCommit: (() -> Unit)? = null,
     @Suppress("ModifierParameter") modifier: Modifier = Modifier
 ) {
-    DebugRecomposeProbe("ReaderOverlayMenu", "visible=$visible")
+    DebugRecomposeProbe("ReaderOverlayMenu") { "visible=$visible" }
     val floatButtonBottomPadding = if (singlePageProgress != null) 154.dp else 110.dp
     Box(modifier = modifier.fillMaxSize()) {
         // Animated top bar

@@ -27,23 +27,29 @@ import me.thenano.yamibo.yamibo_app.components.theme.contrastAgainst
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import kotlin.math.abs
 
-/** Floating reader jump button that mirrors Yamibo mobile's top/bottom scroll control. */
+/**
+ * Floating reader jump button that mirrors Yamibo mobile's top/bottom scroll control.
+ *
+ * [visible] and [pointsDown] are read lazily inside this composable so high-frequency
+ * scroll state changes only recompose the button instead of the whole reader screen.
+ */
 @Composable
 fun ReaderScrollJumpButton(
-    visible: Boolean,
-    pointsDown: Boolean,
+    visible: () -> Boolean,
+    pointsDown: () -> Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = YamiboTheme.colors
     val buttonColors = colors.readerScrollJumpButtonColors()
+    val currentPointsDown = pointsDown()
     val rotation by animateFloatAsState(
-        targetValue = if (pointsDown) 180f else 0f,
+        targetValue = if (currentPointsDown) 180f else 0f,
         label = "reader_scroll_jump_button_rotation",
     )
 
     AnimatedVisibility(
-        visible = visible,
+        visible = visible(),
         enter = fadeIn(),
         exit = fadeOut(),
         modifier = modifier,
@@ -62,7 +68,7 @@ fun ReaderScrollJumpButton(
         ) {
             Icon(
                 imageVector = YamiboIcons.ChevronUp,
-                contentDescription = if (pointsDown) i18n("跳到底部") else i18n("跳到頂部"),
+                contentDescription = if (currentPointsDown) i18n("跳到底部") else i18n("跳到頂部"),
                 tint = buttonColors.icon,
                 modifier = Modifier
                     .size(24.dp)

@@ -64,6 +64,7 @@ import me.thenano.yamibo.yamibo_app.repository.BookMarkRepository
 import me.thenano.yamibo.yamibo_app.repository.ChapterStateRepository
 import me.thenano.yamibo.yamibo_app.repository.ContentCoverRepository
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
+import me.thenano.yamibo.yamibo_app.repository.chineseconversion.ChineseConversionMode
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository.ThreadReadingHistory
 import me.thenano.yamibo.yamibo_app.repository.contentcover.ThreadCoverResolver
 import me.thenano.yamibo.yamibo_app.repository.contentcover.toCoverTargetType
@@ -154,6 +155,16 @@ private data class ReaderListEntry(
             kind == ReaderEntryKind.SegmentedBodyWithHeaderAndFooter ||
             kind == ReaderEntryKind.SegmentedBodyWithFooter ||
             kind == ReaderEntryKind.SegmentedBody
+}
+
+/**
+ * Snapshot state that changes on nearly every scroll direction change. It is kept out of
+ * the reader screen's own composition scope: only [ReaderScrollJumpButton] reads these
+ * values, so scroll feedback recomposes just the button instead of the entire screen.
+ */
+private class ReaderScrollJumpButtonState {
+    var pointsDown by mutableStateOf(false)
+    var visibleAfterSlide by mutableStateOf(false)
 }
 
 private data class ThreadReaderSinglePageEntry(
@@ -402,11 +413,14 @@ private data class ReaderCatalogCurrentPosition(
 private const val LONG_READER_HTML_THRESHOLD = 16_000
 internal const val MAX_READER_TEXT_SEGMENT_CHARS = 4_000
 
-internal fun splitLongReaderTextBlock(block: HtmlBlock.Text): List<HtmlBlock.Text> {
+internal fun splitLongReaderTextBlock(
+    block: HtmlBlock.Text,
+    segmenter: TextBoundarySegmenter = ThreadReaderTextBoundaries.defaultSegmenter,
+): List<HtmlBlock.Text> {
     val text = block.annotatedString.text
     if (text.length <= MAX_READER_TEXT_SEGMENT_CHARS) return listOf(block)
 
-    val breakMap = buildSafeBreakMap(block)
+    val breakMap = buildSafeBreakMap(block, segmenter)
     return buildList {
         var start = 0
         var chunkIndex = 0
@@ -493,28 +507,44 @@ private fun groupReaderBlocks(blocks: List<HtmlBlock>): List<List<HtmlBlock>> {
     return groups
 }
 
-internal fun splitLongReaderBlock(block: HtmlBlock): List<HtmlBlock> = when (block) {
-    is HtmlBlock.Text -> splitLongReaderTextBlock(block)
+internal fun splitLongReaderBlock(
+    block: HtmlBlock,
+    segmenter: TextBoundarySegmenter = ThreadReaderTextBoundaries.defaultSegmenter,
+): List<HtmlBlock> = when (block) {
+    is HtmlBlock.Text -> splitLongReaderTextBlock(block, segmenter)
     is HtmlBlock.Code -> block.codeText.chunked(MAX_READER_TEXT_SEGMENT_CHARS).mapIndexed { index, text ->
         block.copy(codeText = text, anchorId = "${block.anchorId}-$index")
     }
 
-    is HtmlBlock.Quote -> groupReaderBlocks(block.contentBlocks.flatMap(::splitLongReaderBlock)).mapIndexed { index, blocks ->
+    is HtmlBlock.Quote -> groupReaderBlocks(
+        block.contentBlocks.flatMap { splitLongReaderBlock(it, segmenter) }
+    ).mapIndexed { index, blocks ->
         block.copy(contentBlocks = blocks, anchorId = "${block.anchorId}-$index")
     }
 
-    is HtmlBlock.Collapse -> groupReaderBlocks(block.contentBlocks.flatMap(::splitLongReaderBlock)).mapIndexed { index, blocks ->
+    is HtmlBlock.Collapse -> groupReaderBlocks(
+        block.contentBlocks.flatMap { splitLongReaderBlock(it, segmenter) }
+    ).mapIndexed { index, blocks ->
         block.copy(contentBlocks = blocks, anchorId = "${block.anchorId}-$index")
     }
 
-    is HtmlBlock.Locked -> groupReaderBlocks(block.contentBlocks.flatMap(::splitLongReaderBlock)).mapIndexed { index, blocks ->
+    is HtmlBlock.Locked -> groupReaderBlocks(
+        block.contentBlocks.flatMap { splitLongReaderBlock(it, segmenter) }
+    ).mapIndexed { index, blocks ->
         block.copy(contentBlocks = blocks, anchorId = "${block.anchorId}-$index")
     }
 
     else -> listOf(block)
 }
 
-private fun buildReaderBodySegments(post: Post, contentHtml: String): List<ReaderBodySegment>? {
+private fun mayNeedReaderBodySegments(post: Post): Boolean =
+    post.contentHtml.length >= LONG_READER_HTML_THRESHOLD || post.images.size >= 6
+
+private fun buildReaderBodySegments(
+    post: Post,
+    contentHtml: String,
+    segmenter: TextBoundarySegmenter = ThreadReaderTextBoundaries.defaultSegmenter,
+): List<ReaderBodySegment>? {
     val shouldSegmentImages = post.images.size >= 6
     val shouldSegmentLongText = contentHtml.length >= LONG_READER_HTML_THRESHOLD
     if (!shouldSegmentImages && !shouldSegmentLongText) return null
@@ -539,7 +569,7 @@ private fun buildReaderBodySegments(post: Post, contentHtml: String): List<Reade
     }
 
     val segmentableBlocks = blocks.flatMap { block ->
-        if (shouldSegmentLongText) splitLongReaderBlock(block) else listOf(block)
+        if (shouldSegmentLongText) splitLongReaderBlock(block, segmenter) else listOf(block)
     }
 
     segmentableBlocks.forEach { block ->
@@ -588,7 +618,7 @@ internal fun ThreadReaderScreen(
     catalogRssQuery: String? = null,
     catalogRssPage: Int? = null,
 ) {
-    DebugRecomposeProbe("ThreadReaderScreen", tid.value.toString())
+    DebugRecomposeProbe("ThreadReaderScreen") { tid.value.toString() }
     val colors = YamiboTheme.colors
     val appSettingsRepository = LocalAppSettingsRepository.current
     val novelSettingsRepository = LocalNovelReaderSettingsRepository.current
@@ -680,6 +710,7 @@ internal fun ThreadReaderScreen(
     var activeImageGeometrySnapshot by remember(tid, targetPid) {
         mutableStateOf<Map<String, Float>>(emptyMap())
     }
+    var imageGeometryRevision by remember(tid, targetPid) { mutableIntStateOf(0) }
     var imageGeometryPreflightReady by remember(tid, targetPid) { mutableStateOf(false) }
     val pendingPostHeights = remember(tid) { mutableStateMapOf<Long, Int>() }
     val loadedImageUrlsByPost = remember(tid) { mutableStateMapOf<Long, Set<String>>() }
@@ -695,8 +726,7 @@ internal fun ThreadReaderScreen(
     var showRefreshDownloadedDialog by remember { mutableStateOf(false) }
     var showDownloadedLastPageWarning by remember { mutableStateOf(false) }
     var dismissedUpdateWarningPages by remember(tid, authorId) { mutableStateOf(emptySet<Int>()) }
-    var scrollJumpButtonPointsDown by remember { mutableStateOf(false) }
-    var showScrollJumpButtonAfterSlide by remember { mutableStateOf(false) }
+    val scrollJumpButtonState = remember { ReaderScrollJumpButtonState() }
     var singlePageSession by remember(tid, targetPid) {
         mutableStateOf<ThreadReaderSinglePageSession?>(null)
     }
@@ -1077,15 +1107,91 @@ internal fun ThreadReaderScreen(
     val chineseConversionRepository = LocalChineseConversionRepository.current
     val chineseConversionMode by chineseConversionRepository.currentMode.collectAsState()
     val convertedContentByPid = remember { mutableStateMapOf<Long, String>() }
+    val convertedSourceByPid = remember { mutableMapOf<Long, String>() }
     var convertedContentVersion by remember { mutableIntStateOf(0) }
+    var lastConversionMode by remember { mutableStateOf<ChineseConversionMode?>(null) }
+    val segmentedBodyCache = remember { mutableMapOf<Long, Pair<String, List<ReaderBodySegment>?>>() }
+    var segmentedBodyByPostId by remember { mutableStateOf<Map<Long, List<ReaderBodySegment>?>>(emptyMap()) }
 
     LaunchedEffect(posts, chineseConversionMode) {
-        convertedContentByPid.clear()
-        convertedContentVersion++
-        if (chineseConversionMode != null) {
-            posts.forEach { post ->
-                convertedContentByPid[post.pid.value.toLong()] = chineseConversionRepository.convert(post.contentHtml)
+        val mode = chineseConversionMode
+        val modeChanged = lastConversionMode != mode
+        lastConversionMode = mode
+        val postsSnapshot = posts.toList()
+        var conversionChanged = false
+
+        // 1) Incremental Chinese conversion. Loading page N+1 no longer reconverts
+        // page 1..N: only posts whose source HTML changed (or whose mode changed) run.
+        if (mode == null) {
+            if (modeChanged && (convertedContentByPid.isNotEmpty() || convertedSourceByPid.isNotEmpty())) {
+                convertedContentByPid.clear()
+                convertedSourceByPid.clear()
+                conversionChanged = true
             }
+        } else {
+            val toConvert = postsSnapshot.mapNotNull { post ->
+                val pid = post.pid.value.toLong()
+                if (
+                    modeChanged ||
+                    convertedSourceByPid[pid] != post.contentHtml ||
+                    !convertedContentByPid.containsKey(pid)
+                ) {
+                    pid to post.contentHtml
+                } else {
+                    null
+                }
+            }
+            if (modeChanged || toConvert.isNotEmpty()) {
+                val converted = withContext(Dispatchers.Default) {
+                    toConvert.map { (pid, html) -> pid to chineseConversionRepository.convert(html) }
+                }
+                if (modeChanged) {
+                    convertedContentByPid.clear()
+                    convertedSourceByPid.clear()
+                }
+                val sourcesByPid = toConvert.toMap()
+                converted.forEach { (pid, html) ->
+                    val source = sourcesByPid[pid] ?: return@forEach
+                    convertedContentByPid[pid] = html
+                    convertedSourceByPid[pid] = source
+                }
+                conversionChanged = true
+            }
+        }
+
+        // 2) Incremental long-post body segmentation. HtmlParser/Ksoup work runs on
+        // Dispatchers.Default so composition never blocks on parsing; unchanged posts
+        // keep their cached segments.
+        val convertedSnapshot = convertedContentByPid.toMap()
+        val missing = postsSnapshot.mapNotNull { post ->
+            val pid = post.pid.value.toLong()
+            val content = convertedSnapshot[pid] ?: post.contentHtml
+            if (segmentedBodyCache[pid]?.first != content) {
+                Triple(pid, post, content)
+            } else {
+                null
+            }
+        }
+        if (missing.isNotEmpty()) {
+            val missingContentByPid = missing.associate { (pid, _, content) -> pid to content }
+            val computed = withContext(Dispatchers.Default) {
+                val segmenter = CachingTextBoundarySegmenter(
+                    createPlatformTextBoundarySegmenter(UnicodeFallbackTextBoundarySegmenter)
+                )
+                missing.map { (pid, post, content) ->
+                    pid to buildReaderBodySegments(post, content, segmenter)
+                }
+            }
+            computed.forEach { (pid, segments) ->
+                val content = missingContentByPid[pid] ?: return@forEach
+                segmentedBodyCache[pid] = content to segments
+            }
+            segmentedBodyByPostId = segmentedBodyCache.mapValues { (_, cached) -> cached.second }
+        }
+
+        // Publish the conversion revision only after segmentation is ready so
+        // single-page planning never re-parses content in an intermediate state.
+        if (conversionChanged) {
             convertedContentVersion++
         }
     }
@@ -1094,12 +1200,6 @@ internal fun ThreadReaderScreen(
     val isNovelForum = forumId?.let { YamiboForum.isNovelForum(it) } == true
     val showRegularFirstPostTagBanner = isMangaForum || (!isNovelForum && !isNovelThread)
     val showNovelFirstPostTagBanner = isNovelThread && isNovelForum
-    val segmentedBodyByPostId = remember(posts, convertedContentVersion) {
-        posts.associate { post ->
-            val pid = post.pid.value.toLong()
-            pid to buildReaderBodySegments(post, convertedContentByPid[pid] ?: post.contentHtml)
-        }
-    }
     val readerEntries = remember(
         posts,
         segmentedBodyByPostId,
@@ -1113,8 +1213,20 @@ internal fun ThreadReaderScreen(
                 val postId = post.pid.value.toLong()
                 val postPage = pageByPid[postId] ?: 1
                 val segmentedBody = segmentedBodyByPostId[postId]
+                val segmentationPending = !segmentedBodyByPostId.containsKey(postId) &&
+                    mayNeedReaderBodySegments(post)
 
-                if (segmentedBody.isNullOrEmpty()) {
+                if (segmentationPending) {
+                    add(
+                        ReaderListEntry(
+                            key = "post-$postId-header",
+                            contentType = "thread_post_header",
+                            kind = ReaderEntryKind.SegmentedHeader,
+                            post = post,
+                            postIndex = index,
+                        )
+                    )
+                } else if (segmentedBody.isNullOrEmpty()) {
                     add(
                         ReaderListEntry(
                             key = "post-$postId",
@@ -1258,6 +1370,7 @@ internal fun ThreadReaderScreen(
             .toList()
         if (urls.isEmpty()) {
             activeImageGeometrySnapshot = imageAspectRatioCache.toMap()
+            imageGeometryRevision++
             imageGeometryPreflightReady = true
             return@LaunchedEffect
         }
@@ -1293,6 +1406,7 @@ internal fun ThreadReaderScreen(
             }
         }
         activeImageGeometrySnapshot = imageAspectRatioCache.toMap() + measuredRatios
+        imageGeometryRevision++
         imageGeometryPreflightReady = true
         debugPerfLog(
             "single_page_image_preflight|urls=${urls.size}|resolved=${activeImageGeometrySnapshot.size}|timeoutMs=500"
@@ -1341,7 +1455,7 @@ internal fun ThreadReaderScreen(
         readerFontId,
         readerContentWidthFraction,
         convertedContentVersion,
-        activeImageGeometrySnapshot,
+        imageGeometryRevision,
         readerViewportWidthPx,
         textMeasurer,
         density,
@@ -1710,7 +1824,7 @@ internal fun ThreadReaderScreen(
         readerFontId,
         readerContentWidthFraction,
         convertedContentVersion,
-        activeImageGeometrySnapshot,
+        imageGeometryRevision,
         readerViewportWidthPx,
     ) {
         listOf(
@@ -1723,7 +1837,7 @@ internal fun ThreadReaderScreen(
             readerFontId,
             readerContentWidthFraction,
             convertedContentVersion,
-            activeImageGeometrySnapshot.hashCode(),
+            imageGeometryRevision,
             readerViewportWidthPx,
         )
     }
@@ -2549,11 +2663,11 @@ internal fun ThreadReaderScreen(
         val currentIndex = visibleAnchorEntryIndex() ?: return null
         val currentEntry = readerEntries.getOrNull(currentIndex) ?: return null
         return when (scrollButtonJumpTarget) {
-            ReaderScrollButtonJumpTarget.PAGE_EDGE -> pageEdgeAnchorIndex(currentEntry, scrollJumpButtonPointsDown)
+            ReaderScrollButtonJumpTarget.PAGE_EDGE -> pageEdgeAnchorIndex(currentEntry, scrollJumpButtonState.pointsDown)
             ReaderScrollButtonJumpTarget.POST_EDGE -> postEdgeAnchorIndex(
                 currentIndex,
                 currentEntry,
-                scrollJumpButtonPointsDown
+                scrollJumpButtonState.pointsDown
             )
         }
     }
@@ -3158,7 +3272,7 @@ internal fun ThreadReaderScreen(
             state != ReaderState.Success ||
             scrollButtonDisplayMode == ReaderScrollButtonDisplayMode.NEVER
         ) {
-            showScrollJumpButtonAfterSlide = false
+            scrollJumpButtonState.visibleAfterSlide = false
             return@LaunchedEffect
         }
 
@@ -3177,23 +3291,23 @@ internal fun ThreadReaderScreen(
                 val threshold = scrollButtonDirectionThreshold.coerceAtLeast(1).toLong()
                 val delta = currentY - lastY
                 if (delta > threshold) {
-                    scrollJumpButtonPointsDown = true
+                    scrollJumpButtonState.pointsDown = true
                     anchorY = lastY + ((delta - threshold) / 2L) + 1L
                 } else if (delta < -threshold || delta <= 0L) {
-                    scrollJumpButtonPointsDown = false
+                    scrollJumpButtonState.pointsDown = false
                     anchorY = currentY
                 }
 
                 if (scrollButtonDisplayMode == ReaderScrollButtonDisplayMode.WHEN_USER_SLIDE) {
-                    if (!showScrollJumpButtonAfterSlide) {
-                        showScrollJumpButtonAfterSlide = true
+                    if (!scrollJumpButtonState.visibleAfterSlide) {
+                        scrollJumpButtonState.visibleAfterSlide = true
                     }
                     visibilityToken += 1
                     val token = visibilityToken
                     this@LaunchedEffect.launch {
                         delay(1800.milliseconds)
                         if (visibilityToken == token) {
-                            showScrollJumpButtonAfterSlide = false
+                            scrollJumpButtonState.visibleAfterSlide = false
                         }
                     }
                 }
@@ -4624,14 +4738,6 @@ internal fun ThreadReaderScreen(
                             .padding(end = 0.dp, bottom = progressHintBottomPadding),
                     )
 
-                    val showScrollJumpButton =
-                        state == ReaderState.Success &&
-                            readerEntries.isNotEmpty() &&
-                            scrollButtonDisplayMode != ReaderScrollButtonDisplayMode.NEVER &&
-                            (
-                                scrollButtonDisplayMode == ReaderScrollButtonDisplayMode.ALWAYS ||
-                                    showScrollJumpButtonAfterSlide
-                                )
                     val scrollJumpBottomPadding = if (keepSystemBarsBackground) {
                         WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 96.dp
                     } else {
@@ -4639,8 +4745,16 @@ internal fun ThreadReaderScreen(
                     }
                     if (!isSinglePageMode && !showSettingsPanel) {
                         ReaderScrollJumpButton(
-                            visible = showScrollJumpButton,
-                            pointsDown = scrollJumpButtonPointsDown,
+                            visible = {
+                                state == ReaderState.Success &&
+                                    readerEntries.isNotEmpty() &&
+                                    scrollButtonDisplayMode != ReaderScrollButtonDisplayMode.NEVER &&
+                                    (
+                                        scrollButtonDisplayMode == ReaderScrollButtonDisplayMode.ALWAYS ||
+                                            scrollJumpButtonState.visibleAfterSlide
+                                        )
+                            },
+                            pointsDown = { scrollJumpButtonState.pointsDown },
                             onClick = {
                                 scope.launch {
                                     val targetIndex = scrollJumpTargetIndex()
