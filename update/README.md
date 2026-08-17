@@ -82,12 +82,19 @@ Important asset URL rule:
 - Gitea mirror manifests must use the Gitea Release APK URL.
 - Do not publish mirror manifests that point back to GitHub APK assets.
 
-Client update source order (all serve the same GitHub `lmc2007/yamibo-app` feed; the mirror is preferred for speed, GitHub direct is the fallback):
+Client update source order (all serve the same GitHub `lmc2007/yamibo-app` feed; mirrors are preferred for speed, GitHub direct is the last fallback):
 
-1. `ghproxy.net` mirror
-2. GitHub direct: `raw.githubusercontent.com/.../update-release/update/stable.json`
+1. `github.cnxiaobai.com` mirror
+2. `gh.halonice.com` mirror
+3. `ghproxy.sakuramoe.dev` mirror
+4. `gh.padao.fun` mirror
+5. `gh.jasonzeng.dev` mirror
+6. `ghproxy.mirror.skybyte.me` mirror
+7. GitHub direct: `raw.githubusercontent.com/.../update-release/update/stable.json`
 
-`gh-proxy.com` is not used for update checks; it only accelerates APK downloads. Android downloads of GitHub Release APK assets go through `https://gh-proxy.com/<asset-url>` first and fall back to the GitHub direct URL when the proxy fails. The client automatically switches to the next source when one takes longer than 3 seconds or fails to fetch or decode, and skips stale mirrors (ready manifests not newer than the installed version) instead of stopping at them.
+Update-check timeouts: each proxy source uses a 5 second request timeout; GitHub direct uses 10 seconds.
+
+`gh-proxy.com` is not used for update checks; it only accelerates APK downloads. Android downloads of GitHub Release APK assets go through `https://gh-proxy.com/<asset-url>` first and fall back to the GitHub direct URL when the proxy fails. The client automatically falls back to the next source when one fails to fetch or decode, and skips stale mirrors (ready manifests not newer than the installed version) instead of stopping at them.
 
 ## Sync Update Folder To Mirrors Workflow
 
