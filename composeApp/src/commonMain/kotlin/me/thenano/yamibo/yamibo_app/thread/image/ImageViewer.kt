@@ -114,8 +114,8 @@ fun ImageViewer(
     onRenderedAspectRatioChanged: ((Float) -> Unit)? = null,
 ) {
     val fullUrl = normalizeImageUrl(url)
-    val diagnosticUrl = imageSourceForDiagnostics(fullUrl)
-    DebugRecomposeProbe("ImageViewer", diagnosticUrl)
+    val diagnosticUrl = remember(fullUrl) { imageSourceForDiagnostics(fullUrl) }
+    DebugRecomposeProbe("ImageViewer") { diagnosticUrl }
     var localRetryKey by remember { mutableIntStateOf(0) }
     var showMenu by remember { mutableStateOf(false) }
     val retryKey = localRetryKey + externalRetryKey
