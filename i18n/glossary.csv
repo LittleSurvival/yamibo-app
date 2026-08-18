@@ -892,3 +892,7 @@ Current cache size: {}","清除圖片、頁面與其他暫存資料，釋放目�
 網盤帳戶,Cloud drive account,網盤帳戶,网盘账户
 同步失敗：{},Sync failed: {},同步失敗：{},同步失败：{}
 網盤：登入中...,Cloud drive: signing in...,網盤：登入中...,网盘：登录中...
+正在导出TXT...,Exporting TXT...,正在导出TXT...,正在导出TXT...
+正在读取第 {} 页 / 共 {} 页,Reading page {} of {},正在读取第 {} 页 / 共 {} 页,正在读取第 {} 页 / 共 {} 页
+已导出TXT文件：{},Exported TXT file: {},已导出TXT文件：{},已导出TXT文件：{}
+导出TXT失败：{},Export TXT failed: {},导出TXT失败：{},导出TXT失败：{}
