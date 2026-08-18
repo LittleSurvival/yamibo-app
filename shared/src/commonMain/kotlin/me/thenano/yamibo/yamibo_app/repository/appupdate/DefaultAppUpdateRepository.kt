@@ -89,6 +89,11 @@ class DefaultAppUpdateRepository(
         var preparing: AppUpdateCheckResult.Preparing? = null
         var ignored: AppUpdateRelease? = null
         var sawManifest = false
+        var preparingSourceIndex: Int? = null
+        // First source that returned a decodable manifest in this check. It becomes the preferred
+        // source for the next check when no ready update is found (e.g. UpToDate), so the last
+        // successfully detected mirror is tried first next time.
+        var firstSuccessfulSource: AppUpdateSource? = null
 
         for (source in orderedSources) {
             val result = runCatching {
@@ -121,6 +126,9 @@ class DefaultAppUpdateRepository(
                 continue
             }
             sawManifest = true
+            if (firstSuccessfulSource == null) {
+                firstSuccessfulSource = source
+            }
 
             if (!manifest.isReady) {
                 if (manifest.versionCode > platform.currentVersionCode && preparing == null) {
@@ -130,6 +138,7 @@ class DefaultAppUpdateRepository(
                         versionCode = manifest.versionCode,
                         sourceName = source.name,
                     )
+                    preparingSourceIndex = sources.indexOf(source).coerceAtLeast(0)
                 }
                 continue
             }
@@ -172,7 +181,12 @@ class DefaultAppUpdateRepository(
             }
         }
 
-        preparing?.let { return it }
+        preparing?.let {
+            preparingSourceIndex?.let { index ->
+                appSettingsRepository.appUpdatePreferredSourceIndex.setValue(index)
+            }
+            return it
+        }
         ignored?.let {
             appSettingsRepository.appUpdatePreferredSourceIndex.setValue(
                 sources.indexOf(it.source).coerceAtLeast(0),
@@ -180,6 +194,11 @@ class DefaultAppUpdateRepository(
             return AppUpdateCheckResult.Ignored(it)
         }
         if (sawManifest) {
+            firstSuccessfulSource?.let { source ->
+                appSettingsRepository.appUpdatePreferredSourceIndex.setValue(
+                    sources.indexOf(source).coerceAtLeast(0),
+                )
+            }
             return AppUpdateCheckResult.UpToDate(platform.currentVersionName)
         }
         return AppUpdateCheckResult.Failed(errors.joinToString(separator = "\n").ifBlank { "No update source available" })

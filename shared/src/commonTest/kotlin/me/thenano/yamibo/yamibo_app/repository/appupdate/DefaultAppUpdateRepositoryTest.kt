@@ -140,6 +140,48 @@ class DefaultAppUpdateRepositoryTest {
 
         val result = assertIs<AppUpdateCheckResult.UpToDate>(environment.repository.checkForUpdate(force = true))
         assertEquals("0.1.6", result.currentVersionName)
+        assertEquals(0, environment.settings.appUpdatePreferredSourceIndex.getValue())
+    }
+
+    @Test
+    fun upToDateRemembersSuccessfulMirrorForNextCheck() = runBlocking {
+        val environment = environment(
+            currentVersionCode = 8,
+            preferredIndex = 0,
+            failingSources = PROXY_SOURCE_NAMES.toSet(),
+            manifests = mapOf(
+                "GitHub" to readyManifest(7),
+            ),
+        )
+
+        val result = assertIs<AppUpdateCheckResult.UpToDate>(environment.repository.checkForUpdate(force = true))
+        assertEquals("0.1.6", result.currentVersionName)
+        assertEquals(6, environment.settings.appUpdatePreferredSourceIndex.getValue())
+        assertTrue(environment.requests.any { "raw.githubusercontent.com" in it })
+
+        val requestsBeforeSecondCheck = environment.requests.size
+        assertIs<AppUpdateCheckResult.UpToDate>(environment.repository.checkForUpdate(force = true))
+        assertTrue("raw.githubusercontent.com" in environment.requests[requestsBeforeSecondCheck])
+    }
+
+    @Test
+    fun preparingRemembersSourceForNextCheck() = runBlocking {
+        val environment = environment(
+            currentVersionCode = 8,
+            preferredIndex = 6,
+            manifests = mapOf(
+                "GitHub" to readyManifest(7),
+                "github.cnxiaobai.com" to notReadyManifest(9),
+            ),
+        )
+
+        val result = assertIs<AppUpdateCheckResult.Preparing>(environment.repository.checkForUpdate(force = true))
+        assertEquals("github.cnxiaobai.com", result.sourceName)
+        assertEquals(0, environment.settings.appUpdatePreferredSourceIndex.getValue())
+
+        val requestsBeforeSecondCheck = environment.requests.size
+        assertIs<AppUpdateCheckResult.Preparing>(environment.repository.checkForUpdate(force = true))
+        assertTrue("github.cnxiaobai.com" in environment.requests[requestsBeforeSecondCheck])
     }
 
     @Test
