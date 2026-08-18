@@ -47,6 +47,7 @@ internal fun ThreadHeader(
     onFavorite: () -> Unit,
     onFavoriteLongPress: (() -> Unit)? = null,
     onShare: () -> Unit,
+    onExportTxt: () -> Unit = {},
     onContinueRead: () -> Unit = {},
     readingProgressText: String? = null,
     noteContent: String = "",
@@ -279,6 +280,21 @@ internal fun ThreadHeader(
                             contentDescription = i18n("分享"),
                             modifier = Modifier.size(22.dp),
                             tint = colors.brownDeep
+                        )
+                    }
+                }
+
+                Surface(
+                    onClick = onExportTxt,
+                    shape = RoundedCornerShape(12.dp),
+                    color = colors.brownPrimary.copy(alpha = 0.1f)
+                ) {
+                    Box(Modifier.padding(10.dp), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = "TXT",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.brownDeep
                         )
                     }
                 }

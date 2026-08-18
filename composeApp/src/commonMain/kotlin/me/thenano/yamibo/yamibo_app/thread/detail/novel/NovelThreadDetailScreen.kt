@@ -9,6 +9,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil3.PlatformContext
 import coil3.compose.LocalPlatformContext
 import io.github.littlesurvival.YamiboRoute
@@ -29,6 +30,9 @@ import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository.ThreadReadi
 import me.thenano.yamibo.yamibo_app.repository.contentcover.findThreadCoverCandidate
 import me.thenano.yamibo.yamibo_app.thread.detail.components.DetailNoteCard
 import me.thenano.yamibo.yamibo_app.thread.detail.components.DetailNoteEditorDialog
+import me.thenano.yamibo.yamibo_app.novelexport.rememberNovelTxtExportFileActions
+import me.thenano.yamibo.yamibo_app.repository.novelexport.NovelTxtExportResult
+import me.thenano.yamibo.yamibo_app.repository.novelexport.NovelTxtExporter
 import me.thenano.yamibo.yamibo_app.thread.detail.novel.components.*
 import me.thenano.yamibo.yamibo_app.thread.reader.IThreadReaderScreen
 import me.thenano.yamibo.yamibo_app.util.shareText
@@ -90,6 +94,23 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
     var postBookMarkEntries by remember { mutableStateOf<Map<Long, BookMarkRepository.Entry>>(emptyMap()) }
     var postChapterStates by remember { mutableStateOf<Map<Long, ChapterStateRepository.Entry>>(emptyMap()) }
     var actionPost by remember { mutableStateOf<Post?>(null) }
+    var exportingTxt by remember { mutableStateOf(false) }
+    var exportTxtProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    val novelTxtExporter = remember { NovelTxtExporter() }
+    val txtExportFileActions = rememberNovelTxtExportFileActions(
+        onExported = { fileName ->
+            feedbackController.post(
+                message = i18n("已导出TXT文件：{}", fileName),
+                duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short,
+            )
+        },
+        onExportFailed = { message ->
+            feedbackController.post(
+                message = i18n("导出TXT失败：{}", message),
+                duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short,
+            )
+        },
+    )
     val noteAuthorId = authorId?.value?.toLong() ?: 0L
     val coverKey = remember(tid) {
         ContentCoverRepository.Key(ContentCoverRepository.TargetType.ThreadNovel, tid.value.toLong())
@@ -429,6 +450,40 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
                                     showFavoriteDialog = true
                                 }
                             },
+                            onExportTxt = {
+                                val page = (state as? ThreadState.Success)?.page
+                                if (page != null && !exportingTxt) {
+                                    scope.launch {
+                                        exportingTxt = true
+                                        val result = novelTxtExporter.buildNovelTxt(
+                                            firstPage = page,
+                                            loadPage = { p ->
+                                                threadRepository.getCachedThread(tid, authorId, p)
+                                                    ?: (threadRepository.fetchThread(tid, authorId, p) as? YamiboResult.Success)?.value
+                                            },
+                                            onProgress = { fetched, total ->
+                                                exportTxtProgress = fetched to total
+                                            },
+                                        )
+                                        exportingTxt = false
+                                        exportTxtProgress = null
+                                        when (result) {
+                                            is NovelTxtExportResult.Success -> {
+                                                txtExportFileActions.exportTxt(
+                                                    novelTxtExporter.sanitizeFileName(result.title),
+                                                    result.content,
+                                                )
+                                            }
+                                            is NovelTxtExportResult.Failure -> {
+                                                feedbackController.post(
+                                                    message = i18n("导出TXT失败：{}", result.message),
+                                                    duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short,
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            },
                             onContinueRead = {
                                 val history = readHistory
                                 if (history != null) {
@@ -726,6 +781,14 @@ actionPost?.let { post ->
         },
     )
 }
+
+if (exportingTxt) {
+    val progress = exportTxtProgress
+    ExportTxtProgressDialog(
+        currentPage = progress?.first ?: 1,
+        totalPages = progress?.second ?: 1,
+    )
+}
 }
 
 /** Thread content body */
@@ -741,6 +804,7 @@ private fun ThreadContent(
     onPostLongPress: (Post) -> Unit,
     onFavorite: () -> Unit,
     onFavoriteLongPress: () -> Unit,
+    onExportTxt: () -> Unit,
     isFavorited: Boolean,
     onContinueRead: () -> Unit,
     readingProgressText: String?,
@@ -772,6 +836,7 @@ private fun ThreadContent(
                     shareText(platformContext, url, thread.title)
                 },
                 onContinueRead = onContinueRead,
+                onExportTxt = onExportTxt,
                 readingProgressText = readingProgressText,
                 noteContent = noteContent,
                 onNoteClick = onNoteClick,
@@ -878,4 +943,29 @@ private fun YamiboActionRow(text: String, onClick: () -> Unit) {
             color = colors.textDark,
         )
     }
+}
+
+@Composable
+private fun ExportTxtProgressDialog(
+    currentPage: Int,
+    totalPages: Int,
+) {
+    val colors = YamiboTheme.colors
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text(i18n("正在导出TXT..."), color = colors.textStrong) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                CircularProgressIndicator(color = colors.brownPrimary)
+                Text(
+                    text = i18n("正在读取第 {} 页 / 共 {} 页", currentPage, totalPages),
+                    color = colors.textDark.copy(alpha = 0.68f),
+                    fontSize = 13.sp,
+                )
+            }
+        },
+        confirmButton = {},
+        dismissButton = {},
+        containerColor = colors.creamSurface,
+    )
 }
