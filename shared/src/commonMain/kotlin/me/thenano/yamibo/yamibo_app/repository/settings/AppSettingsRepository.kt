@@ -192,6 +192,12 @@ class AppSettingsRepository(store: SettingsStore) : SettingsRegistry(store, pref
         default = true,
     )
 
+    /** 新增收藏後顯示下載選項 */
+    val favoriteAddDownloadPromptEnabled by boolSetting(
+        name = "favorite_add_download_prompt_enabled",
+        default = true,
+    )
+
     /** 新增收藏預設動作 */
     val favoriteAddSyncDefault by boolSetting(
         name = "favorite_add_sync_default",

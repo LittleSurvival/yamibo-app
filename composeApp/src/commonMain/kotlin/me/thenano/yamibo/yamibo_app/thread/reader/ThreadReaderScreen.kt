@@ -623,6 +623,7 @@ internal fun ThreadReaderScreen(
     val isNovelThread = threadType == ReadHistoryRepository.ThreadEntryType.Novel
     val keepSystemBarsBackground = novelSettingsRepository.keepSystemBarsBackground.state()
     val readerFontSize = novelSettingsRepository.fontSize.state()
+    val favoriteAddDownloadPromptEnabled = appSettingsRepository.favoriteAddDownloadPromptEnabled.state()
     val readerLineSpacing = novelSettingsRepository.lineSpacing.state()
     val readerFontId = novelSettingsRepository.readerFontId.state()
     val readerContentWidthFraction = novelSettingsRepository.contentWidthFraction.state()
@@ -689,6 +690,7 @@ internal fun ThreadReaderScreen(
     var showMenu by remember { mutableStateOf(false) }
     var showSettingsPanel by remember { mutableStateOf(false) }
     var showDownloadSheet by remember { mutableStateOf(false) }
+    var downloadSheetOpenedAfterFavorite by remember { mutableStateOf(false) }
     var downloadSheetPage by remember(tid, authorId) { mutableIntStateOf(initialPage) }
     var showRefreshDownloadedDialog by remember { mutableStateOf(false) }
     var showDownloadedLastPageWarning by remember { mutableStateOf(false) }
@@ -784,6 +786,7 @@ internal fun ThreadReaderScreen(
     var showFavoriteRemovalConfirm by remember { mutableStateOf(false) }
     var showFavoriteMultiPathDialog by remember { mutableStateOf(false) }
     var showFavoriteAddSyncConfirm by remember { mutableStateOf(false) }
+    var pendingFavoriteDownloadAfterSync by remember { mutableStateOf(false) }
     var showFavoriteRemoveSyncConfirm by remember { mutableStateOf(false) }
     var postBookMarkEntries by remember { mutableStateOf<Map<Long, BookMarkRepository.Entry>>(emptyMap()) }
     var catalogActionPost by remember { mutableStateOf<Post?>(null) }
@@ -861,13 +864,17 @@ internal fun ThreadReaderScreen(
     }
 
     suspend fun completeFavoriteAdd(syncToRemote: Boolean) {
-        completeFavoriteAddWithFeedback(
+        val result = completeFavoriteAddWithFeedback(
             favoriteRepository = favoriteRepository,
             favoriteSyncRepository = favoriteSyncRepository,
             target = favoriteTarget(),
             syncToRemote = syncToRemote,
             feedbackController = feedbackController,
         )
+        if (result.creationOutcome == FavoriteCreationOutcome.Created && favoriteAddDownloadPromptEnabled) {
+            downloadSheetOpenedAfterFavorite = true
+            showDownloadSheet = true
+        }
     }
 
     suspend fun completeSavedFavoriteSync(syncToRemote: Boolean) {
@@ -878,6 +885,11 @@ internal fun ThreadReaderScreen(
             syncToRemote = syncToRemote,
             feedbackController = feedbackController,
         )
+        if (pendingFavoriteDownloadAfterSync && favoriteAddDownloadPromptEnabled) {
+            downloadSheetOpenedAfterFavorite = true
+            showDownloadSheet = true
+        }
+        pendingFavoriteDownloadAfterSync = false
     }
 
     suspend fun completeFavoriteRemoval(removeRemote: Boolean) {
@@ -930,8 +942,9 @@ internal fun ThreadReaderScreen(
         }
 
         if (target.supportsRemoteWebsiteSync() && appSettingsRepository.favoriteAddSyncPromptEnabled.getValue()) {
-            favoriteRepository.saveFavorite(target)
+            val creationOutcome = favoriteRepository.saveFavoriteWithOutcome(target)
             favoriteRefreshToken += 1
+            pendingFavoriteDownloadAfterSync = creationOutcome == FavoriteCreationOutcome.Created
             showFavoriteAddSyncConfirm = true
         } else {
             completeFavoriteAdd(
@@ -3408,6 +3421,7 @@ internal fun ThreadReaderScreen(
                                 downloadSheetPage = currentVisiblePageForAction()
                                 drawerState.close()
                                 withFrameNanos { }
+                                downloadSheetOpenedAfterFavorite = false
                                 showDownloadSheet = true
                             }
                         },
@@ -4798,7 +4812,10 @@ internal fun ThreadReaderScreen(
                 .filter { it.second.status in completedOrActiveStatuses }
                 .mapTo(mutableSetOf()) { it.first.page }
             ReaderDownloadSheet(
-                onDismiss = { showDownloadSheet = false },
+                onDismiss = {
+                    showDownloadSheet = false
+                    downloadSheetOpenedAfterFavorite = false
+                },
                 showDownloadPage = pageStatus == DownloadStatus.NotDownloaded ||
                     pageStatus == DownloadStatus.Failed,
                 showDownloadThread = (1..totalPages).any { it !in completedOrActivePages },
@@ -4809,6 +4826,7 @@ internal fun ThreadReaderScreen(
                 onDownloadPage = {
                     val page = downloadSheetPage
                     showDownloadSheet = false
+                    downloadSheetOpenedAfterFavorite = false
                     launchDownloadTask("page:$page") {
                         downloadRepository.enqueuePage(tid, threadInfo?.title ?: title, authorId, page)
                             .onSuccess { feedbackController.post(i18n("已加入下載佇列")) }
@@ -4825,6 +4843,7 @@ internal fun ThreadReaderScreen(
                 },
                 onDownloadThread = {
                     showDownloadSheet = false
+                    downloadSheetOpenedAfterFavorite = false
                     launchDownloadTask("all") {
                         downloadRepository.enqueueThread(tid, threadInfo?.title ?: title, authorId)
                             .onSuccess { feedbackController.post(i18n("已加入完整 Thread 下載")) }
@@ -4843,6 +4862,7 @@ internal fun ThreadReaderScreen(
                 },
                 onDownloadThreadExceptLastPage = {
                     showDownloadSheet = false
+                    downloadSheetOpenedAfterFavorite = false
                     launchDownloadTask("except-last") {
                         downloadRepository.enqueueThreadExceptLastPage(
                             tid,
@@ -4866,6 +4886,7 @@ internal fun ThreadReaderScreen(
                 onClearPage = {
                     val page = downloadSheetPage
                     showDownloadSheet = false
+                    downloadSheetOpenedAfterFavorite = false
                     launchDownloadTask("clear-page:$page") {
                         downloadRepository.clearPage(ThreadPageDownloadKey(tid.value, page, authorId?.value))
                         feedbackController.post(i18n("已清除目前頁下載"))
@@ -4874,10 +4895,21 @@ internal fun ThreadReaderScreen(
                 onClearThread = {
                     val page = currentVisiblePageForAction()
                     showDownloadSheet = false
+                    downloadSheetOpenedAfterFavorite = false
                     launchDownloadTask("clear-thread") {
                         downloadRepository.clearThread(ThreadPageDownloadKey(tid.value, page, authorId?.value))
                         feedbackController.post(i18n("已清除整個 Thread 下載"))
                     }
+                },
+                doNotAskAgain = if (downloadSheetOpenedAfterFavorite) {
+                    !favoriteAddDownloadPromptEnabled
+                } else {
+                    null
+                },
+                onDoNotAskAgainChange = if (downloadSheetOpenedAfterFavorite) {
+                    { checked -> appSettingsRepository.favoriteAddDownloadPromptEnabled.setValue(!checked) }
+                } else {
+                    null
                 },
             )
         }
@@ -4999,13 +5031,14 @@ internal fun ThreadReaderScreen(
                 scope.launch {
                     val existing = favoriteRepository.findFavoriteItem(target)
                     if (existing == null) {
-                        favoriteRepository.saveFavorite(
+                        val creationOutcome = favoriteRepository.saveFavoriteWithOutcome(
                             target,
                             categoryIds = selectedCategories.toList(),
                             collectionIds = selectedCollections.toList()
                         )
                         showFavoriteDialog = false
                         favoriteRefreshToken += 1
+                        pendingFavoriteDownloadAfterSync = creationOutcome == FavoriteCreationOutcome.Created
                         if (target.supportsRemoteWebsiteSync() && appSettingsRepository.favoriteAddSyncPromptEnabled.getValue()) {
                             showFavoriteAddSyncConfirm = true
                         } else {
@@ -5410,115 +5443,6 @@ private fun ThreadReaderProgressOverlay(
         visible = showHint,
         modifier = hintModifier,
     )
-}
-
-@Composable
-@OptIn(ExperimentalMaterial3Api::class)
-private fun ReaderDownloadSheet(
-    onDismiss: () -> Unit,
-    showDownloadPage: Boolean,
-    showDownloadThread: Boolean,
-    showDownloadThreadExceptLastPage: Boolean,
-    showClearPage: Boolean,
-    showClearThread: Boolean,
-    onDownloadPage: () -> Unit,
-    onDownloadThread: () -> Unit,
-    onDownloadThreadExceptLastPage: () -> Unit,
-    onClearPage: () -> Unit,
-    onClearThread: () -> Unit,
-) {
-    val colors = YamiboTheme.colors
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = colors.creamSurface,
-        sheetState = sheetState,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text(i18n("下載"), color = colors.textStrong, fontSize = 22.sp)
-            Text(
-                text = i18n("下載會保存整頁帖子與原始圖片。"),
-                color = colors.textDark.copy(alpha = 0.68f),
-                fontSize = 13.sp,
-            )
-            if (showDownloadPage) {
-                DownloadSheetAction(i18n("下載目前頁"), i18n("保存此頁所有帖子與圖片"), false, onDownloadPage)
-            }
-            if (showDownloadThread) {
-                DownloadSheetAction(i18n("下載完整 Thread"), i18n("將全部頁面加入背景佇列"), false, onDownloadThread)
-            }
-            if (showDownloadThreadExceptLastPage) {
-                DownloadSheetAction(
-                    i18n("下載除最後一頁的所有頁面"),
-                    i18n("保留可能持續更新的最後一頁在線閱讀"),
-                    false,
-                    onDownloadThreadExceptLastPage,
-                )
-            }
-            if (showClearPage) {
-                DownloadSheetAction(i18n("清除目前頁下載"), i18n("只刪除此頁離線內容"), true, onClearPage)
-            }
-            if (showClearThread) {
-                DownloadSheetAction(
-                    i18n("清除整個 Thread 下載"),
-                    i18n("取消佇列並刪除所有已下載頁"),
-                    true,
-                    onClearThread
-                )
-            }
-            TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) {
-                Text(i18n("關閉"), color = colors.brownPrimary)
-            }
-        }
-    }
-}
-
-@Composable
-private fun DownloadSheetAction(
-    title: String,
-    subtitle: String,
-    destructive: Boolean,
-    onClick: () -> Unit,
-) {
-    val colors = YamiboTheme.colors
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = colors.creamBackground),
-        onClick = onClick,
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = YamiboIcons.Download,
-                contentDescription = null,
-                tint = if (destructive) colors.redAccent else colors.orangeAccent,
-                modifier = Modifier.size(22.dp),
-            )
-            Column(Modifier.padding(start = 12.dp)) {
-                Text(
-                    text = title,
-                    color = if (destructive) colors.redAccent else colors.textStrong,
-                    fontSize = 15.sp,
-                )
-                Text(
-                    text = subtitle,
-                    color = colors.textDark.copy(alpha = 0.65f),
-                    fontSize = 12.sp,
-                )
-            }
-        }
-    }
 }
 
 @Composable

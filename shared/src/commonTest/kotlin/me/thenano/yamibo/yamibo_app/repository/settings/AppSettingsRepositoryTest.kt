@@ -4,6 +4,7 @@ import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import me.thenano.yamibo.yamibo_app.util.time.FixedScheduleInterval
 
 class AppSettingsRepositoryTest {
@@ -13,6 +14,19 @@ class AppSettingsRepositoryTest {
 
         assertFalse(repository.favoriteUpdateAutoDownload.getValue())
         assertFalse(repository.downloadedContentRefreshAutoUpdate.getValue())
+    }
+
+    @Test
+    fun favoriteAddDownloadPromptDefaultsEnabledAndPersists() {
+        val store = AppSettingsMemoryStore()
+        val repository = AppSettingsRepository(store)
+
+        assertTrue(repository.favoriteAddDownloadPromptEnabled.getValue())
+        repository.favoriteAddDownloadPromptEnabled.setValue(false)
+
+        assertFalse(AppSettingsRepository(store).favoriteAddDownloadPromptEnabled.getValue())
+        repository.favoriteAddDownloadPromptEnabled.setValue(true)
+        assertTrue(AppSettingsRepository(store).favoriteAddDownloadPromptEnabled.getValue())
     }
 
     @Test

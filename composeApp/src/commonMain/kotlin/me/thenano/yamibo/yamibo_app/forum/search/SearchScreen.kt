@@ -49,6 +49,7 @@ import me.thenano.yamibo.yamibo_app.thread.detail.rss.IRssSearchSubscriptionDeta
 import me.thenano.yamibo.yamibo_app.thread.reader.IThreadReaderScreen
 import me.thenano.yamibo.yamibo_app.userspace.IUserSpaceScreen
 import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository as FavoriteStoreRepositoryType
+import me.thenano.yamibo.yamibo_app.util.state
 
 private sealed interface SearchState {
     data object Idle : SearchState
@@ -68,6 +69,11 @@ private data class PendingRssFavorite(
     val searchPage: SearchPage,
 )
 
+private data class SavedRssFavorite(
+    val target: FavoriteTargetPayload.RssSearch,
+    val creationOutcome: FavoriteCreationOutcome,
+)
+
 @Composable
 fun SearchScreen(fid: ForumId?) {
     val colors = YamiboTheme.colors
@@ -78,6 +84,7 @@ fun SearchScreen(fid: ForumId?) {
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
     val feedbackController = LocalAppFeedbackController.current
+    val appSettingsRepository = LocalAppSettingsRepository.current
     val focusRequester = remember { FocusRequester() }
     var searchFieldPlaced by remember { mutableStateOf(false) }
 
@@ -95,6 +102,8 @@ fun SearchScreen(fid: ForumId?) {
     }
     var favoriteDialogCategorySelection by remember { mutableStateOf<Set<Long>>(emptySet()) }
     var favoriteDialogCollectionSelection by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var favoritePostAddDownloadTarget by remember { mutableStateOf<FavoriteTargetPayload.RssSearch?>(null) }
+    val favoriteAddDownloadPromptEnabled = appSettingsRepository.favoriteAddDownloadPromptEnabled.state()
 
     fun navigateThread(thread: ThreadSummary) {
         val isNovelThread = fid?.let { YamiboForum.isNovelForum(it) }
@@ -165,7 +174,7 @@ fun SearchScreen(fid: ForumId?) {
         searchPage: SearchPage,
         categoryIds: Set<Long> = emptySet(),
         collectionIds: Set<Long> = emptySet(),
-    ): Long? {
+    ): SavedRssFavorite? {
         val existingSubscription = rssRepository.findBySearch(keyword, fid)
         val result = rssRepository.createFromSearch(
             title = keyword,
@@ -184,16 +193,19 @@ fun SearchScreen(fid: ForumId?) {
             title = keyword,
             coverUrl = null,
         )
-        try {
+        val creationOutcome = try {
             val existingItem = favoriteRepository.findFavoriteItem(target)
             if (existingItem == null) {
-                favoriteRepository.saveFavorite(
+                favoriteRepository.saveFavoriteWithOutcome(
                     target = target,
                     categoryIds = categoryIds.toList(),
                     collectionIds = collectionIds.toList(),
                 )
             } else if (categoryIds.isNotEmpty() || collectionIds.isNotEmpty()) {
                 favoriteRepository.setItemLocations(existingItem.id, categoryIds, collectionIds)
+                FavoriteCreationOutcome.AlreadyExisted
+            } else {
+                FavoriteCreationOutcome.AlreadyExisted
             }
         } catch (error: Throwable) {
             Logger.e("SearchScreen", "Failed to save RSS favorite keyword=$keyword", error)
@@ -207,7 +219,15 @@ fun SearchScreen(fid: ForumId?) {
         feedbackController.post(
             if (existingSubscription == null) i18n("已收藏為 RSS 訂閱") else i18n("已收藏此 RSS 訂閱")
         )
-        return result.value
+        return SavedRssFavorite(target, creationOutcome)
+    }
+
+    fun handleSavedRssFavorite(saved: SavedRssFavorite) {
+        if (saved.creationOutcome == FavoriteCreationOutcome.Created && favoriteAddDownloadPromptEnabled) {
+            favoritePostAddDownloadTarget = saved.target
+        } else {
+            navigator.navigate(IRssSearchSubscriptionDetailScreen(saved.target.subscriptionId))
+        }
     }
 
     suspend fun openRssFavoritePicker(keyword: String, searchPage: SearchPage) {
@@ -320,10 +340,7 @@ fun SearchScreen(fid: ForumId?) {
                                     feedbackController.post(i18n("保存失敗"))
                             } else {
                                 scope.launch {
-                                    val subscriptionId = saveRssFavorite(keyword, currentState.page)
-                                    if (subscriptionId != null) {
-                                        navigator.navigate(IRssSearchSubscriptionDetailScreen(subscriptionId))
-                                    }
+                                    saveRssFavorite(keyword, currentState.page)?.let(::handleSavedRssFavorite)
                                 }
                             }
                         },
@@ -356,17 +373,29 @@ fun SearchScreen(fid: ForumId?) {
             },
             onConfirm = { selectedCategories, selectedCollections ->
                 scope.launch {
-                    val subscriptionId = saveRssFavorite(
+                    val saved = saveRssFavorite(
                         keyword = pending.keyword,
                         searchPage = pending.searchPage,
                         categoryIds = selectedCategories,
                         collectionIds = selectedCollections,
                     )
                     pendingRssFavorite = null
-                    if (subscriptionId != null) {
-                        navigator.navigate(IRssSearchSubscriptionDetailScreen(subscriptionId))
-                    }
+                    saved?.let(::handleSavedRssFavorite)
                 }
+            },
+        )
+    }
+
+    favoritePostAddDownloadTarget?.let { target ->
+        FavoritePostAddDownloadSheet(
+            target = target,
+            doNotAskAgain = !favoriteAddDownloadPromptEnabled,
+            onDoNotAskAgainChange = { checked ->
+                appSettingsRepository.favoriteAddDownloadPromptEnabled.setValue(!checked)
+            },
+            onDismiss = {
+                favoritePostAddDownloadTarget = null
+                navigator.navigate(IRssSearchSubscriptionDetailScreen(target.subscriptionId))
             },
         )
     }

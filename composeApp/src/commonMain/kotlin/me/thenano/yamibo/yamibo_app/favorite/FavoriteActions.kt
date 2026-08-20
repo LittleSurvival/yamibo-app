@@ -93,19 +93,40 @@ internal fun FavoriteTargetPayload.taskIdentity(): String = when (this) {
     is FavoriteTargetPayload.RssSearch -> "rss:$subscriptionId"
 }
 
+internal enum class FavoriteCreationOutcome {
+    Created,
+    AlreadyExisted,
+}
+
+internal data class FavoriteAddResult(
+    val creationOutcome: FavoriteCreationOutcome,
+    val syncResult: FavoriteSyncActionResult?,
+)
+
+internal suspend fun FavoriteStoreRepository.saveFavoriteWithOutcome(
+    target: FavoriteTargetPayload,
+    categoryIds: List<Long> = emptyList(),
+    collectionIds: List<Long> = emptyList(),
+): FavoriteCreationOutcome {
+    val existed = findFavoriteItem(target) != null
+    saveFavorite(target, categoryIds, collectionIds)
+    return if (existed) FavoriteCreationOutcome.AlreadyExisted else FavoriteCreationOutcome.Created
+}
+
 internal suspend fun addFavoriteAndMaybeSync(
     favoriteRepository: FavoriteStoreRepository,
     favoriteSyncRepository: FavoriteSyncRepository,
     target: FavoriteTargetPayload,
     syncToRemote: Boolean,
-): FavoriteSyncActionResult? {
-    favoriteRepository.saveFavorite(target)
-    return syncExistingFavoriteIfRequested(
+): FavoriteAddResult {
+    val creationOutcome = favoriteRepository.saveFavoriteWithOutcome(target)
+    val syncResult = syncExistingFavoriteIfRequested(
         favoriteRepository = favoriteRepository,
         favoriteSyncRepository = favoriteSyncRepository,
         target = target,
         syncToRemote = syncToRemote,
     )
+    return FavoriteAddResult(creationOutcome, syncResult)
 }
 
 internal suspend fun syncExistingFavoriteIfRequested(
@@ -135,16 +156,17 @@ internal suspend fun completeFavoriteAddWithFeedback(
     target: FavoriteTargetPayload,
     syncToRemote: Boolean,
     feedbackController: me.thenano.yamibo.yamibo_app.feedback.AppFeedbackController,
-) {
+): FavoriteAddResult {
     val feedbackGroup = "favorite-add:${target.taskIdentity()}"
     if (syncToRemote) {
         feedbackController.post(i18n("正在同步到百合會..."), groupKey = feedbackGroup)
     }
-    val syncResult = withContext(Dispatchers.Default) {
+    val result = withContext(Dispatchers.Default) {
         addFavoriteAndMaybeSync(favoriteRepository, favoriteSyncRepository, target, syncToRemote)
     }
-    val message = favoriteSyncFeedbackMessage(syncResult, i18n("已加入收藏"))
+    val message = favoriteSyncFeedbackMessage(result.syncResult, i18n("已加入收藏"))
     feedbackController.post(message, groupKey = feedbackGroup)
+    return result
 }
 
 internal suspend fun completeSavedFavoriteSyncWithFeedback(

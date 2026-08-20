@@ -227,6 +227,7 @@ private fun FavoriteSettingsContent(feedbackController: me.thenano.yamibo.yamibo
     val favoriteUpdateRunner = LocalFavoriteUpdateRunner.current
     val skipConfirm = appSettingsRepository.skipFavoriteRemovalConfirm.state()
     val addSyncPromptEnabled = appSettingsRepository.favoriteAddSyncPromptEnabled.state()
+    val addDownloadPromptEnabled = appSettingsRepository.favoriteAddDownloadPromptEnabled.state()
     val addSyncDefault = appSettingsRepository.favoriteAddSyncDefault.state()
     val removeSyncPromptEnabled = appSettingsRepository.favoriteRemoveSyncPromptEnabled.state()
     val removeSyncDefault = appSettingsRepository.favoriteRemoveSyncDefault.state()
@@ -334,6 +335,15 @@ private fun FavoriteSettingsContent(feedbackController: me.thenano.yamibo.yamibo
     Spacer(Modifier.height(24.dp))
 
     SectionLabel(i18n("收藏同步偏好"))
+
+    SettingsToggleRow(
+        title = i18n("收藏後顯示下載選項"),
+        subtitle = i18n("開啟後，新增收藏完成時會顯示適用的下載選項。"),
+        checked = addDownloadPromptEnabled,
+        onCheckedChange = { appSettingsRepository.favoriteAddDownloadPromptEnabled.setValue(it) },
+    )
+
+    Spacer(Modifier.height(18.dp))
     SettingsActionRow(
         title = i18n("通知與背景同步設定"),
         subtitle = i18n("檢查通知權限、電池最佳化與背景同步所需的系統設定。"),

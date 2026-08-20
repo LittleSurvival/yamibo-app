@@ -89,8 +89,10 @@ fun RssSearchSubscriptionDetailScreen(
     var showFavoriteRemovalConfirm by remember { mutableStateOf(false) }
     var showFavoriteMultiPathDialog by remember { mutableStateOf(false) }
     var showDownloadSheet by remember { mutableStateOf(false) }
+    var downloadSheetOpenedAfterFavorite by remember { mutableStateOf(false) }
 
     val isMangaMode = appSettingsRepo.isMangaMode.state()
+    val favoriteAddDownloadPromptEnabled = appSettingsRepo.favoriteAddDownloadPromptEnabled.state()
     val longStripModeEnabled by imageReaderModeOverrideRepository
         .observeRssLongStrip(subscriptionId)
         .collectAsState(false)
@@ -402,9 +404,13 @@ fun RssSearchSubscriptionDetailScreen(
                                 val target = favoriteTarget()
                                 val selection = favoriteRepository.getFavoriteLocationSelection(target)
                                 if (selection.item == null) {
-                                    favoriteRepository.saveFavorite(target)
+                                    val creationOutcome = favoriteRepository.saveFavoriteWithOutcome(target)
                                     favoriteRefreshToken += 1
                                     feedbackController.post(i18n("已加入收藏"))
+                                    if (creationOutcome == FavoriteCreationOutcome.Created && favoriteAddDownloadPromptEnabled) {
+                                        downloadSheetOpenedAfterFavorite = true
+                                        showDownloadSheet = true
+                                    }
                                 } else {
                                     pendingFavoriteRemovalSelection = selection
                                     if (appSettingsRepo.skipFavoriteRemovalConfirm.getValue()) {
@@ -432,7 +438,10 @@ fun RssSearchSubscriptionDetailScreen(
                             shareText(platformContext, "RSS: ${currentTitle()}", currentTitle())
                         },
                         showDownloadAction = isMangaMode,
-                        onDownload = { showDownloadSheet = true },
+                        onDownload = {
+                            downloadSheetOpenedAfterFavorite = false
+                            showDownloadSheet = true
+                        },
                         noteContent = detailNote?.content.orEmpty(),
                         onNoteClick = { showNoteDialog = true },
                         onPageChange = { pageIndex ->
@@ -593,10 +602,14 @@ fun RssSearchSubscriptionDetailScreen(
         val currentPageHasDownloads = currentThreads.any { rssDownloadEntries.containsKey(it.tid.value.toLong()) }
         CatalogDownloadActionSheet(
             title = i18n("RSS 漫畫下載"),
-            onDismiss = { showDownloadSheet = false },
+            onDismiss = {
+                showDownloadSheet = false
+                downloadSheetOpenedAfterFavorite = false
+            },
             actions = buildList {
                 add(CatalogDownloadAction(i18n("下載目前分頁")) {
                     showDownloadSheet = false
+                    downloadSheetOpenedAfterFavorite = false
                     launchDownloadTask("current-page:$currentPage") {
                         if (!ensureDownloadStorageReady()) return@launchDownloadTask
                         downloadRepository.enqueueRssMangaCurrentPage(subscriptionId, currentTitle(), currentQuery(), currentThreads, currentPage)
@@ -608,6 +621,7 @@ fun RssSearchSubscriptionDetailScreen(
                 })
                 add(CatalogDownloadAction(i18n("下載全部分頁")) {
                     showDownloadSheet = false
+                    downloadSheetOpenedAfterFavorite = false
                     launchDownloadTask("all-pages") {
                         if (!ensureDownloadStorageReady()) return@launchDownloadTask
                         downloadRepository.enqueueRssMangaAllPages(subscriptionId, currentTitle(), currentQuery())
@@ -620,6 +634,7 @@ fun RssSearchSubscriptionDetailScreen(
                 if (currentPageHasDownloads) {
                     add(CatalogDownloadAction(i18n("清除目前分頁下載")) {
                         showDownloadSheet = false
+                        downloadSheetOpenedAfterFavorite = false
                         launchDownloadTask("clear-page:$currentPage") {
                             currentThreads.forEach { downloadRepository.clearRssMangaChapter(rssMangaKey(it)) }
                             feedbackController.post(i18n("已清除目前分頁下載"))
@@ -629,12 +644,23 @@ fun RssSearchSubscriptionDetailScreen(
                 if (rssDownloadEntries.isNotEmpty()) {
                     add(CatalogDownloadAction(i18n("清除整個 RSS 下載")) {
                         showDownloadSheet = false
+                        downloadSheetOpenedAfterFavorite = false
                         launchDownloadTask("clear-all") {
                             downloadRepository.clearRssManga(subscriptionId)
                             feedbackController.post(i18n("已清除整個 RSS 下載"))
                         }
                     })
                 }
+            },
+            doNotAskAgain = if (downloadSheetOpenedAfterFavorite) {
+                !favoriteAddDownloadPromptEnabled
+            } else {
+                null
+            },
+            onDoNotAskAgainChange = if (downloadSheetOpenedAfterFavorite) {
+                { checked -> appSettingsRepo.favoriteAddDownloadPromptEnabled.setValue(!checked) }
+            } else {
+                null
             },
         )
     }
@@ -655,7 +681,15 @@ fun RssSearchSubscriptionDetailScreen(
                 scope.launch {
                     val existing = favoriteRepository.findFavoriteItem(target)
                     if (existing == null) {
-                        favoriteRepository.saveFavorite(target, selectedCategories.toList(), selectedCollections.toList())
+                        val creationOutcome = favoriteRepository.saveFavoriteWithOutcome(
+                            target,
+                            selectedCategories.toList(),
+                            selectedCollections.toList(),
+                        )
+                        if (creationOutcome == FavoriteCreationOutcome.Created && favoriteAddDownloadPromptEnabled) {
+                            downloadSheetOpenedAfterFavorite = true
+                            showDownloadSheet = true
+                        }
                     } else {
                         favoriteRepository.setItemLocations(existing.id, selectedCategories, selectedCollections)
                     }

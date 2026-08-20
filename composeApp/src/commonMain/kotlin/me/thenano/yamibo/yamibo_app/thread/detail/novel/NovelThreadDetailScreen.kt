@@ -32,6 +32,7 @@ import me.thenano.yamibo.yamibo_app.thread.detail.components.DetailNoteEditorDia
 import me.thenano.yamibo.yamibo_app.thread.detail.novel.components.*
 import me.thenano.yamibo.yamibo_app.thread.reader.IThreadReaderScreen
 import me.thenano.yamibo.yamibo_app.util.shareText
+import me.thenano.yamibo.yamibo_app.util.state
 import me.thenano.yamibo.yamibo_app.util.time.epochMillisOrNull
 
 /** Thread detail state */
@@ -84,6 +85,8 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
     var showFavoriteRemovalConfirm by remember { mutableStateOf(false) }
     var showFavoriteMultiPathDialog by remember { mutableStateOf(false) }
     var showFavoriteAddSyncConfirm by remember { mutableStateOf(false) }
+    var pendingFavoriteDownloadAfterSync by remember { mutableStateOf(false) }
+    var favoritePostAddDownloadTarget by remember { mutableStateOf<FavoriteTargetPayload?>(null) }
     var showFavoriteRemoveSyncConfirm by remember { mutableStateOf(false) }
     var detailNote by remember { mutableStateOf<DetailNoteRepository.DetailNote?>(null) }
     var showNoteDialog by remember { mutableStateOf(false) }
@@ -95,6 +98,7 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
         ContentCoverRepository.Key(ContentCoverRepository.TargetType.ThreadNovel, tid.value.toLong())
     }
     val canonicalCover by contentCoverRepository.observeCover(coverKey).collectAsState(null)
+    val favoriteAddDownloadPromptEnabled = appSettingsRepo.favoriteAddDownloadPromptEnabled.state()
 
     suspend fun reloadReadingHistory() {
         readHistory = try {
@@ -184,13 +188,17 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
     }
 
     suspend fun completeFavoriteAdd(syncToRemote: Boolean) {
-        completeFavoriteAddWithFeedback(
+        val target = favoriteTarget()
+        val result = completeFavoriteAddWithFeedback(
             favoriteRepository = favoriteRepository,
             favoriteSyncRepository = favoriteSyncRepository,
-            target = favoriteTarget(),
+            target = target,
             syncToRemote = syncToRemote,
             feedbackController = feedbackController,
         )
+        if (result.creationOutcome == FavoriteCreationOutcome.Created && favoriteAddDownloadPromptEnabled) {
+            favoritePostAddDownloadTarget = target
+        }
     }
 
     suspend fun completeSavedFavoriteSync(syncToRemote: Boolean) {
@@ -201,6 +209,10 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
             syncToRemote = syncToRemote,
             feedbackController = feedbackController,
         )
+        if (pendingFavoriteDownloadAfterSync && favoriteAddDownloadPromptEnabled) {
+            favoritePostAddDownloadTarget = favoriteTarget()
+        }
+        pendingFavoriteDownloadAfterSync = false
     }
 
     suspend fun completeFavoriteRemoval(removeRemote: Boolean) {
@@ -252,8 +264,9 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
         }
 
         if (target.supportsRemoteWebsiteSync() && appSettingsRepo.favoriteAddSyncPromptEnabled.getValue()) {
-            favoriteRepository.saveFavorite(target)
+            val creationOutcome = favoriteRepository.saveFavoriteWithOutcome(target)
             favoriteRefreshToken += 1
+            pendingFavoriteDownloadAfterSync = creationOutcome == FavoriteCreationOutcome.Created
             showFavoriteAddSyncConfirm = true
         } else {
             completeFavoriteAdd(
@@ -483,6 +496,17 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
         }
     }
 
+favoritePostAddDownloadTarget?.let { target ->
+    FavoritePostAddDownloadSheet(
+        target = target,
+        doNotAskAgain = !favoriteAddDownloadPromptEnabled,
+        onDoNotAskAgainChange = { checked ->
+            appSettingsRepo.favoriteAddDownloadPromptEnabled.setValue(!checked)
+        },
+        onDismiss = { favoritePostAddDownloadTarget = null },
+    )
+}
+
 if (showFavoriteDialog) {
     val target = FavoriteTargetPayload.Thread(
         tid = tid,
@@ -510,13 +534,14 @@ if (showFavoriteDialog) {
             scope.launch {
                 val existing = favoriteRepository.findFavoriteItem(target)
                 if (existing == null) {
-                    favoriteRepository.saveFavorite(
+                    val creationOutcome = favoriteRepository.saveFavoriteWithOutcome(
                         target,
                         categoryIds = selectedCategories.toList(),
                         collectionIds = selectedCollections.toList()
                     )
                     showFavoriteDialog = false
                     favoriteRefreshToken += 1
+                    pendingFavoriteDownloadAfterSync = creationOutcome == FavoriteCreationOutcome.Created
                     if (target.supportsRemoteWebsiteSync() && appSettingsRepo.favoriteAddSyncPromptEnabled.getValue()) {
                         showFavoriteAddSyncConfirm = true
                     } else {

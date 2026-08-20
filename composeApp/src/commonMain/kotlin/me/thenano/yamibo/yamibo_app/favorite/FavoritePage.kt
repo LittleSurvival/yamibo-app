@@ -219,15 +219,6 @@ fun FavoritePage() {
         )
     }
 
-    fun batchDownloadResultMessage(result: FavoriteBatchDownloadResult): String {
-        val skipped = result.skipped + result.unsupported
-        return when {
-            result.requested == 0 -> i18n("沒有可下載的收藏")
-            result.failed == 0 && skipped == 0 -> i18n("已加入下載佇列 {} 項", result.queued)
-            else -> i18n("已加入 {} 項，失敗 {} 項，跳過 {} 項", result.queued, result.failed, skipped)
-        }
-    }
-
     val favoriteShareFileActions = rememberFavoriteShareFileActions(
         onExported = { fileName -> showSnackbarMessage(i18n("已匯出 {}", fileName)) },
         onExportFailed = { message -> showSnackbarMessage(message) },
@@ -862,7 +853,7 @@ fun FavoritePage() {
                         val result = withContext(Dispatchers.Default) {
                             enqueueFavoriteBatchDownloads(downloadRepository, rssRepository, items, batchMode)
                         }
-                        showSnackbarMessage(batchDownloadResultMessage(result))
+                        showSnackbarMessage(favoriteBatchDownloadResultMessage(result))
                     } catch (error: CancellationException) {
                         throw error
                     } catch (error: Throwable) {

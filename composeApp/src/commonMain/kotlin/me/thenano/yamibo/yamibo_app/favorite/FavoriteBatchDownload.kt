@@ -7,6 +7,7 @@ import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository.FavoriteC
 import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository.FavoriteItem
 import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository.FavoriteTargetType
 import me.thenano.yamibo.yamibo_app.repository.RssSearchSubscriptionRepository
+import me.thenano.yamibo.yamibo_app.i18n.i18n
 
 internal enum class FavoriteBatchDownloadType {
     NovelThread,
@@ -36,6 +37,15 @@ internal data class FavoriteBatchDownloadResult(
     val failed: Int,
     val unsupported: Int,
 )
+
+internal fun favoriteBatchDownloadResultMessage(result: FavoriteBatchDownloadResult): String {
+    val skipped = result.skipped + result.unsupported
+    return when {
+        result.requested == 0 -> i18n("沒有可下載的收藏")
+        result.failed == 0 && skipped == 0 -> i18n("已加入下載佇列 {} 項", result.queued)
+        else -> i18n("已加入 {} 項，失敗 {} 項，跳過 {} 項", result.queued, result.failed, skipped)
+    }
+}
 
 internal class FavoriteBatchDownloadSubmissionGate {
     private var submitting = false
