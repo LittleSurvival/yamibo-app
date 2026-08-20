@@ -91,10 +91,12 @@ internal fun TagDetailScreen(
     var threadChapterStates by remember { mutableStateOf<Map<Long, ChapterStateRepository.Entry>>(emptyMap()) }
     var actionThread by remember { mutableStateOf<ThreadSummary?>(null) }
     var showDownloadSheet by remember { mutableStateOf(false) }
+    var downloadSheetOpenedAfterFavorite by remember { mutableStateOf(false) }
 
     val appSettingsRepo = LocalAppSettingsRepository.current
     val imageReaderModeOverrideRepository = LocalImageReaderModeOverrideRepository.current
     val isMangaMode = appSettingsRepo.isMangaMode.state()
+    val favoriteAddDownloadPromptEnabled = appSettingsRepo.favoriteAddDownloadPromptEnabled.state()
     val longStripModeEnabled by imageReaderModeOverrideRepository.observeTagLongStrip(tagId).collectAsState(false)
     val stackSize = navigator.stack.size
 
@@ -260,9 +262,13 @@ internal fun TagDetailScreen(
             return
         }
 
-        favoriteRepository.saveFavorite(target)
+        val creationOutcome = favoriteRepository.saveFavoriteWithOutcome(target)
         favoriteRefreshToken += 1
         feedbackController.post(i18n("已加入收藏"))
+        if (creationOutcome == FavoriteCreationOutcome.Created && favoriteAddDownloadPromptEnabled) {
+            downloadSheetOpenedAfterFavorite = true
+            showDownloadSheet = true
+        }
     }
 
     LaunchedEffect(tagId, currentTagName, favoriteRefreshToken, canonicalCover?.resolvedUrl) {
@@ -515,7 +521,10 @@ internal fun TagDetailScreen(
                                 shareText(platformContext, url, currentTagName)
                             },
                             showDownloadAction = isMangaMode,
-                            onDownload = { showDownloadSheet = true },
+                            onDownload = {
+                                downloadSheetOpenedAfterFavorite = false
+                                showDownloadSheet = true
+                            },
                             noteContent = detailNote?.content.orEmpty(),
                             onNoteClick = { showNoteDialog = true },
                             onPageChange = { page ->
@@ -565,10 +574,14 @@ internal fun TagDetailScreen(
         val currentPageHasDownloads = currentThreads.any { tagMangaDownloadEntries.containsKey(it.tid.value.toLong()) }
         CatalogDownloadActionSheet(
             title = i18n("標籤漫畫下載"),
-            onDismiss = { showDownloadSheet = false },
+            onDismiss = {
+                showDownloadSheet = false
+                downloadSheetOpenedAfterFavorite = false
+            },
             actions = buildList {
                 add(CatalogDownloadAction(i18n("下載目前分頁")) {
                     showDownloadSheet = false
+                    downloadSheetOpenedAfterFavorite = false
                     launchDownloadTask("current-page:$currentPage") {
                         if (!ensureDownloadStorageReady()) return@launchDownloadTask
                         downloadRepository.enqueueTagMangaCurrentPage(
@@ -584,6 +597,7 @@ internal fun TagDetailScreen(
                 })
                 add(CatalogDownloadAction(i18n("下載全部分頁")) {
                     showDownloadSheet = false
+                    downloadSheetOpenedAfterFavorite = false
                     launchDownloadTask("all-pages") {
                         if (!ensureDownloadStorageReady()) return@launchDownloadTask
                         downloadRepository.enqueueTagMangaAllPages(tagId, currentTagName)
@@ -596,6 +610,7 @@ internal fun TagDetailScreen(
                 if (currentPageHasDownloads) {
                     add(CatalogDownloadAction(i18n("清除目前分頁下載")) {
                         showDownloadSheet = false
+                        downloadSheetOpenedAfterFavorite = false
                         launchDownloadTask("clear-page:$currentPage") {
                             currentThreads.forEach { downloadRepository.clearTagMangaChapter(tagMangaKey(it)) }
                             feedbackController.post(i18n("已清除目前分頁下載"))
@@ -605,12 +620,23 @@ internal fun TagDetailScreen(
                 if (tagMangaDownloadEntries.isNotEmpty()) {
                     add(CatalogDownloadAction(i18n("清除整個標籤下載")) {
                         showDownloadSheet = false
+                        downloadSheetOpenedAfterFavorite = false
                         launchDownloadTask("clear-all") {
                             downloadRepository.clearTagManga(tagId)
                             feedbackController.post(i18n("已清除整個標籤下載"))
                         }
                     })
                 }
+            },
+            doNotAskAgain = if (downloadSheetOpenedAfterFavorite) {
+                !favoriteAddDownloadPromptEnabled
+            } else {
+                null
+            },
+            onDoNotAskAgainChange = if (downloadSheetOpenedAfterFavorite) {
+                { checked -> appSettingsRepo.favoriteAddDownloadPromptEnabled.setValue(!checked) }
+            } else {
+                null
             },
         )
     }
@@ -635,7 +661,7 @@ internal fun TagDetailScreen(
                 scope.launch {
                     val existing = favoriteRepository.findFavoriteItem(target)
                     if (existing == null) {
-                        favoriteRepository.saveFavorite(
+                        val creationOutcome = favoriteRepository.saveFavoriteWithOutcome(
                             target,
                             categoryIds = selectedCategories.toList(),
                             collectionIds = selectedCollections.toList()
@@ -643,6 +669,10 @@ internal fun TagDetailScreen(
                         showFavoriteDialog = false
                         favoriteRefreshToken += 1
                         feedbackController.post(i18n("已加入收藏"))
+                        if (creationOutcome == FavoriteCreationOutcome.Created && favoriteAddDownloadPromptEnabled) {
+                            downloadSheetOpenedAfterFavorite = true
+                            showDownloadSheet = true
+                        }
                     } else if (selectedCategories.isEmpty() && selectedCollections.isEmpty()) {
                         showFavoriteDialog = false
                         pendingFavoriteRemovalSelection = favoriteRepository.getFavoriteLocationSelection(target)

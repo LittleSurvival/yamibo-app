@@ -36,6 +36,7 @@ import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository.ThreadReadingHistory
 import me.thenano.yamibo.yamibo_app.thread.reader.IImageReaderScreen
 import me.thenano.yamibo.yamibo_app.thread.reader.IThreadReaderScreen
+import me.thenano.yamibo.yamibo_app.util.state
 import kotlin.math.ceil
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -85,7 +86,10 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
     var showFavoriteRemovalConfirm by remember { mutableStateOf(false) }
     var showFavoriteMultiPathDialog by remember { mutableStateOf(false) }
     var showFavoriteAddSyncConfirm by remember { mutableStateOf(false) }
+    var pendingFavoritePostAddDownloadTarget by remember { mutableStateOf<FavoriteTargetPayload?>(null) }
+    var favoritePostAddDownloadTarget by remember { mutableStateOf<FavoriteTargetPayload?>(null) }
     var showFavoriteRemoveSyncConfirm by remember { mutableStateOf(false) }
+    val favoriteAddDownloadPromptEnabled = appSettingsRepository.favoriteAddDownloadPromptEnabled.state()
 
     /** Re-tap History tab → open the topmost item's reader */
     LaunchedEffect(reTapToken) {
@@ -337,15 +341,19 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
     }
 
     suspend fun completeFavoriteAdd(target: FavoriteTargetPayload, syncToRemote: Boolean) {
-        val syncResult = withContext(Dispatchers.Default) {
+        val addResult = withContext(Dispatchers.Default) {
             addFavoriteAndMaybeSync(favoriteRepository, favoriteSyncRepository, target, syncToRemote)
         }
+        val syncResult = addResult.syncResult
         val message = when {
             syncResult == null -> i18n("已加入收藏，預設存入未分類")
             syncResult.success -> i18n("已加入收藏，{}", (syncResult.message?.let { i18n(it) }?.takeIf { it.isNotBlank() } ?: i18n("已同步到百合會。")))
             else -> i18n("已加入收藏，但同步失敗：{}", (syncResult.message?.let { i18n(it) }?.takeIf { it.isNotBlank() } ?: i18n("請稍後再試")))
         }
         feedbackController.post(message)
+        if (addResult.creationOutcome == FavoriteCreationOutcome.Created && favoriteAddDownloadPromptEnabled) {
+            favoritePostAddDownloadTarget = target
+        }
     }
 
     suspend fun completeSavedFavoriteSync(target: FavoriteTargetPayload, syncToRemote: Boolean) {
@@ -362,6 +370,12 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
             else -> i18n("已加入本地收藏，但同步到百合會失敗：{}", (syncResult.message?.let { i18n(it) }?.takeIf { it.isNotBlank() } ?: i18n("請稍後再試")))
         }
         feedbackController.post(message, groupKey = feedbackGroup)
+        if (pendingFavoritePostAddDownloadTarget == target && favoriteAddDownloadPromptEnabled) {
+            favoritePostAddDownloadTarget = target
+        }
+        if (pendingFavoritePostAddDownloadTarget == target) {
+            pendingFavoritePostAddDownloadTarget = null
+        }
     }
 
     suspend fun completeFavoriteRemoval(target: FavoriteTargetPayload, removeRemote: Boolean) {
@@ -413,9 +427,12 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
         }
 
         if (target.supportsRemoteWebsiteSync() && appSettingsRepository.favoriteAddSyncPromptEnabled.getValue()) {
-            favoriteRepository.saveFavorite(target)
+            val creationOutcome = favoriteRepository.saveFavoriteWithOutcome(target)
             favoriteRefreshToken += 1
             pendingFavoriteRemovalTarget = target
+            pendingFavoritePostAddDownloadTarget = target.takeIf {
+                creationOutcome == FavoriteCreationOutcome.Created
+            }
             showFavoriteAddSyncConfirm = true
         } else {
             completeFavoriteAdd(
@@ -808,6 +825,17 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
         }
     }
 
+    favoritePostAddDownloadTarget?.let { target ->
+        FavoritePostAddDownloadSheet(
+            target = target,
+            doNotAskAgain = !favoriteAddDownloadPromptEnabled,
+            onDoNotAskAgainChange = { checked ->
+                appSettingsRepository.favoriteAddDownloadPromptEnabled.setValue(!checked)
+            },
+            onDismiss = { favoritePostAddDownloadTarget = null },
+        )
+    }
+
     if (favoriteDialogTarget != null) {
         FavoriteCollectionPickerDialog(
             categories = favoriteDialogCategories,
@@ -824,13 +852,16 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
                     val target = favoriteDialogTarget ?: return@launch
                     val existing = favoriteRepository.findFavoriteItem(target)
                     if (existing == null) {
-                        favoriteRepository.saveFavorite(
+                        val creationOutcome = favoriteRepository.saveFavoriteWithOutcome(
                             target,
                             categoryIds = selectedCategories.toList(),
                             collectionIds = selectedCollections.toList()
                         )
                         favoriteDialogTarget = null
                         favoriteRefreshToken += 1
+                        pendingFavoritePostAddDownloadTarget = target.takeIf {
+                            creationOutcome == FavoriteCreationOutcome.Created
+                        }
                         if (target.supportsRemoteWebsiteSync() && appSettingsRepository.favoriteAddSyncPromptEnabled.getValue()) {
                             pendingFavoriteRemovalTarget = target
                             showFavoriteAddSyncConfirm = true

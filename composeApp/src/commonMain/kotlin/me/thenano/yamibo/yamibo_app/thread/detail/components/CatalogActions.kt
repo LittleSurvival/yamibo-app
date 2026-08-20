@@ -53,6 +53,8 @@ internal fun CatalogDownloadActionSheet(
     title: String,
     actions: List<CatalogDownloadAction>,
     onDismiss: () -> Unit,
+    doNotAskAgain: Boolean? = null,
+    onDoNotAskAgainChange: ((Boolean) -> Unit)? = null,
 ) {
     val colors = YamiboTheme.colors
     ModalBottomSheet(
@@ -69,6 +71,9 @@ internal fun CatalogDownloadActionSheet(
             Text(title, color = colors.textStrong, style = MaterialTheme.typography.titleMedium)
             actions.forEach { action ->
                 CatalogActionRow(action.label, action.onClick)
+            }
+            if (doNotAskAgain != null && onDoNotAskAgainChange != null) {
+                DownloadPromptSuppressionRow(doNotAskAgain, onDoNotAskAgainChange)
             }
             Spacer(Modifier.height(4.dp))
         }

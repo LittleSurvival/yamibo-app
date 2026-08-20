@@ -854,6 +854,11 @@ RSS搜尋目錄(#{}),RSS search directory (#{}),RSS搜尋目錄(#{}),RSS搜尋�
 App 啟動時同步,Sync on app start,App 啟動時同步,App 启动时同步
 離開前台時同步,Sync when leaving foreground,離開前台時同步,离开前台时同步
 背景同步週期,Background sync interval,背景同步週期,后台同步周期
+收藏後顯示下載選項,Show download options after favoriting,收藏後顯示下載選項,收藏后显示下载选项
+開啟後，新增收藏完成時會顯示適用的下載選項。,"When enabled, applicable download options appear after a favorite is added.",開啟後，新增收藏完成時會顯示適用的下載選項。,开启后，新增收藏完成时会显示适用的下载选项。
+不要再詢問,Don't ask again,不要再詢問,不再询问
+可在收藏設定重新開啟。,You can enable this again in Favorite settings.,可在收藏設定重新開啟。,可在收藏设置中重新开启。
+找不到剛新增的收藏,The newly added favorite could not be found.,找不到剛新增的收藏,找不到刚新增的收藏
 下載資料夾,Download folder,下載資料夾,下载文件夹
 下載與備份資料夾,Download and backup folder,下載與備份資料夾,下载与备份文件夹
 下載內容與本地備份共用此資料夾；點擊可選擇或變更位置。,"Downloads and local backups share this folder; tap to select or change its location.",下載內容與本地備份共用此資料夾；點擊可選擇或變更位置。,下载内容与本地备份共用此文件夹；点击可选择或更改位置。
