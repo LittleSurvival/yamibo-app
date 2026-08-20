@@ -43,7 +43,7 @@ import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.core.cache.CacheStorageUsage
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
-import me.thenano.yamibo.yamibo_app.profile.settings.backup.IBackupSettingsScreen
+import me.thenano.yamibo.yamibo_app.profile.settings.ISettingsCategoryScreen
 import me.thenano.yamibo.yamibo_app.repository.DownloadRepository
 import me.thenano.yamibo.yamibo_app.repository.download.*
 import me.thenano.yamibo.yamibo_app.util.formatDownloadedByteSize
@@ -127,7 +127,7 @@ fun DownloadQueueScreen() {
                     entries = entries,
                     summary = summary,
                     folderReady = folderReady,
-                    onOpenSettings = { navigator.navigate(IBackupSettingsScreen()) },
+                    onOpenStorageSettings = { navigator.navigate(ISettingsCategoryScreen("storage")) },
                     onPauseAll = {
                         appTaskManager.launch(AppTaskKey("download-control:pause-all")) {
                             repository.pauseAll()
@@ -269,7 +269,7 @@ private fun DownloadQueueTab(
     entries: List<DownloadQueueEntry>,
     summary: DownloadQueueSummary,
     folderReady: Boolean,
-    onOpenSettings: () -> Unit,
+    onOpenStorageSettings: () -> Unit,
     onPauseAll: () -> Unit,
     onResumeAll: () -> Unit,
     onRetry: (DownloadQueueEntry) -> Unit,
@@ -288,9 +288,7 @@ private fun DownloadQueueTab(
                 onResumeAll = onResumeAll,
             )
         }
-        if (!folderReady) {
-            item { BackupFolderRequiredCard(onOpenSettings) }
-        }
+        item { DownloadFolderSettingsCard(folderReady, onOpenStorageSettings) }
         if (entries.isEmpty()) {
             item { EmptyDownloadQueueCard() }
         } else {
@@ -346,14 +344,25 @@ private fun DownloadSummaryCard(
 }
 
 @Composable
-private fun BackupFolderRequiredCard(onOpenSettings: () -> Unit) {
+private fun DownloadFolderSettingsCard(
+    folderReady: Boolean,
+    onOpenStorageSettings: () -> Unit,
+) {
     val colors = YamiboTheme.colors
     YamiboDownloadCard {
-        Text(i18n("尚未設定下載資料夾"), color = colors.textStrong, fontWeight = FontWeight.SemiBold)
+        Text(i18n("下載資料夾"), color = colors.textStrong, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(6.dp))
-        Text(i18n("下載內容會存放在本地資料備份指定的資料夾。"), color = colors.textDark.copy(alpha = 0.68f), fontSize = 13.sp)
+        Text(
+            text = if (folderReady) {
+                i18n("下載與備份資料夾由儲存空間設定統一管理。")
+            } else {
+                i18n("尚未設定下載資料夾，請先前往儲存空間選擇位置。")
+            },
+            color = colors.textDark.copy(alpha = 0.68f),
+            fontSize = 13.sp,
+        )
         Spacer(Modifier.height(12.dp))
-        SmallQueueButton(i18n("前往設定"), onOpenSettings)
+        SmallQueueButton(i18n("前往儲存空間"), onOpenStorageSettings)
     }
 }
 

@@ -94,7 +94,7 @@ internal fun SettingsScreen() {
             SettingsItem(
                 icon = YamiboIcons.Storage,
                 title = i18n("儲存空間"),
-                subtitle = i18n("緩存空間與啟動時清理設定"),
+                subtitle = i18n("下載、備份資料夾與緩存清理設定"),
                 onClick = { navigator.navigate(ISettingsCategoryScreen("storage")) },
             )
             SettingsDivider()

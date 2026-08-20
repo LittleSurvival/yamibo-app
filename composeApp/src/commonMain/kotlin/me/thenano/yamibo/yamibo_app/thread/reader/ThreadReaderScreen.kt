@@ -57,7 +57,7 @@ import me.thenano.yamibo.yamibo_app.components.tracking.ReadingTimeTracker
 import me.thenano.yamibo.yamibo_app.favorite.*
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
-import me.thenano.yamibo.yamibo_app.profile.settings.backup.IBackupSettingsScreen
+import me.thenano.yamibo.yamibo_app.profile.settings.ISettingsCategoryScreen
 import me.thenano.yamibo.yamibo_app.repository.BookMarkRepository
 import me.thenano.yamibo.yamibo_app.repository.ChapterStateRepository
 import me.thenano.yamibo.yamibo_app.repository.ContentCoverRepository
@@ -4819,7 +4819,7 @@ internal fun ThreadReaderScreen(
                                     error
                                 )
                                 feedbackController.post(error.message ?: i18n("下載失敗"))
-                                navigator.navigate(IBackupSettingsScreen())
+                                navigator.navigate(ISettingsCategoryScreen("storage"))
                             }
                     }
                 },
@@ -4836,7 +4836,7 @@ internal fun ThreadReaderScreen(
                                 )
                                 feedbackController.post(error.message ?: i18n("下載失敗"))
                                 if (!downloadRepository.isStorageReady()) {
-                                    navigator.navigate(IBackupSettingsScreen())
+                                    navigator.navigate(ISettingsCategoryScreen("storage"))
                                 }
                             }
                     }
@@ -4858,7 +4858,7 @@ internal fun ThreadReaderScreen(
                                 )
                                 feedbackController.post(error.message ?: i18n("下載失敗"))
                                 if (!downloadRepository.isStorageReady()) {
-                                    navigator.navigate(IBackupSettingsScreen())
+                                    navigator.navigate(ISettingsCategoryScreen("storage"))
                                 }
                             }
                     }

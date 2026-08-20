@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -27,6 +28,7 @@ import me.thenano.yamibo.yamibo_app.i18n.localizedLabel
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.profile.download.IDownloadQueueScreen
 import me.thenano.yamibo.yamibo_app.profile.settings.access.IBackgroundAccessSetupScreen
+import me.thenano.yamibo.yamibo_app.profile.settings.backup.rememberBackupFileActions
 import me.thenano.yamibo.yamibo_app.profile.settings.bound.*
 import me.thenano.yamibo.yamibo_app.profile.settings.components.SettingsChipRow
 import me.thenano.yamibo.yamibo_app.profile.settings.components.ThemeSelectorContent
@@ -531,6 +533,57 @@ private fun SettingsActionRow(
 }
 
 @Composable
+private fun SharedStorageFolderCard(
+    folderLabel: String?,
+    onSelectFolder: () -> Unit,
+) {
+    val colors = YamiboTheme.colors
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = colors.creamSurface,
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = i18n("下載與備份資料夾"),
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.textStrong,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = folderLabel ?: i18n("尚未選擇資料夾"),
+                fontSize = 13.sp,
+                color = colors.textDark.copy(alpha = 0.7f),
+            )
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = i18n("下載內容與本地備份共用此資料夾"),
+                    fontSize = 13.sp,
+                    color = colors.textDark.copy(alpha = 0.65f),
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(12.dp))
+                Surface(
+                    onClick = onSelectFolder,
+                    shape = RoundedCornerShape(8.dp),
+                    color = colors.brownLight.copy(alpha = 0.26f),
+                ) {
+                    Text(
+                        text = i18n(if (folderLabel == null) "選擇資料夾" else "變更資料夾"),
+                        fontSize = 13.sp,
+                        color = colors.brownDeep,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun RowScope.SettingsRowDescription(
     title: String,
     subtitle: String,
@@ -559,14 +612,17 @@ private fun StorageContent(feedbackController: me.thenano.yamibo.yamibo_app.feed
     val appSettingsRepo = LocalAppSettingsRepository.current
     val diskCacheFactory = LocalDiskCacheFactory.current
     val downloadRepository = LocalDownloadRepository.current
+    val backupRepository = LocalBackupRepository.current
     val coroutineScope = rememberCoroutineScope()
 
     val clearOnLaunch = appSettingsRepo.clearCacheOnAppLaunch.state()
+    var folderLabel by remember { mutableStateOf<String?>(null) }
     var cacheSizeText by remember { mutableStateOf(i18n("正在計算中...")) }
     var cacheBreakdown by remember { mutableStateOf(CacheStorageBreakdown(rootPath = "", usages = emptyList())) }
     var downloadSummary by remember { mutableStateOf(DownloadedContentSummary()) }
 
     suspend fun refreshCacheUsage() {
+        folderLabel = backupRepository.getSelectedFolderLabel()
         cacheBreakdown = diskCacheFactory.getCacheStorageBreakdown()
         downloadSummary = runCatching { downloadRepository.getDownloadedContentSummary() }
             .onFailure { Logger.w(TAG, "Failed to load downloaded content summary for storage settings", it) }
@@ -574,9 +630,32 @@ private fun StorageContent(feedbackController: me.thenano.yamibo.yamibo_app.feed
         cacheSizeText = formatStorageSize(cacheBreakdown.usages.sumOf { it.bytes })
     }
 
+    val folderActions = rememberBackupFileActions(
+        onFolderSelected = { uri ->
+            coroutineScope.launch {
+                backupRepository.setSelectedFolder(uri)
+                    .onSuccess {
+                        refreshCacheUsage()
+                        feedbackController.post(i18n("已選擇下載與備份資料夾"))
+                    }
+                    .onFailure { error ->
+                        Logger.e(TAG, "Failed to select shared storage folder", error)
+                        feedbackController.post(error.message ?: i18n("無法選擇資料夾"))
+                    }
+            }
+        },
+        onBackupPicked = {},
+    )
+
     LaunchedEffect(Unit) {
         refreshCacheUsage()
     }
+
+    SharedStorageFolderCard(
+        folderLabel = folderLabel,
+        onSelectFolder = folderActions.selectFolder,
+    )
+    Spacer(Modifier.height(24.dp))
 
     Row(
         modifier = Modifier
