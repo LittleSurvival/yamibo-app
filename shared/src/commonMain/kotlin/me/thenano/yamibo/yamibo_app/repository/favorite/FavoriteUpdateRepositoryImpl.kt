@@ -157,7 +157,9 @@ class FavoriteUpdateRepositoryImpl internal constructor(
         val categoryIdsByItem = if (enabledCategories.isEmpty()) {
             emptyMap()
         } else {
-            favorites.associate { item -> item.id to localFavoriteRepository.getCategoryIdsForItem(item.id) }
+            favorites.associate { item ->
+                item.id to localFavoriteRepository.getContainingCategoryIdsForItem(item.id)
+            }
         }
         val targets = favorites.filter { item ->
             val fid = item.scopeFid()
@@ -248,7 +250,7 @@ class FavoriteUpdateRepositoryImpl internal constructor(
         val categoryIdsByItem = mutableMapOf<Long, Set<Long>>()
         if (enabledCategories.isNotEmpty()) {
             favoritesByKey.values.forEach { item ->
-                categoryIdsByItem[item.id] = localFavoriteRepository.getCategoryIdsForItem(item.id)
+                categoryIdsByItem[item.id] = localFavoriteRepository.getContainingCategoryIdsForItem(item.id)
             }
         }
         return events.filter { event ->
@@ -348,7 +350,7 @@ class FavoriteUpdateRepositoryImpl internal constructor(
         getFavoriteUpdateCandidates().map { item ->
             ScopeTarget(
                 fid = item.scopeFid(),
-                categoryIds = localFavoriteRepository.getCategoryIdsForItem(item.id),
+                categoryIds = localFavoriteRepository.getContainingCategoryIdsForItem(item.id),
             )
         }
 
@@ -842,7 +844,7 @@ class FavoriteUpdateRepositoryImpl internal constructor(
         val now = currentTimeMillis()
         val counts = mutableMapOf<Long, Int>()
         favorites.forEach { item ->
-            localFavoriteRepository.getCategoryIdsForItem(item.id).forEach { categoryId ->
+            localFavoriteRepository.getContainingCategoryIdsForItem(item.id).forEach { categoryId ->
                 counts[categoryId] = (counts[categoryId] ?: 0) + 1
             }
         }

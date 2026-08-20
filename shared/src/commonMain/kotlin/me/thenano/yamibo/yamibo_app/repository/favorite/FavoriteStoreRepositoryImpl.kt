@@ -150,6 +150,14 @@ class FavoriteStoreRepositoryImpl internal constructor(
             .toSet()
     }
 
+    override suspend fun getContainingCategoryIdsForItem(itemId: Long): Set<Long> {
+        val directCategoryIds = itemCategoryCrossRefQueries.getCategoryIdsByItemId(itemId)
+            .executeAsList()
+        val collectionCategoryIds = crossRefQueries.getCategoryIdsByItemId(itemId)
+            .executeAsList()
+        return (directCategoryIds + collectionCategoryIds).toSet()
+    }
+
     override suspend fun getCollectionIdsForItem(itemId: Long): Set<Long> {
         return crossRefQueries.getCollectionIdsByItemId(itemId)
             .executeAsList()

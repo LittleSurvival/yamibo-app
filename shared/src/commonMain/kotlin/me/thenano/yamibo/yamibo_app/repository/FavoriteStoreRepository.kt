@@ -92,6 +92,7 @@ interface FavoriteStoreRepository {
     suspend fun getCollectionsWithItems(categoryId: Long): List<FavoriteCollectionWithItems>
     suspend fun getCollectionOptions(): List<FavoriteCollectionOption>
     suspend fun getCategoryIdsForItem(itemId: Long): Set<Long>
+    suspend fun getContainingCategoryIdsForItem(itemId: Long): Set<Long>
     suspend fun getCollectionIdsForItem(itemId: Long): Set<Long>
     suspend fun getFavoritePaths(itemId: Long): List<String>
 
