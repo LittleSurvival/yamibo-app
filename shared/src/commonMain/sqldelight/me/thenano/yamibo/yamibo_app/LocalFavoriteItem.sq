@@ -45,6 +45,19 @@ INNER JOIN LocalFavoriteItemCollectionCrossRef
 WHERE LocalFavoriteItemCollectionCrossRef.collectionId = ?
 ORDER BY LocalFavoriteItem.lastFavoriteStatusUpdateAt DESC, LocalFavoriteItem.id DESC;
 
+getByCollectionCategoryId:
+SELECT LocalFavoriteItemCollectionCrossRef.collectionId, LocalFavoriteItem.*
+FROM LocalFavoriteItem
+INNER JOIN LocalFavoriteItemCollectionCrossRef
+    ON LocalFavoriteItem.id = LocalFavoriteItemCollectionCrossRef.itemId
+INNER JOIN LocalFavoriteCollection
+    ON LocalFavoriteCollection.id = LocalFavoriteItemCollectionCrossRef.collectionId
+WHERE LocalFavoriteCollection.categoryId = ?
+ORDER BY LocalFavoriteCollection.sortOrder ASC,
+    LocalFavoriteCollection.id ASC,
+    LocalFavoriteItem.lastFavoriteStatusUpdateAt DESC,
+    LocalFavoriteItem.id DESC;
+
 getByCategoryId:
 SELECT LocalFavoriteItem.*
 FROM LocalFavoriteItem

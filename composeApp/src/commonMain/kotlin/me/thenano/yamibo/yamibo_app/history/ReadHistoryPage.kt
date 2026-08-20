@@ -28,6 +28,8 @@ import me.thenano.yamibo.yamibo_app.forum.components.PageNavigation
 import me.thenano.yamibo.yamibo_app.history.components.*
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
+import me.thenano.yamibo.yamibo_app.performance.favoriteHistoryLoadPerf
+import me.thenano.yamibo.yamibo_app.performance.LatestLoadGeneration
 import me.thenano.yamibo.yamibo_app.repository.ContentCoverRepository
 import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
@@ -55,6 +57,7 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
     val filterPrefix = i18n("篩選")
 
     var state by remember { mutableStateOf<HistoryState>(HistoryState.Loading) }
+    val loadGeneration = remember { LatestLoadGeneration() }
     var currentPage by remember { mutableIntStateOf(1) }
     var mode by remember { mutableStateOf(PageMode.Normal) }
     var searchQuery by remember { mutableStateOf("") }
@@ -164,7 +167,7 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
         }
     }
 
-    suspend fun refreshFilterCounts() {
+    suspend fun refreshFilterCounts(generation: Long): Boolean {
         val refreshedCounts = withContext(Dispatchers.Default) {
             val actualCounts = readHistoryRepo.getCombinedHistoryFilterCounts()
             actualCounts
@@ -190,28 +193,75 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
                     }.thenByDescending { it.count }.thenBy { it.label }
                 )
         }
+        if (!loadGeneration.isCurrent(generation)) return false
         filterCounts = refreshedCounts
         val availableFilters = refreshedCounts.mapTo(mutableSetOf()) { it.filter }
-        selectedFilters = normalizeHistoryFilters(selectedFilters)
+        val normalizedFilters = normalizeHistoryFilters(selectedFilters)
             .filterTo(mutableSetOf()) { it in availableFilters }
+        val changed = normalizedFilters != selectedFilters
+        selectedFilters = normalizedFilters
+        return changed
     }
 
     suspend fun loadPage(page: Int) {
-        state = HistoryState.Loading
+        val generation = loadGeneration.begin()
+        val requestFilters = selectedFilters
+        val requestKey = "normal:$page:${requestFilters.map(::historyFilterKey).sorted().joinToString(",")}"
+        if ((state as? HistoryState.Success)?.requestKey != requestKey) {
+            state = HistoryState.Loading
+        }
+        favoriteHistoryLoadPerf("history", generation, "request_start", "key=$requestKey")
         try {
-            refreshFilterCounts()
-            val count = readHistoryRepo.getCombinedHistoryCountByFilters(selectedFilters)
-            if (count == 0L) {
-                state = HistoryState.Empty
+            val (items, count) = withContext(Dispatchers.Default) {
+                readHistoryRepo.getCombinedHistoryPageByFilters(requestFilters, page, PAGE_SIZE) to
+                    readHistoryRepo.getCombinedHistoryCountByFilters(requestFilters)
+            }
+            favoriteHistoryLoadPerf("history", generation, "primary_repository_complete")
+            if (!loadGeneration.isCurrent(generation)) {
+                favoriteHistoryLoadPerf("history", generation, "obsolete_before_primary")
                 return
             }
-            state = HistoryState.Success(
-                items = readHistoryRepo.getCombinedHistoryPageByFilters(selectedFilters, page, PAGE_SIZE),
-                totalCount = count,
+            if (count == 0L) {
+                state = HistoryState.Empty
+            } else {
+                state = HistoryState.Success(
+                    items = items,
+                    totalCount = count,
+                    currentPage = page,
+                    requestKey = requestKey,
+                    loadGeneration = generation,
+                    supplementaryLoading = true,
+                )
                 currentPage = page
-            )
-            currentPage = page
+            }
+            favoriteHistoryLoadPerf("history", generation, "primary_state_published", "items=${items.size}")
+            // Publish interactive rows for a frame before calculating global filter counts.
+            withFrameNanos { }
+
+            val selectionChanged = try {
+                refreshFilterCounts(generation)
+            } catch (error: Exception) {
+                Logger.e("ReadHistoryPage", "Supplementary history counts failed", error)
+                if (loadGeneration.isCurrent(generation)) {
+                    (state as? HistoryState.Success)
+                        ?.takeIf { it.loadGeneration == generation }
+                        ?.let { state = it.copy(supplementaryLoading = false) }
+                    favoriteHistoryLoadPerf("history", generation, "supplementary_failed")
+                }
+                return
+            }
+            favoriteHistoryLoadPerf("history", generation, "supplementary_repository_complete")
+            if (!loadGeneration.isCurrent(generation)) return
+            if (selectionChanged) {
+                loadPage(1)
+                return
+            }
+            (state as? HistoryState.Success)
+                ?.takeIf { it.loadGeneration == generation }
+                ?.let { state = it.copy(supplementaryLoading = false) }
+            favoriteHistoryLoadPerf("history", generation, "supplementary_state_published")
         } catch (e: Exception) {
+            if (!loadGeneration.isCurrent(generation)) return
             Logger.e("ReadHistoryPage", "Failed to load read history page=$page filters=${selectedFilters.joinToString()}", e)
             state = HistoryState.Error(e.message ?: i18n("載入失敗"))
         }
@@ -220,20 +270,34 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
     suspend fun doSearch(query: String, page: Int = 1) {
         val trimmed = query.trim()
         if (trimmed.isEmpty()) return
-        state = HistoryState.Loading
+        val generation = loadGeneration.begin()
+        val requestKey = "search:$page:$trimmed"
+        if ((state as? HistoryState.Success)?.requestKey != requestKey) {
+            state = HistoryState.Loading
+        }
+        favoriteHistoryLoadPerf("history", generation, "request_start", "key=$requestKey")
         try {
-            val count = readHistoryRepo.searchCombinedHistoryCount(trimmed)
+            val (items, count) = withContext(Dispatchers.Default) {
+                readHistoryRepo.searchCombinedHistory(trimmed, page, PAGE_SIZE) to
+                    readHistoryRepo.searchCombinedHistoryCount(trimmed)
+            }
+            favoriteHistoryLoadPerf("history", generation, "primary_repository_complete")
+            if (!loadGeneration.isCurrent(generation)) return
             if (count == 0L) {
                 state = HistoryState.Empty
                 return
             }
             state = HistoryState.Success(
-                items = readHistoryRepo.searchCombinedHistory(trimmed, page, PAGE_SIZE),
+                items = items,
                 totalCount = count,
-                currentPage = page
+                currentPage = page,
+                requestKey = requestKey,
+                loadGeneration = generation,
             )
             currentPage = page
+            favoriteHistoryLoadPerf("history", generation, "primary_state_published", "items=${items.size}")
         } catch (e: Exception) {
+            if (!loadGeneration.isCurrent(generation)) return
             Logger.e("ReadHistoryPage", "Failed to search read history page=$page", e)
             state = HistoryState.Error(e.message ?: i18n("搜尋失敗"))
         }
@@ -357,6 +421,18 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
             completeFavoriteAdd(
                 target = target,
                 syncToRemote = target.supportsRemoteWebsiteSync() && appSettingsRepository.favoriteAddSyncDefault.getValue(),
+            )
+        }
+    }
+
+    val renderedSuccess = state as? HistoryState.Success
+    LaunchedEffect(renderedSuccess?.loadGeneration) {
+        renderedSuccess?.let {
+            favoriteHistoryLoadPerf(
+                "history",
+                it.loadGeneration,
+                "first_content_rendered",
+                "supplementaryLoading=${it.supplementaryLoading}",
             )
         }
     }
@@ -931,6 +1007,13 @@ private fun normalizeHistoryFilters(
     } else {
         filters
     }
+}
+
+private fun historyFilterKey(filter: ReadHistoryRepository.HistoryFilter): String = when (filter) {
+    ReadHistoryRepository.HistoryFilter.All -> "all"
+    ReadHistoryRepository.HistoryFilter.Tag -> "tag"
+    ReadHistoryRepository.HistoryFilter.Rss -> "rss"
+    is ReadHistoryRepository.HistoryFilter.Forum -> "forum:${filter.forumId.value}"
 }
 
 private fun selectedHistoryFilterLabel(

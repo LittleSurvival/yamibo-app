@@ -7,6 +7,13 @@ getCollectionIdsByItemId:
 SELECT collectionId FROM LocalFavoriteItemCollectionCrossRef
 WHERE itemId = ?;
 
+getCategoryIdsByItemId:
+SELECT DISTINCT LocalFavoriteCollection.categoryId
+FROM LocalFavoriteItemCollectionCrossRef
+INNER JOIN LocalFavoriteCollection
+    ON LocalFavoriteCollection.id = LocalFavoriteItemCollectionCrossRef.collectionId
+WHERE LocalFavoriteItemCollectionCrossRef.itemId = ?;
+
 getItemIdsByCollectionId:
 SELECT itemId FROM LocalFavoriteItemCollectionCrossRef
 WHERE collectionId = ?;

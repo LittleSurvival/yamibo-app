@@ -15,8 +15,13 @@ import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
 internal class OperationRecordingReadHistoryRepository(
     private val delegate: ReadHistoryRepository,
     private val recorder: AppSyncMutationRecorder,
-    private val storageDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val storageDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : ReadHistoryRepository by delegate {
+    override suspend fun getLastVisitTimes(
+        lookups: Collection<ReadHistoryRepository.LastVisitLookup>,
+        isMangaMode: Boolean,
+    ): Map<Long, Long> = delegate.getLastVisitTimes(lookups, isMangaMode)
+
     override suspend fun savePosition(history: ReadHistoryRepository.ThreadReadingHistory) =
         withContext(storageDispatcher) {
         val existing = delegate.getPosition(history.threadId, history.threadType, history.authorId)

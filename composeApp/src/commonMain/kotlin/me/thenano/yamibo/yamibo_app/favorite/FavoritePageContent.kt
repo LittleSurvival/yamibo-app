@@ -6,13 +6,14 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.staggeredgrid.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -138,18 +139,24 @@ internal fun FavoritePageContent(
             }
         }
 
-        @Suppress("DEPRECATION")
-        ScrollableTabRow(
-            selectedTabIndex = ready.categories.indexOfFirst { it.id == ready.selectedCategoryId }.coerceAtLeast(0),
-            edgePadding = 8.dp,
-            containerColor = colors.creamBackground,
-            divider = { HorizontalDivider(color = colors.brownPrimary.copy(alpha = 0.12f)) },
-            indicator = {},
-        ) {
-            ready.categories.forEach { category ->
+        val selectedTabIndex = ready.categories.indexOfFirst { it.id == ready.selectedCategoryId }.coerceAtLeast(0)
+        val categoryTabState = rememberLazyListState(initialFirstVisibleItemIndex = selectedTabIndex)
+        LaunchedEffect(selectedTabIndex) {
+            if (selectedTabIndex !in categoryTabState.layoutInfo.visibleItemsInfo.map { it.index }) {
+                categoryTabState.animateScrollToItem(selectedTabIndex)
+            }
+        }
+        Box(Modifier.fillMaxWidth().background(colors.creamBackground)) {
+            LazyRow(
+                state = categoryTabState,
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 8.dp),
+            ) {
+                items(ready.categories, key = { it.id }) { category ->
                 Tab(
                     selected = category.id == ready.selectedCategoryId,
                     onClick = { onSelectCategory(category.id) },
+                    modifier = Modifier.widthIn(min = 112.dp),
                     text = {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(category.name, fontSize = 15.sp, fontWeight = if (category.id == ready.selectedCategoryId) FontWeight.Bold else FontWeight.Medium)
@@ -172,7 +179,12 @@ internal fun FavoritePageContent(
                     selectedContentColor = colors.textStrong,
                     unselectedContentColor = colors.textDark.copy(alpha = 0.66f),
                 )
+                }
             }
+            HorizontalDivider(
+                modifier = Modifier.align(Alignment.BottomCenter),
+                color = colors.brownPrimary.copy(alpha = 0.12f),
+            )
         }
 
         val runningSyncRunId = (syncState as? FavoriteSyncState.Running)?.snapshot?.runId
@@ -237,7 +249,6 @@ internal fun FavoritePageContent(
                 }
             }
         } else {
-            val selectedTabIndex = ready.categories.indexOfFirst { it.id == ready.selectedCategoryId }.coerceAtLeast(0)
             val previousTabIndex = remember { mutableIntStateOf(selectedTabIndex) }
             val density = LocalDensity.current
             val direction = when {

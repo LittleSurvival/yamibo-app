@@ -13,6 +13,13 @@ import io.github.littlesurvival.dto.value.UserId
  */
 interface ReadHistoryRepository {
 
+    data class LastVisitLookup(
+        val itemId: Long,
+        val targetType: FavoriteStoreRepository.FavoriteTargetType,
+        val targetId: Long,
+        val authorId: UserId? = null,
+    )
+
     /** Common wrapper/interface for merging multiple types of reading history */
     sealed interface AnyReadingHistory {
         val lastVisitTime: Long
@@ -99,6 +106,38 @@ interface ReadHistoryRepository {
         authorId: UserId? = null,
     ): ThreadReadingHistory?
 
+    suspend fun getLastVisitTimes(
+        lookups: Collection<LastVisitLookup>,
+        isMangaMode: Boolean,
+    ): Map<Long, Long> {
+        return buildMap {
+            lookups.forEach { lookup ->
+                val lastVisitTime = when (lookup.targetType) {
+                    FavoriteStoreRepository.FavoriteTargetType.ThreadNormal -> getPosition(
+                        ThreadId(lookup.targetId.toInt()),
+                        ThreadEntryType.Normal,
+                    )?.lastVisitTime
+                    FavoriteStoreRepository.FavoriteTargetType.ThreadNovel -> getPosition(
+                        ThreadId(lookup.targetId.toInt()),
+                        ThreadEntryType.Novel,
+                        lookup.authorId,
+                    )?.lastVisitTime
+                    FavoriteStoreRepository.FavoriteTargetType.TagManga -> if (isMangaMode) {
+                        getTagMangaReaderModeHistoryPosition(TagId(lookup.targetId.toInt()))?.lastVisitTime
+                    } else {
+                        getTagCatalogThreadHistoryPosition(TagId(lookup.targetId.toInt()))?.lastVisitTime
+                    }
+                    FavoriteStoreRepository.FavoriteTargetType.RssSearch -> if (isMangaMode) {
+                        getRssSearchReaderModeHistoryPosition(lookup.targetId)?.lastVisitTime
+                    } else {
+                        getRssCatalogThreadHistoryPosition(lookup.targetId)?.lastVisitTime
+                    }
+                }
+                put(lookup.itemId, lastVisitTime ?: 0L)
+            }
+        }
+    }
+
     /** Get a page of history entries (newest first) */
     suspend fun getHistoryPage(page: Int, pageSize: Int = 20): List<ThreadReadingHistory>
 
@@ -150,12 +189,10 @@ interface ReadHistoryRepository {
         val normalized = filters.filterNot { it == HistoryFilter.All }.toSet()
         if (normalized.isEmpty()) return getCombinedHistoryPage(page, pageSize)
         val offset = (page - 1).coerceAtLeast(0) * pageSize
+        val perFilterLimit = offset + pageSize
         val items = mutableListOf<AnyReadingHistory>()
         for (filter in normalized) {
-            val count = getCombinedHistoryCountByFilter(filter).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-            if (count > 0) {
-                items += getCombinedHistoryPageByFilter(filter, page = 1, pageSize = count)
-            }
+            items += getCombinedHistoryPageByFilter(filter, page = 1, pageSize = perFilterLimit)
         }
         return items
             .sortedByDescending { it.lastVisitTime }

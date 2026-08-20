@@ -10,6 +10,9 @@ INSERT OR REPLACE INTO MangaTagReadingHistory(
 getByTagId:
 SELECT * FROM MangaTagReadingHistory WHERE tagId = ?;
 
+getByTagIds:
+SELECT * FROM MangaTagReadingHistory WHERE tagId IN ?;
+
 deleteByTagId:
 DELETE FROM MangaTagReadingHistory WHERE tagId = ?;
 

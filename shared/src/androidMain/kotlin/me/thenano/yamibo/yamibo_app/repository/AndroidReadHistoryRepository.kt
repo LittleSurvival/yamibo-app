@@ -60,6 +60,67 @@ class AndroidReadHistoryRepository(
         queries.trimToLatest(MAX_HISTORY_ITEMS)
     }
 
+    override suspend fun getLastVisitTimes(
+        lookups: Collection<ReadHistoryRepository.LastVisitLookup>,
+        isMangaMode: Boolean,
+    ): Map<Long, Long> {
+        if (lookups.isEmpty()) return emptyMap()
+        val threadLookups = lookups.filter {
+            it.targetType == FavoriteStoreRepository.FavoriteTargetType.ThreadNormal ||
+                it.targetType == FavoriteStoreRepository.FavoriteTargetType.ThreadNovel
+        }
+        val threadRows = threadLookups.map { it.targetId }.distinct().takeIf { it.isNotEmpty() }
+            ?.let { queries.getByThreadIds(it).executeAsList() }
+            .orEmpty()
+            .associateBy {
+                Triple(
+                    it.threadId,
+                    ReadHistoryRepository.ThreadEntryType.fromStorage(it.threadType),
+                    it.authorId,
+                )
+            }
+        val tagLookups = lookups.filter {
+            it.targetType == FavoriteStoreRepository.FavoriteTargetType.TagManga
+        }
+        val tagIds = tagLookups.map { it.targetId }.distinct()
+        val tagTimes = if (tagIds.isEmpty()) {
+            emptyMap()
+        } else if (isMangaMode) {
+            mangaTagQueries.getByTagIds(tagIds).executeAsList().associate { it.tagId to it.lastVisitTime }
+        } else {
+            tagCatalogQueries.getByTagIds(tagIds).executeAsList().associate { it.tagId to it.lastVisitTime }
+        }
+        val rssLookups = lookups.filter {
+            it.targetType == FavoriteStoreRepository.FavoriteTargetType.RssSearch
+        }
+        val rssIds = rssLookups.map { it.targetId }.distinct()
+        val rssTimes = if (rssIds.isEmpty()) {
+            emptyMap()
+        } else if (isMangaMode) {
+            rssSearchQueries.getBySubscriptionIds(rssIds).executeAsList()
+                .associate { it.subscriptionId to it.lastVisitTime }
+        } else {
+            rssCatalogQueries.getBySubscriptionIds(rssIds).executeAsList()
+                .associate { it.subscriptionId to it.lastVisitTime }
+        }
+        return lookups.associate { lookup ->
+            val value = when (lookup.targetType) {
+                FavoriteStoreRepository.FavoriteTargetType.ThreadNormal ->
+                    threadRows[Triple(lookup.targetId, ReadHistoryRepository.ThreadEntryType.Normal, 0L)]?.lastVisitTime
+                FavoriteStoreRepository.FavoriteTargetType.ThreadNovel ->
+                    threadRows[Triple(
+                        lookup.targetId,
+                        ReadHistoryRepository.ThreadEntryType.Novel,
+                        lookup.authorId?.value?.toLong() ?: 0L,
+                    )]?.lastVisitTime
+                FavoriteStoreRepository.FavoriteTargetType.TagManga -> tagTimes[lookup.targetId]
+                FavoriteStoreRepository.FavoriteTargetType.RssSearch -> rssTimes[lookup.targetId]
+            }
+            lookup.itemId to (value ?: 0L)
+        }
+    }
+
+
     override suspend fun getPosition(
         tid: ThreadId,
         threadType: ReadHistoryRepository.ThreadEntryType,
@@ -484,9 +545,10 @@ class AndroidReadHistoryRepository(
         pageSize: Int
     ): List<ReadHistoryRepository.AnyReadingHistory> {
         val offset = (page - 1).coerceAtLeast(0) * pageSize
-        val threads = loadAllThreadHistory()
-        val tags = loadLatestTagCatalogHistory()
-        val rss = loadLatestRssCatalogHistory()
+        val windowSize = offset + pageSize
+        val threads = loadThreadHistoryWindow(limit = windowSize)
+        val tags = loadLatestTagCatalogHistoryWindow(limit = windowSize)
+        val rss = loadLatestRssCatalogHistoryWindow(limit = windowSize)
         return (threads + tags + rss)
             .sortedByDescending { it.lastVisitTime }
             .drop(offset)
@@ -495,8 +557,8 @@ class AndroidReadHistoryRepository(
 
     override suspend fun getCombinedHistoryCount(): Long {
         return queries.countAll().executeAsOne() +
-            loadLatestTagCatalogHistory().size.toLong() +
-            loadLatestRssCatalogHistory().size.toLong()
+            queries.countLatestTags().executeAsOne() +
+            queries.countLatestRss().executeAsOne()
     }
 
     override suspend fun getCombinedHistoryPageByFilter(
@@ -512,10 +574,10 @@ class AndroidReadHistoryRepository(
                 pageSize.toLong(),
                 offset.toLong(),
             ).executeAsList().map { it.toHistory() }
-            ReadHistoryRepository.HistoryFilter.Tag -> loadLatestTagCatalogHistory()
+            ReadHistoryRepository.HistoryFilter.Tag -> loadLatestTagCatalogHistoryWindow(limit = offset + pageSize)
                 .drop(offset)
                 .take(pageSize)
-            ReadHistoryRepository.HistoryFilter.Rss -> loadLatestRssCatalogHistory()
+            ReadHistoryRepository.HistoryFilter.Rss -> loadLatestRssCatalogHistoryWindow(limit = offset + pageSize)
                 .drop(offset)
                 .take(pageSize)
         }
@@ -525,8 +587,8 @@ class AndroidReadHistoryRepository(
         return when (filter) {
             ReadHistoryRepository.HistoryFilter.All -> getCombinedHistoryCount()
             is ReadHistoryRepository.HistoryFilter.Forum -> queries.countByForumId(filter.forumId.value.toLong()).executeAsOne()
-            ReadHistoryRepository.HistoryFilter.Tag -> loadLatestTagCatalogHistory().size.toLong()
-            ReadHistoryRepository.HistoryFilter.Rss -> loadLatestRssCatalogHistory().size.toLong()
+            ReadHistoryRepository.HistoryFilter.Tag -> queries.countLatestTags().executeAsOne()
+            ReadHistoryRepository.HistoryFilter.Rss -> queries.countLatestRss().executeAsOne()
         }
     }
 
@@ -539,8 +601,8 @@ class AndroidReadHistoryRepository(
                 count = row.count,
             )
         }
-        val tagCount = loadLatestTagCatalogHistory().size.toLong()
-        val rssCount = loadLatestRssCatalogHistory().size.toLong()
+        val tagCount = queries.countLatestTags().executeAsOne()
+        val rssCount = queries.countLatestRss().executeAsOne()
         return buildList {
             add(
                 ReadHistoryRepository.HistoryFilterCount(
@@ -577,9 +639,10 @@ class AndroidReadHistoryRepository(
         pageSize: Int
     ): List<ReadHistoryRepository.AnyReadingHistory> {
         val offset = (page - 1).coerceAtLeast(0) * pageSize
-        val threads = loadAllThreadHistory(query)
-        val tags = loadLatestTagCatalogHistory(query)
-        val rss = loadLatestRssCatalogHistory(query)
+        val windowSize = offset + pageSize
+        val threads = loadThreadHistoryWindow(query, windowSize)
+        val tags = loadLatestTagCatalogHistoryWindow(query, windowSize)
+        val rss = loadLatestRssCatalogHistoryWindow(query, windowSize)
         return (threads + tags + rss)
             .sortedByDescending { it.lastVisitTime }
             .drop(offset)
@@ -588,8 +651,8 @@ class AndroidReadHistoryRepository(
 
     override suspend fun searchCombinedHistoryCount(query: String): Long {
         return queries.countByName(query).executeAsOne() +
-            loadLatestTagCatalogHistory(query).size.toLong() +
-            loadLatestRssCatalogHistory(query).size.toLong()
+            queries.countLatestTagsByName(query).executeAsOne() +
+            queries.countLatestRssByName(query).executeAsOne()
     }
 
     override suspend fun deleteCombinedHistoryBatch(items: List<ReadHistoryRepository.AnyReadingHistory>) {
@@ -690,6 +753,78 @@ class AndroidReadHistoryRepository(
     override suspend fun getReadingDurationTotal(startDateKey: String, endDateKey: String): Long {
         return readingTimeQueries.getTotalDuration(startDateKey, endDateKey).executeAsOne()
     }
+
+    private fun loadThreadHistoryWindow(
+        query: String? = null,
+        limit: Int,
+    ): List<ReadHistoryRepository.ThreadReadingHistory> {
+        if (limit <= 0) return emptyList()
+        val rows = if (query.isNullOrBlank()) {
+            queries.getPage(limit.toLong(), 0L).executeAsList()
+        } else {
+            queries.searchByName(query, limit.toLong(), 0L).executeAsList()
+        }
+        return rows.map { it.toHistory() }
+    }
+
+    private fun loadLatestTagCatalogHistoryWindow(
+        query: String? = null,
+        limit: Int,
+    ): List<ReadHistoryRepository.AnyReadingHistory> {
+        if (limit <= 0) return emptyList()
+        var sqlLimit = limit.toLong()
+        while (true) {
+            val mangaRows = if (query.isNullOrBlank()) {
+                mangaTagQueries.getPage(sqlLimit, 0L).executeAsList()
+            } else {
+                mangaTagQueries.searchByName(query, query, sqlLimit, 0L).executeAsList()
+            }
+            val catalogRows = if (query.isNullOrBlank()) {
+                tagCatalogQueries.getPage(sqlLimit, 0L).executeAsList()
+            } else {
+                tagCatalogQueries.searchByName(query, query, sqlLimit, 0L).executeAsList()
+            }
+            val merged = (mangaRows.map { it.toHistory() } + catalogRows.map { it.toHistory() })
+                .latestByCatalogKey()
+            if (merged.size >= limit ||
+                (mangaRows.size.toLong() < sqlLimit && catalogRows.size.toLong() < sqlLimit) ||
+                sqlLimit >= MAX_HISTORY_ITEMS
+            ) {
+                return merged.take(limit)
+            }
+            sqlLimit = (sqlLimit * 2).coerceAtMost(MAX_HISTORY_ITEMS)
+        }
+    }
+
+    private fun loadLatestRssCatalogHistoryWindow(
+        query: String? = null,
+        limit: Int,
+    ): List<ReadHistoryRepository.AnyReadingHistory> {
+        if (limit <= 0) return emptyList()
+        var sqlLimit = limit.toLong()
+        while (true) {
+            val searchRows = if (query.isNullOrBlank()) {
+                rssSearchQueries.getPage(sqlLimit, 0L).executeAsList()
+            } else {
+                rssSearchQueries.searchByName(query, query, query, sqlLimit, 0L).executeAsList()
+            }
+            val catalogRows = if (query.isNullOrBlank()) {
+                rssCatalogQueries.getPage(sqlLimit, 0L).executeAsList()
+            } else {
+                rssCatalogQueries.searchByName(query, query, query, sqlLimit, 0L).executeAsList()
+            }
+            val merged = (searchRows.map { it.toHistory() } + catalogRows.map { it.toHistory() })
+                .latestByCatalogKey()
+            if (merged.size >= limit ||
+                (searchRows.size.toLong() < sqlLimit && catalogRows.size.toLong() < sqlLimit) ||
+                sqlLimit >= MAX_HISTORY_ITEMS
+            ) {
+                return merged.take(limit)
+            }
+            sqlLimit = (sqlLimit * 2).coerceAtMost(MAX_HISTORY_ITEMS)
+        }
+    }
+
 
     private fun loadAllThreadHistory(query: String? = null): List<ReadHistoryRepository.ThreadReadingHistory> {
         val histories = mutableListOf<ReadHistoryRepository.ThreadReadingHistory>()
