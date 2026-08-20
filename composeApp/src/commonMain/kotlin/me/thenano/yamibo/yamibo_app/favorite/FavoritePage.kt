@@ -34,7 +34,7 @@ import me.thenano.yamibo.yamibo_app.navigation.*
 import me.thenano.yamibo.yamibo_app.performance.favoriteHistoryLoadPerf
 import me.thenano.yamibo.yamibo_app.performance.LatestLoadGeneration
 import me.thenano.yamibo.yamibo_app.profile.settings.access.IBackgroundAccessSetupScreen
-import me.thenano.yamibo.yamibo_app.profile.settings.backup.IBackupSettingsScreen
+import me.thenano.yamibo.yamibo_app.profile.settings.ISettingsCategoryScreen
 import me.thenano.yamibo.yamibo_app.repository.FavoriteShareRepository
 import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository.*
 import me.thenano.yamibo.yamibo_app.repository.FavoriteSyncRepository.FavoriteSyncState
@@ -855,8 +855,8 @@ fun FavoritePage() {
                 ) {
                     try {
                         if (!downloadRepository.isStorageReady()) {
-                            showSnackbarMessage(i18n("請先設定備份資料夾"))
-                            navigator.navigate(IBackupSettingsScreen())
+                            showSnackbarMessage(i18n("尚未設定下載資料夾"))
+                            navigator.navigate(ISettingsCategoryScreen("storage"))
                             return@launch
                         }
                         val result = withContext(Dispatchers.Default) {

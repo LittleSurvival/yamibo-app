@@ -854,3 +854,16 @@ RSS搜尋目錄(#{}),RSS search directory (#{}),RSS搜尋目錄(#{}),RSS搜尋�
 App 啟動時同步,Sync on app start,App 啟動時同步,App 启动时同步
 離開前台時同步,Sync when leaving foreground,離開前台時同步,离开前台时同步
 背景同步週期,Background sync interval,背景同步週期,后台同步周期
+下載資料夾,Download folder,下載資料夾,下载文件夹
+下載與備份資料夾,Download and backup folder,下載與備份資料夾,下载与备份文件夹
+下載內容與本地備份共用此資料夾；點擊可選擇或變更位置。,"Downloads and local backups share this folder; tap to select or change its location.",下載內容與本地備份共用此資料夾；點擊可選擇或變更位置。,下载内容与本地备份共用此文件夹；点击可选择或更改位置。
+下載內容與本地備份共用此資料夾,Downloads and local backups share this folder,下載內容與本地備份共用此資料夾,下载内容与本地备份共用此文件夹
+選擇資料夾,Select folder,選擇資料夾,选择文件夹
+變更資料夾,Change folder,變更資料夾,更改文件夹
+下載與備份資料夾由儲存空間設定統一管理。,The download and backup folder is managed in Storage settings.,下載與備份資料夾由儲存空間設定統一管理。,下载与备份文件夹由存储空间设置统一管理。
+前往儲存空間,Go to Storage,前往儲存空間,前往存储空间
+尚未設定下載資料夾，請先前往儲存空間選擇位置。,No download folder is set. Go to Storage to choose a location.,尚未設定下載資料夾，請先前往儲存空間選擇位置。,尚未设置下载文件夹，请先前往存储空间选择位置。
+尚未選擇資料夾,No folder selected,尚未選擇資料夾,尚未选择文件夹
+已選擇下載與備份資料夾,Download and backup folder selected,已選擇下載與備份資料夾,已选择下载与备份文件夹
+無法選擇資料夾,Unable to select folder,無法選擇資料夾,无法选择文件夹
+下載、備份資料夾與緩存清理設定,"Download and backup folder, and cache cleanup settings",下載、備份資料夾與緩存清理設定,下载、备份文件夹与缓存清理设置

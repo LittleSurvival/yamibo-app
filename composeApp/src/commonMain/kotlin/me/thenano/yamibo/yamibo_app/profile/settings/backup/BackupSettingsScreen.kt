@@ -60,19 +60,7 @@ internal fun BackupSettingsScreen() {
     }
 
     val fileActions = rememberBackupFileActions(
-        onFolderSelected = { uri ->
-            coroutineScope.launch {
-                repository.setSelectedFolder(uri)
-                    .onSuccess {
-                        refresh()
-                        feedbackController.post(i18n("已選擇備份資料夾"))
-                    }
-                    .onFailure { error ->
-                        Logger.e("BackupSettingsScreen", "Failed to select backup folder", error)
-                        feedbackController.post(error.message ?: i18n("無法選擇備份資料夾"))
-                    }
-            }
-        },
+        onFolderSelected = {},
         onBackupPicked = { uri -> pendingRestoreUri = uri },
     )
 
@@ -100,7 +88,9 @@ internal fun BackupSettingsScreen() {
                 folderLabel = folderLabel,
                 storageBytes = storageBytes,
                 backupCount = backupFiles.size,
-                onSelectFolder = fileActions.selectFolder,
+                onOpenStorageSettings = {
+                    navigator.navigate(me.thenano.yamibo.yamibo_app.profile.settings.ISettingsCategoryScreen("storage"))
+                },
             )
             Text(
                 text = i18n("備份範圍包含收藏、設定、筆記、書籤、歷史進度與更新紀錄。"),
@@ -195,7 +185,7 @@ private fun BackupInfoCard(
     folderLabel: String?,
     storageBytes: Long,
     backupCount: Int,
-    onSelectFolder: () -> Unit,
+    onOpenStorageSettings: () -> Unit,
 ) {
     val colors = YamiboTheme.colors
     BackupCard {
@@ -216,7 +206,7 @@ private fun BackupInfoCard(
                 color = colors.textDark.copy(alpha = 0.65f),
                 modifier = Modifier.weight(1f),
             )
-            SmallBackupButton(text = i18n("選擇資料夾"), onClick = onSelectFolder)
+            SmallBackupButton(text = i18n("前往儲存空間"), onClick = onOpenStorageSettings)
         }
     }
 }

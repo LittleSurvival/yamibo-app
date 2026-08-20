@@ -9,6 +9,7 @@
 ## Branch naming isolation
 
 - Before creating any branch, read [Branch Naming Rule Document](dev-docs/branch-naming.md).
+- Do not prefix repository branch names with `codex/`; branch names must start directly with the version/lineage pattern defined in the branch naming document.
 
 ## Main branch integration
 

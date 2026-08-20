@@ -22,7 +22,7 @@ import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.favorite.*
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
-import me.thenano.yamibo.yamibo_app.profile.settings.backup.IBackupSettingsScreen
+import me.thenano.yamibo.yamibo_app.profile.settings.ISettingsCategoryScreen
 import me.thenano.yamibo.yamibo_app.repository.*
 import me.thenano.yamibo.yamibo_app.repository.download.RssMangaChapterDownloadKey
 import me.thenano.yamibo.yamibo_app.thread.detail.components.*
@@ -114,7 +114,7 @@ fun RssSearchSubscriptionDetailScreen(
     suspend fun ensureDownloadStorageReady(): Boolean {
         if (downloadRepository.isStorageReady()) return true
         feedbackController.post(i18n("尚未設定下載資料夾"))
-        navigator.navigate(IBackupSettingsScreen())
+        navigator.navigate(ISettingsCategoryScreen("storage"))
         return false
     }
 
