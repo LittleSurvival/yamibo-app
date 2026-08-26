@@ -26,6 +26,19 @@ class AppSyncPayloadFilteringTest {
     }
 
     @Test
+    fun portableSnapshotDropsLegacyDataCoverFromRollbackPayload() {
+        val sanitized = YamiboBackupFile(
+            appVersionCode = 1,
+            createdAt = 1,
+            readingState = BackupReadingState(
+                threadHistory = listOf(threadHistory("http://data:image/png;base64,AAAA")),
+            ),
+        ).withPortableAppSyncPayloads()
+
+        assertNull(sanitized.readingState.threadHistory.single().threadCover)
+    }
+
+    @Test
     fun bootstrapSnapshotExcludesSignCacheAndSanitizesThreadCover() {
         val snapshot = YamiboBackupFile(
             appVersionCode = 1,

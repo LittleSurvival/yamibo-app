@@ -7,8 +7,11 @@ import kotlinx.coroutines.sync.withLock
 import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncInstallationState
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncJournalRetirementIntent
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncOperationLifecycle
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncVerifiedCheckpoint
+import me.thenano.yamibo.yamibo_app.repository.appsync.appSyncThreadCoverOrNull
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncAccountBinding
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncCausalContext
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperation
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncReplicaKey
@@ -17,6 +20,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointA
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.ParsedAppSyncCheckpointEnvelope
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.resolvedPublishedThroughSequence
 import me.thenano.yamibo.yamibo_app.store.appsync.AppSyncOperationStore
+import me.thenano.yamibo.yamibo_app.store.appsync.AppSyncOutboxRebaseResult
 
 internal data class LoadedAppSyncJournal(
     val remoteId: String,
@@ -176,6 +180,9 @@ internal sealed interface OperationSyncResult {
         val quarantineCount: Int,
         val attempts: Int,
         val changes: List<OperationChangeSummary>,
+        val migratedLegacyOperationCount: Int = 0,
+        val replacementMigrationOperationCount: Int = 0,
+        val scrubbedLegacyPayloadCount: Int = 0,
     ) : OperationSyncResult
 
     data class RetryScheduled(
@@ -214,6 +221,7 @@ internal class OperationSyncEngine(
     private val bulkDeleteGuard: BulkDeleteGuard = BulkDeleteGuard(
         authorizationLookup = store::loadBulkDeleteAuthorization,
     ),
+    private val migrateLegacyOutbox: ((SyncAccountBinding, SyncCausalContext) -> AppSyncOutboxRebaseResult)? = null,
 ) {
     private val processMutex = Mutex()
     private val compaction = CompactionCoordinator(store, nowMillis, inactiveAfterMillis)
@@ -285,14 +293,18 @@ internal class OperationSyncEngine(
         var totalApplied = 0
         var totalAcknowledged = 0
         var totalQuarantined = 0
+        var totalMigratedLegacyOperations = 0
+        var totalReplacementMigrationOperations = 0
+        var totalScrubbedLegacyPayloads = 0
         val receivedOperations = linkedMapOf<SyncOperationId, SyncOperation>()
         val uploadedOperations = linkedMapOf<SyncOperationId, SyncOperation>()
 
         repeat(maxAttempts) { attemptIndex ->
             val requestedForcedDiscovery = forceDiscovery && attemptIndex == 0
+            val legacyMigrationCandidate = store.pendingOperations().any(::hasLegacyOversizedPayload)
             val initialLoad = remote.loadJournals(
                 accountBinding,
-                forceDiscovery = requestedForcedDiscovery,
+                forceDiscovery = requestedForcedDiscovery || legacyMigrationCandidate,
             )
             val authoritativeLoad = if (
                 detectEmptyCloud &&
@@ -381,6 +393,30 @@ internal class OperationSyncEngine(
                 }
             }
 
+            if (legacyMigrationCandidate) {
+                // legacyMigrationCandidate forces an authoritative discovery above. A missing own
+                // journal is therefore also verified absence, which covers installations whose
+                // first oversized journal was rejected before any blog could be created.
+                val verifiedOwnOperationIds = ownJournal?.payload?.operations.orEmpty()
+                    .mapTo(hashSetOf()) { it.operationId }
+                val legacyPending = store.pendingOperations().filter(::hasLegacyOversizedPayload)
+                if (
+                    legacyPending.isNotEmpty() &&
+                    legacyPending.none { it.operationId in verifiedOwnOperationIds }
+                ) {
+                    val migrated = migrateLegacyOutbox?.invoke(
+                        accountBinding,
+                        store.causalContext(),
+                    )
+                    if (migrated != null) {
+                        totalMigratedLegacyOperations += migrated.discardedOperationCount
+                        totalReplacementMigrationOperations += migrated.replacementOperationCount
+                        totalScrubbedLegacyPayloads += migrated.scrubbedLegacyPayloadCount
+                        return@repeat
+                    }
+                }
+            }
+
             val pending = store.pendingOperations()
             val checkpointAcknowledgements = store.verifiedCheckpoints()
                 .map {
@@ -421,7 +457,12 @@ internal class OperationSyncEngine(
                     ),
                 )
                 val pendingIds = pending.mapTo(linkedSetOf()) { it.operationId }
-                store.markPublishedUnverified(pendingIds)
+                val newlyPublishedIds = store.allOutboxOperations()
+                    .asSequence()
+                    .filter { (_, lifecycle) -> lifecycle == AppSyncOperationLifecycle.PendingLocal }
+                    .mapTo(linkedSetOf()) { it.first.operationId }
+                    .intersect(pendingIds)
+                store.markPublishedUnverified(newlyPublishedIds)
                 when (
                     val published = remote.publishOwnJournal(
                         payload,
@@ -461,6 +502,10 @@ internal class OperationSyncEngine(
                         return OperationSyncResult.PausedAuth("Cached FormHash expired")
                     }
                     is AppSyncJournalPublishResult.StoragePressure -> {
+                        // This result is produced by the local size preflight before submitBlog.
+                        // No remote acknowledgement is ambiguous, so these rows remain retryable
+                        // local work instead of being mislabeled as published.
+                        store.markPendingLocal(newlyPublishedIds)
                         store.updateState(AppSyncInstallationState.PausedProvider)
                         return OperationSyncResult.StoragePressure(
                             "Journal requires ${published.encodedChars} chars; " +
@@ -485,11 +530,19 @@ internal class OperationSyncEngine(
                         uploaded = uploadedOperations.values,
                         state = domainState.currentState(),
                     ),
+                    migratedLegacyOperationCount = totalMigratedLegacyOperations,
+                    replacementMigrationOperationCount = totalReplacementMigrationOperations,
+                    scrubbedLegacyPayloadCount = totalScrubbedLegacyPayloads,
                 )
             }
         }
 
         return OperationSyncResult.RetryScheduled("Sync did not reach a fixed point")
+    }
+
+    private fun hasLegacyOversizedPayload(operation: SyncOperation): Boolean {
+        val cover = operation.fields["threadCover"] ?: return false
+        return cover.isNotBlank() && appSyncThreadCoverOrNull(cover) == null
     }
 
     private fun reconcileVerifiedCheckpoint(

@@ -1145,6 +1145,74 @@ class OperationSyncEngineTest {
         )
     }
 
+    @Test
+    fun storagePreflightFailureRestoresPendingLifecycle() = runBlocking {
+        val fixture = fixture()
+        activate(fixture)
+        appendSetting(fixture, "dark")
+        fixture.remote.publishFailure = AppSyncJournalPublishResult.StoragePressure(60_000, 50_000)
+
+        assertIs<OperationSyncResult.StoragePressure>(
+            fixture.engine.synchronize(account, formHash),
+        )
+
+        assertEquals(
+            AppSyncOperationLifecycle.PendingLocal,
+            fixture.store.allOutboxOperations().single().second,
+        )
+    }
+
+    @Test
+    fun verifiedMissingLegacyPayloadRebasesToSafeSnapshotEpoch() = runBlocking {
+        val fixture = fixture()
+        activate(fixture)
+        val oldInstallation = requireNotNull(fixture.store.installation())
+        val legacy = fixture.store.appendLocalOperation(
+            accountBinding = account,
+            domainId = SyncDomainId("reading.thread"),
+            entityId = SyncEntityId("thread:1"),
+            entityGeneration = 1,
+            kind = SyncOperationKind.Patch,
+            fields = mapOf("threadCover" to "http://data:image/png;base64," + "A".repeat(64_000)),
+            causalContext = fixture.store.causalContext(),
+            createdAtEpochMillis = fixture.clock++,
+            origin = SyncOperationOrigin.UserAction,
+        )
+        fixture.store.markPublishedUnverified(setOf(legacy.operationId))
+        fixture.engine = OperationSyncEngine(
+            store = fixture.store,
+            remote = fixture.remote,
+            domainState = fixture.domain,
+            nowMillis = { fixture.clock++ },
+            ownerId = { "migration-owner" },
+            migrateLegacyOutbox = { binding, causalContext ->
+                fixture.store.rebaseCurrentPendingOperations(
+                    accountBinding = binding,
+                    drafts = listOf(migrationSetting("dark")),
+                    causalContext = causalContext,
+                    createdAtEpochMillis = fixture.clock++,
+                )
+            },
+        )
+
+        val result = assertIs<OperationSyncResult.Converged>(
+            fixture.engine.synchronize(account, formHash),
+        )
+
+        assertEquals(1, result.migratedLegacyOperationCount)
+        assertEquals(1, result.replacementMigrationOperationCount)
+        assertEquals(1, result.scrubbedLegacyPayloadCount)
+        assertNotEquals(oldInstallation.deviceEpoch, fixture.store.installation()?.deviceEpoch)
+        val oldRow = fixture.store.allOutboxOperations().single { it.first.operationId == legacy.operationId }
+        assertEquals(AppSyncOperationLifecycle.DiscardedByRebootstrap, oldRow.second)
+        assertEquals(null, oldRow.first.fields["threadCover"])
+        val replacement = fixture.store.allOutboxOperations().single {
+            it.first.deviceEpoch == fixture.store.installation()?.deviceEpoch
+        }
+        assertEquals(AppSyncOperationLifecycle.Acknowledged, replacement.second)
+        assertTrue(fixture.remote.forceDiscoveryRequests.contains(true))
+    }
+
     private fun journalPayload(
         operation: me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperation,
     ) = AppSyncJournalPayload(
@@ -1212,6 +1280,7 @@ class OperationSyncEngineTest {
         var loadGate: CompletableDeferred<Unit>? = null
         var loadStarted: CompletableDeferred<Unit>? = null
         val checkpoints = mutableListOf<LoadedAppSyncCheckpoint>()
+        val forceDiscoveryRequests = mutableListOf<Boolean>()
 
         val journalCount: Int
             get() = journals.size
@@ -1221,6 +1290,7 @@ class OperationSyncEngineTest {
             forceDiscovery: Boolean,
         ): AppSyncJournalLoadResult {
             loadCount++
+            forceDiscoveryRequests += forceDiscovery
             loadStarted?.complete(Unit)
             loadGate?.await()
             loadGate = null

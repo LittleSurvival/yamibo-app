@@ -134,6 +134,16 @@ UPDATE AppSyncOutbox
 SET lifecycle = 'PUBLISHED_UNVERIFIED'
 WHERE operationId IN ? AND lifecycle = 'PENDING_LOCAL';
 
+markOperationsPendingLocal:
+UPDATE AppSyncOutbox
+SET lifecycle = 'PENDING_LOCAL'
+WHERE operationId IN ? AND lifecycle = 'PUBLISHED_UNVERIFIED';
+
+rewriteOperationFields:
+UPDATE AppSyncOutbox
+SET fieldsJson = ?
+WHERE operationId = ?;
+
 markOperationsAcknowledged:
 UPDATE AppSyncOutbox
 SET lifecycle = 'ACKNOWLEDGED',

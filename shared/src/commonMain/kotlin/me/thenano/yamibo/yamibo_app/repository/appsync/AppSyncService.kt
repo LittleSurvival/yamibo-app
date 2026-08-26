@@ -325,7 +325,7 @@ class AppSyncService(
             val source = checkNotNull(localSnapshotSource) {
                 "Backup snapshot source is not configured"
             }
-            val snapshot = source.createAppSyncSnapshot()
+            val snapshot = source.createAppSyncSnapshot().withPortableAppSyncPayloads()
             val migration = migrationPlanner.planWithDiagnostics(snapshot)
             CapturedBootstrapSnapshot(
                 migrationDrafts = migration.drafts,
@@ -340,6 +340,27 @@ class AppSyncService(
         domainState = domainState,
         nowMillis = nowMillis,
         ownerId = { SyncIdentityGenerator.writerNonce().value },
+        migrateLegacyOutbox = { binding, causalContext ->
+            val installation = requireNotNull(store.installation())
+            val snapshot = checkNotNull(localSnapshotSource) {
+                "Backup snapshot source is not configured"
+            }.createAppSyncSnapshot().withPortableAppSyncPayloads()
+            val migration = migrationPlanner.planWithDiagnostics(snapshot)
+            store.saveBootstrapRollbackSnapshot(
+                AppSyncBootstrapRollbackSnapshot(
+                    accountBinding = binding,
+                    databaseGeneration = installation.databaseGeneration,
+                    encodedSnapshot = rollbackSnapshotCodec.encode(snapshot).getOrThrow(),
+                    createdAtEpochMillis = nowMillis(),
+                ),
+            )
+            store.rebaseCurrentPendingOperations(
+                accountBinding = binding,
+                drafts = migration.drafts,
+                causalContext = causalContext,
+                createdAtEpochMillis = nowMillis(),
+            )
+        },
     )
     private val manualOverride = ManualSyncOverrideCoordinator(
         store = store,
@@ -1015,7 +1036,14 @@ class AppSyncService(
                 )
                 is OperationSyncResult.Converged -> statusFor(
                     AppSyncInstallationState.Active,
-                    "同步完成：接收 ${result.appliedRemoteCount}、確認 ${result.acknowledgedLocalCount}",
+                    if (result.migratedLegacyOperationCount > 0) {
+                        "已遷移 ${result.migratedLegacyOperationCount} 筆舊同步操作為 " +
+                            "${result.replacementMigrationOperationCount} 筆安全快照；" +
+                            "已清理 ${result.scrubbedLegacyPayloadCount} 筆巨大快取欄位；" +
+                            "同步完成：接收 ${result.appliedRemoteCount}、確認 ${result.acknowledgedLocalCount}"
+                    } else {
+                        "同步完成：接收 ${result.appliedRemoteCount}、確認 ${result.acknowledgedLocalCount}"
+                    },
                     AppSyncStatusMessage.SyncCompleted(
                         receivedCount = result.appliedRemoteCount,
                         acknowledgedCount = result.acknowledgedLocalCount,

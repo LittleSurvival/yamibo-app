@@ -31,6 +31,12 @@ internal data class LocalSyncOperationDraft(
     val bulkDeleteAuthorizationId: String? = null,
 )
 
+internal data class AppSyncOutboxRebaseResult(
+    val discardedOperationCount: Int,
+    val replacementOperationCount: Int,
+    val scrubbedLegacyPayloadCount: Int,
+)
+
 internal interface AppSyncOperationStore {
     fun initialize(databaseGeneration: String): AppSyncInstallation
     fun installation(): AppSyncInstallation?
@@ -75,6 +81,13 @@ internal interface AppSyncOperationStore {
         createdAtEpochMillis: Long,
     ): List<SyncOperation>
 
+    fun rebaseCurrentPendingOperations(
+        accountBinding: SyncAccountBinding,
+        drafts: List<LocalSyncOperationDraft>,
+        causalContext: SyncCausalContext,
+        createdAtEpochMillis: Long,
+    ): AppSyncOutboxRebaseResult
+
     fun saveBootstrapRollbackSnapshot(snapshot: AppSyncBootstrapRollbackSnapshot)
     fun latestBootstrapRollbackSnapshot(): AppSyncBootstrapRollbackSnapshot?
 
@@ -90,6 +103,7 @@ internal interface AppSyncOperationStore {
     fun pendingOperations(): List<SyncOperation>
     fun allOutboxOperations(): List<Pair<SyncOperation, AppSyncOperationLifecycle>>
     fun markPublishedUnverified(operationIds: Set<SyncOperationId>)
+    fun markPendingLocal(operationIds: Set<SyncOperationId>)
     fun markAcknowledged(operationIds: Set<SyncOperationId>, atEpochMillis: Long)
     fun markCompacted(operationIds: Set<SyncOperationId>)
     fun replaceWithVerifiedCloudState(

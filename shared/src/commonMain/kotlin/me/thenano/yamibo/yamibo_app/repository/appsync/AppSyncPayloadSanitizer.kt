@@ -1,5 +1,7 @@
 package me.thenano.yamibo.yamibo_app.repository.appsync
 
+import me.thenano.yamibo.yamibo_app.repository.backup.YamiboBackupFile
+
 /**
  * AppSync must only transport remotely fetchable thread covers. Local data URIs are cache
  * payloads, not portable reading-history metadata, and can be large enough to overflow a journal.
@@ -16,3 +18,11 @@ internal fun appSyncThreadCoverOrNull(value: String?): String? {
     if (candidate.any(Char::isWhitespace)) return null
     return candidate
 }
+
+internal fun YamiboBackupFile.withPortableAppSyncPayloads(): YamiboBackupFile = copy(
+    readingState = readingState.copy(
+        threadHistory = readingState.threadHistory.map { history ->
+            history.copy(threadCover = appSyncThreadCoverOrNull(history.threadCover))
+        },
+    ),
+)
