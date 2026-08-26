@@ -18,17 +18,28 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import me.thenano.yamibo.yamibo_app.LocalBackgroundAccessRepository
+import me.thenano.yamibo.yamibo_app.LocalAppSettingsRepository
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBar
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.i18n.i18n
+import me.thenano.yamibo.yamibo_app.i18n.localizedLabel
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
+import me.thenano.yamibo.yamibo_app.profile.settings.components.SettingsChipRow
+import me.thenano.yamibo.yamibo_app.profile.settings.components.SettingsToggleRow
+import me.thenano.yamibo.yamibo_app.repository.settings.MessageNotificationDailyLimit
+import me.thenano.yamibo.yamibo_app.repository.settings.MessageNotificationIntervals
+import me.thenano.yamibo.yamibo_app.util.state
 
 @Composable
 internal fun BackgroundAccessSetupScreen() {
     val colors = YamiboTheme.colors
     val navigator = LocalNavigator.current
     val repository = LocalBackgroundAccessRepository.current
+    val appSettings = LocalAppSettingsRepository.current
     val state by repository.state.collectAsState()
+    val messageNotificationsEnabled = appSettings.messageNotificationEnabled.state()
+    val messageNotificationInterval = appSettings.messageNotificationInterval.state()
+    val messageNotificationDailyLimit = appSettings.messageNotificationDailyLimit.state()
     val coroutineScope = rememberCoroutineScope()
     val notificationPermissionRequester = rememberBackgroundAccessNotificationPermissionRequester {
         coroutineScope.launch {
@@ -62,6 +73,68 @@ internal fun BackgroundAccessSetupScreen() {
                 .verticalScroll(rememberScrollState())
                 .padding(20.dp),
         ) {
+            Text(
+                text = i18n("新消息通知"),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.textDark.copy(alpha = 0.5f),
+            )
+            Spacer(Modifier.height(6.dp))
+            SettingsToggleRow(
+                title = i18n("定時檢查新消息"),
+                subtitle = i18n("在背景讀取首頁的消息紅點，發現新消息時顯示系統通知。"),
+                checked = messageNotificationsEnabled,
+                onCheckedChange = appSettings.messageNotificationEnabled::setValue,
+            )
+
+            Text(
+                text = i18n("檢查週期"),
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium,
+                color = colors.textDark,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
+            Spacer(Modifier.height(6.dp))
+            SettingsChipRow(
+                options = MessageNotificationIntervals.map { it to it.localizedLabel() },
+                selectedValue = messageNotificationInterval,
+                onSelect = appSettings.messageNotificationInterval::setValue,
+                modifier = Modifier.padding(horizontal = 4.dp),
+                enabled = messageNotificationsEnabled,
+            )
+
+            Spacer(Modifier.height(18.dp))
+            Text(
+                text = i18n("每日通知次數上限"),
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium,
+                color = colors.textDark,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
+            Spacer(Modifier.height(6.dp))
+            SettingsChipRow(
+                options = MessageNotificationDailyLimit.entries.map { it to it.localizedLabel() },
+                selectedValue = messageNotificationDailyLimit,
+                onSelect = appSettings.messageNotificationDailyLimit::setValue,
+                modifier = Modifier.padding(horizontal = 4.dp),
+                enabled = messageNotificationsEnabled,
+            )
+            Text(
+                text = i18n("通知內容不包含消息正文；iOS 的實際檢查時間由系統決定。"),
+                fontSize = 13.sp,
+                color = colors.textDark.copy(alpha = 0.68f),
+                lineHeight = 20.sp,
+                modifier = Modifier.padding(start = 4.dp, top = 12.dp, end = 4.dp),
+            )
+
+            Spacer(Modifier.height(32.dp))
+            Text(
+                text = i18n("系統存取狀態"),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.textDark.copy(alpha = 0.5f),
+            )
+            Spacer(Modifier.height(12.dp))
             Text(
                 text = state.summary.localized(),
                 fontSize = 16.sp,

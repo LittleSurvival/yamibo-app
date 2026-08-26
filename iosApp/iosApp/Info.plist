@@ -7,10 +7,12 @@
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>me.thenano.yamibo.yamibo-app.app-sync</string>
+		<string>me.thenano.yamibo.yamibo-app.message-notification</string>
 	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>processing</string>
+		<string>fetch</string>
 	</array>
 </dict>
 </plist>

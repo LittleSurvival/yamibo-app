@@ -51,6 +51,19 @@ class AppSettingsRepositoryTest {
         assertEquals(FixedScheduleInterval.Hours24, AppUpdateLaunchCheckThreshold.HOURS_24.fixedInterval)
         assertEquals(FixedScheduleInterval.Week1, BackupInterval.WEEK_1.fixedInterval)
     }
+
+    @Test
+    fun messageNotificationsDefaultEnabledAtThreeHoursAndTwiceDaily() {
+        val repository = AppSettingsRepository(AppSettingsMemoryStore())
+
+        assertTrue(repository.messageNotificationEnabled.getValue())
+        assertEquals(FixedScheduleInterval.Hours3, repository.messageNotificationInterval.getValue())
+        assertEquals(MessageNotificationDailyLimit.TWICE, repository.messageNotificationDailyLimit.getValue())
+        assertEquals((1..6).toList(), MessageNotificationDailyLimit.entries.mapNotNull { it.maxPerDay })
+        assertEquals(null, MessageNotificationDailyLimit.UNLIMITED.maxPerDay)
+        assertEquals(10, MessageNotificationIntervals.size)
+        assertTrue(FixedScheduleInterval.Hours3 in MessageNotificationIntervals)
+    }
 }
 
 private class AppSettingsMemoryStore : SettingsStore {

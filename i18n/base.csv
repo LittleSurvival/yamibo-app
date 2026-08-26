@@ -929,3 +929,14 @@ RSS 目錄進度,RSS catalog progress,RSS 目錄進度,RSS 目录进度
 安全載入完成，套用 {} 筆操作；保留 {} 筆無法解析來源的舊 RSS 閱讀紀錄於本機,"Safe load completed with {} operation(s); {} unresolved legacy RSS reading record(s) remain local",安全載入完成，套用 {} 筆操作；保留 {} 筆無法解析來源的舊 RSS 閱讀紀錄於本機,安全加载完成，应用 {} 条操作；{} 条无法解析来源的旧 RSS 阅读记录保留在本地
 閱讀時間,Reading time,閱讀時間,阅读时间
 關閉 {},Disabled {},關閉 {},关闭 {}
+新消息通知,New message notifications,新消息通知,新消息通知
+定時檢查新消息,Check for new messages periodically,定時檢查新消息,定时检查新消息
+在背景讀取首頁的消息紅點，發現新消息時顯示系統通知。,Read the homepage message indicator in the background and show a system notification when new messages are present.,在背景讀取首頁的消息紅點，發現新消息時顯示系統通知。,在后台读取首页的消息红点，发现新消息时显示系统通知。
+檢查週期,Check interval,檢查週期,检查周期
+每日通知次數上限,Daily notification limit,每日通知次數上限,每日通知次数上限
+無上限,Unlimited,無上限,无上限
+通知內容不包含消息正文；iOS 的實際檢查時間由系統決定。,Notifications do not include message content; iOS determines the actual check time.,通知內容不包含消息正文；iOS 的實際檢查時間由系統決定。,通知内容不包含消息正文；iOS 的实际检查时间由系统决定。
+系統存取狀態,System access status,系統存取狀態,系统访问状态
+查看通知,View messages,查看通知,查看通知
+不再提醒（僅限今日）,Do not remind again today,不再提醒（僅限今日）,不再提醒（仅限今日）
+您有新的通知，快來看看吧 !,"You have a new notification. Come take a look!",您有新的通知，快來看看吧 !,您有新的通知，快来看看吧 !
