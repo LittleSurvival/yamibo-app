@@ -31,6 +31,7 @@ import me.thenano.yamibo.yamibo_app.profile.settings.access.IBackgroundAccessSet
 import me.thenano.yamibo.yamibo_app.profile.settings.backup.rememberBackupFileActions
 import me.thenano.yamibo.yamibo_app.profile.settings.bound.*
 import me.thenano.yamibo.yamibo_app.profile.settings.components.SettingsChipRow
+import me.thenano.yamibo.yamibo_app.profile.settings.components.SettingsToggleRow
 import me.thenano.yamibo.yamibo_app.profile.settings.components.ThemeSelectorContent
 import me.thenano.yamibo.yamibo_app.repository.FavoriteSyncRepository.FavoriteSyncState
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadedContentSummary
@@ -478,38 +479,6 @@ private fun FavoriteSettingsContent(feedbackController: me.thenano.yamibo.yamibo
             fontSize = 13.sp,
             color = colors.textDark.copy(alpha = 0.68f),
             modifier = Modifier.padding(horizontal = 4.dp),
-        )
-    }
-}
-
-@Composable
-private fun SettingsToggleRow(
-    title: String,
-    subtitle: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    val colors = YamiboTheme.colors
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-            ) { onCheckedChange(!checked) }
-            .padding(vertical = 16.dp, horizontal = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        SettingsRowDescription(title = title, subtitle = subtitle, colors = colors)
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = colors.brownDeep,
-                checkedTrackColor = colors.brownPrimary.copy(alpha = 0.5f),
-                uncheckedThumbColor = colors.textDark.copy(alpha = 0.5f),
-                uncheckedTrackColor = colors.brownLight.copy(alpha = 0.3f),
-            ),
         )
     }
 }

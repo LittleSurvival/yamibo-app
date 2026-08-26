@@ -10,6 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -21,14 +22,15 @@ fun <T> SettingsChipRow(
     options: List<Pair<T, String>>,
     selectedValue: T,
     onSelect: (T) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     val colors = YamiboTheme.colors
 
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = modifier
+        modifier = modifier.graphicsLayer { alpha = if (enabled) 1f else 0.42f }
     ) {
         options.forEach { (value, label) ->
             val isSelected = value == selectedValue
@@ -42,7 +44,7 @@ fun <T> SettingsChipRow(
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
-                    ) { onSelect(value) }
+                    ) { if (enabled) onSelect(value) }
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
                 Text(

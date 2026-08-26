@@ -130,6 +130,32 @@ enum class SignReminderFrequency(val label: String, val timesPerDay: Int) {
     SIX_TIMES_A_DAY("6x_day", 6),
 }
 
+enum class MessageNotificationDailyLimit(
+    val label: String,
+    val maxPerDay: Int?,
+) {
+    ONCE("1x_day", 1),
+    TWICE("2x_day", 2),
+    THREE_TIMES("3x_day", 3),
+    FOUR_TIMES("4x_day", 4),
+    FIVE_TIMES("5x_day", 5),
+    SIX_TIMES("6x_day", 6),
+    UNLIMITED("unlimited", null),
+}
+
+val MessageNotificationIntervals: List<FixedScheduleInterval> = listOf(
+    FixedScheduleInterval.Hours1,
+    FixedScheduleInterval.Hours2,
+    FixedScheduleInterval.Hours3,
+    FixedScheduleInterval.Hours4,
+    FixedScheduleInterval.Hours6,
+    FixedScheduleInterval.Hours12,
+    FixedScheduleInterval.Days1,
+    FixedScheduleInterval.Days2,
+    FixedScheduleInterval.Days3,
+    FixedScheduleInterval.Week1,
+)
+
 enum class AppLanguage(val label: String, val languageTag: String) {
     TRADITIONAL_CHINESE("zh-TW", "zh-TW"),
     SIMPLIFIED_CHINESE("zh-CN", "zh-CN"),
@@ -172,6 +198,24 @@ class AppSettingsRepository(store: SettingsStore) : SettingsRegistry(store, pref
     val showHomeSwiperImages by boolSetting(
         name = "show_home_swiper_images",
         default = true,
+    )
+
+    /** 定期檢查首頁新消息 */
+    val messageNotificationEnabled by boolSetting(
+        name = "message_notification_enabled",
+        default = true,
+    )
+
+    /** 首頁新消息檢查週期 */
+    val messageNotificationInterval by enumSetting(
+        name = "message_notification_interval",
+        default = FixedScheduleInterval.Hours3,
+    )
+
+    /** 每日首頁新消息通知上限 */
+    val messageNotificationDailyLimit by enumSetting(
+        name = "message_notification_daily_limit",
+        default = MessageNotificationDailyLimit.TWICE,
     )
 
     /** App 字體 */
@@ -379,6 +423,7 @@ class AppSettingsRepository(store: SettingsStore) : SettingsRegistry(store, pref
         val backupIntervalOptions = BackupInterval.entries.map { it to it.label }
         val signInModeOptions = SignInMode.entries.map { it to it.label }
         val signInReminderFrequencyOptions = SignReminderFrequency.entries.map { it to it.label }
+        val messageNotificationDailyLimitOptions = MessageNotificationDailyLimit.entries.map { it to it.label }
         val languageOptions = AppLanguage.entries.map { it to it.label }
     }
 }

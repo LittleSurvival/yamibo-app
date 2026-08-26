@@ -82,3 +82,13 @@ fun SignReminderFrequency.localizedLabel(): String = when (this) {
     SignReminderFrequency.SIX_TIMES_A_DAY -> i18n("每天 6 次")
 }
 
+fun MessageNotificationDailyLimit.localizedLabel(): String = when (this) {
+    MessageNotificationDailyLimit.ONCE -> i18n("每天 1 次")
+    MessageNotificationDailyLimit.TWICE -> i18n("每天 2 次")
+    MessageNotificationDailyLimit.THREE_TIMES -> i18n("每天 3 次")
+    MessageNotificationDailyLimit.FOUR_TIMES -> i18n("每天 4 次")
+    MessageNotificationDailyLimit.FIVE_TIMES -> i18n("每天 5 次")
+    MessageNotificationDailyLimit.SIX_TIMES -> i18n("每天 6 次")
+    MessageNotificationDailyLimit.UNLIMITED -> i18n("無上限")
+}
+

@@ -55,6 +55,9 @@ import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.navigation.ComposableNavigator
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.navigation.NavAction
+import me.thenano.yamibo.yamibo_app.message.IMessageCenterScreen
+import me.thenano.yamibo.yamibo_app.message.MessageCenterTab
+import me.thenano.yamibo.yamibo_app.notification.messageNotificationNavigationTrigger
 import me.thenano.yamibo.yamibo_app.profile.settings.update.AppUpdatePromptContent
 import me.thenano.yamibo.yamibo_app.profile.sign.ISignWebView
 import me.thenano.yamibo.yamibo_app.profile.sign.shouldDismissSignReminderFor
@@ -356,6 +359,15 @@ fun App() {
                 signRepository = signRepository,
                 appTaskManager = appTaskManager,
                 feedbackController = feedbackController,
+            )
+        }
+    }
+
+    val openMessageCenterFromNotification by messageNotificationNavigationTrigger.pending.collectAsState()
+    LaunchedEffect(openMessageCenterFromNotification) {
+        if (openMessageCenterFromNotification && messageNotificationNavigationTrigger.consume()) {
+            navigator.navigate(
+                IMessageCenterScreen(initialTab = MessageCenterTab.PrivateMessages),
             )
         }
     }

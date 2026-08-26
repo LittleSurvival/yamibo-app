@@ -39,6 +39,9 @@ import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.navigation.rememberRestorableNavigator
 import me.thenano.yamibo.yamibo_app.network.AndroidYamiboClientProvider
 import me.thenano.yamibo.yamibo_app.notification.dismissActiveSignReminder
+import me.thenano.yamibo.yamibo_app.notification.AndroidMessageNotificationScheduler
+import me.thenano.yamibo.yamibo_app.notification.dismissActiveMessageNotification
+import me.thenano.yamibo.yamibo_app.notification.requestOpenMessageCenterFromNotification
 import me.thenano.yamibo.yamibo_app.profile.settings.access.AndroidBackgroundAccessRepository
 import me.thenano.yamibo.yamibo_app.profile.settings.backup.AndroidBackupScheduler
 import me.thenano.yamibo.yamibo_app.profile.settings.sign.AndroidSignReminderScheduler
@@ -96,6 +99,11 @@ class MainActivity : ComponentActivity() {
             dismissActiveSignReminder(this)
             showSignWebViewTrigger.value = true
             intent.putExtra(EXTRA_FROM_NOTIFICATION_SIGN_IN, false)
+        }
+        if (intent?.getBooleanExtra(EXTRA_FROM_MESSAGE_NOTIFICATION, false) == true) {
+            dismissActiveMessageNotification(this)
+            requestOpenMessageCenterFromNotification()
+            intent.putExtra(EXTRA_FROM_MESSAGE_NOTIFICATION, false)
         }
     }
 
@@ -328,6 +336,7 @@ class MainActivity : ComponentActivity() {
             }
             val backupScheduler = remember { AndroidBackupScheduler(context) }
             val signReminderScheduler = remember { AndroidSignReminderScheduler(context) }
+            val messageNotificationScheduler = remember { AndroidMessageNotificationScheduler(context) }
             LaunchedEffect(backupRepository) {
                 diskCacheFactory.backupStorageUsageProvider = { backupRepository.getBackupStorageBytes() }
             }
@@ -407,6 +416,8 @@ class MainActivity : ComponentActivity() {
                 val favoriteUpdateInterval = appSettingsRepository.favoriteUpdateInterval.state()
                 val backupInterval = appSettingsRepository.backupInterval.state()
                 val signReminderFrequency = appSettingsRepository.signInReminderFrequency.state()
+                val messageNotificationEnabled = appSettingsRepository.messageNotificationEnabled.state()
+                val messageNotificationInterval = appSettingsRepository.messageNotificationInterval.state()
                 
                 LaunchedEffect(Unit) {
                     if (appSettingsRepository.clearCacheOnAppLaunch.getValue()) {
@@ -425,6 +436,13 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(signReminderFrequency) {
                     delay(1_200.milliseconds)
                     signReminderScheduler.schedule(signReminderFrequency)
+                }
+                LaunchedEffect(messageNotificationEnabled, messageNotificationInterval) {
+                    delay(1_200.milliseconds)
+                    messageNotificationScheduler.setEnabled(
+                        enabled = messageNotificationEnabled,
+                        interval = messageNotificationInterval,
+                    )
                 }
                 LaunchedEffect(Unit) {
                     delay(1_200.milliseconds)
@@ -448,5 +466,6 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_FROM_NOTIFICATION_SIGN_IN = "extra_from_notification_sign_in"
+        const val EXTRA_FROM_MESSAGE_NOTIFICATION = "extra_from_message_notification"
     }
 }
