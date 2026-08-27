@@ -1,8 +1,8 @@
 {
   "channel": "stable",
-  "versionName": "0.0.6",
-  "versionCode": 7,
+  "versionName": "0.0.7",
+  "versionCode": 8,
   "isReady": false,
-  "releaseNotes": "強化 HTTP 405/WAF 驗證與登入 Cookie 保存，改善閱讀器順暢度，並修復內嵌圖片、Cloudflare Email",
+  "releaseNotes": "新增我的消息定時通知與首次收藏下載選項，修復更新檢查並優化收藏與閱讀紀錄載入",
   "assets": []
 }
