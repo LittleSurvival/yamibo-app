@@ -25,12 +25,20 @@ internal object AppSyncJournalDefaults {
     const val CHECKPOINT_MARKER = "YAMIBO_APP_SYNC_CHECKPOINT:v1"
     const val JOURNAL_TITLE_PREFIX = "Yamibo App Sync Journal - DO NOT EDIT - v1 - "
     const val CHECKPOINT_TITLE_PREFIX = "Yamibo App Sync Checkpoint - DO NOT EDIT - v1 - "
+    const val SEGMENT_TITLE_PREFIX = "Yamibo App Sync Segment - DO NOT EDIT - v2 - "
+    const val ROOT_TITLE_PREFIX = "Yamibo App Sync Root - DO NOT EDIT - v2 - "
 
     fun journalTitle(deviceId: SyncDeviceId, epoch: SyncDeviceEpoch): String =
         "$JOURNAL_TITLE_PREFIX${deviceId.value.take(12)}-${epoch.value.take(12)}"
 
     fun checkpointTitle(checkpointId: String): String =
         "$CHECKPOINT_TITLE_PREFIX${checkpointId.take(24)}"
+
+    fun segmentTitle(kind: AppSyncSegmentPayloadKind, generationId: String, index: Int): String =
+        "$SEGMENT_TITLE_PREFIX${kind.name.lowercase()}-${generationId.take(24)}-$index"
+
+    fun rootTitle(kind: AppSyncSegmentPayloadKind, generationId: String): String =
+        "$ROOT_TITLE_PREFIX${kind.name.lowercase()}-${generationId.take(24)}"
 }
 
 @Serializable
@@ -51,8 +59,20 @@ internal data class AppSyncJournalPayload(
     val observed: SyncCausalContext,
     val checkpointAcknowledgements: List<AppSyncCheckpointAcknowledgement> = emptyList(),
     val heartbeatAtEpochMillis: Long,
+    val protocolReadVersion: Int = AppSyncProtocolCapabilities.LEGACY_VERSION,
+    val protocolWriteVersion: Int = AppSyncProtocolCapabilities.LEGACY_VERSION,
+    val appVersion: String = "unknown",
     val publishedThroughSequence: Long? = null,
 )
+
+internal object AppSyncProtocolCapabilities {
+    const val LEGACY_VERSION: Int = 1
+    const val READER_VERSION: Int = 2
+    const val READER_FIRST_WRITE_VERSION: Int = 1
+
+    fun canWriteV2(activeJournals: Collection<AppSyncJournalPayload>): Boolean =
+        activeJournals.isNotEmpty() && activeJournals.all { it.protocolReadVersion >= READER_VERSION }
+}
 
 internal fun AppSyncJournalPayload.resolvedPublishedThroughSequence(): Long? {
     val ownObserved = observed[SyncReplicaKey(deviceId, deviceEpoch)]

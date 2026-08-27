@@ -5,6 +5,7 @@ import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDomainId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncEntityId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperation
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncPortabilityPolicy
 
 internal interface SyncDomainMaterializer {
     fun apply(entity: ResolvedSyncEntity)
@@ -103,6 +104,15 @@ internal class SqlDelightSyncDomainStateAdapter(
         queries.getResolvedEntitiesByDomain(domainId.value).executeAsList().size
 
     private fun persist(entity: ResolvedSyncEntity) {
+        if (entity.key.domainId.value == "settings" &&
+            !AppSyncPortabilityPolicy.isSettingPortable(entity.key.entityId.value)
+        ) {
+            queries.deleteResolvedEntitiesByDomainAndEntity(
+                domainId = entity.key.domainId.value,
+                entityId = entity.key.entityId.value,
+            )
+            return
+        }
         queries.upsertResolvedEntity(
             entityKey = entity.key.stableKey(),
             domainId = entity.key.domainId.value,

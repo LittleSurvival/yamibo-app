@@ -1,0 +1,48 @@
+CREATE TABLE AppSyncRecoverySession (
+    sessionId TEXT NOT NULL PRIMARY KEY,
+    accountBinding TEXT NOT NULL UNIQUE,
+    mode TEXT NOT NULL,
+    sourceDeviceId TEXT NOT NULL,
+    sourceDeviceEpoch TEXT NOT NULL,
+    targetDeviceId TEXT NOT NULL,
+    targetDeviceEpoch TEXT NOT NULL,
+    targetWriterNonce TEXT NOT NULL,
+    targetFirstSequence INTEGER NOT NULL,
+    generationId TEXT NOT NULL,
+    sourceOperationIdsJson TEXT NOT NULL,
+    acknowledgedSourceOperationIdsJson TEXT NOT NULL,
+    replacementFingerprint TEXT NOT NULL,
+    phase TEXT NOT NULL,
+    retryCount INTEGER NOT NULL DEFAULT 0,
+    nextRetryAtEpochMillis INTEGER,
+    lastErrorCategory TEXT,
+    blockingDomain TEXT,
+    redactedBlockingEntity TEXT,
+    rootBlogId INTEGER,
+    rootFingerprint TEXT,
+    indexCommitted INTEGER NOT NULL DEFAULT 0,
+    createdAtEpochMillis INTEGER NOT NULL,
+    updatedAtEpochMillis INTEGER NOT NULL,
+    completedAtEpochMillis INTEGER
+);
+
+CREATE TABLE AppSyncRecoveryShadowOperation (
+    sessionId TEXT NOT NULL,
+    operationId TEXT NOT NULL,
+    encodedOperation TEXT NOT NULL,
+    PRIMARY KEY (sessionId, operationId),
+    FOREIGN KEY (sessionId) REFERENCES AppSyncRecoverySession(sessionId) ON DELETE CASCADE
+);
+
+CREATE TABLE AppSyncRecoverySegmentWrite (
+    sessionId TEXT NOT NULL,
+    segmentIndex INTEGER NOT NULL,
+    segmentCount INTEGER NOT NULL,
+    expectedFingerprint TEXT NOT NULL,
+    nextBlogId INTEGER,
+    blogId INTEGER,
+    verifiedFingerprint TEXT,
+    verifiedAtEpochMillis INTEGER,
+    PRIMARY KEY (sessionId, segmentIndex),
+    FOREIGN KEY (sessionId) REFERENCES AppSyncRecoverySession(sessionId) ON DELETE CASCADE
+);

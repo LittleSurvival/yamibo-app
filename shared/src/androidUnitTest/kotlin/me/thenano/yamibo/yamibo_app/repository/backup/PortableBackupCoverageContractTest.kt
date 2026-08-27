@@ -140,6 +140,7 @@ class PortableBackupCoverageContractTest {
         val SETTINGS_REGISTRY_DECLARATION =
             Regex("""class\s+(\w+)\s*\([^)]*\)\s*:\s*SettingsRegistry\s*\(""")
         val RUNTIME_ONLY_SETTING_SUFFIXES = setOf(
+            "favoritelastcategoryid",
             "signpagehtmlcache",
             "signpagehtmlcacheupdatedat",
             "favoriteupdatehiddenrunid",

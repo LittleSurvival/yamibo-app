@@ -134,6 +134,16 @@ UPDATE AppSyncOutbox
 SET lifecycle = 'PUBLISHED_UNVERIFIED'
 WHERE operationId IN ? AND lifecycle = 'PENDING_LOCAL';
 
+markOperationsPendingLocal:
+UPDATE AppSyncOutbox
+SET lifecycle = 'PENDING_LOCAL'
+WHERE operationId IN ? AND lifecycle = 'PUBLISHED_UNVERIFIED';
+
+rewriteOperationFields:
+UPDATE AppSyncOutbox
+SET fieldsJson = ?
+WHERE operationId = ?;
+
 markOperationsAcknowledged:
 UPDATE AppSyncOutbox
 SET lifecycle = 'ACKNOWLEDGED',
@@ -453,6 +463,152 @@ getResolvedEntitiesByDomain:
 SELECT * FROM AppSyncResolvedEntity
 WHERE domainId = ?
 ORDER BY entityKey ASC;
+
+deleteResolvedEntitiesByDomainAndEntity:
+DELETE FROM AppSyncResolvedEntity
+WHERE domainId = ? AND entityId = ?;
+
+getRecoverySessionByAccount:
+SELECT * FROM AppSyncRecoverySession
+WHERE accountBinding = ?;
+
+getRecoverySession:
+SELECT * FROM AppSyncRecoverySession
+WHERE sessionId = ?;
+
+insertRecoverySession:
+INSERT INTO AppSyncRecoverySession(
+    sessionId, accountBinding, mode, sourceDeviceId, sourceDeviceEpoch,
+    targetDeviceId, targetDeviceEpoch, targetWriterNonce, targetFirstSequence, generationId,
+    sourceOperationIdsJson, acknowledgedSourceOperationIdsJson, replacementFingerprint, phase,
+    retryCount, nextRetryAtEpochMillis, lastErrorCategory,
+    blockingDomain, redactedBlockingEntity, rootBlogId, rootFingerprint,
+    indexCommitted, createdAtEpochMillis, updatedAtEpochMillis, completedAtEpochMillis
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, NULL, NULL, NULL, NULL, NULL, 0, ?, ?, NULL);
+
+transitionRecoverySession:
+UPDATE AppSyncRecoverySession
+SET phase = ?,
+    retryCount = ?,
+    nextRetryAtEpochMillis = ?,
+    lastErrorCategory = ?,
+    blockingDomain = ?,
+    redactedBlockingEntity = ?,
+    updatedAtEpochMillis = ?,
+    completedAtEpochMillis = ?
+WHERE sessionId = ? AND phase = ?;
+
+markRecoveryRootVerified:
+UPDATE AppSyncRecoverySession
+SET rootBlogId = ?, rootFingerprint = ?, phase = 'COMMITTING_INDEX', updatedAtEpochMillis = ?
+WHERE sessionId = ? AND phase = 'PUBLISHING_ROOT';
+
+markRecoveryIndexCommitted:
+UPDATE AppSyncRecoverySession
+SET indexCommitted = 1, phase = 'ACTIVATING_LOCAL', updatedAtEpochMillis = ?
+WHERE sessionId = ? AND phase = 'COMMITTING_INDEX' AND rootBlogId IS NOT NULL;
+
+insertRecoveryShadowOperation:
+INSERT OR REPLACE INTO AppSyncRecoveryShadowOperation(sessionId, operationId, encodedOperation)
+VALUES (?, ?, ?);
+
+getRecoveryShadowOperations:
+SELECT * FROM AppSyncRecoveryShadowOperation
+WHERE sessionId = ?
+ORDER BY operationId ASC;
+
+upsertRecoverySegmentIntent:
+INSERT OR IGNORE INTO AppSyncRecoverySegmentWrite(
+    sessionId, segmentIndex, segmentCount, expectedFingerprint,
+    nextBlogId, blogId, verifiedFingerprint, verifiedAtEpochMillis
+) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL);
+
+markRecoverySegmentVerified:
+UPDATE AppSyncRecoverySegmentWrite
+SET blogId = ?, verifiedFingerprint = ?, verifiedAtEpochMillis = ?
+WHERE sessionId = ? AND segmentIndex = ? AND expectedFingerprint = ?;
+
+getRecoverySegmentWrites:
+SELECT * FROM AppSyncRecoverySegmentWrite
+WHERE sessionId = ?
+ORDER BY segmentIndex ASC;
+
+markOperationsSupersededByRecovery:
+UPDATE AppSyncOutbox
+SET lifecycle = 'SUPERSEDED_BY_RECOVERY'
+WHERE operationId IN ? AND lifecycle IN ('PENDING_LOCAL', 'PUBLISHED_UNVERIFIED');
+
+activateRecoveryGeneration:
+UPDATE AppSyncInstallation
+SET accountBinding = ?,
+    deviceId = ?,
+    deviceEpoch = ?,
+    writerNonce = ?,
+    nextSequence = ?,
+    state = 'ACTIVE',
+    journalBlogId = ?,
+    lastVerifiedHeartbeatAt = ?
+WHERE singletonId = 1 AND deviceId = ? AND deviceEpoch = ?;
+
+deleteRecoverySession:
+DELETE FROM AppSyncRecoverySession
+WHERE sessionId = ? AND indexCommitted = 0;
+
+deleteCompletedRecoverySession:
+DELETE FROM AppSyncRecoverySession
+WHERE sessionId = ? AND phase = 'COMPLETED';
+
+deleteRecoveryShadowOperations:
+DELETE FROM AppSyncRecoveryShadowOperation
+WHERE sessionId = ?;
+
+deleteRecoverySegmentWrites:
+DELETE FROM AppSyncRecoverySegmentWrite
+WHERE sessionId = ?;
+
+getActiveRecoverySessions:
+SELECT * FROM AppSyncRecoverySession
+WHERE accountBinding = ? AND phase != 'COMPLETED';
+
+updateRecoveryPayloadMeasurement:
+UPDATE AppSyncRecoverySession
+SET encodedChars = ?, targetBudgetChars = ?, updatedAtEpochMillis = ?
+WHERE sessionId = ?;
+
+getCleanupObservation:
+SELECT * FROM AppSyncCleanupObservation
+WHERE generationId = ?;
+
+getCleanupObservationsByAccount:
+SELECT * FROM AppSyncCleanupObservation
+WHERE accountBinding = ?
+ORDER BY firstObservedAtEpochMillis ASC, generationId ASC;
+
+insertCleanupObservation:
+INSERT INTO AppSyncCleanupObservation(
+    generationId, accountBinding, rootBlogId, rootFingerprint, blogIdsJson,
+    observationCount, firstObservedAtEpochMillis, lastObservedAtEpochMillis,
+    lastIndexFingerprint, deletedBlogIdsJson
+) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, '[]');
+
+updateCleanupObservation:
+UPDATE AppSyncCleanupObservation
+SET rootBlogId = ?,
+    rootFingerprint = ?,
+    blogIdsJson = ?,
+    observationCount = ?,
+    lastObservedAtEpochMillis = ?,
+    lastIndexFingerprint = ?
+WHERE generationId = ?;
+
+markCleanupBlogDeleted:
+UPDATE AppSyncCleanupObservation
+SET deletedBlogIdsJson = ?
+WHERE generationId = ?;
+
+deleteCleanupObservation:
+DELETE FROM AppSyncCleanupObservation
+WHERE generationId = ?;
 
 getResolvedEntitiesByDomainAndEntity:
 SELECT * FROM AppSyncResolvedEntity

@@ -20,6 +20,8 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.engine.LoadedAppSyncCheck
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.OperationReductionResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.OperationReducer
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.ResolvedSyncEntity
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.ResolvedSyncField
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.deterministicPortableCheckpointId
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.SyncDomainStateAdapter
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.SyncEntityKey
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncInstallationState
@@ -28,6 +30,8 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDomainId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncEntityId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationKind
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationOrigin
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperation
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncSequence
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointEnvelopeCodec
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointPayload
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointValidation
@@ -80,6 +84,41 @@ class CheckpointCoordinatorTest {
         assertTrue(failure.reason.contains("projection validation failed"))
         assertTrue(fixture.remote.publishedIds.isEmpty())
         assertTrue(fixture.store.verifiedCheckpoints().isEmpty())
+    }
+
+    @Test
+    fun checkpointIdUsesPortableResolvedValuesNotLocalOperationMetadata() {
+        val fixture = fixture()
+        val operation = fixture.store.allOutboxOperations().single().first
+        val key = SyncEntityKey(SyncDomainId("settings"), SyncEntityId("theme"), 1)
+        val first = ResolvedSyncEntity(
+            key = key,
+            fields = linkedMapOf(
+                "value" to ResolvedSyncField("dark", operation),
+                "type" to ResolvedSyncField("string", operation),
+            ),
+        )
+        val otherLocalMetadata = operation.copy(
+            operationId = SyncOperation.idFor(
+                operation.deviceId,
+                operation.deviceEpoch,
+                SyncSequence(99L),
+            ),
+            sequence = SyncSequence(99L),
+            createdAtEpochMillis = 99_999L,
+        )
+        val second = ResolvedSyncEntity(
+            key = key,
+            fields = linkedMapOf(
+                "type" to ResolvedSyncField("string", otherLocalMetadata),
+                "value" to ResolvedSyncField("dark", otherLocalMetadata),
+            ),
+        )
+
+        assertEquals(
+            deterministicPortableCheckpointId(mapOf("replica" to 8L), listOf(first)),
+            deterministicPortableCheckpointId(mapOf("replica" to 8L), listOf(second)),
+        )
     }
 
     private fun fixture(inconsistentFavoriteUpdateProjection: Boolean = false): Fixture {

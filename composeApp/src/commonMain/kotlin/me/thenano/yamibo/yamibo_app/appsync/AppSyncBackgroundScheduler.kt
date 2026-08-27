@@ -12,4 +12,8 @@ internal fun shouldNotifyBackgroundQuarantine(
     previous: AppSyncServicePhase,
     current: AppSyncServicePhase,
 ): Boolean = previous != AppSyncServicePhase.Quarantined &&
-    current == AppSyncServicePhase.Quarantined
+    previous != AppSyncServicePhase.RecoveryNeedsAttention &&
+    current in setOf(
+        AppSyncServicePhase.Quarantined,
+        AppSyncServicePhase.RecoveryNeedsAttention,
+    )

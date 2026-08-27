@@ -34,6 +34,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncReplicaKey
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncSequence
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncWriterNonce
 import me.thenano.yamibo.yamibo_app.AppSyncOutbox
+import me.thenano.yamibo.yamibo_app.repository.appsync.appSyncThreadCoverOrNull
 
 internal class SqlDelightAppSyncOperationStore(
     private val db: Database,
@@ -299,6 +300,86 @@ internal class SqlDelightAppSyncOperationStore(
         return created
     }
 
+    override fun rebaseCurrentPendingOperations(
+        accountBinding: SyncAccountBinding,
+        drafts: List<LocalSyncOperationDraft>,
+        causalContext: SyncCausalContext,
+        createdAtEpochMillis: Long,
+    ): AppSyncOutboxRebaseResult {
+        var result: AppSyncOutboxRebaseResult? = null
+        db.transaction {
+            val before = requireInstallation()
+            require(before.accountBinding == accountBinding) {
+                "Outbox rebase requires the currently bound account"
+            }
+            val pendingRows = allOutboxOperations().filter { (operation, lifecycle) ->
+                operation.deviceId == before.deviceId &&
+                    operation.deviceEpoch == before.deviceEpoch &&
+                    (lifecycle == AppSyncOperationLifecycle.PendingLocal ||
+                        lifecycle == AppSyncOperationLifecycle.PublishedUnverified)
+            }
+            val discardedCount = pendingRows.size
+            require(discardedCount > 0) { "Outbox rebase requires pending operations" }
+            queries.markReplicaOperationsDiscardedByRebootstrap(
+                deviceId = before.deviceId.value,
+                deviceEpoch = before.deviceEpoch.value,
+            )
+            queries.updateInstallationIdentity(
+                accountBinding = accountBinding.value,
+                deviceId = SyncIdentityGenerator.deviceId().value,
+                deviceEpoch = SyncIdentityGenerator.deviceEpoch().value,
+                writerNonce = SyncIdentityGenerator.writerNonce().value,
+                nextSequence = 1L,
+                state = AppSyncInstallationState.Active.toDb(),
+            )
+            val installation = requireInstallation()
+            drafts.forEachIndexed { index, draft ->
+                val sequence = SyncSequence(installation.nextSequence + index)
+                insertOutbox(
+                    SyncOperation(
+                        operationId = SyncOperation.idFor(
+                            installation.deviceId,
+                            installation.deviceEpoch,
+                            sequence,
+                        ),
+                        deviceId = installation.deviceId,
+                        deviceEpoch = installation.deviceEpoch,
+                        sequence = sequence,
+                        accountBinding = accountBinding,
+                        domainId = draft.domainId,
+                        entityId = draft.entityId,
+                        entityGeneration = draft.entityGeneration,
+                        kind = draft.kind,
+                        fields = draft.fields,
+                        causalContext = causalContext,
+                        createdAtEpochMillis = createdAtEpochMillis,
+                        origin = SyncOperationOrigin.Migration,
+                        bulkDeleteAuthorizationId = draft.bulkDeleteAuthorizationId,
+                    ),
+                    AppSyncOperationLifecycle.PendingLocal,
+                )
+                queries.advanceNextSequence()
+            }
+            var scrubbedLegacyPayloadCount = 0
+            pendingRows.forEach { (operation, _) ->
+                val cover = operation.fields["threadCover"] ?: return@forEach
+                if (cover.isNotBlank() && appSyncThreadCoverOrNull(cover) == null) {
+                    queries.rewriteOperationFields(
+                        fieldsJson = json.encodeToString(operation.fields - "threadCover"),
+                        operationId = operation.operationId.value,
+                    )
+                    scrubbedLegacyPayloadCount++
+                }
+            }
+            result = AppSyncOutboxRebaseResult(
+                discardedOperationCount = discardedCount,
+                replacementOperationCount = drafts.size,
+                scrubbedLegacyPayloadCount = scrubbedLegacyPayloadCount,
+            )
+        }
+        return requireNotNull(result)
+    }
+
     override fun saveBootstrapRollbackSnapshot(snapshot: AppSyncBootstrapRollbackSnapshot) {
         require(snapshot.databaseGeneration.isNotBlank()) {
             "Rollback snapshot database generation cannot be blank"
@@ -393,6 +474,12 @@ internal class SqlDelightAppSyncOperationStore(
     override fun markPublishedUnverified(operationIds: Set<SyncOperationId>) {
         if (operationIds.isNotEmpty()) {
             queries.markOperationsPublishedUnverified(operationIds.map { it.value })
+        }
+    }
+
+    override fun markPendingLocal(operationIds: Set<SyncOperationId>) {
+        if (operationIds.isNotEmpty()) {
+            queries.markOperationsPendingLocal(operationIds.map { it.value })
         }
     }
 

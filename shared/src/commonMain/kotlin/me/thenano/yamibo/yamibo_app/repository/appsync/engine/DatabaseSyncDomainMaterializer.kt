@@ -2,12 +2,14 @@ package me.thenano.yamibo.yamibo_app.repository.appsync.engine
 
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.repository.appsync.isAppSyncLocalOnlySetting
+import me.thenano.yamibo.yamibo_app.repository.appsync.appSyncThreadCoverOrNull
 import me.thenano.yamibo.yamibo_app.repository.rss.rssSearchSubscriptionSyncId
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 
 internal class DatabaseSyncDomainMaterializer(
     private val db: Database,
     private val settingsStore: SettingsStore,
+    private val recordPortabilityEvidence: (AppSyncPortabilityEvidence) -> Unit = {},
 ) : SyncDomainMaterializer {
     override fun apply(entity: ResolvedSyncEntity) {
         when (entity.key.domainId.value) {
@@ -109,7 +111,17 @@ internal class DatabaseSyncDomainMaterializer(
     }
 
     private fun applySetting(entity: ResolvedSyncEntity) {
-        if (isAppSyncLocalOnlySetting(entity.key.entityId.value)) return
+        if (isAppSyncLocalOnlySetting(entity.key.entityId.value)) {
+            recordPortabilityEvidence(
+                AppSyncPortabilityEvidence(
+                    domain = entity.key.domainId.value,
+                    redactedEntityId = "setting(len=${entity.key.entityId.value.length})",
+                    reason = "legacy-local-only",
+                ),
+            )
+            db.appSyncOperationQueries.deleteSyncSettingValue(entity.key.entityId.value)
+            return
+        }
         db.appSyncOperationQueries.recordKnownSyncSettingKey(entity.key.entityId.value)
         if (entity.tombstone != null) {
             db.appSyncOperationQueries.deleteSyncSettingValue(entity.key.entityId.value)
@@ -360,11 +372,30 @@ internal class DatabaseSyncDomainMaterializer(
             return
         }
         val fields = entity.values()
+        val portableThreadCover = appSyncThreadCoverOrNull(fields["threadCover"])
+        val existingThreadCover = if (fields["threadCover"] != null && portableThreadCover == null) {
+            db.readingHistoryQueries.getByThreadKey(
+                threadId = fields.long("threadId"),
+                threadType = fields.require("threadType"),
+                authorId = fields.long("authorId"),
+            ).executeAsOneOrNull()?.threadCover
+        } else {
+            null
+        }
+        if (fields["threadCover"] != null && portableThreadCover == null) {
+            recordPortabilityEvidence(
+                AppSyncPortabilityEvidence(
+                    domain = entity.key.domainId.value,
+                    redactedEntityId = "thread(len=${entity.key.entityId.value.length})",
+                    reason = "legacy-local-cover",
+                ),
+            )
+        }
         db.readingHistoryQueries.upsert(
             threadId = fields.long("threadId"),
             threadType = fields.require("threadType"),
             threadName = fields.require("threadName"),
-            threadCover = fields["threadCover"],
+            threadCover = portableThreadCover ?: existingThreadCover,
             forumName = fields["forumName"],
             forumId = fields["forumId"]?.toLongOrNull(),
             authorId = fields.long("authorId"),
@@ -630,3 +661,9 @@ internal class DatabaseSyncDomainMaterializer(
             }
         }
 }
+
+internal data class AppSyncPortabilityEvidence(
+    val domain: String,
+    val redactedEntityId: String,
+    val reason: String,
+)

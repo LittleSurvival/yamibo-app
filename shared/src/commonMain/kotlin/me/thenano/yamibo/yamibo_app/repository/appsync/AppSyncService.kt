@@ -50,6 +50,8 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationOr
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.YamiboAppSyncBlogProvider
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.YamiboAppSyncJournalRemote
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCloudResetResult
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCapacityFeatureFlags
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCapacityFeatureFlagKeys
 import me.thenano.yamibo.yamibo_app.repository.bookmark.BookMarkRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.backup.BackupRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.backup.CloudBackupPayloadCodec
@@ -65,6 +67,8 @@ import me.thenano.yamibo.yamibo_app.repository.settings.core.SettingsRegistry
 import me.thenano.yamibo.yamibo_app.repository.settings.core.StringSetting
 import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncOperationStore
 import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncRemoteBlogStore
+import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncRecoveryStore
+import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncCleanupObservationStore
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
 
@@ -77,6 +81,40 @@ enum class AppSyncServicePhase {
     PausedProvider,
     Quarantined,
     RetryPending,
+    RecoveryClassifying,
+    RecoveryStaging,
+    RecoveryUploadingSegments,
+    RecoveryPublishingRoot,
+    RecoveryCommittingIndex,
+    RecoveryActivatingLocal,
+    RecoveryCleaning,
+    RecoveryNeedsAttention,
+}
+
+data class AppSyncRecoveryStatus(
+    val phase: AppSyncRecoveryPublicPhase,
+    val encodedChars: Int?,
+    val targetBudgetChars: Int,
+    val verifiedSegmentCount: Int,
+    val totalSegmentCount: Int,
+    val pendingOperationCount: Int,
+    val retryCount: Long,
+    val retryCategory: String?,
+    val nextRetryAtEpochMillis: Long?,
+    val blockingDomain: String?,
+    val redactedBlockingEntity: String?,
+    val payloadFingerprint: String,
+)
+
+enum class AppSyncRecoveryPublicPhase {
+    Classifying,
+    Staging,
+    UploadingSegments,
+    PublishingRoot,
+    CommittingIndex,
+    ActivatingLocal,
+    Cleaning,
+    NeedsAttention,
 }
 
 data class AppSyncServiceStatus(
@@ -96,6 +134,7 @@ data class AppSyncServiceStatus(
     val scheduleSettings: AppSyncScheduleSettings = AppSyncScheduleSettings(),
     val pendingTriggerGeneration: Long? = null,
     val journalRetirementStatus: AppSyncJournalRetirementStatus? = null,
+    val recoveryStatus: AppSyncRecoveryStatus? = null,
 )
 
 sealed interface AppSyncStatusMessage {
@@ -131,6 +170,8 @@ sealed interface AppSyncStatusMessage {
     ) : AppSyncStatusMessage
     data object SyncAlreadyRunning : AppSyncStatusMessage
     data object AuthenticationExpired : AppSyncStatusMessage
+    data object RecoveryInProgress : AppSyncStatusMessage
+    data class RecoveryNeedsAttention(val domain: String) : AppSyncStatusMessage
     /** Carries diagnostics across layers; the UI intentionally replaces it with a localized key. */
     data class External(val value: String) : AppSyncStatusMessage
 }
@@ -303,14 +344,34 @@ class AppSyncService(
         materializer = DatabaseSyncDomainMaterializer(db, settingsStore),
         nowMillis = nowMillis,
     )
-    private val remote = YamiboAppSyncJournalRemote(
-        provider = YamiboAppSyncBlogProvider(
-            cookieStore = authRepository.cookieStore,
-            yamiboClient = authRepository.yamiboClient,
+    private val blogProvider = YamiboAppSyncBlogProvider(
+        cookieStore = authRepository.cookieStore,
+        yamiboClient = authRepository.yamiboClient,
+    )
+    private val remoteBlogStore = SqlDelightAppSyncRemoteBlogStore(db)
+    private val recoveryStore = SqlDelightAppSyncRecoveryStore(db)
+    private val cleanupObservationStore = SqlDelightAppSyncCleanupObservationStore(db)
+    private val capacityFlags = AppSyncCapacityFeatureFlags(
+        v2ReadsEnabled = settingsStore.getBoolean(AppSyncCapacityFeatureFlagKeys.V2_READS, true),
+        v2WritesEnabled = settingsStore.getBoolean(AppSyncCapacityFeatureFlagKeys.V2_WRITES, true),
+        automaticLegacyRecoveryEnabled = settingsStore.getBoolean(
+            AppSyncCapacityFeatureFlagKeys.AUTOMATIC_LEGACY_RECOVERY,
+            true,
         ),
-        store = SqlDelightAppSyncRemoteBlogStore(db),
+        cleanupDryRun = settingsStore.getBoolean(AppSyncCapacityFeatureFlagKeys.CLEANUP_DRY_RUN, true),
+        cleanupDeletionEnabled = settingsStore.getBoolean(
+            AppSyncCapacityFeatureFlagKeys.CLEANUP_DELETION,
+            false,
+        ),
+    )
+    private val remote = YamiboAppSyncJournalRemote(
+        provider = blogProvider,
+        store = remoteBlogStore,
         nowMillis = nowMillis,
         retirementIntents = store::retirementIntents,
+        recoveryStore = recoveryStore,
+        cleanupObservationStore = cleanupObservationStore,
+        capacityFlags = capacityFlags,
     )
     private var localSnapshotSource: BackupRepositoryImpl? = null
     private val migrationPlanner = BackupSnapshotMigrationPlanner()
@@ -325,7 +386,7 @@ class AppSyncService(
             val source = checkNotNull(localSnapshotSource) {
                 "Backup snapshot source is not configured"
             }
-            val snapshot = source.createAppSyncSnapshot()
+            val snapshot = source.createAppSyncSnapshot().withPortableAppSyncPayloads()
             val migration = migrationPlanner.planWithDiagnostics(snapshot)
             CapturedBootstrapSnapshot(
                 migrationDrafts = migration.drafts,
@@ -934,12 +995,19 @@ class AppSyncService(
         forcePushWhenCloudEmpty: Boolean = true,
     ): AppSyncServiceStatus {
         val demand = existingDemand ?: beginReliabilityDemand(trigger)
+        val resumesCapacityRecovery = recoveryStore.recoverySession(binding)
+            ?.phase?.requiresPayloadResume() == true
+        val runPolicy = appSyncRecoveryRunPolicy(
+            resumesCapacityRecovery = resumesCapacityRecovery,
+            requestedProjectionAudit = auditLocalProjection,
+            requestedEmptyCloudDetection = forcePushWhenCloudEmpty,
+        )
         mutableStatus.value = mutableStatus.value.copy(
             phase = AppSyncServicePhase.Running,
             message = "正在同步操作紀錄",
             presentationMessage = AppSyncStatusMessage.SyncRunning,
         )
-        if (auditLocalProjection && localSnapshotSource != null) {
+        if (runPolicy.auditLocalProjection && localSnapshotSource != null) {
             when (val audit = repairLocalProjection(binding)) {
                 is LocalProjectionRepairResult.Ready -> Unit
                 is LocalProjectionRepairResult.Failed -> {
@@ -958,7 +1026,9 @@ class AppSyncService(
             accountBinding = binding,
             formHash = authRepository.currentUser()?.formHash,
             forceDiscovery = forceDiscovery,
-            detectEmptyCloud = forcePushWhenCloudEmpty,
+            // Until Index commit, staged v2 data is intentionally invisible and the cloud can
+            // still look empty. Resume the durable source set instead of seeding it again.
+            detectEmptyCloud = runPolicy.detectEmptyCloud,
         )
         logSyncResult(trigger, result)
         if (result is OperationSyncResult.EmptyCloud) {
@@ -1001,6 +1071,7 @@ class AppSyncService(
                         receivedCount = converged.appliedRemoteCount,
                         acknowledgedCount = converged.acknowledgedLocalCount,
                     ),
+                    phaseOverride = AppSyncServicePhase.RetryPending,
                     changeSummaries = converged.changes.map(OperationChangeSummary::toPublic),
                 )
             }
@@ -1015,7 +1086,14 @@ class AppSyncService(
                 )
                 is OperationSyncResult.Converged -> statusFor(
                     AppSyncInstallationState.Active,
-                    "同步完成：接收 ${result.appliedRemoteCount}、確認 ${result.acknowledgedLocalCount}",
+                    if (result.migratedLegacyOperationCount > 0) {
+                        "已遷移 ${result.migratedLegacyOperationCount} 筆舊同步操作為 " +
+                            "${result.replacementMigrationOperationCount} 筆安全快照；" +
+                            "已清理 ${result.scrubbedLegacyPayloadCount} 筆巨大快取欄位；" +
+                            "同步完成：接收 ${result.appliedRemoteCount}、確認 ${result.acknowledgedLocalCount}"
+                    } else {
+                        "同步完成：接收 ${result.appliedRemoteCount}、確認 ${result.acknowledgedLocalCount}"
+                    },
                     AppSyncStatusMessage.SyncCompleted(
                         receivedCount = result.appliedRemoteCount,
                         acknowledgedCount = result.acknowledgedLocalCount,
@@ -1028,7 +1106,11 @@ class AppSyncService(
                 is OperationSyncResult.PausedProvider ->
                     statusFor(AppSyncInstallationState.PausedProvider, result.reason)
                 is OperationSyncResult.StoragePressure ->
-                    statusFor(AppSyncInstallationState.PausedProvider, result.reason)
+                    statusFor(
+                        AppSyncInstallationState.Active,
+                        result.reason,
+                        phaseOverride = AppSyncServicePhase.RetryPending,
+                    )
                 is OperationSyncResult.RebootstrapRequired ->
                     statusFor(AppSyncInstallationState.RebootstrapRequired, result.reason)
                 is OperationSyncResult.RetryScheduled -> statusFor(
@@ -1209,6 +1291,12 @@ class AppSyncService(
             causalReplicaCount = finalCoverage.size.toLong(),
             causalCoverageHash = coverageHash(finalCoverage),
         )
+        val orphanCount = store.installation()?.accountBinding
+            ?.let { cleanupObservationStore.observations(it.value).size }
+            ?: 0
+        redactedRecoveryEvidenceLine(status, orphanCount)?.let { evidence ->
+            Logger.i(APPSYNC_LOG_TAG, evidence)
+        }
         return status
     }
 
@@ -1261,7 +1349,17 @@ class AppSyncService(
         journalRetirementStatus: AppSyncJournalRetirementStatus? = null,
     ): AppSyncServiceStatus {
         val installation = requireNotNull(store.installation())
-        val phase = phaseOverride ?: when (state) {
+        val recoveryStatus = installation.accountBinding
+            ?.let(recoveryStore::recoverySession)
+            ?.takeIf {
+                it.phase != me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.Completed
+            }
+            ?.let { session ->
+                appSyncRecoveryStatus(session, recoveryStore.segmentWrites(session.sessionId))
+            }
+        val phase = phaseOverride?.takeIf { it == AppSyncServicePhase.Running }
+            ?: recoveryStatus?.phase?.toServicePhase()
+            ?: phaseOverride ?: when (state) {
             AppSyncInstallationState.Unbound,
             AppSyncInstallationState.Bootstrapping,
             AppSyncInstallationState.RebootstrapRequired,
@@ -1277,13 +1375,22 @@ class AppSyncService(
             pendingOperationCount = store.pendingOperations().size,
             lastVerifiedAtEpochMillis = installation.lastVerifiedHeartbeatAt,
             message = message,
-            presentationMessage = presentationMessage,
+            presentationMessage = when {
+                recoveryStatus?.phase == AppSyncRecoveryPublicPhase.NeedsAttention ->
+                    AppSyncStatusMessage.RecoveryNeedsAttention(
+                        recoveryStatus.blockingDomain ?: "unknown",
+                    )
+                recoveryStatus != null && presentationMessage is AppSyncStatusMessage.External ->
+                    AppSyncStatusMessage.RecoveryInProgress
+                else -> presentationMessage
+            },
             changeSummaries = changeSummaries,
             scheduleSettings = installation.scheduleSettings,
             pendingTriggerGeneration = installation.requestedTriggerGeneration.takeIf {
                 it > installation.accountedTriggerGeneration
             },
             journalRetirementStatus = journalRetirementStatus,
+            recoveryStatus = recoveryStatus,
         )
     }
 
@@ -1323,6 +1430,100 @@ class AppSyncService(
         const val JOURNAL_RETIREMENT_DELETE_ENABLED_KEY =
             "appsync.journal_retirement_delete_enabled"
     }
+}
+
+internal fun AppSyncRecoveryPublicPhase.toServicePhase(): AppSyncServicePhase = when (this) {
+    AppSyncRecoveryPublicPhase.Classifying -> AppSyncServicePhase.RecoveryClassifying
+    AppSyncRecoveryPublicPhase.Staging -> AppSyncServicePhase.RecoveryStaging
+    AppSyncRecoveryPublicPhase.UploadingSegments -> AppSyncServicePhase.RecoveryUploadingSegments
+    AppSyncRecoveryPublicPhase.PublishingRoot -> AppSyncServicePhase.RecoveryPublishingRoot
+    AppSyncRecoveryPublicPhase.CommittingIndex -> AppSyncServicePhase.RecoveryCommittingIndex
+    AppSyncRecoveryPublicPhase.ActivatingLocal -> AppSyncServicePhase.RecoveryActivatingLocal
+    AppSyncRecoveryPublicPhase.Cleaning -> AppSyncServicePhase.RecoveryCleaning
+    AppSyncRecoveryPublicPhase.NeedsAttention -> AppSyncServicePhase.RecoveryNeedsAttention
+}
+
+internal fun me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase
+    .requiresPayloadResume(): Boolean =
+    this != me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.Completed &&
+        this != me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.NeedsAttention
+
+internal data class AppSyncRecoveryRunPolicy(
+    val auditLocalProjection: Boolean,
+    val detectEmptyCloud: Boolean,
+)
+
+internal fun appSyncRecoveryRunPolicy(
+    resumesCapacityRecovery: Boolean,
+    requestedProjectionAudit: Boolean,
+    requestedEmptyCloudDetection: Boolean,
+): AppSyncRecoveryRunPolicy = AppSyncRecoveryRunPolicy(
+    auditLocalProjection = requestedProjectionAudit && !resumesCapacityRecovery,
+    detectEmptyCloud = requestedEmptyCloudDetection && !resumesCapacityRecovery,
+)
+
+internal fun me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.toPublicRecoveryPhase():
+    AppSyncRecoveryPublicPhase = when (this) {
+    me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.Classifying ->
+        AppSyncRecoveryPublicPhase.Classifying
+    me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.Staging ->
+        AppSyncRecoveryPublicPhase.Staging
+    me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.PublishingSegments ->
+        AppSyncRecoveryPublicPhase.UploadingSegments
+    me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.PublishingRoot ->
+        AppSyncRecoveryPublicPhase.PublishingRoot
+    me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.CommittingIndex ->
+        AppSyncRecoveryPublicPhase.CommittingIndex
+    me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.ActivatingLocal ->
+        AppSyncRecoveryPublicPhase.ActivatingLocal
+    me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.Cleaning,
+    me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.Completed,
+    -> AppSyncRecoveryPublicPhase.Cleaning
+    me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.NeedsAttention ->
+        AppSyncRecoveryPublicPhase.NeedsAttention
+}
+
+internal fun appSyncRecoveryStatus(
+    session: me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoverySession,
+    writes: List<me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoverySegmentWrite>,
+): AppSyncRecoveryStatus = AppSyncRecoveryStatus(
+    phase = session.phase.toPublicRecoveryPhase(),
+    encodedChars = session.encodedChars,
+    targetBudgetChars = session.targetBudgetChars,
+    verifiedSegmentCount = writes.count {
+        it.blogId != null && it.verifiedFingerprint == it.expectedFingerprint
+    },
+    totalSegmentCount = writes.map { it.segmentCount }.maxOrNull() ?: 0,
+    pendingOperationCount = session.sourceOperationIds.size,
+    retryCount = session.retryCount,
+    retryCategory = session.lastErrorCategory,
+    nextRetryAtEpochMillis = session.nextRetryAtEpochMillis,
+    blockingDomain = session.blockingDomain,
+    redactedBlockingEntity = session.redactedBlockingEntity,
+    payloadFingerprint = session.replacementFingerprint,
+)
+
+internal fun redactedRecoveryEvidenceLine(
+    status: AppSyncServiceStatus,
+    orphanCount: Int,
+): String? = status.recoveryStatus?.let { recovery ->
+    val requestCount = recovery.verifiedSegmentCount + when (recovery.phase) {
+        AppSyncRecoveryPublicPhase.Classifying,
+        AppSyncRecoveryPublicPhase.Staging,
+        AppSyncRecoveryPublicPhase.UploadingSegments,
+        -> 0
+        AppSyncRecoveryPublicPhase.PublishingRoot -> 1
+        AppSyncRecoveryPublicPhase.CommittingIndex,
+        AppSyncRecoveryPublicPhase.ActivatingLocal,
+        AppSyncRecoveryPublicPhase.Cleaning,
+        AppSyncRecoveryPublicPhase.NeedsAttention,
+        -> 2
+    }
+    "Recovery evidence fingerprint=${recovery.payloadFingerprint} " +
+        "encodedChars=${recovery.encodedChars ?: -1} targetChars=${recovery.targetBudgetChars} " +
+        "segments=${recovery.verifiedSegmentCount}/${recovery.totalSegmentCount} " +
+        "requests=$requestCount phase=${recovery.phase.name} retryCount=${recovery.retryCount} " +
+        "retryCategory=${recovery.retryCategory ?: "none"} orphanCount=$orphanCount"
 }
 
 internal fun AppSyncInstallationState.requiresBootstrapForSync(): Boolean = when (this) {
@@ -1476,11 +1677,19 @@ internal fun reliabilityOutcomeFor(phase: AppSyncServicePhase): String = when (p
     AppSyncServicePhase.RetryPending,
     AppSyncServicePhase.Running,
     AppSyncServicePhase.BootstrapRequired,
+    AppSyncServicePhase.RecoveryClassifying,
+    AppSyncServicePhase.RecoveryStaging,
+    AppSyncServicePhase.RecoveryUploadingSegments,
+    AppSyncServicePhase.RecoveryPublishingRoot,
+    AppSyncServicePhase.RecoveryCommittingIndex,
+    AppSyncServicePhase.RecoveryActivatingLocal,
+    AppSyncServicePhase.RecoveryCleaning,
     -> "RETRY"
     AppSyncServicePhase.PausedAuth,
     AppSyncServicePhase.Disabled,
     -> "EXCLUDED_AUTH"
     AppSyncServicePhase.PausedProvider,
     AppSyncServicePhase.Quarantined,
+    AppSyncServicePhase.RecoveryNeedsAttention,
     -> "MANUAL_INTERVENTION"
 }

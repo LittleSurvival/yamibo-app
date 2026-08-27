@@ -1,0 +1,15 @@
+CREATE TABLE AppSyncCleanupObservation (
+    generationId TEXT NOT NULL PRIMARY KEY,
+    accountBinding TEXT NOT NULL,
+    rootBlogId INTEGER NOT NULL,
+    rootFingerprint TEXT NOT NULL,
+    blogIdsJson TEXT NOT NULL,
+    observationCount INTEGER NOT NULL,
+    firstObservedAtEpochMillis INTEGER NOT NULL,
+    lastObservedAtEpochMillis INTEGER NOT NULL,
+    lastIndexFingerprint TEXT NOT NULL,
+    deletedBlogIdsJson TEXT NOT NULL DEFAULT '[]'
+);
+
+CREATE INDEX AppSyncCleanupObservationAccountIndex
+ON AppSyncCleanupObservation(accountBinding);

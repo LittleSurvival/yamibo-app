@@ -71,11 +71,19 @@ class AppSyncWorker(
             AppSyncServicePhase.PausedAuth,
             AppSyncServicePhase.Quarantined,
             AppSyncServicePhase.Disabled,
+            AppSyncServicePhase.RecoveryNeedsAttention,
             -> Result.failure()
             AppSyncServicePhase.BootstrapRequired,
             AppSyncServicePhase.Running,
             AppSyncServicePhase.PausedProvider,
             AppSyncServicePhase.RetryPending,
+            AppSyncServicePhase.RecoveryClassifying,
+            AppSyncServicePhase.RecoveryStaging,
+            AppSyncServicePhase.RecoveryUploadingSegments,
+            AppSyncServicePhase.RecoveryPublishingRoot,
+            AppSyncServicePhase.RecoveryCommittingIndex,
+            AppSyncServicePhase.RecoveryActivatingLocal,
+            AppSyncServicePhase.RecoveryCleaning,
             -> Result.retry()
         }
     } catch (error: Throwable) {

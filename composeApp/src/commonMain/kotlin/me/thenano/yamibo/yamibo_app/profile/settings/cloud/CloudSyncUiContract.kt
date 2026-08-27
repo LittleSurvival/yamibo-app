@@ -58,6 +58,10 @@ internal enum class CloudSyncDetailLabel {
     AutomaticSync,
     PendingUploads,
     JournalCleanup,
+    RecoveryPayload,
+    RecoverySegments,
+    RecoveryPending,
+    RecoveryBlocker,
     LatestResult,
     ;
 
@@ -67,6 +71,10 @@ internal enum class CloudSyncDetailLabel {
         AutomaticSync -> i18n("自動同步")
         PendingUploads -> i18n("待上傳操作")
         JournalCleanup -> i18n("Journal 清理")
+        RecoveryPayload -> i18n("復原資料大小")
+        RecoverySegments -> i18n("復原分段進度")
+        RecoveryPending -> i18n("復原待處理操作")
+        RecoveryBlocker -> i18n("需要處理")
         LatestResult -> i18n("最近結果")
     }
 }
@@ -78,6 +86,7 @@ internal sealed interface CloudSyncDetailValue {
     data class Count(val value: Int) : CloudSyncDetailValue
     data class Journal(val value: AppSyncJournalRetirementMessage) : CloudSyncDetailValue
     data class StatusMessage(val value: AppSyncStatusMessage) : CloudSyncDetailValue
+    data class Text(val value: String) : CloudSyncDetailValue
     data object NoRecord : CloudSyncDetailValue
 }
 
@@ -211,6 +220,7 @@ internal data class CloudSyncUiState(
     val periodicInterval: FixedScheduleInterval = FixedScheduleInterval.Hours6,
     val periodicIntervalOptions: List<FixedScheduleInterval> = AppSyncPeriodicIntervals,
     val actionsAvailable: Boolean = false,
+    val refreshAvailable: Boolean = false,
     val cloudDataExists: Boolean = false,
     val notice: CloudSyncNotice? = null,
     val changes: List<CloudSyncChangeDetail> = emptyList(),
@@ -449,13 +459,23 @@ private fun CloudSyncForcePreview.toService() = AppSyncForcePreview(
 internal fun AppSyncServiceStatus.toUiState(
     backgroundSchedulerAvailable: Boolean,
 ): CloudSyncUiState {
-    val busy = phase == AppSyncServicePhase.Running
+    val recoveryPhases = setOf(
+        AppSyncServicePhase.RecoveryClassifying,
+        AppSyncServicePhase.RecoveryStaging,
+        AppSyncServicePhase.RecoveryUploadingSegments,
+        AppSyncServicePhase.RecoveryPublishingRoot,
+        AppSyncServicePhase.RecoveryCommittingIndex,
+        AppSyncServicePhase.RecoveryActivatingLocal,
+        AppSyncServicePhase.RecoveryCleaning,
+    )
+    val busy = phase == AppSyncServicePhase.Running || phase in recoveryPhases
     val available = phase == AppSyncServicePhase.Active
     val needsAttention = phase in setOf(
         AppSyncServicePhase.PausedAuth,
         AppSyncServicePhase.PausedProvider,
         AppSyncServicePhase.Quarantined,
         AppSyncServicePhase.RetryPending,
+        AppSyncServicePhase.RecoveryNeedsAttention,
     )
     return CloudSyncUiState(
         status = when {
@@ -473,6 +493,13 @@ internal fun AppSyncServiceStatus.toUiState(
                 AppSyncServicePhase.Active,
                 AppSyncServicePhase.BootstrapRequired,
                 AppSyncServicePhase.RetryPending,
+                AppSyncServicePhase.RecoveryClassifying,
+                AppSyncServicePhase.RecoveryStaging,
+                AppSyncServicePhase.RecoveryUploadingSegments,
+                AppSyncServicePhase.RecoveryPublishingRoot,
+                AppSyncServicePhase.RecoveryCommittingIndex,
+                AppSyncServicePhase.RecoveryActivatingLocal,
+                AppSyncServicePhase.RecoveryCleaning,
             ),
         automaticStatus = when {
             !backgroundSchedulerAvailable -> CloudSyncAutomaticStatus.Unsupported
@@ -482,7 +509,12 @@ internal fun AppSyncServiceStatus.toUiState(
         syncOnAppStart = scheduleSettings.syncOnAppStart,
         syncOnForegroundExit = scheduleSettings.syncOnForegroundExit,
         periodicInterval = scheduleSettings.periodicInterval,
-        actionsAvailable = !busy,
+        actionsAvailable = !busy && recoveryStatus == null,
+        // Durable recovery phases describe resumable state, not necessarily an active coroutine.
+        // Keep destructive/force actions disabled, but allow refresh to reacquire the lease and
+        // continue when automatic sync is off. Concurrent taps remain safe through the sync lease.
+        refreshAvailable = phase != AppSyncServicePhase.Running &&
+            phase != AppSyncServicePhase.RecoveryNeedsAttention,
         cloudDataExists = available || lastVerifiedAtEpochMillis != null,
         notice = if (needsAttention) {
             CloudSyncNotice(presentationMessage, CloudSyncNoticeSeverity.Warning)
@@ -496,6 +528,43 @@ internal fun AppSyncServiceStatus.toUiState(
                     CloudSyncDetailValue.Phase(phase),
                 ),
             )
+            recoveryStatus?.let { recovery ->
+                add(
+                    CloudSyncDetail(
+                        CloudSyncDetailLabel.RecoveryPayload,
+                        CloudSyncDetailValue.Text(
+                            "${recovery.encodedChars ?: 0} / ${recovery.targetBudgetChars}",
+                        ),
+                    ),
+                )
+                add(
+                    CloudSyncDetail(
+                        CloudSyncDetailLabel.RecoverySegments,
+                        CloudSyncDetailValue.Text(
+                            "${recovery.verifiedSegmentCount} / ${recovery.totalSegmentCount}",
+                        ),
+                    ),
+                )
+                add(
+                    CloudSyncDetail(
+                        CloudSyncDetailLabel.RecoveryPending,
+                        CloudSyncDetailValue.Count(recovery.pendingOperationCount),
+                    ),
+                )
+                if (recovery.blockingDomain != null || recovery.redactedBlockingEntity != null) {
+                    add(
+                        CloudSyncDetail(
+                            CloudSyncDetailLabel.RecoveryBlocker,
+                            CloudSyncDetailValue.Text(
+                                listOfNotNull(
+                                    recovery.blockingDomain,
+                                    recovery.redactedBlockingEntity,
+                                ).joinToString(" / "),
+                            ),
+                        ),
+                    )
+                }
+            }
             add(
                 CloudSyncDetail(
                     CloudSyncDetailLabel.LastVerified,

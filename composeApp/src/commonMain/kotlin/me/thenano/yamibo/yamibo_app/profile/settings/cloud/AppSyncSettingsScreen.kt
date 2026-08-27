@@ -337,7 +337,7 @@ private fun CloudStatusRow(
         }
         IconButton(
             onClick = onRefresh,
-            enabled = state.actionsAvailable && !state.isBusy,
+            enabled = state.refreshAvailable,
             modifier = Modifier
                 .size(48.dp)
                 .testTag("app_sync_refresh"),
@@ -346,7 +346,7 @@ private fun CloudStatusRow(
                 imageVector = YamiboIcons.Reload,
                 contentDescription = i18n("重新檢查雲端備份"),
                 tint = colors.brownPrimary.copy(
-                    alpha = if (state.actionsAvailable && !state.isBusy) 1f else 0.35f,
+                    alpha = if (state.refreshAvailable) 1f else 0.35f,
                 ),
             )
         }
@@ -841,6 +841,14 @@ private fun cloudSyncStatusHeadline(phase: AppSyncServicePhase?): String = when 
     AppSyncServicePhase.PausedProvider -> i18n("雲端暫時無法使用")
     AppSyncServicePhase.Quarantined -> i18n("有資料需要檢查")
     AppSyncServicePhase.RetryPending -> i18n("等待重試")
+    AppSyncServicePhase.RecoveryClassifying -> i18n("正在分析舊同步資料")
+    AppSyncServicePhase.RecoveryStaging -> i18n("正在建立安全復原資料")
+    AppSyncServicePhase.RecoveryUploadingSegments -> i18n("正在分段上傳復原資料")
+    AppSyncServicePhase.RecoveryPublishingRoot -> i18n("正在驗證復原索引根")
+    AppSyncServicePhase.RecoveryCommittingIndex -> i18n("正在提交雲端索引")
+    AppSyncServicePhase.RecoveryActivatingLocal -> i18n("正在套用已驗證復原結果")
+    AppSyncServicePhase.RecoveryCleaning -> i18n("正在安全清理舊同步資料")
+    AppSyncServicePhase.RecoveryNeedsAttention -> i18n("復原需要處理")
 }
 
 private fun appSyncStatusMessageText(message: AppSyncStatusMessage): String = when (message) {
@@ -891,6 +899,10 @@ private fun appSyncStatusMessageText(message: AppSyncStatusMessage): String = wh
         )
     AppSyncStatusMessage.SyncAlreadyRunning -> i18n("已有同步工作執行中")
     AppSyncStatusMessage.AuthenticationExpired -> i18n("登入狀態已過期，請先刷新登入狀態")
+    AppSyncStatusMessage.RecoveryInProgress ->
+        i18n("正在自動修復過大的舊同步資料；可稍後重試，進度不會遺失")
+    is AppSyncStatusMessage.RecoveryNeedsAttention ->
+        i18n("{} 的資料無法安全轉移，請保留本機資料並查看復原詳情", message.domain)
     // External values are provider/engine diagnostics, not localization keys. Keep them in the
     // service status for logs and tests, but never leak untranslated implementation text into UI.
     is AppSyncStatusMessage.External -> i18n("同步失敗")
@@ -903,6 +915,7 @@ private fun cloudSyncDetailValueText(value: CloudSyncDetailValue): String = when
     is CloudSyncDetailValue.Count -> value.value.toString()
     is CloudSyncDetailValue.Journal -> appSyncJournalRetirementText(value.value)
     is CloudSyncDetailValue.StatusMessage -> appSyncStatusMessageText(value.value)
+    is CloudSyncDetailValue.Text -> value.value
     CloudSyncDetailValue.NoRecord -> i18n("尚無紀錄")
 }
 
@@ -915,6 +928,14 @@ private fun cloudSyncPhaseText(phase: AppSyncServicePhase): String = when (phase
     AppSyncServicePhase.PausedProvider -> i18n("供應端暫停")
     AppSyncServicePhase.Quarantined -> i18n("隔離")
     AppSyncServicePhase.RetryPending -> i18n("等待重試")
+    AppSyncServicePhase.RecoveryClassifying -> i18n("分析中")
+    AppSyncServicePhase.RecoveryStaging -> i18n("準備中")
+    AppSyncServicePhase.RecoveryUploadingSegments -> i18n("分段上傳中")
+    AppSyncServicePhase.RecoveryPublishingRoot -> i18n("發布根索引中")
+    AppSyncServicePhase.RecoveryCommittingIndex -> i18n("提交索引中")
+    AppSyncServicePhase.RecoveryActivatingLocal -> i18n("本機啟用中")
+    AppSyncServicePhase.RecoveryCleaning -> i18n("安全清理中")
+    AppSyncServicePhase.RecoveryNeedsAttention -> i18n("需要處理")
 }
 
 private fun appSyncJournalRetirementText(message: AppSyncJournalRetirementMessage): String =

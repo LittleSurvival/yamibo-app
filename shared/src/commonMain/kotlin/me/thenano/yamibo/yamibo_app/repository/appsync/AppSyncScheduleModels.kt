@@ -38,10 +38,18 @@ fun AppSyncServicePhase.isDurableAutomaticTriggerOutcome(): Boolean = when (this
     AppSyncServicePhase.PausedAuth,
     AppSyncServicePhase.Quarantined,
     AppSyncServicePhase.Disabled,
+    AppSyncServicePhase.RecoveryNeedsAttention,
     -> true
     AppSyncServicePhase.BootstrapRequired,
     AppSyncServicePhase.Running,
     AppSyncServicePhase.PausedProvider,
     AppSyncServicePhase.RetryPending,
+    AppSyncServicePhase.RecoveryClassifying,
+    AppSyncServicePhase.RecoveryStaging,
+    AppSyncServicePhase.RecoveryUploadingSegments,
+    AppSyncServicePhase.RecoveryPublishingRoot,
+    AppSyncServicePhase.RecoveryCommittingIndex,
+    AppSyncServicePhase.RecoveryActivatingLocal,
+    AppSyncServicePhase.RecoveryCleaning,
     -> false
 }

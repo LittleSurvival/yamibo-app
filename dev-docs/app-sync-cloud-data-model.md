@@ -28,6 +28,8 @@
 | Index | `Yamibo App Sync Index - DO NOT EDIT - v1` |
 | Journal | `Yamibo App Sync Journal - DO NOT EDIT - v1 - <replica>` |
 | Checkpoint | `Yamibo App Sync Checkpoint - DO NOT EDIT - v1 - <checkpoint>` |
+| Segment | `Yamibo App Sync Segment - DO NOT EDIT - v2 - <kind>-<generation>-<index>` |
+| Root | `Yamibo App Sync Root - DO NOT EDIT - v2 - <kind>-<generation>` |
 
 開發期間使用的 `ymb-sync-9f4c2a7` namespace 不會被正式版自動採用，也不會被
 正式版的同步資料清理流程當成 `v1` 資料刪除。若未來需要匯入舊資料，必須另行提供
@@ -37,9 +39,11 @@
 
 | 類型 | 主要用途 | 一般數量 | 是否為資料真相 |
 |---|---|---:|---|
-| Index | 記錄 Journal、Checkpoint 的位置與 fingerprint | 1 | 否，僅為 advisory discovery cache |
+| Index | 記錄 Journal、Checkpoint 或其 v2 Root 的位置與 fingerprint | 1 | 否，僅為 advisory discovery cache |
 | Journal | 記錄單一 replica/device 產生的增量操作 | 每個 active replica 1 | 是，操作紀錄來源 |
 | Checkpoint | 保存特定 causal coverage 下的完整狀態 | 最多 3 | 是，經驗證的復原與 compaction 基準 |
+| Segment | v2 不可變 payload 分段 | 每個 generation 依大小決定 | 否，須由完整 chain 與 Root 驗證 |
+| Root | v2 generation manifest 與 segment chain 起點 | 每個 generation 1 | 否，須經 Index commit 才可見 |
 
 ```mermaid
 flowchart TD
@@ -95,6 +99,8 @@ Index 是 discovery cache，不是刪除或資料存在性的唯一證據。
 - Index reference 會覆蓋本機同 replica/checkpoint 的舊 BlogId。
 - Index 未列出的既有 verified local link 仍會保留。
 - 新但尚未被本機或 Index 知道的 Journal，由 24 小時完整探索找回。
+- v2 Root 只有在 verified Index 指向它後才成為 committed generation；列表上單獨出現的
+  Segment 或 Root 仍視為 staging/orphan，不進一般 reduce。
 
 這項限制是必要的，因為 Index 本身是 shared whole-document write。兩台設備同時更新
 Index 時，後寫入者可能基於較舊版本送出內容，使另一台設備剛加入的 reference 暫時遺失。
@@ -209,6 +215,72 @@ Journal 除了 operations，也保存：
 
 這些 metadata 用於判斷設備活躍狀態、Checkpoint acknowledgement，以及 Journal
 是否可安全退休。
+
+## v2 Segment 與 Root lifecycle
+
+v2 不是新的 domain schema，而是承載既有 canonical v1 Journal/Checkpoint envelope 的
+容量 transport。讀取端重建所有 segment 後，仍交回原本的 v1 codec 驗證 marker、account、
+schema、fingerprint 與 operation invariant，因此 reducer 不需要區分 v1/v2。
+
+發布順序固定如下：
+
+1. 先將 canonical envelope 依最終 Blog body 的 42,000 characters target 切分。
+2. 以 tail-to-head 順序建立不可變 Segment；每篇包含 generation、index/count、chunk hash
+   與下一篇 BlogId，任何 timeout 可由 durable session 繼續。
+3. 所有 Segment 都取得 typed verified identity 後才發布不可變 Root manifest。
+4. Root 記錄 head BlogId、segment count、總長度與完整 envelope fingerprint。
+5. 最後更新 Index；只有 verified Index reference 是 generation 的 commit point。
+6. Index commit 後才在本機 transaction 內承認原 operation 或啟用 Checkpoint。
+
+若在步驟 2–4 中斷，舊 Index 仍指向舊 generation，讀者看不到半成品；重試會依 durable
+segment/root identity 恢復。完整探索也不會把未經 Index commit 的 v2 chain 當成新資料。
+已 commit 的 Root 採 direct-ID 讀取並嚴格驗證 chain order、binding、fingerprint 與長度。
+
+### Payload budget 與 entity fallback
+
+- 所有容量判斷都量測最終送往 provider 的字串，包含 marker、JSON escaping、hash 與 chain metadata。
+- rollout target 是 42,000 characters；provider hard limit 保留為 50,000。42,001 或 45,000
+  都不再嘗試單篇 POST，而會進 segmented path。
+- canonical envelope 解碼上限為 16 MiB、最多 4,096 segments。
+- portable sanitizer 在 publication 前移除已知 cache/device-local 欄位，例如舊 sign-page HTML
+  cache、folder URI 與 data-URL cover；原本 local row 留作 rollback/稽核證據。
+- 單一 sanitized entity 若仍超過 256 KiB global bound，或超過其 domain-specific semantic
+  bound，不會切斷 entity semantic；session 進 `NeedsAttention` 並只暴露 domain 與 redacted ID。
+
+### Protocol capability 與相容窗口
+
+v2 採 reader-first、writer-later：新版本 Journal 先宣告 `protocolReadVersion=2`，仍維持
+`protocolWriteVersion=1`。只有所有 active replica 的最新 verified Journal 都宣告可讀 v2，
+且集合非空時，才允許新的 segmented Journal/Checkpoint write；任何 v1 或未知 active replica
+都會阻擋 v2 publication。v1 與 v2 重建出的相同 operation 依 operation ID 去重，再進同一
+deterministic reducer。
+
+本機 rollout flags 可分別暫停 opportunistic v2 read discovery、v2 writes、自動 legacy recovery、
+cleanup dry-run 與 cleanup deletion。回滾可以停止新的 staging 與 deletion，但已被 Index commit
+的 v2 Root 必須永遠維持可讀，避免把已發布資料困在雲端。v1 reader 與 rollback support 在
+active-replica capability 與 production evidence 未完成前不得移除。
+
+### Recovery state machine
+
+容量復原使用 durable session，狀態依序為：
+
+```text
+Classifying -> Staging -> PublishingSegments -> PublishingRoot
+            -> CommittingIndex -> ActivatingLocal -> Cleaning -> Completed
+```
+
+可重試錯誤保存 retry category/count/next time，不承認 source operation；永久 entity policy
+違規進 `NeedsAttention`。UI 顯示 encoded/target、verified/total segments、pending 數與 redacted
+blocker，復原期間停用 force pull/push，背景 worker 不會把 recovery 誤報成同步完成。
+
+### Orphan cleanup proof
+
+Index absence 絕不單獨授權刪除。Cleanup 只在 maintenance full discovery 中考慮已完整驗證
+Root、chain 與 canonical payload 的 generation，並排除 Index references、active recovery、
+pinned Checkpoint 與 retirement proof 可達的 Root。候選的 Index fingerprint/root fingerprint/
+segment set 任一改變都重置觀察；必須至少三次 observation、相鄰至少 24 小時、總跨度至少
+七天才 eligible。正式預設為 dry-run 且 deletion 關閉；真正刪除需要兩個旗標同時允許，
+使用 typed verified delete、保存已刪 BlogId 以便續跑，且每輪最多 20 篇 Blog。
 
 ### Causal coverage 不變量
 
@@ -528,6 +600,18 @@ POST Index = 1
 總計約 3 requests
 ```
 
+segmented generation 的首次發布成本為：
+
+```text
+POST Segment = N
+POST Root = 1
+POST Index = 1
+總計 = N + 2 requests
+```
+
+中斷後只補未 verified 的 Segment/Root/Index；同一 generation 已驗證的寫入不重送。cleanup
+full discovery 另有 list page、Root 與 Segment 驗證成本，因此只屬 maintenance，不進一般 sync。
+
 App 程序剛重啟時，記憶體 payload cache 尚未建立，除了 Index 外還需要讀取 Index
 引用且本機沒有 payload 的 Journal/Checkpoint。這不是完整掃描，且不會讀取 stale
 deleted list entries。
@@ -570,6 +654,13 @@ deleted list entries。
   依 canonical sync ID materialize 並在刪除後收斂。
 - AppSync snapshot inclusion、change-summary 顯示、SQLDelight migration、Compose cloud-sync
   state test，以及 shared/Compose iOS simulator compilation。
+- traced capacity fixture（5,000+ favorites、8,000+ reading-history rows、3 筆 367K 舊 sign
+  cache operations）經 sanitizer/recovery 後 canonical envelope 為 922 characters、1 segment、
+  3 次 generation write request；JVM 測得 481 ms、約 60,335,168 bytes 記憶體增量並可重啟收斂。
+- 16 MiB codec maximum 產生 403 segments、405 次 generation write request；JVM 測得
+  706 ms、約 90,643,456 bytes 記憶體增量，所有 final bodies 不超過 42,000 且完整重建一致。
+- boundary evidence 證明 42,000 fits target，42,001 不 fits target；45,000 不 fits target 但仍
+  fits 50,000 hard limit，因此 rollout 一律在 42K 後進 segmented path。
 
 這些測試證明 deterministic 行為與 transaction invariant，但不等同真實 Yamibo 網路的
 長期 rollout 指標。尚未取得大量實際設備下的成功率、request count、網站 eventual

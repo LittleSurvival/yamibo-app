@@ -20,6 +20,18 @@ class AppSyncBackgroundNotificationTest {
                 AppSyncServicePhase.Quarantined,
             ),
         )
+        assertTrue(
+            shouldNotifyBackgroundQuarantine(
+                AppSyncServicePhase.RecoveryUploadingSegments,
+                AppSyncServicePhase.RecoveryNeedsAttention,
+            ),
+        )
+        assertFalse(
+            shouldNotifyBackgroundQuarantine(
+                AppSyncServicePhase.RecoveryNeedsAttention,
+                AppSyncServicePhase.RecoveryNeedsAttention,
+            ),
+        )
         assertFalse(
             shouldNotifyBackgroundQuarantine(
                 AppSyncServicePhase.Active,
