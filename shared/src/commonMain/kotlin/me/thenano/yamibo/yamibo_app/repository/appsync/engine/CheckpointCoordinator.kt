@@ -9,6 +9,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointE
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointTombstone
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointValidation
 import me.thenano.yamibo.yamibo_app.repository.backup.YamiboBackupFile
+import me.thenano.yamibo.yamibo_app.repository.appsync.withPortableAppSyncPayloads
 import me.thenano.yamibo.yamibo_app.store.appsync.AppSyncOperationStore
 
 internal sealed interface CheckpointCreationResult {
@@ -66,7 +67,7 @@ internal class CheckpointCoordinator(
             checkpointId = checkpointId,
             accountBinding = accountBinding,
             coverage = coverage,
-            snapshot = projection.snapshot,
+            snapshot = projection.snapshot.withPortableAppSyncPayloads(),
             resolvedEntities = entities,
             tombstones = entities.mapNotNull { entity ->
                 entity.tombstone?.let {

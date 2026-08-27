@@ -21,6 +21,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncWriterNonce
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncJournalEnvelopeCodec
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncJournalPayload
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncJournalValidation
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncProtocolCapabilities
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.resolvedPublishedThroughSequence
 
 class AppSyncJournalEnvelopeCodecTest {
@@ -57,6 +58,28 @@ class AppSyncJournalEnvelopeCodecTest {
         val validated = assertIs<AppSyncJournalValidation.Valid>(codec.validate(encoded))
 
         assertEquals(payload, validated.envelope.payload)
+    }
+
+    @Test
+    fun capabilityMetadataDefaultsLegacyPayloadAndGatesV2Writes() {
+        val payload = payload()
+        val json = Json { encodeDefaults = true; explicitNulls = true }
+            .encodeToString(AppSyncJournalPayload.serializer(), payload)
+            .replace(Regex(",\"protocolReadVersion\":2,\"protocolWriteVersion\":1,\"appVersion\":\"unknown\""), "")
+        val encoded = """
+            [YAMIBO_APP_SYNC_JOURNAL:v1:BEGIN]
+            schema=1
+            fingerprint=${stableAppSyncFingerprint(json)}
+            payload=$json
+            [YAMIBO_APP_SYNC_JOURNAL:v1:END]
+        """.trimIndent()
+
+        val decoded = assertIs<AppSyncJournalValidation.Valid>(codec.validate(encoded)).envelope.payload
+
+        assertEquals(1, decoded.protocolReadVersion)
+        assertEquals(1, decoded.protocolWriteVersion)
+        assertTrue(!AppSyncProtocolCapabilities.canWriteV2(listOf(decoded)))
+        assertTrue(AppSyncProtocolCapabilities.canWriteV2(listOf(decoded.copy(protocolReadVersion = 2))))
     }
 
     @Test

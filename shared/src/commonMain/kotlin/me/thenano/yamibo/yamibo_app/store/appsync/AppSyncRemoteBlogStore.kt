@@ -9,6 +9,8 @@ internal enum class AppSyncRemoteBlogKind {
     Index,
     Journal,
     Checkpoint,
+    JournalRoot,
+    Segment,
 }
 internal data class StoredAppSyncRemoteBlog(
     val remoteKey: String,

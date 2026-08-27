@@ -9,18 +9,19 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncInstallation
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncJournalRetirementIntent
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncOperationLifecycle
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncVerifiedCheckpoint
-import me.thenano.yamibo.yamibo_app.repository.appsync.appSyncThreadCoverOrNull
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncPortabilityPolicy
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncPortableEntityResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncAccountBinding
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncCausalContext
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperation
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncReplicaKey
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncJournalPayload
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncProtocolCapabilities
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointAcknowledgement
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.ParsedAppSyncCheckpointEnvelope
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.resolvedPublishedThroughSequence
 import me.thenano.yamibo.yamibo_app.store.appsync.AppSyncOperationStore
-import me.thenano.yamibo.yamibo_app.store.appsync.AppSyncOutboxRebaseResult
 
 internal data class LoadedAppSyncJournal(
     val remoteId: String,
@@ -141,6 +142,39 @@ internal interface AppSyncJournalRemote {
         )
 }
 
+internal interface AppSyncSegmentedJournalRemote : AppSyncJournalRemote {
+    suspend fun publishOwnJournalSegmented(
+        payload: AppSyncJournalPayload,
+        acknowledgementOperationIds: Set<SyncOperationId>,
+        activeJournals: List<LoadedAppSyncJournal>,
+        formHash: FormHash,
+    ): AppSyncJournalPublishResult
+}
+
+internal sealed interface AppSyncLegacyRecoveryResult {
+    data class Verified(
+        val sourceOperationCount: Int,
+        val acknowledgedSourceCount: Int,
+        val replacementOperationCount: Int,
+        val scrubbedLegacyPayloadCount: Int,
+    ) : AppSyncLegacyRecoveryResult
+
+    data object FormExpired : AppSyncLegacyRecoveryResult
+    data class Retryable(val reason: String) : AppSyncLegacyRecoveryResult
+    data class Conflict(val reason: String) : AppSyncLegacyRecoveryResult
+    data class NeedsAttention(val reason: String) : AppSyncLegacyRecoveryResult
+}
+
+internal interface AppSyncLegacyRecoveryRemote : AppSyncJournalRemote {
+    suspend fun recoverLegacyOperations(
+        classifications: List<AppSyncLegacyOperationClassification>,
+        observed: SyncCausalContext,
+        checkpointAcknowledgements: List<AppSyncCheckpointAcknowledgement>,
+        activeJournals: List<LoadedAppSyncJournal>,
+        formHash: FormHash,
+    ): AppSyncLegacyRecoveryResult
+}
+
 internal interface SyncDomainStateAdapter {
     fun currentState(): Map<SyncEntityKey, ResolvedSyncEntity>
     fun apply(result: OperationReductionResult)
@@ -221,7 +255,7 @@ internal class OperationSyncEngine(
     private val bulkDeleteGuard: BulkDeleteGuard = BulkDeleteGuard(
         authorizationLookup = store::loadBulkDeleteAuthorization,
     ),
-    private val migrateLegacyOutbox: ((SyncAccountBinding, SyncCausalContext) -> AppSyncOutboxRebaseResult)? = null,
+    private val legacyClassifier: AppSyncLegacyOperationClassifier = AppSyncLegacyOperationClassifier(),
 ) {
     private val processMutex = Mutex()
     private val compaction = CompactionCoordinator(store, nowMillis, inactiveAfterMillis)
@@ -301,7 +335,12 @@ internal class OperationSyncEngine(
 
         repeat(maxAttempts) { attemptIndex ->
             val requestedForcedDiscovery = forceDiscovery && attemptIndex == 0
-            val legacyMigrationCandidate = store.pendingOperations().any(::hasLegacyOversizedPayload)
+            val pendingBeforeLoad = store.pendingOperations()
+            val legacyMigrationCandidate = legacyClassifier.classify(
+                pendingBeforeLoad,
+                verifiedRemoteOperationIds = emptySet(),
+                authoritativeAbsence = false,
+            ).any { it.requiresRecovery }
             val initialLoad = remote.loadJournals(
                 accountBinding,
                 forceDiscovery = requestedForcedDiscovery || legacyMigrationCandidate,
@@ -393,31 +432,6 @@ internal class OperationSyncEngine(
                 }
             }
 
-            if (legacyMigrationCandidate) {
-                // legacyMigrationCandidate forces an authoritative discovery above. A missing own
-                // journal is therefore also verified absence, which covers installations whose
-                // first oversized journal was rejected before any blog could be created.
-                val verifiedOwnOperationIds = ownJournal?.payload?.operations.orEmpty()
-                    .mapTo(hashSetOf()) { it.operationId }
-                val legacyPending = store.pendingOperations().filter(::hasLegacyOversizedPayload)
-                if (
-                    legacyPending.isNotEmpty() &&
-                    legacyPending.none { it.operationId in verifiedOwnOperationIds }
-                ) {
-                    val migrated = migrateLegacyOutbox?.invoke(
-                        accountBinding,
-                        store.causalContext(),
-                    )
-                    if (migrated != null) {
-                        totalMigratedLegacyOperations += migrated.discardedOperationCount
-                        totalReplacementMigrationOperations += migrated.replacementOperationCount
-                        totalScrubbedLegacyPayloads += migrated.scrubbedLegacyPayloadCount
-                        return@repeat
-                    }
-                }
-            }
-
-            val pending = store.pendingOperations()
             val checkpointAcknowledgements = store.verifiedCheckpoints()
                 .map {
                     AppSyncCheckpointAcknowledgement(
@@ -426,6 +440,71 @@ internal class OperationSyncEngine(
                     )
                 }
                 .sortedBy { it.checkpointId }
+
+            if (legacyMigrationCandidate) {
+                // legacyMigrationCandidate forces an authoritative discovery above. A missing own
+                // journal is therefore also verified absence, which covers installations whose
+                // first oversized journal was rejected before any blog could be created.
+                val verifiedOwnOperationIds = ownJournal?.payload?.operations.orEmpty()
+                    .mapTo(hashSetOf()) { it.operationId }
+                val legacyClassifications = legacyClassifier.classify(
+                    pending = store.pendingOperations(),
+                    verifiedRemoteOperationIds = verifiedOwnOperationIds,
+                    authoritativeAbsence = true,
+                )
+                if (legacyClassifications.any { it.requiresRecovery }) {
+                    val recoveryRemote = remote as? AppSyncLegacyRecoveryRemote
+                        ?: return OperationSyncResult.StoragePressure(
+                            "Durable legacy capacity recovery is unavailable",
+                        )
+                    when (
+                        val recovered = recoveryRemote.recoverLegacyOperations(
+                            classifications = legacyClassifications,
+                            observed = store.causalContext(),
+                            checkpointAcknowledgements = checkpointAcknowledgements,
+                            activeJournals = loaded,
+                            formHash = formHash,
+                        )
+                    ) {
+                        is AppSyncLegacyRecoveryResult.Verified -> {
+                            totalMigratedLegacyOperations += recovered.sourceOperationCount
+                            totalAcknowledged += recovered.acknowledgedSourceCount
+                            totalReplacementMigrationOperations += recovered.replacementOperationCount
+                            totalScrubbedLegacyPayloads += recovered.scrubbedLegacyPayloadCount
+                            if (store.pendingOperations().isEmpty()) {
+                                return OperationSyncResult.Converged(
+                                    appliedRemoteCount = totalApplied,
+                                    acknowledgedLocalCount = totalAcknowledged,
+                                    quarantineCount = totalQuarantined,
+                                    attempts = attemptIndex + 1,
+                                    changes = summarizeWinningOperations(
+                                        received = receivedOperations.values,
+                                        uploaded = uploadedOperations.values,
+                                        state = domainState.currentState(),
+                                    ),
+                                    migratedLegacyOperationCount = totalMigratedLegacyOperations,
+                                    replacementMigrationOperationCount =
+                                        totalReplacementMigrationOperations,
+                                    scrubbedLegacyPayloadCount = totalScrubbedLegacyPayloads,
+                                )
+                            }
+                            return@repeat
+                        }
+                        AppSyncLegacyRecoveryResult.FormExpired -> {
+                            store.updateState(AppSyncInstallationState.PausedAuth)
+                            return OperationSyncResult.PausedAuth("Cached FormHash expired")
+                        }
+                        is AppSyncLegacyRecoveryResult.Retryable ->
+                            return OperationSyncResult.RetryScheduled(recovered.reason)
+                        is AppSyncLegacyRecoveryResult.Conflict ->
+                            return OperationSyncResult.RetryScheduled(recovered.reason)
+                        is AppSyncLegacyRecoveryResult.NeedsAttention ->
+                            return OperationSyncResult.StoragePressure(recovered.reason)
+                    }
+                }
+            }
+
+            val pending = store.pendingOperations()
             val journalMetadataChanged =
                 ownJournal == null ||
                     ownJournal.payload.checkpointAcknowledgements != checkpointAcknowledgements ||
@@ -448,6 +527,8 @@ internal class OperationSyncEngine(
                     observed = store.causalContext(),
                     checkpointAcknowledgements = checkpointAcknowledgements,
                     heartbeatAtEpochMillis = nowMillis(),
+                    protocolReadVersion = AppSyncProtocolCapabilities.READER_VERSION,
+                    protocolWriteVersion = AppSyncProtocolCapabilities.READER_FIRST_WRITE_VERSION,
                     publishedThroughSequence = maxOf(
                         ownJournal?.payload?.resolvedPublishedThroughSequence() ?: 0L,
                         store.causalContext()[
@@ -502,15 +583,59 @@ internal class OperationSyncEngine(
                         return OperationSyncResult.PausedAuth("Cached FormHash expired")
                     }
                     is AppSyncJournalPublishResult.StoragePressure -> {
-                        // This result is produced by the local size preflight before submitBlog.
-                        // No remote acknowledgement is ambiguous, so these rows remain retryable
-                        // local work instead of being mislabeled as published.
-                        store.markPendingLocal(newlyPublishedIds)
-                        store.updateState(AppSyncInstallationState.PausedProvider)
-                        return OperationSyncResult.StoragePressure(
-                            "Journal requires ${published.encodedChars} chars; " +
-                                "safe provider limit is ${published.limitChars}",
-                        )
+                        val segmentedRemote = remote as? AppSyncSegmentedJournalRemote
+                        if (segmentedRemote == null) {
+                            store.markPendingLocal(newlyPublishedIds)
+                            return OperationSyncResult.StoragePressure(
+                                "Journal requires ${published.encodedChars} chars; " +
+                                    "safe provider limit is ${published.limitChars}",
+                            )
+                        }
+                        when (
+                            val segmented = segmentedRemote.publishOwnJournalSegmented(
+                                payload,
+                                acknowledgementOperationIds = pendingIds,
+                                activeJournals = loaded,
+                                formHash = formHash,
+                            )
+                        ) {
+                            is AppSyncJournalPublishResult.Verified -> {
+                                val verifiedIds = segmented.journal.payload.operations
+                                    .mapTo(hashSetOf()) { it.operationId }
+                                val acknowledged = pendingIds.intersect(verifiedIds)
+                                if (acknowledged != pendingIds) {
+                                    return OperationSyncResult.RetryScheduled(
+                                        "Segmented commit omitted expected operation ids",
+                                    )
+                                }
+                                store.markAcknowledged(acknowledged, nowMillis())
+                                store.updateVerifiedHeartbeat(
+                                    segmented.journal.payload.heartbeatAtEpochMillis,
+                                    segmented.journal.remoteId.toLongOrNull(),
+                                )
+                                totalAcknowledged += acknowledged.size
+                                pending.filter { it.operationId in acknowledged }.forEach {
+                                    uploadedOperations[it.operationId] = it
+                                }
+                            }
+                            is AppSyncJournalPublishResult.Unknown ->
+                                return OperationSyncResult.RetryScheduled(segmented.reason)
+                            is AppSyncJournalPublishResult.Conflict ->
+                                return OperationSyncResult.RetryScheduled(segmented.reason)
+                            AppSyncJournalPublishResult.FormExpired -> {
+                                store.updateState(AppSyncInstallationState.PausedAuth)
+                                return OperationSyncResult.PausedAuth("Cached FormHash expired")
+                            }
+                            is AppSyncJournalPublishResult.StoragePressure ->
+                                run {
+                                    store.markPendingLocal(newlyPublishedIds)
+                                    return OperationSyncResult.StoragePressure(
+                                        "Segmented Journal exceeds supported total size",
+                                    )
+                                }
+                            is AppSyncJournalPublishResult.TerminalFailure ->
+                                return OperationSyncResult.PausedProvider(segmented.reason)
+                        }
                     }
                     is AppSyncJournalPublishResult.TerminalFailure -> {
                         store.updateState(AppSyncInstallationState.PausedProvider)
@@ -538,11 +663,6 @@ internal class OperationSyncEngine(
         }
 
         return OperationSyncResult.RetryScheduled("Sync did not reach a fixed point")
-    }
-
-    private fun hasLegacyOversizedPayload(operation: SyncOperation): Boolean {
-        val cover = operation.fields["threadCover"] ?: return false
-        return cover.isNotBlank() && appSyncThreadCoverOrNull(cover) == null
     }
 
     private fun reconcileVerifiedCheckpoint(

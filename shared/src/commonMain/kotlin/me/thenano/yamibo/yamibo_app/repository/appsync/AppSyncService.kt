@@ -65,6 +65,7 @@ import me.thenano.yamibo.yamibo_app.repository.settings.core.SettingsRegistry
 import me.thenano.yamibo.yamibo_app.repository.settings.core.StringSetting
 import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncOperationStore
 import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncRemoteBlogStore
+import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncRecoveryStore
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
 
@@ -303,14 +304,18 @@ class AppSyncService(
         materializer = DatabaseSyncDomainMaterializer(db, settingsStore),
         nowMillis = nowMillis,
     )
+    private val blogProvider = YamiboAppSyncBlogProvider(
+        cookieStore = authRepository.cookieStore,
+        yamiboClient = authRepository.yamiboClient,
+    )
+    private val remoteBlogStore = SqlDelightAppSyncRemoteBlogStore(db)
+    private val recoveryStore = SqlDelightAppSyncRecoveryStore(db)
     private val remote = YamiboAppSyncJournalRemote(
-        provider = YamiboAppSyncBlogProvider(
-            cookieStore = authRepository.cookieStore,
-            yamiboClient = authRepository.yamiboClient,
-        ),
-        store = SqlDelightAppSyncRemoteBlogStore(db),
+        provider = blogProvider,
+        store = remoteBlogStore,
         nowMillis = nowMillis,
         retirementIntents = store::retirementIntents,
+        recoveryStore = recoveryStore,
     )
     private var localSnapshotSource: BackupRepositoryImpl? = null
     private val migrationPlanner = BackupSnapshotMigrationPlanner()
@@ -340,27 +345,6 @@ class AppSyncService(
         domainState = domainState,
         nowMillis = nowMillis,
         ownerId = { SyncIdentityGenerator.writerNonce().value },
-        migrateLegacyOutbox = { binding, causalContext ->
-            val installation = requireNotNull(store.installation())
-            val snapshot = checkNotNull(localSnapshotSource) {
-                "Backup snapshot source is not configured"
-            }.createAppSyncSnapshot().withPortableAppSyncPayloads()
-            val migration = migrationPlanner.planWithDiagnostics(snapshot)
-            store.saveBootstrapRollbackSnapshot(
-                AppSyncBootstrapRollbackSnapshot(
-                    accountBinding = binding,
-                    databaseGeneration = installation.databaseGeneration,
-                    encodedSnapshot = rollbackSnapshotCodec.encode(snapshot).getOrThrow(),
-                    createdAtEpochMillis = nowMillis(),
-                ),
-            )
-            store.rebaseCurrentPendingOperations(
-                accountBinding = binding,
-                drafts = migration.drafts,
-                causalContext = causalContext,
-                createdAtEpochMillis = nowMillis(),
-            )
-        },
     )
     private val manualOverride = ManualSyncOverrideCoordinator(
         store = store,

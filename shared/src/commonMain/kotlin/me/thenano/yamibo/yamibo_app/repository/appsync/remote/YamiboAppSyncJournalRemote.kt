@@ -9,6 +9,12 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalPubl
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncCheckpointPublishResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncCheckpointRetentionResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalRemote
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncLegacyOperationClassification
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncLegacyRecoveryPlanner
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncLegacyRecoveryRemote
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncLegacyRecoveryResult
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncRecoveryOperationStager
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncSegmentedJournalRemote
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalRetirementRemoteResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.LoadedAppSyncJournal
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.LoadedAppSyncCheckpoint
@@ -17,10 +23,15 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncCloudResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncJournalRetirementIntent
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncJournalRetirementStage
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncAccountBinding
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncCausalContext
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncReplicaKey
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncSequence
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationId
+import me.thenano.yamibo.yamibo_app.repository.appsync.domain.stableAppSyncFingerprint
 import me.thenano.yamibo.yamibo_app.store.appsync.AppSyncRemoteBlogKind
 import me.thenano.yamibo.yamibo_app.store.appsync.AppSyncRemoteBlogStore
 import me.thenano.yamibo.yamibo_app.store.appsync.StoredAppSyncRemoteBlog
+import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncRecoveryStore
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
 
 internal sealed interface AppSyncCloudResetResult {
@@ -39,7 +50,8 @@ internal class YamiboAppSyncJournalRemote(
     private val nowMillis: () -> Long = ::currentTimeMillis,
     private val retirementIntents:
         (SyncAccountBinding) -> List<AppSyncJournalRetirementIntent> = { emptyList() },
-) : AppSyncJournalRemote {
+    private val recoveryStore: SqlDelightAppSyncRecoveryStore? = null,
+) : AppSyncSegmentedJournalRemote, AppSyncLegacyRecoveryRemote {
     private val verifiedJournalCache = mutableMapOf<String, LoadedAppSyncJournal>()
     private val verifiedCheckpointCache = mutableMapOf<String, LoadedAppSyncCheckpoint>()
     private var verifiedIndexCache: VerifiedIndex? = null
@@ -415,6 +427,276 @@ internal class YamiboAppSyncJournalRemote(
         updateIndexBestEffort(payload.accountBinding, classSelection, formHash)
         return AppSyncJournalPublishResult.Verified(journal)
     }
+
+    override suspend fun publishOwnJournalSegmented(
+        payload: AppSyncJournalPayload,
+        acknowledgementOperationIds: Set<SyncOperationId>,
+        activeJournals: List<LoadedAppSyncJournal>,
+        formHash: FormHash,
+    ): AppSyncJournalPublishResult {
+        val durableStore = recoveryStore
+            ?: return AppSyncJournalPublishResult.TerminalFailure(
+                "Durable segmented Journal storage is unavailable",
+            )
+        if (!AppSyncProtocolCapabilities.canWriteV2(activeJournals.map { it.payload } + payload)) {
+            return AppSyncJournalPublishResult.Conflict(
+                "An active device cannot read segmented AppSync Journals",
+            )
+        }
+        if (acknowledgementOperationIds.isEmpty()) {
+            return AppSyncJournalPublishResult.TerminalFailure(
+                "Segmented Journal publication requires pending operation identities",
+            )
+        }
+        val classSelection = when (val resolved = resolveClassSelection(payload.accountBinding)) {
+            is ClassSelectionResult.Success -> resolved.selection
+            is ClassSelectionResult.Retryable ->
+                return AppSyncJournalPublishResult.Unknown(resolved.reason)
+            is ClassSelectionResult.Terminal ->
+                return AppSyncJournalPublishResult.TerminalFailure(resolved.reason)
+        }
+        val canonicalEnvelope = journalCodec.encode(payload)
+        val envelope = journalCodec.validate(canonicalEnvelope) as AppSyncJournalValidation.Valid
+        val bodyFingerprint = stableAppSyncFingerprint(canonicalEnvelope)
+        val session = durableStore.createOrResumeSegmentedJournal(
+            payload.accountBinding,
+            acknowledgementOperationIds.mapTo(linkedSetOf()) { it.value },
+            bodyFingerprint,
+            nowMillis(),
+        )
+        if (session.phase in setOf(
+                me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.Classifying,
+                me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.Staging,
+            )
+        ) {
+            durableStore.startSegmentedJournal(session.sessionId, nowMillis())
+        }
+        val coordinator = AppSyncSegmentedJournalCommitCoordinator(
+            publisher = AppSyncSegmentPublisher(provider, durableStore, nowMillis = nowMillis),
+            indexCommitter = AppSyncSegmentIndexCommitter(
+                provider, store, durableStore, nowMillis = nowMillis,
+            ),
+            recoveryStore = durableStore,
+            nowMillis = nowMillis,
+        )
+        return when (
+            val result = coordinator.commit(
+                session.sessionId,
+                canonicalEnvelope,
+                SyncReplicaKey(payload.deviceId, payload.deviceEpoch).stableKey,
+                classSelection,
+                formHash,
+            )
+        ) {
+            is AppSyncSegmentedJournalCommitResult.Verified -> {
+                store.save(
+                    StoredAppSyncRemoteBlog(
+                        remoteKey = payload.replicaKey(),
+                        kind = AppSyncRemoteBlogKind.JournalRoot,
+                        blogId = BlogId(result.rootBlogId.toInt()),
+                        classId = classSelection.existingClassId(),
+                        fingerprint = envelope.envelope.fingerprint,
+                        validatedAtEpochMillis = nowMillis(),
+                        contentUpdatedAtEpochMillis = payload.heartbeatAtEpochMillis,
+                    ),
+                )
+                AppSyncJournalPublishResult.Verified(
+                    LoadedAppSyncJournal(
+                        remoteId = result.rootBlogId.toString(),
+                        fingerprint = envelope.envelope.fingerprint,
+                        payload = payload,
+                    ),
+                )
+            }
+            AppSyncSegmentedJournalCommitResult.FormExpired -> AppSyncJournalPublishResult.FormExpired
+            is AppSyncSegmentedJournalCommitResult.Retryable ->
+                AppSyncJournalPublishResult.Unknown(result.reason)
+            is AppSyncSegmentedJournalCommitResult.Conflict ->
+                AppSyncJournalPublishResult.Conflict(result.reason)
+            is AppSyncSegmentedJournalCommitResult.Terminal ->
+                AppSyncJournalPublishResult.TerminalFailure(result.reason)
+        }
+    }
+
+    override suspend fun recoverLegacyOperations(
+        classifications: List<AppSyncLegacyOperationClassification>,
+        observed: SyncCausalContext,
+        checkpointAcknowledgements: List<AppSyncCheckpointAcknowledgement>,
+        activeJournals: List<LoadedAppSyncJournal>,
+        formHash: FormHash,
+    ): AppSyncLegacyRecoveryResult {
+        val durableStore = recoveryStore
+            ?: return AppSyncLegacyRecoveryResult.NeedsAttention(
+                "Durable legacy recovery storage is unavailable",
+            )
+        if (classifications.isEmpty() || classifications.none { it.requiresRecovery }) {
+            return AppSyncLegacyRecoveryResult.Verified(0, 0, 0, 0)
+        }
+        val plan = AppSyncLegacyRecoveryPlanner().plan(classifications)
+        if (plan.unknownOperationIds.isNotEmpty()) {
+            return AppSyncLegacyRecoveryResult.Retryable(
+                "Authoritative evidence is missing for ${plan.unknownOperationIds.size} operations",
+            )
+        }
+        val accountBinding = classifications.first().operation.accountBinding
+        if (classifications.any { it.operation.accountBinding != accountBinding }) {
+            return AppSyncLegacyRecoveryResult.NeedsAttention(
+                "Legacy recovery cannot span multiple accounts",
+            )
+        }
+        val existing = durableStore.recoverySession(accountBinding)
+        if (existing?.phase ==
+            me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.NeedsAttention
+        ) {
+            return AppSyncLegacyRecoveryResult.NeedsAttention(
+                "Legacy recovery requires attention for ${existing.blockingDomain ?: "unknown domain"}",
+            )
+        }
+        val sourceIds = classifications.mapTo(linkedSetOf()) { it.operation.operationId.value }
+        var session = durableStore.createOrResume(
+            accountBinding = accountBinding,
+            sourceOperationIds = sourceIds,
+            replacementFingerprint = legacyRecoveryFingerprint(classifications),
+            nowEpochMillis = nowMillis(),
+            acknowledgedSourceOperationIds = plan.verifiedPresentSourceIds
+                .mapTo(linkedSetOf()) { it.value },
+        )
+        plan.needsAttention.firstOrNull()?.let { blocker ->
+            if (session.phase ==
+                me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.Classifying
+            ) {
+                durableStore.transition(
+                    session.sessionId,
+                    session.phase,
+                    me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.NeedsAttention,
+                    nowMillis(),
+                    lastErrorCategory = "ENTITY_SIZE_POLICY",
+                    blockingDomain = blocker.domain,
+                    redactedBlockingEntity = blocker.redactedEntityId,
+                )
+            }
+            return AppSyncLegacyRecoveryResult.NeedsAttention(
+                "${blocker.domain} entity exceeds ${blocker.limitBytes} encoded bytes",
+            )
+        }
+        if (plan.replacements.isEmpty()) {
+            if (session.phase !=
+                me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.Completed
+            ) {
+                durableStore.completeVerifiedRecoveryWithoutPublication(session.sessionId, nowMillis())
+            }
+            return AppSyncLegacyRecoveryResult.Verified(
+                sourceOperationCount = sourceIds.size,
+                acknowledgedSourceCount = plan.verifiedPresentSourceIds.size,
+                replacementOperationCount = 0,
+                scrubbedLegacyPayloadCount = classifications.count { it.requiresRecovery },
+            )
+        }
+        if (session.phase in setOf(
+                me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.Classifying,
+                me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.Staging,
+            )
+        ) {
+            AppSyncRecoveryOperationStager(durableStore).stage(session.sessionId, plan)
+            session = requireNotNull(durableStore.session(session.sessionId))
+        }
+        val operations = durableStore.shadowOperations(session.sessionId)
+        if (operations.isEmpty()) {
+            return AppSyncLegacyRecoveryResult.NeedsAttention(
+                "Legacy recovery staging contains no replacement operations",
+            )
+        }
+        val targetReplica = SyncReplicaKey(session.targetDeviceId, session.targetDeviceEpoch)
+        val lastSequence = operations.last().sequence.value
+        val payload = AppSyncJournalPayload(
+            accountBinding = accountBinding,
+            deviceId = session.targetDeviceId,
+            deviceEpoch = session.targetDeviceEpoch,
+            writerNonce = session.targetWriterNonce,
+            firstSequence = operations.first().sequence.value,
+            lastSequence = lastSequence,
+            operations = operations,
+            observed = observed.advance(targetReplica, SyncSequence(lastSequence)),
+            checkpointAcknowledgements = checkpointAcknowledgements,
+            heartbeatAtEpochMillis = nowMillis(),
+            protocolReadVersion = AppSyncProtocolCapabilities.READER_VERSION,
+            protocolWriteVersion = AppSyncProtocolCapabilities.READER_FIRST_WRITE_VERSION,
+            publishedThroughSequence = lastSequence,
+        )
+        if (!AppSyncProtocolCapabilities.canWriteV2(activeJournals.map { it.payload } + payload)) {
+            return AppSyncLegacyRecoveryResult.Conflict(
+                "An active device cannot read segmented AppSync Journals",
+            )
+        }
+        val classSelection = when (val resolved = resolveClassSelection(accountBinding)) {
+            is ClassSelectionResult.Success -> resolved.selection
+            is ClassSelectionResult.Retryable ->
+                return AppSyncLegacyRecoveryResult.Retryable(resolved.reason)
+            is ClassSelectionResult.Terminal ->
+                return AppSyncLegacyRecoveryResult.NeedsAttention(resolved.reason)
+        }
+        val canonicalEnvelope = journalCodec.encode(payload)
+        val validated = journalCodec.validate(canonicalEnvelope) as AppSyncJournalValidation.Valid
+        val coordinator = AppSyncSegmentedJournalCommitCoordinator(
+            publisher = AppSyncSegmentPublisher(provider, durableStore, nowMillis = nowMillis),
+            indexCommitter = AppSyncSegmentIndexCommitter(
+                provider, store, durableStore, nowMillis = nowMillis,
+            ),
+            recoveryStore = durableStore,
+            nowMillis = nowMillis,
+        )
+        return when (
+            val committed = coordinator.commit(
+                session.sessionId,
+                canonicalEnvelope,
+                targetReplica.stableKey,
+                classSelection,
+                formHash,
+            )
+        ) {
+            is AppSyncSegmentedJournalCommitResult.Verified -> {
+                store.save(
+                    StoredAppSyncRemoteBlog(
+                        remoteKey = payload.replicaKey(),
+                        kind = AppSyncRemoteBlogKind.JournalRoot,
+                        blogId = BlogId(committed.rootBlogId.toInt()),
+                        classId = classSelection.existingClassId(),
+                        fingerprint = validated.envelope.fingerprint,
+                        validatedAtEpochMillis = nowMillis(),
+                        contentUpdatedAtEpochMillis = payload.heartbeatAtEpochMillis,
+                    ),
+                )
+                AppSyncLegacyRecoveryResult.Verified(
+                    sourceOperationCount = sourceIds.size,
+                    acknowledgedSourceCount = plan.verifiedPresentSourceIds.size,
+                    replacementOperationCount = operations.size,
+                    scrubbedLegacyPayloadCount = classifications.count { it.requiresRecovery },
+                )
+            }
+            AppSyncSegmentedJournalCommitResult.FormExpired -> AppSyncLegacyRecoveryResult.FormExpired
+            is AppSyncSegmentedJournalCommitResult.Retryable ->
+                AppSyncLegacyRecoveryResult.Retryable(committed.reason)
+            is AppSyncSegmentedJournalCommitResult.Conflict ->
+                AppSyncLegacyRecoveryResult.Conflict(committed.reason)
+            is AppSyncSegmentedJournalCommitResult.Terminal ->
+                AppSyncLegacyRecoveryResult.NeedsAttention(committed.reason)
+        }
+    }
+
+    private fun legacyRecoveryFingerprint(
+        classifications: List<AppSyncLegacyOperationClassification>,
+    ): String = stableAppSyncFingerprint(
+        classifications.sortedBy { it.operation.operationId.value }.joinToString("|") { classified ->
+            val operation = classified.operation
+            val portableFields = when (val result = classified.portability) {
+                is me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncPortableEntityResult.Portable ->
+                    result.fields.toSortedMap().entries.joinToString(",") { (key, value) -> "$key=$value" }
+                is me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncPortableEntityResult.NeedsAttention ->
+                    "blocked:${result.domain}:${result.redactedEntityId}:${result.encodedBytes}"
+            }
+            "${operation.operationId.value}:${classified.evidence}:${operation.kind}:$portableFields"
+        },
+    )
 
     override suspend fun publishCheckpoint(
         payload: AppSyncCheckpointPayload,
@@ -1224,7 +1506,7 @@ internal class YamiboAppSyncJournalRemote(
         const val INDEX_REMOTE_KEY = "index"
         const val CHECKPOINT_REMOTE_KEY_PREFIX = "checkpoint:"
         const val MAX_DISCOVERY_PAGES = 100
-        const val SAFE_BLOG_BODY_CHAR_LIMIT = 50_000
+        const val SAFE_BLOG_BODY_CHAR_LIMIT = AppSyncPayloadBudget.HARD_LIMIT_CHARS
     }
 }
 
@@ -1264,7 +1546,7 @@ private fun AppSyncCloudResult<*>.toJournalLoadFailure(): AppSyncJournalLoadResu
     else -> AppSyncJournalLoadResult.TerminalFailure(describeForJournal())
 }
 
-private fun AppSyncCloudResult<*>.describeForJournal(): String = when (this) {
+internal fun AppSyncCloudResult<*>.describeForJournal(): String = when (this) {
     is AppSyncCloudResult.VerifiedSuccess -> "verified"
     is AppSyncCloudResult.AcknowledgedButUnverified -> reason
     AppSyncCloudResult.NotFound -> "not found"

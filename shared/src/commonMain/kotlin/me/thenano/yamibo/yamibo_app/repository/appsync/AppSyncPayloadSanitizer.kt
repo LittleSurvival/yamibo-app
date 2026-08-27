@@ -7,19 +7,11 @@ import me.thenano.yamibo.yamibo_app.repository.backup.YamiboBackupFile
  * payloads, not portable reading-history metadata, and can be large enough to overflow a journal.
  */
 internal fun appSyncThreadCoverOrNull(value: String?): String? {
-    val candidate = value?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-    val schemeLength = when {
-        candidate.startsWith("https://", ignoreCase = true) -> "https://".length
-        candidate.startsWith("http://", ignoreCase = true) -> "http://".length
-        else -> return null
-    }
-    val address = candidate.substring(schemeLength)
-    if (address.isBlank() || address.startsWith("data:", ignoreCase = true)) return null
-    if (candidate.any(Char::isWhitespace)) return null
-    return candidate
+    return portableRemoteUrlOrNull(value)
 }
 
 internal fun YamiboBackupFile.withPortableAppSyncPayloads(): YamiboBackupFile = copy(
+    settings = settings.filter { AppSyncPortabilityPolicy.isSettingPortable(it.key) },
     readingState = readingState.copy(
         threadHistory = readingState.threadHistory.map { history ->
             history.copy(threadCover = appSyncThreadCoverOrNull(history.threadCover))

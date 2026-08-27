@@ -18,6 +18,10 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.engine.CapturedBootstrapS
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalLoadResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalPublishResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalRemote
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncLegacyOperationClassification
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncLegacyRecoveryRemote
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncLegacyRecoveryResult
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncSegmentedJournalRemote
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.BootstrapCoordinator
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.LoadedAppSyncJournal
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.LoadedAppSyncCheckpoint
@@ -36,6 +40,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDomainId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncEntityId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationKind
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationOrigin
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationId
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncJournalPayload
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointPayload
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.ParsedAppSyncCheckpointEnvelope
@@ -1163,7 +1168,35 @@ class OperationSyncEngineTest {
     }
 
     @Test
-    fun verifiedMissingLegacyPayloadRebasesToSafeSnapshotEpoch() = runBlocking {
+    fun oversizedJournalUsesSegmentedRemoteAndDoesNotPauseProvider() = runBlocking {
+        val fixture = fixture()
+        activate(fixture)
+        appendSetting(fixture, "dark")
+        fixture.remote.publishFailure = AppSyncJournalPublishResult.StoragePressure(60_000, 50_000)
+        fixture.remote.segmentedHandler = { payload ->
+            AppSyncJournalPublishResult.Verified(
+                LoadedAppSyncJournal(
+                    remoteId = "401",
+                    fingerprint = "segmented",
+                    payload = payload,
+                ),
+            )
+        }
+
+        val result = fixture.engine.synchronize(account, formHash)
+
+        assertIs<OperationSyncResult.Converged>(result)
+        assertEquals(1, fixture.remote.segmentedPublishCount)
+        assertEquals(
+            AppSyncOperationLifecycle.Acknowledged,
+            fixture.store.allOutboxOperations().single().second,
+        )
+        assertEquals(AppSyncInstallationState.Active, fixture.store.installation()?.state)
+        assertEquals(401L, fixture.store.installation()?.journalBlogId)
+    }
+
+    @Test
+    fun interruptedLegacyRecoveryPreservesSourceIdentityAndLifecycle() = runBlocking {
         val fixture = fixture()
         activate(fixture)
         val oldInstallation = requireNotNull(fixture.store.installation())
@@ -1179,37 +1212,19 @@ class OperationSyncEngineTest {
             origin = SyncOperationOrigin.UserAction,
         )
         fixture.store.markPublishedUnverified(setOf(legacy.operationId))
-        fixture.engine = OperationSyncEngine(
-            store = fixture.store,
-            remote = fixture.remote,
-            domainState = fixture.domain,
-            nowMillis = { fixture.clock++ },
-            ownerId = { "migration-owner" },
-            migrateLegacyOutbox = { binding, causalContext ->
-                fixture.store.rebaseCurrentPendingOperations(
-                    accountBinding = binding,
-                    drafts = listOf(migrationSetting("dark")),
-                    causalContext = causalContext,
-                    createdAtEpochMillis = fixture.clock++,
-                )
-            },
-        )
+        fixture.remote.legacyRecoveryHandler = {
+            AppSyncLegacyRecoveryResult.Retryable("interrupted before verified commit")
+        }
 
-        val result = assertIs<OperationSyncResult.Converged>(
+        val result = assertIs<OperationSyncResult.RetryScheduled>(
             fixture.engine.synchronize(account, formHash),
         )
 
-        assertEquals(1, result.migratedLegacyOperationCount)
-        assertEquals(1, result.replacementMigrationOperationCount)
-        assertEquals(1, result.scrubbedLegacyPayloadCount)
-        assertNotEquals(oldInstallation.deviceEpoch, fixture.store.installation()?.deviceEpoch)
+        assertTrue(result.reason.contains("interrupted"))
+        assertEquals(oldInstallation, fixture.store.installation())
         val oldRow = fixture.store.allOutboxOperations().single { it.first.operationId == legacy.operationId }
-        assertEquals(AppSyncOperationLifecycle.DiscardedByRebootstrap, oldRow.second)
-        assertEquals(null, oldRow.first.fields["threadCover"])
-        val replacement = fixture.store.allOutboxOperations().single {
-            it.first.deviceEpoch == fixture.store.installation()?.deviceEpoch
-        }
-        assertEquals(AppSyncOperationLifecycle.Acknowledged, replacement.second)
+        assertEquals(AppSyncOperationLifecycle.PublishedUnverified, oldRow.second)
+        assertTrue(oldRow.first.fields["threadCover"]?.contains("AAAA") == true)
         assertTrue(fixture.remote.forceDiscoveryRequests.contains(true))
     }
 
@@ -1267,7 +1282,7 @@ class OperationSyncEngineTest {
                 ?.value
     }
 
-    private class FakeJournalRemote : AppSyncJournalRemote {
+    private class FakeJournalRemote : AppSyncSegmentedJournalRemote, AppSyncLegacyRecoveryRemote {
         private val journals = linkedMapOf<String, LoadedAppSyncJournal>()
         var publishCount = 0
         var loadCount = 0
@@ -1277,6 +1292,10 @@ class OperationSyncEngineTest {
         var retryableLoadFailuresRemaining = 0
         var loadFailure: AppSyncJournalLoadResult? = null
         var publishFailure: AppSyncJournalPublishResult? = null
+        var segmentedPublishCount = 0
+        var segmentedHandler: ((AppSyncJournalPayload) -> AppSyncJournalPublishResult)? = null
+        var legacyRecoveryHandler:
+            ((List<AppSyncLegacyOperationClassification>) -> AppSyncLegacyRecoveryResult)? = null
         var loadGate: CompletableDeferred<Unit>? = null
         var loadStarted: CompletableDeferred<Unit>? = null
         val checkpoints = mutableListOf<LoadedAppSyncCheckpoint>()
@@ -1328,6 +1347,26 @@ class OperationSyncEngineTest {
                 AppSyncJournalPublishResult.Verified(loaded)
             }
         }
+
+        override suspend fun publishOwnJournalSegmented(
+            payload: AppSyncJournalPayload,
+            acknowledgementOperationIds: Set<SyncOperationId>,
+            activeJournals: List<LoadedAppSyncJournal>,
+            formHash: FormHash,
+        ): AppSyncJournalPublishResult {
+            segmentedPublishCount++
+            return segmentedHandler?.invoke(payload)
+                ?: AppSyncJournalPublishResult.StoragePressure(60_000, 50_000)
+        }
+
+        override suspend fun recoverLegacyOperations(
+            classifications: List<AppSyncLegacyOperationClassification>,
+            observed: SyncCausalContext,
+            checkpointAcknowledgements: List<me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointAcknowledgement>,
+            activeJournals: List<LoadedAppSyncJournal>,
+            formHash: FormHash,
+        ): AppSyncLegacyRecoveryResult = legacyRecoveryHandler?.invoke(classifications)
+            ?: AppSyncLegacyRecoveryResult.Retryable("legacy recovery handler is not configured")
 
         fun seed(payload: AppSyncJournalPayload) {
             val key = "${payload.deviceId.value}:${payload.deviceEpoch.value}"

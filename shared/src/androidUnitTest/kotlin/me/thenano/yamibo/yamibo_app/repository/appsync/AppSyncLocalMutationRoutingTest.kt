@@ -198,6 +198,47 @@ class AppSyncLocalMutationRoutingTest {
     }
 
     @Test
+    fun inboundLegacyCacheCannotOverwriteLocalValueOrRemainInResolvedCheckpointState() {
+        val db = inMemoryDatabase()
+        val store = SqlDelightAppSyncOperationStore(db).also {
+            it.initialize("generation")
+            it.bindAccount(SyncAccountBinding("account"), AppSyncInstallationState.Active)
+        }
+        val settings = MapSettingsStore().also {
+            it.putString("appsettings.signpagehtmlcache", "local-device-cache")
+        }
+        val evidence = mutableListOf<me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncPortabilityEvidence>()
+        val domainState = SqlDelightSyncDomainStateAdapter(
+            db = db,
+            materializer = DatabaseSyncDomainMaterializer(db, settings, evidence::add),
+            nowMillis = { 100 },
+        )
+        val legacy = store.appendLocalOperation(
+            accountBinding = SyncAccountBinding("account"),
+            domainId = me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDomainId("settings"),
+            entityId = me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncEntityId(
+                "appsettings.signpagehtmlcache",
+            ),
+            entityGeneration = 1,
+            kind = SyncOperationKind.Patch,
+            fields = mapOf("type" to "string", "value" to "legacy-cloud-cache"),
+            causalContext = me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncCausalContext(),
+            createdAtEpochMillis = 1,
+            origin = me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationOrigin.UserAction,
+        )
+
+        domainState.apply(OperationReducer().reduce(operations = listOf(legacy)))
+
+        assertEquals(
+            "local-device-cache",
+            settings.getString("appsettings.signpagehtmlcache", ""),
+        )
+        assertTrue(domainState.currentState().isEmpty())
+        assertEquals("legacy-local-only", evidence.single().reason)
+        assertFalse(evidence.single().redactedEntityId.contains("signpagehtmlcache"))
+    }
+
+    @Test
     fun threadCoverOperationsOnlyCarryHttpLinks() = runBlocking {
         val cases = listOf(
             "http://example.com/cover.jpg" to "http://example.com/cover.jpg",

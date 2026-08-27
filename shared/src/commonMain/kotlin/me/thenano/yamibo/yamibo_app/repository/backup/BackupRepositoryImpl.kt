@@ -9,6 +9,7 @@ import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 import me.thenano.yamibo.yamibo_app.util.time.currentLocalDateKeyAt
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncIdentityGenerator
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncPortabilityPolicy
 import me.thenano.yamibo.yamibo_app.repository.rss.rssSearchSubscriptionSyncId
 
 class BackupRepositoryImpl(
@@ -1179,17 +1180,7 @@ class BackupRepositoryImpl(
     }
 
     private fun shouldSkipSetting(key: String): Boolean {
-        val blockedSuffixes = listOf(
-            "signpagehtmlcache",
-            "signpagehtmlcacheupdatedat",
-            "favoriteupdatehiddenrunid",
-            "appupdatelastcheckat",
-            "appupdateignoredversioncode",
-            "backupfolderuri",
-            "backuplastautobackupat",
-        )
-        val normalized = key.replace(".", "").lowercase()
-        return blockedSuffixes.any(normalized::endsWith)
+        return !AppSyncPortabilityPolicy.includeSettingInLocalBackup(key)
     }
 
     private fun backupFileName(nowMillis: Long, automatic: Boolean, customName: String? = null): String {

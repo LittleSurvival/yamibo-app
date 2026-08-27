@@ -104,10 +104,5 @@ internal const val PENDING_SETTINGS_MIGRATION_WINNER = "local-pending-bootstrap-
  * still belong in a portable backup, but publishing them through AppSync would make one device
  * interpret another device's local database identifiers.
  */
-internal fun isAppSyncLocalOnlySetting(key: String): Boolean = key in APP_SYNC_LOCAL_ONLY_SETTINGS
-
-private val APP_SYNC_LOCAL_ONLY_SETTINGS = setOf(
-    "appsettings.favoritelastcategoryid",
-    "appsettings.signpagehtmlcache",
-    "appsettings.signpagehtmlcacheupdatedat",
-)
+internal fun isAppSyncLocalOnlySetting(key: String): Boolean =
+    !AppSyncPortabilityPolicy.isSettingPortable(key)
