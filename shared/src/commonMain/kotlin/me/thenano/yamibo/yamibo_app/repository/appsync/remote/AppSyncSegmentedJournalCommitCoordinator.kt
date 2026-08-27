@@ -95,5 +95,6 @@ internal class AppSyncSegmentedJournalCommitCoordinator(
         AppSyncRecoveryMode.LegacyShadow -> recoveryStore.shadowOperations(session.sessionId)
             .mapTo(linkedSetOf()) { it.operationId.value }
         AppSyncRecoveryMode.SegmentedJournal -> session.sourceOperationIds
+        AppSyncRecoveryMode.SegmentedCheckpoint -> emptySet()
     }
 }

@@ -57,6 +57,63 @@ class SqlDelightAppSyncRecoveryStoreTest {
     }
 
     @Test
+    fun migration40CreatesDurableCleanupObservationSchema() {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+
+        Database.Schema.migrate(driver, oldVersion = 40, newVersion = 41)
+
+        val columns = driver.executeQuery(
+            identifier = null,
+            sql = "PRAGMA table_info('AppSyncCleanupObservation')",
+            mapper = { cursor ->
+                app.cash.sqldelight.db.QueryResult.Value(
+                    buildSet {
+                        while (cursor.next().value) add(requireNotNull(cursor.getString(1)))
+                    },
+                )
+            },
+            parameters = 0,
+        ).value
+        assertTrue(
+            columns.containsAll(
+                setOf(
+                    "generationId",
+                    "observationCount",
+                    "firstObservedAtEpochMillis",
+                    "lastObservedAtEpochMillis",
+                    "deletedBlogIdsJson",
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun migration41AddsRecoveryPayloadProgressWithoutRewritingSessions() {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        driver.execute(
+            null,
+            "CREATE TABLE AppSyncRecoverySession (sessionId TEXT NOT NULL PRIMARY KEY)",
+            0,
+        )
+
+        Database.Schema.migrate(driver, oldVersion = 41, newVersion = 42)
+
+        val columns = driver.executeQuery(
+            null,
+            "PRAGMA table_info('AppSyncRecoverySession')",
+            { cursor ->
+                app.cash.sqldelight.db.QueryResult.Value(
+                    buildSet {
+                        while (cursor.next().value) add(requireNotNull(cursor.getString(1)))
+                    },
+                )
+            },
+            0,
+        ).value
+        assertTrue(columns.containsAll(setOf("encodedChars", "targetBudgetChars")))
+    }
+
+    @Test
     fun everyRecoveryPhaseSurvivesStoreRestart() {
         AppSyncRecoveryPhase.entries.forEach { phase ->
             val fixture = fixture()

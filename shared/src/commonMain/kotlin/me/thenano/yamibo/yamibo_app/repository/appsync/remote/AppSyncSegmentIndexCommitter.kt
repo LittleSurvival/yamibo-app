@@ -30,6 +30,30 @@ internal class AppSyncSegmentIndexCommitter(
         sessionId: String,
         classSelection: AppSyncBlogClassSelection,
         formHash: FormHash,
+    ): AppSyncSegmentIndexCommitResult = commitRoot(
+        sessionId = sessionId,
+        checkpointId = null,
+        classSelection = classSelection,
+        formHash = formHash,
+    )
+
+    suspend fun commitCheckpointRoot(
+        sessionId: String,
+        checkpointId: String,
+        classSelection: AppSyncBlogClassSelection,
+        formHash: FormHash,
+    ): AppSyncSegmentIndexCommitResult = commitRoot(
+        sessionId = sessionId,
+        checkpointId = checkpointId,
+        classSelection = classSelection,
+        formHash = formHash,
+    )
+
+    private suspend fun commitRoot(
+        sessionId: String,
+        checkpointId: String?,
+        classSelection: AppSyncBlogClassSelection,
+        formHash: FormHash,
     ): AppSyncSegmentIndexCommitResult {
         val session = recoveryStore.session(sessionId)
             ?: return AppSyncSegmentIndexCommitResult.Terminal("Recovery session is missing")
@@ -60,9 +84,21 @@ internal class AppSyncSegmentIndexCommitter(
         if (currentPayload.accountBinding != session.accountBinding) {
             return AppSyncSegmentIndexCommitResult.Terminal("Index account binding does not match")
         }
-        val rootReference = AppSyncIndexJournalReference(replicaKey, rootBlogId, rootFingerprint)
+        val journalReference = if (checkpointId == null) {
+            AppSyncIndexJournalReference(replicaKey, rootBlogId, rootFingerprint)
+        } else {
+            null
+        }
+        val checkpointReference = checkpointId?.let {
+            AppSyncIndexCheckpointReference(it, rootBlogId, rootFingerprint)
+        }
         val desiredPayload = currentPayload.copy(
-            journals = currentPayload.journals.filterNot { it.replicaKey == replicaKey } + rootReference,
+            journals = journalReference?.let { reference ->
+                currentPayload.journals.filterNot { it.replicaKey == replicaKey } + reference
+            } ?: currentPayload.journals,
+            checkpoints = checkpointReference?.let { reference ->
+                currentPayload.checkpoints.filterNot { it.checkpointId == checkpointId } + reference
+            } ?: currentPayload.checkpoints,
             updatedAtEpochMillis = nowMillis(),
         )
         val encoded = indexCodec.encode(desiredPayload)
@@ -99,7 +135,10 @@ internal class AppSyncSegmentIndexCommitter(
             when (val loaded = loadIndex(candidateId)) {
                 is LoadedIndex.Valid -> if (
                     loaded.fingerprint == expected.fingerprint &&
-                    loaded.payload.journals.singleOrNull { it.replicaKey == replicaKey } == rootReference
+                    (journalReference == null ||
+                        loaded.payload.journals.singleOrNull { it.replicaKey == replicaKey } == journalReference) &&
+                    (checkpointReference == null ||
+                        loaded.payload.checkpoints.singleOrNull { it.checkpointId == checkpointId } == checkpointReference)
                 ) {
                     remoteStore.save(
                         StoredAppSyncRemoteBlog(
@@ -120,7 +159,7 @@ internal class AppSyncSegmentIndexCommitter(
             }
         }
         return AppSyncSegmentIndexCommitResult.Retryable(
-            "Index reload did not verify the staged Journal root reference",
+            "Index reload did not verify the staged root reference",
         )
     }
 

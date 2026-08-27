@@ -1,0 +1,2 @@
+ALTER TABLE AppSyncRecoverySession ADD COLUMN encodedChars INTEGER;
+ALTER TABLE AppSyncRecoverySession ADD COLUMN targetBudgetChars INTEGER NOT NULL DEFAULT 42000;

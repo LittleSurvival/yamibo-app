@@ -15,6 +15,8 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncScheduleSettings
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncJournalRetirementState
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncJournalRetirementStatus
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncStatusMessage
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncRecoveryStatus
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncRecoveryPublicPhase
 import me.thenano.yamibo.yamibo_app.util.time.FixedScheduleInterval
 
 class CloudSyncUiStateTest {
@@ -293,6 +295,70 @@ class CloudSyncUiStateTest {
                 "等待 checkpoint 完整覆蓋與所有活躍 replica 確認",
             ),
             raw,
+        )
+    }
+
+    @Test
+    fun recoveryProgressIsVisibleAndForceActionsStayUnavailableUntilCommitCompletes() {
+        val recovery = AppSyncRecoveryStatus(
+            phase = AppSyncRecoveryPublicPhase.UploadingSegments,
+            encodedChars = 91_234,
+            targetBudgetChars = 42_000,
+            verifiedSegmentCount = 2,
+            totalSegmentCount = 4,
+            pendingOperationCount = 535,
+            retryCount = 1,
+            retryCategory = "NETWORK",
+            nextRetryAtEpochMillis = 999L,
+            blockingDomain = null,
+            redactedBlockingEntity = null,
+            payloadFingerprint = "abc123",
+        )
+        val state = status(AppSyncServicePhase.RecoveryUploadingSegments).copy(
+            presentationMessage = AppSyncStatusMessage.RecoveryInProgress,
+            recoveryStatus = recovery,
+        ).toUiState(backgroundSchedulerAvailable = true)
+
+        assertEquals(CloudSyncStatus.Checking, state.status)
+        assertEquals(CloudSyncOperation.Syncing, state.operation)
+        assertFalse(state.actionsAvailable)
+        assertTrue(state.refreshAvailable)
+        assertEquals(
+            CloudSyncDetailValue.Text("91234 / 42000"),
+            state.details.single { it.label == CloudSyncDetailLabel.RecoveryPayload }.value,
+        )
+        assertEquals(
+            CloudSyncDetailValue.Text("2 / 4"),
+            state.details.single { it.label == CloudSyncDetailLabel.RecoverySegments }.value,
+        )
+    }
+
+    @Test
+    fun recoveryBlockerShowsOnlyRedactedIdentityAndNeverEnablesForceRecovery() {
+        val state = status(AppSyncServicePhase.RecoveryNeedsAttention).copy(
+            presentationMessage = AppSyncStatusMessage.RecoveryNeedsAttention("detail-note"),
+            recoveryStatus = AppSyncRecoveryStatus(
+                phase = AppSyncRecoveryPublicPhase.NeedsAttention,
+                encodedChars = 300_000,
+                targetBudgetChars = 42_000,
+                verifiedSegmentCount = 0,
+                totalSegmentCount = 0,
+                pendingOperationCount = 1,
+                retryCount = 3,
+                retryCategory = "ENTITY_SIZE_POLICY",
+                nextRetryAtEpochMillis = null,
+                blockingDomain = "detail-note",
+                redactedBlockingEntity = "entity#7ac9",
+                payloadFingerprint = "safe-fingerprint",
+            ),
+        ).toUiState(backgroundSchedulerAvailable = true)
+
+        assertFalse(state.actionsAvailable)
+        assertFalse(state.refreshAvailable)
+        assertNotNull(state.notice)
+        assertEquals(
+            CloudSyncDetailValue.Text("detail-note / entity#7ac9"),
+            state.details.single { it.label == CloudSyncDetailLabel.RecoveryBlocker }.value,
         )
     }
 

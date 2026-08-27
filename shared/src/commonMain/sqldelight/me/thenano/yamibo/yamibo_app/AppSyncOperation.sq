@@ -566,6 +566,50 @@ deleteRecoverySegmentWrites:
 DELETE FROM AppSyncRecoverySegmentWrite
 WHERE sessionId = ?;
 
+getActiveRecoverySessions:
+SELECT * FROM AppSyncRecoverySession
+WHERE accountBinding = ? AND phase != 'COMPLETED';
+
+updateRecoveryPayloadMeasurement:
+UPDATE AppSyncRecoverySession
+SET encodedChars = ?, targetBudgetChars = ?, updatedAtEpochMillis = ?
+WHERE sessionId = ?;
+
+getCleanupObservation:
+SELECT * FROM AppSyncCleanupObservation
+WHERE generationId = ?;
+
+getCleanupObservationsByAccount:
+SELECT * FROM AppSyncCleanupObservation
+WHERE accountBinding = ?
+ORDER BY firstObservedAtEpochMillis ASC, generationId ASC;
+
+insertCleanupObservation:
+INSERT INTO AppSyncCleanupObservation(
+    generationId, accountBinding, rootBlogId, rootFingerprint, blogIdsJson,
+    observationCount, firstObservedAtEpochMillis, lastObservedAtEpochMillis,
+    lastIndexFingerprint, deletedBlogIdsJson
+) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, '[]');
+
+updateCleanupObservation:
+UPDATE AppSyncCleanupObservation
+SET rootBlogId = ?,
+    rootFingerprint = ?,
+    blogIdsJson = ?,
+    observationCount = ?,
+    lastObservedAtEpochMillis = ?,
+    lastIndexFingerprint = ?
+WHERE generationId = ?;
+
+markCleanupBlogDeleted:
+UPDATE AppSyncCleanupObservation
+SET deletedBlogIdsJson = ?
+WHERE generationId = ?;
+
+deleteCleanupObservation:
+DELETE FROM AppSyncCleanupObservation
+WHERE generationId = ?;
+
 getResolvedEntitiesByDomainAndEntity:
 SELECT * FROM AppSyncResolvedEntity
 WHERE domainId = ? AND entityId = ?

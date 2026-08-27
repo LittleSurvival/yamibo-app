@@ -19,6 +19,7 @@ import kotlin.test.assertTrue
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncCloudResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncInstallationState
+import me.thenano.yamibo.yamibo_app.repository.appsync.domain.stableAppSyncFingerprint
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncAccountBinding
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncCausalContext
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDomainId
@@ -48,6 +49,8 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncSegmentPubl
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncSegmentPublisher
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncSegmentedJournalCommitCoordinator
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncSegmentedJournalCommitResult
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncSegmentedCheckpointCommitCoordinator
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncSegmentedCheckpointCommitResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.YamiboAppSyncJournalRemote
 import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncOperationStore
 import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncRemoteBlogStore
@@ -353,6 +356,225 @@ class AppSyncSegmentPublisherTest {
         assertEquals(installation.deviceId, fixture.operations.installation()?.deviceId)
         assertTrue(fixture.operations.installation()?.journalBlogId != null)
         assertEquals(0, provider.fetchListCalls)
+    }
+
+    @Test
+    fun checkpointChainBecomesVisibleOnlyAfterVerifiedIndexAndLocalActivation() = runBlocking {
+        val fixture = fixture()
+        fixture.recovery.rollbackPreCommit(fixture.session.sessionId)
+        val provider = FakeProvider()
+        val checkpointId = "cp-portable"
+        val checkpointCodec = me.thenano.yamibo.yamibo_app.repository.appsync.remote
+            .AppSyncCheckpointEnvelopeCodec()
+        val checkpointPayload = checkpointCodec.createPayload(
+            checkpointId = checkpointId,
+            accountBinding = fixture.account,
+            coverage = SyncCausalContext(),
+            snapshot = me.thenano.yamibo.yamibo_app.repository.backup.YamiboBackupFile(
+                appVersionCode = 1,
+                createdAt = 20L,
+            ),
+            tombstones = emptyList(),
+            createdAtEpochMillis = 20L,
+        )
+        val envelope = checkpointCodec.encode(checkpointPayload)
+        val session = fixture.recovery.createOrResumeSegmentedCheckpoint(
+            fixture.account,
+            checkpointId,
+            stableAppSyncFingerprint(envelope),
+            20L,
+        )
+        fixture.recovery.startSegmentedJournal(session.sessionId, 21L)
+        val coordinator = AppSyncSegmentedCheckpointCommitCoordinator(
+            publisher(
+                provider,
+                fixture.recovery,
+                AppSyncSegmentEnvelopeCodec(AppSyncPayloadBudget(4_096)),
+            ),
+            AppSyncSegmentIndexCommitter(
+                provider, fixture.remoteStore, fixture.recovery, nowMillis = { 40L },
+            ),
+            fixture.recovery,
+            nowMillis = { 50L },
+        )
+
+        provider.failSubmissionNumber = 2
+        assertIs<AppSyncSegmentedCheckpointCommitResult.Retryable>(
+            coordinator.commit(
+                session.sessionId, checkpointId, envelope, CLASS_SELECTION, FORM_HASH,
+            ),
+        )
+        assertTrue(fixture.remoteStore.load("index") == null)
+        assertTrue(fixture.recovery.session(session.sessionId)?.indexCommitted == false)
+
+        provider.failSubmissionNumber = null
+        val verified = assertIs<AppSyncSegmentedCheckpointCommitResult.Verified>(
+            coordinator.commit(
+                session.sessionId, checkpointId, envelope, CLASS_SELECTION, FORM_HASH,
+            ),
+        )
+        assertTrue(verified.rootBlogId > 0)
+        assertEquals(
+            me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.Completed,
+            fixture.recovery.session(session.sessionId)?.phase,
+        )
+        val indexBlog = requireNotNull(fixture.remoteStore.load("index"))
+        val indexPage = assertIs<AppSyncCloudResult.VerifiedSuccess<BlogPage>>(
+            provider.fetchBlog(indexBlog.blogId),
+        ).value
+        val index = assertIs<me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncIndexValidation.Valid>(
+            AppSyncIndexEnvelopeCodec().validateReaderHtml(indexPage.rootBlog.contentHtml),
+        ).envelope.payload
+        assertEquals(verified.rootBlogId.toInt(), index.checkpoints.single().blogId)
+        assertEquals(checkpointId, index.checkpoints.single().checkpointId)
+        assertEquals(
+            me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncOperationLifecycle.PendingLocal,
+            fixture.operations.allOutboxOperations().single().second,
+        )
+        assertEquals(
+            AppSyncRemoteBlogKind.CheckpointRoot,
+            fixture.remoteStore.load("checkpoint-root:${session.generationId}")?.kind,
+        )
+        assertTrue(fixture.remoteStore.loadKind(AppSyncRemoteBlogKind.Segment).isEmpty())
+
+        val restartedRemote = YamiboAppSyncJournalRemote(
+            provider = provider,
+            store = fixture.remoteStore,
+            nowMillis = { 60L },
+            recoveryStore = SqlDelightAppSyncRecoveryStore(fixture.database),
+        )
+        val loaded = assertIs<
+            me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalLoadResult.Success
+            >(restartedRemote.loadJournals(fixture.account, forceDiscovery = false))
+        assertEquals(checkpointId, loaded.checkpoints.single().envelope.payload.checkpointId)
+        assertEquals(
+            AppSyncRemoteBlogKind.CheckpointRoot,
+            fixture.remoteStore.load("checkpoint:$checkpointId")?.kind,
+        )
+        assertEquals(envelope, me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointEnvelopeCodec()
+            .encode(loaded.checkpoints.single().envelope.payload))
+    }
+
+    @Test
+    fun largeCheckpointUsesBudgetedSegmentsAndLoadsAcrossRemoteRestart() = runBlocking {
+        val fixture = fixture()
+        fixture.recovery.rollbackPreCommit(fixture.session.sessionId)
+        fixture.remoteStore.saveClassId(fixture.account, BlogClassId(7))
+        val provider = FakeProvider()
+        val installation = requireNotNull(fixture.operations.installation())
+        val journalPayload = AppSyncJournalPayload(
+            accountBinding = fixture.account,
+            deviceId = installation.deviceId,
+            deviceEpoch = installation.deviceEpoch,
+            writerNonce = installation.writerNonce,
+            firstSequence = fixture.source.sequence.value,
+            lastSequence = fixture.source.sequence.value,
+            operations = listOf(fixture.source),
+            observed = SyncCausalContext(),
+            heartbeatAtEpochMillis = 100L,
+            protocolReadVersion = 2,
+            protocolWriteVersion = 1,
+        )
+        val journalBody = AppSyncJournalEnvelopeCodec().encode(journalPayload)
+        val journalFingerprint = assertIs<AppSyncJournalValidation.Valid>(
+            AppSyncJournalEnvelopeCodec().validate(journalBody),
+        ).envelope.fingerprint
+        provider.storeBlog(
+            BlogId(77),
+            AppSyncJournalDefaults.journalTitle(installation.deviceId, installation.deviceEpoch),
+            journalBody,
+        )
+        fixture.remoteStore.save(
+            StoredAppSyncRemoteBlog(
+                me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncReplicaKey(
+                    installation.deviceId,
+                    installation.deviceEpoch,
+                ).stableKey,
+                AppSyncRemoteBlogKind.Journal,
+                BlogId(77),
+                BlogClassId(7),
+                journalFingerprint,
+                100L,
+                100L,
+            ),
+        )
+        val indexBody = AppSyncIndexEnvelopeCodec().encode(
+            AppSyncIndexPayload(
+                accountBinding = fixture.account,
+                journals = listOf(
+                    me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncIndexJournalReference(
+                        replicaKey = me.thenano.yamibo.yamibo_app.repository.appsync.operation
+                            .SyncReplicaKey(installation.deviceId, installation.deviceEpoch).stableKey,
+                        blogId = 77,
+                        fingerprint = journalFingerprint,
+                    ),
+                ),
+                updatedAtEpochMillis = 100L,
+            ),
+        )
+        val indexFingerprint = assertIs<
+            me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncIndexValidation.Valid
+            >(AppSyncIndexEnvelopeCodec().validate(indexBody)).envelope.fingerprint
+        provider.storeBlog(BlogId(78), APP_SYNC_INDEX_TITLE, indexBody)
+        fixture.remoteStore.save(
+            StoredAppSyncRemoteBlog(
+                "index", AppSyncRemoteBlogKind.Index, BlogId(78), BlogClassId(7),
+                indexFingerprint, 100L, 100L,
+            ),
+        )
+        val remote = YamiboAppSyncJournalRemote(
+            provider,
+            fixture.remoteStore,
+            nowMillis = { 200L },
+            recoveryStore = fixture.recovery,
+        )
+        assertIs<me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalLoadResult.Success>(
+            remote.loadJournals(fixture.account, forceDiscovery = false),
+        )
+        val checkpointCodec = me.thenano.yamibo.yamibo_app.repository.appsync.remote
+            .AppSyncCheckpointEnvelopeCodec()
+        val snapshot = me.thenano.yamibo.yamibo_app.repository.backup.YamiboBackupFile(
+            appVersionCode = 1,
+            createdAt = 200L,
+            settings = (0 until 4_000).map { index ->
+                me.thenano.yamibo.yamibo_app.repository.backup.BackupSetting(
+                    key = "portable-$index-${stableAppSyncFingerprint("key-$index")}",
+                    type = me.thenano.yamibo.yamibo_app.repository.backup.BackupSettingType.String,
+                    value = stableAppSyncFingerprint("value-$index-a") +
+                        stableAppSyncFingerprint("value-$index-b"),
+                )
+            },
+        )
+        val payload = checkpointCodec.createPayload(
+            "cp-large",
+            fixture.account,
+            SyncCausalContext(),
+            snapshot,
+            tombstones = emptyList(),
+            createdAtEpochMillis = 200L,
+        )
+        assertTrue(checkpointCodec.encode(payload).length > AppSyncPayloadBudget.DEFAULT_TARGET_CHARS)
+
+        val published = assertIs<
+            me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncCheckpointPublishResult.Verified
+            >(remote.publishCheckpoint(payload, FORM_HASH))
+        assertEquals("cp-large", published.checkpoint.envelope.payload.checkpointId)
+        assertTrue(provider.submittedTitles.any { it.contains(" Segment ") })
+        assertTrue(provider.submittedTitles.any { it.contains(" Root ") })
+        assertTrue(provider.blogs.values
+            .filter { it.blogInfo.title.contains(" Segment ") }
+            .all { it.rootBlog.contentHtml.length <= AppSyncPayloadBudget.DEFAULT_TARGET_CHARS })
+
+        val restarted = YamiboAppSyncJournalRemote(
+            provider,
+            fixture.remoteStore,
+            nowMillis = { 300L },
+            recoveryStore = SqlDelightAppSyncRecoveryStore(fixture.database),
+        )
+        val loaded = assertIs<
+            me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalLoadResult.Success
+            >(restarted.loadJournals(fixture.account, forceDiscovery = false))
+        assertEquals("cp-large", loaded.checkpoints.single().envelope.payload.checkpointId)
     }
 
     private fun publisher(

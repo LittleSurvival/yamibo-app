@@ -1199,7 +1199,6 @@ class OperationSyncEngineTest {
     fun interruptedLegacyRecoveryPreservesSourceIdentityAndLifecycle() = runBlocking {
         val fixture = fixture()
         activate(fixture)
-        val oldInstallation = requireNotNull(fixture.store.installation())
         val legacy = fixture.store.appendLocalOperation(
             accountBinding = account,
             domainId = SyncDomainId("reading.thread"),
@@ -1211,6 +1210,7 @@ class OperationSyncEngineTest {
             createdAtEpochMillis = fixture.clock++,
             origin = SyncOperationOrigin.UserAction,
         )
+        val oldInstallation = requireNotNull(fixture.store.installation())
         fixture.store.markPublishedUnverified(setOf(legacy.operationId))
         fixture.remote.legacyRecoveryHandler = {
             AppSyncLegacyRecoveryResult.Retryable("interrupted before verified commit")

@@ -52,6 +52,20 @@ internal class SqlDelightAppSyncRecoveryStore(
         emptySet(),
     )
 
+    fun createOrResumeSegmentedCheckpoint(
+        accountBinding: SyncAccountBinding,
+        checkpointId: String,
+        payloadFingerprint: String,
+        nowEpochMillis: Long,
+    ): AppSyncRecoverySession = createOrResumeSession(
+        accountBinding,
+        emptySet(),
+        stableAppSyncFingerprint("$checkpointId|$payloadFingerprint"),
+        nowEpochMillis,
+        AppSyncRecoveryMode.SegmentedCheckpoint,
+        emptySet(),
+    )
+
     private fun createOrResumeSession(
         accountBinding: SyncAccountBinding,
         sourceOperationIds: Set<String>,
@@ -60,7 +74,9 @@ internal class SqlDelightAppSyncRecoveryStore(
         mode: AppSyncRecoveryMode,
         acknowledgedSourceOperationIds: Set<String>,
     ): AppSyncRecoverySession {
-        require(sourceOperationIds.isNotEmpty()) { "Recovery requires source operations" }
+        require(sourceOperationIds.isNotEmpty() || mode == AppSyncRecoveryMode.SegmentedCheckpoint) {
+            "Recovery requires source operations"
+        }
         require(acknowledgedSourceOperationIds.all { it in sourceOperationIds }) {
             "Acknowledged recovery sources must belong to the session"
         }
@@ -125,6 +141,9 @@ internal class SqlDelightAppSyncRecoveryStore(
     fun session(sessionId: String): AppSyncRecoverySession? =
         queries.getRecoverySession(sessionId).executeAsOneOrNull()?.toModel()
 
+    fun activeSessions(accountBinding: SyncAccountBinding): List<AppSyncRecoverySession> =
+        queries.getActiveRecoverySessions(accountBinding.value).executeAsList().map { it.toModel() }
+
     private fun DatabaseRecoverySession.toModel(): AppSyncRecoverySession =
         AppSyncRecoverySession(
             sessionId = sessionId,
@@ -154,7 +173,25 @@ internal class SqlDelightAppSyncRecoveryStore(
                 createdAtEpochMillis = createdAtEpochMillis,
                 updatedAtEpochMillis = updatedAtEpochMillis,
                 completedAtEpochMillis = completedAtEpochMillis,
+                encodedChars = encodedChars?.toInt(),
+                targetBudgetChars = targetBudgetChars.toInt(),
             )
+
+    fun recordPayloadMeasurement(
+        sessionId: String,
+        encodedChars: Int,
+        targetBudgetChars: Int,
+        nowEpochMillis: Long,
+    ) {
+        require(encodedChars >= 0 && targetBudgetChars > 0)
+        requireSession(sessionId)
+        queries.updateRecoveryPayloadMeasurement(
+            encodedChars.toLong(),
+            targetBudgetChars.toLong(),
+            nowEpochMillis,
+            sessionId,
+        )
+    }
 
     fun stageOperations(sessionId: String, operations: List<SyncOperation>) {
         require(operations.isNotEmpty())
@@ -181,7 +218,10 @@ internal class SqlDelightAppSyncRecoveryStore(
 
     fun startSegmentedJournal(sessionId: String, nowEpochMillis: Long) {
         val session = requireSession(sessionId)
-        require(session.mode == AppSyncRecoveryMode.SegmentedJournal)
+        require(session.mode in setOf(
+            AppSyncRecoveryMode.SegmentedJournal,
+            AppSyncRecoveryMode.SegmentedCheckpoint,
+        ))
         require(session.phase in setOf(AppSyncRecoveryPhase.Classifying, AppSyncRecoveryPhase.Staging))
         transition(
             sessionId,
@@ -407,6 +447,36 @@ internal class SqlDelightAppSyncRecoveryStore(
                 activateCommittedRecovery(sessionId, activatedAtEpochMillis)
             AppSyncRecoveryMode.SegmentedJournal ->
                 activateCommittedSegmentedJournal(sessionId, activatedAtEpochMillis)
+            AppSyncRecoveryMode.SegmentedCheckpoint ->
+                activateCommittedSegmentedCheckpoint(sessionId, activatedAtEpochMillis)
+        }
+    }
+
+    private fun activateCommittedSegmentedCheckpoint(
+        sessionId: String,
+        activatedAtEpochMillis: Long,
+    ) {
+        val session = requireSession(sessionId)
+        require(session.phase == AppSyncRecoveryPhase.ActivatingLocal && session.indexCommitted)
+        require(session.mode == AppSyncRecoveryMode.SegmentedCheckpoint)
+        val rootBlogId = requireNotNull(session.rootBlogId)
+        val rootFingerprint = requireNotNull(session.rootFingerprint)
+        db.transaction {
+            queries.upsertRemoteBlog(
+                remoteKey = "checkpoint-root:${session.generationId}",
+                kind = AppSyncRemoteBlogKind.CheckpointRoot.name.uppercase(),
+                blogId = rootBlogId,
+                classId = null,
+                fingerprint = rootFingerprint,
+                validatedAtEpochMillis = activatedAtEpochMillis,
+                contentUpdatedAtEpochMillis = activatedAtEpochMillis,
+            )
+            transition(
+                sessionId,
+                AppSyncRecoveryPhase.ActivatingLocal,
+                AppSyncRecoveryPhase.Completed,
+                activatedAtEpochMillis,
+            )
         }
     }
 

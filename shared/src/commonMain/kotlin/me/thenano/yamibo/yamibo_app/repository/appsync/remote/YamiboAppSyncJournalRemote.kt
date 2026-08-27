@@ -1,5 +1,6 @@
 package me.thenano.yamibo.yamibo_app.repository.appsync.remote
 
+import com.fleeksoft.ksoup.Ksoup
 import io.github.littlesurvival.dto.page.UserSpaceBlogPage
 import io.github.littlesurvival.dto.value.BlogClassId
 import io.github.littlesurvival.dto.value.BlogId
@@ -28,6 +29,13 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncReplicaKey
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncSequence
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationId
 import me.thenano.yamibo.yamibo_app.repository.appsync.domain.stableAppSyncFingerprint
+import me.thenano.yamibo.yamibo_app.repository.appsync.cleanup.AppSyncCleanupCoordinator
+import me.thenano.yamibo.yamibo_app.repository.appsync.cleanup.AppSyncCleanupDeleteResult
+import me.thenano.yamibo.yamibo_app.repository.appsync.cleanup.AppSyncCleanupObservationStore
+import me.thenano.yamibo.yamibo_app.repository.appsync.cleanup.AppSyncCleanupReachability
+import me.thenano.yamibo.yamibo_app.repository.appsync.cleanup.AppSyncCleanupReachabilityAnalyzer
+import me.thenano.yamibo.yamibo_app.repository.appsync.cleanup.AppSyncCleanupRunResult
+import me.thenano.yamibo.yamibo_app.repository.appsync.cleanup.AppSyncSegmentGenerationCandidate
 import me.thenano.yamibo.yamibo_app.store.appsync.AppSyncRemoteBlogKind
 import me.thenano.yamibo.yamibo_app.store.appsync.AppSyncRemoteBlogStore
 import me.thenano.yamibo.yamibo_app.store.appsync.StoredAppSyncRemoteBlog
@@ -47,10 +55,13 @@ internal class YamiboAppSyncJournalRemote(
     private val journalCodec: AppSyncJournalEnvelopeCodec = AppSyncJournalEnvelopeCodec(),
     private val indexCodec: AppSyncIndexEnvelopeCodec = AppSyncIndexEnvelopeCodec(),
     private val checkpointCodec: AppSyncCheckpointEnvelopeCodec = AppSyncCheckpointEnvelopeCodec(),
+    private val segmentCodec: AppSyncSegmentEnvelopeCodec = AppSyncSegmentEnvelopeCodec(),
     private val nowMillis: () -> Long = ::currentTimeMillis,
     private val retirementIntents:
         (SyncAccountBinding) -> List<AppSyncJournalRetirementIntent> = { emptyList() },
     private val recoveryStore: SqlDelightAppSyncRecoveryStore? = null,
+    private val cleanupObservationStore: AppSyncCleanupObservationStore? = null,
+    private val capacityFlags: AppSyncCapacityFeatureFlags = AppSyncCapacityFeatureFlags(),
 ) : AppSyncSegmentedJournalRemote, AppSyncLegacyRecoveryRemote {
     private val verifiedJournalCache = mutableMapOf<String, LoadedAppSyncJournal>()
     private val verifiedCheckpointCache = mutableMapOf<String, LoadedAppSyncCheckpoint>()
@@ -375,10 +386,11 @@ internal class YamiboAppSyncJournalRemote(
                 return AppSyncJournalPublishResult.TerminalFailure(resolved.reason)
         }
         val encoded = journalCodec.encode(payload)
-        if (encoded.length > SAFE_BLOG_BODY_CHAR_LIMIT) {
+        val measurement = AppSyncPayloadBudget().measure(encoded)
+        if (!measurement.fitsTarget) {
             return AppSyncJournalPublishResult.StoragePressure(
                 encoded.length,
-                SAFE_BLOG_BODY_CHAR_LIMIT,
+                measurement.targetChars,
             )
         }
         val expectedEnvelope = journalCodec.validate(encoded) as AppSyncJournalValidation.Valid
@@ -434,6 +446,12 @@ internal class YamiboAppSyncJournalRemote(
         activeJournals: List<LoadedAppSyncJournal>,
         formHash: FormHash,
     ): AppSyncJournalPublishResult {
+        if (!capacityFlags.v2WritesEnabled) {
+            return AppSyncJournalPublishResult.StoragePressure(
+                journalCodec.encode(payload).length,
+                AppSyncPayloadBudget.DEFAULT_TARGET_CHARS,
+            )
+        }
         val durableStore = recoveryStore
             ?: return AppSyncJournalPublishResult.TerminalFailure(
                 "Durable segmented Journal storage is unavailable",
@@ -455,13 +473,20 @@ internal class YamiboAppSyncJournalRemote(
             is ClassSelectionResult.Terminal ->
                 return AppSyncJournalPublishResult.TerminalFailure(resolved.reason)
         }
-        val canonicalEnvelope = journalCodec.encode(payload)
-        val envelope = journalCodec.validate(canonicalEnvelope) as AppSyncJournalValidation.Valid
-        val bodyFingerprint = stableAppSyncFingerprint(canonicalEnvelope)
+        val sessionFingerprint = payload.segmentedSessionFingerprint(journalCodec)
         val session = durableStore.createOrResumeSegmentedJournal(
             payload.accountBinding,
             acknowledgementOperationIds.mapTo(linkedSetOf()) { it.value },
-            bodyFingerprint,
+            sessionFingerprint,
+            nowMillis(),
+        )
+        val stablePayload = payload.forSegmentedSession(session.createdAtEpochMillis)
+        val canonicalEnvelope = journalCodec.encode(stablePayload)
+        val envelope = journalCodec.validate(canonicalEnvelope) as AppSyncJournalValidation.Valid
+        durableStore.recordPayloadMeasurement(
+            session.sessionId,
+            canonicalEnvelope.length,
+            AppSyncPayloadBudget.DEFAULT_TARGET_CHARS,
             nowMillis(),
         )
         if (session.phase in setOf(
@@ -497,14 +522,14 @@ internal class YamiboAppSyncJournalRemote(
                         classId = classSelection.existingClassId(),
                         fingerprint = envelope.envelope.fingerprint,
                         validatedAtEpochMillis = nowMillis(),
-                        contentUpdatedAtEpochMillis = payload.heartbeatAtEpochMillis,
+                        contentUpdatedAtEpochMillis = stablePayload.heartbeatAtEpochMillis,
                     ),
                 )
                 AppSyncJournalPublishResult.Verified(
                     LoadedAppSyncJournal(
                         remoteId = result.rootBlogId.toString(),
                         fingerprint = envelope.envelope.fingerprint,
-                        payload = payload,
+                        payload = stablePayload,
                     ),
                 )
             }
@@ -525,6 +550,13 @@ internal class YamiboAppSyncJournalRemote(
         activeJournals: List<LoadedAppSyncJournal>,
         formHash: FormHash,
     ): AppSyncLegacyRecoveryResult {
+        if (!capacityFlags.automaticLegacyRecoveryEnabled &&
+            classifications.any { it.requiresRecovery }
+        ) {
+            return AppSyncLegacyRecoveryResult.Retryable(
+                "Automatic legacy AppSync recovery is disabled by rollout policy",
+            )
+        }
         val durableStore = recoveryStore
             ?: return AppSyncLegacyRecoveryResult.NeedsAttention(
                 "Durable legacy recovery storage is unavailable",
@@ -618,7 +650,7 @@ internal class YamiboAppSyncJournalRemote(
             operations = operations,
             observed = observed.advance(targetReplica, SyncSequence(lastSequence)),
             checkpointAcknowledgements = checkpointAcknowledgements,
-            heartbeatAtEpochMillis = nowMillis(),
+            heartbeatAtEpochMillis = session.createdAtEpochMillis,
             protocolReadVersion = AppSyncProtocolCapabilities.READER_VERSION,
             protocolWriteVersion = AppSyncProtocolCapabilities.READER_FIRST_WRITE_VERSION,
             publishedThroughSequence = lastSequence,
@@ -637,6 +669,12 @@ internal class YamiboAppSyncJournalRemote(
         }
         val canonicalEnvelope = journalCodec.encode(payload)
         val validated = journalCodec.validate(canonicalEnvelope) as AppSyncJournalValidation.Valid
+        durableStore.recordPayloadMeasurement(
+            session.sessionId,
+            canonicalEnvelope.length,
+            AppSyncPayloadBudget.DEFAULT_TARGET_CHARS,
+            nowMillis(),
+        )
         val coordinator = AppSyncSegmentedJournalCommitCoordinator(
             publisher = AppSyncSegmentPublisher(provider, durableStore, nowMillis = nowMillis),
             indexCommitter = AppSyncSegmentIndexCommitter(
@@ -690,7 +728,8 @@ internal class YamiboAppSyncJournalRemote(
             val operation = classified.operation
             val portableFields = when (val result = classified.portability) {
                 is me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncPortableEntityResult.Portable ->
-                    result.fields.toSortedMap().entries.joinToString(",") { (key, value) -> "$key=$value" }
+                    result.fields.entries.sortedBy { it.key }
+                        .joinToString(",") { (key, value) -> "$key=$value" }
                 is me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncPortableEntityResult.NeedsAttention ->
                     "blocked:${result.domain}:${result.redactedEntityId}:${result.encodedBytes}"
             }
@@ -710,13 +749,29 @@ internal class YamiboAppSyncJournalRemote(
                 return AppSyncCheckpointPublishResult.TerminalFailure(resolved.reason)
         }
         val encoded = checkpointCodec.encode(payload)
-        if (encoded.length > SAFE_BLOG_BODY_CHAR_LIMIT) {
-            return AppSyncCheckpointPublishResult.StoragePressure(
-                encoded.length,
-                SAFE_BLOG_BODY_CHAR_LIMIT,
+        val expected = checkpointCodec.validate(encoded) as AppSyncCheckpointValidation.Valid
+        val measurement = AppSyncPayloadBudget().measure(encoded)
+        if (!measurement.fitsTarget) {
+            if (!capacityFlags.v2WritesEnabled) {
+                return AppSyncCheckpointPublishResult.StoragePressure(
+                    encoded.length,
+                    measurement.targetChars,
+                )
+            }
+            if (!AppSyncProtocolCapabilities.canWriteV2(
+                    verifiedJournalCache.values.map { it.payload },
+                )
+            ) {
+                return AppSyncCheckpointPublishResult.TerminalFailure(
+                    "An active device cannot read segmented AppSync Checkpoints",
+                )
+            }
+            return publishCheckpointSegmented(
+                payload = payload,
+                classSelection = classSelection,
+                formHash = formHash,
             )
         }
-        val expected = checkpointCodec.validate(encoded) as AppSyncCheckpointValidation.Valid
         val acknowledgement = when (
             val result = provider.submitBlog(
                 AppSyncBlogWriteRequest(
@@ -761,6 +816,83 @@ internal class YamiboAppSyncJournalRemote(
         return AppSyncCheckpointPublishResult.Verified(checkpoint)
     }
 
+    private suspend fun publishCheckpointSegmented(
+        payload: AppSyncCheckpointPayload,
+        classSelection: AppSyncBlogClassSelection,
+        formHash: FormHash,
+    ): AppSyncCheckpointPublishResult {
+        val durableStore = recoveryStore
+            ?: return AppSyncCheckpointPublishResult.StoragePressure(
+                checkpointCodec.encode(payload).length,
+                AppSyncPayloadBudget.DEFAULT_TARGET_CHARS,
+            )
+        val session = durableStore.createOrResumeSegmentedCheckpoint(
+            accountBinding = payload.accountBinding,
+            checkpointId = payload.checkpointId,
+            payloadFingerprint = stableAppSyncFingerprint(payload.checkpointId),
+            nowEpochMillis = nowMillis(),
+        )
+        val stablePayload = payload.forSegmentedSession(session.createdAtEpochMillis)
+        val stableCanonicalEnvelope = checkpointCodec.encode(stablePayload)
+        val stableExpectedEnvelope = (
+            checkpointCodec.validate(stableCanonicalEnvelope) as AppSyncCheckpointValidation.Valid
+        ).envelope
+        durableStore.recordPayloadMeasurement(
+            session.sessionId,
+            stableCanonicalEnvelope.length,
+            AppSyncPayloadBudget.DEFAULT_TARGET_CHARS,
+            nowMillis(),
+        )
+        if (session.phase in setOf(
+                me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.Classifying,
+                me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.Staging,
+            )
+        ) {
+            durableStore.startSegmentedJournal(session.sessionId, nowMillis())
+        }
+        val coordinator = AppSyncSegmentedCheckpointCommitCoordinator(
+            publisher = AppSyncSegmentPublisher(provider, durableStore, nowMillis = nowMillis),
+            indexCommitter = AppSyncSegmentIndexCommitter(
+                provider, store, durableStore, nowMillis = nowMillis,
+            ),
+            recoveryStore = durableStore,
+            nowMillis = nowMillis,
+        )
+        return when (val committed = coordinator.commit(
+            sessionId = session.sessionId,
+            checkpointId = payload.checkpointId,
+            canonicalEnvelope = stableCanonicalEnvelope,
+            classSelection = classSelection,
+            formHash = formHash,
+        )) {
+            is AppSyncSegmentedCheckpointCommitResult.Verified -> {
+                val candidate = StoredAppSyncRemoteBlog(
+                    remoteKey = checkpointRemoteKey(payload.checkpointId),
+                    kind = AppSyncRemoteBlogKind.CheckpointRoot,
+                    blogId = BlogId(committed.rootBlogId.toInt()),
+                    classId = classSelection.existingClassId(),
+                    fingerprint = stableExpectedEnvelope.fingerprint,
+                    validatedAtEpochMillis = nowMillis(),
+                    contentUpdatedAtEpochMillis = stablePayload.createdAtEpochMillis,
+                )
+                val checkpoint = LoadedAppSyncCheckpoint(
+                    remoteId = committed.rootBlogId.toString(),
+                    envelope = stableExpectedEnvelope,
+                )
+                saveCheckpoint(candidate, checkpoint)
+                AppSyncCheckpointPublishResult.Verified(checkpoint)
+            }
+            AppSyncSegmentedCheckpointCommitResult.FormExpired ->
+                AppSyncCheckpointPublishResult.FormExpired
+            is AppSyncSegmentedCheckpointCommitResult.Retryable ->
+                AppSyncCheckpointPublishResult.Unknown(committed.reason)
+            is AppSyncSegmentedCheckpointCommitResult.Conflict ->
+                AppSyncCheckpointPublishResult.Unknown(committed.reason)
+            is AppSyncSegmentedCheckpointCommitResult.Terminal ->
+                AppSyncCheckpointPublishResult.TerminalFailure(committed.reason)
+        }
+    }
+
     override suspend fun enforceCheckpointRetention(
         accountBinding: SyncAccountBinding,
         formHash: FormHash,
@@ -772,7 +904,18 @@ internal class YamiboAppSyncJournalRemote(
                 "Checkpoint retention limit must be positive",
             )
         }
-        val cached = store.loadKind(AppSyncRemoteBlogKind.Checkpoint)
+        cleanupSegmentGenerations(accountBinding, formHash, pinnedCheckpointIds)?.let { cleanup ->
+            cleanup.retryableFailure?.let {
+                return AppSyncCheckpointRetentionResult.RetryableFailure(it)
+            }
+            cleanup.terminalFailure?.let {
+                return AppSyncCheckpointRetentionResult.TerminalFailure(it)
+            }
+        }
+        val cached = (
+            store.loadKind(AppSyncRemoteBlogKind.Checkpoint) +
+                store.loadKind(AppSyncRemoteBlogKind.CheckpointRoot)
+            )
             .filter {
                 it.remoteKey.startsWith(CHECKPOINT_REMOTE_KEY_PREFIX) &&
                     it.fingerprint != null &&
@@ -793,8 +936,9 @@ internal class YamiboAppSyncJournalRemote(
             )
         val pinned = sorted.filter { checkpointId(it.remoteKey) in pinnedCheckpointIds }
         val retained = (
-            pinned + sorted
+            pinned + sorted.filter { it.kind == AppSyncRemoteBlogKind.CheckpointRoot } + sorted
                 .filterNot { checkpointId(it.remoteKey) in pinnedCheckpointIds }
+                .filter { it.kind == AppSyncRemoteBlogKind.Checkpoint }
                 .take(maximumCheckpoints)
             ).distinctBy { it.remoteKey }
         val retainedRemoteKeys = retained.mapTo(hashSetOf()) { it.remoteKey }
@@ -844,6 +988,107 @@ internal class YamiboAppSyncJournalRemote(
         }
     }
 
+    private suspend fun cleanupSegmentGenerations(
+        accountBinding: SyncAccountBinding,
+        formHash: FormHash,
+        pinnedCheckpointIds: Set<String>,
+    ): AppSyncCleanupRunResult? {
+        // This is the only opportunistic full-list v2 scan. Index-committed v2 roots remain
+        // readable through loadCachedState even when this rollout switch is disabled.
+        if (!capacityFlags.mayReadV2(committedIndexReference = false)) return null
+        val observationStore = cleanupObservationStore ?: return null
+        val durableStore = recoveryStore ?: return null
+        val indexLink = store.load(INDEX_REMOTE_KEY) ?: return null
+        val index = when (val loaded = loadIndex(indexLink, accountBinding)) {
+            is IndexCandidateResult.Valid -> loaded
+            else -> return null
+        }
+        val classId = indexLink.classId ?: store.loadClassId(accountBinding) ?: return null
+        val pages = when (val loaded = fetchAllPages(classId, firstPage = null)) {
+            is BlogPagesResult.Success -> loaded.pages
+            is BlogPagesResult.Failure -> return AppSyncCleanupRunResult(
+                orphanGenerationCount = 0,
+                eligibleGenerationCount = 0,
+                deletedBlogCount = 0,
+                dryRunBlogCount = 0,
+                retryableFailure = (loaded.result as? AppSyncJournalLoadResult.RetryableFailure)?.reason,
+                terminalFailure = (loaded.result as? AppSyncJournalLoadResult.TerminalFailure)?.reason,
+            )
+        }
+        val candidates = mutableListOf<AppSyncSegmentGenerationCandidate>()
+        for (summary in pages.flatMap { it.blogs }) {
+            val title = normalizeListTitle(summary.title, AppSyncCloudConfigDefaults.BLOG_CLASS_NAME)
+            if (!title.startsWith(AppSyncJournalDefaults.ROOT_TITLE_PREFIX)) continue
+            val page = when (val fetched = provider.fetchBlog(summary.bId)) {
+                is AppSyncCloudResult.VerifiedSuccess -> fetched.value
+                else -> continue
+            }
+            val rootBody = readerText(page.rootBlog.contentHtml)
+            val root = segmentCodec.decodeRoot(rootBody).getOrNull() ?: continue
+            if (root.accountBinding != accountBinding.value) continue
+            val kind = when (root.kind) {
+                AppSyncSegmentPayloadKind.Journal.name.lowercase() -> AppSyncSegmentPayloadKind.Journal
+                AppSyncSegmentPayloadKind.Checkpoint.name.lowercase() -> AppSyncSegmentPayloadKind.Checkpoint
+                else -> continue
+            }
+            val loaded = loadCanonicalEnvelope(rootBody, kind, accountBinding)
+                as? CanonicalEnvelopeResult.Valid ?: continue
+            val validPayload = when (kind) {
+                AppSyncSegmentPayloadKind.Journal ->
+                    journalCodec.validate(loaded.body) is AppSyncJournalValidation.Valid
+                AppSyncSegmentPayloadKind.Checkpoint ->
+                    checkpointCodec.validate(loaded.body) is AppSyncCheckpointValidation.Valid
+            }
+            candidates += AppSyncSegmentGenerationCandidate(
+                generationId = root.generationId,
+                rootBlogId = summary.bId.value.toLong(),
+                rootFingerprint = stableAppSyncFingerprint(rootBody),
+                segmentBlogIds = loaded.segmentBlogIds,
+                payloadVerified = validPayload,
+            )
+        }
+        val indexedRoots = index.payload.journals.mapTo(linkedSetOf()) { it.blogId.toLong() } +
+            index.payload.checkpoints.mapTo(linkedSetOf()) { it.blogId.toLong() }
+        val pinnedRoots = index.payload.checkpoints
+            .filter { it.checkpointId in pinnedCheckpointIds }
+            .mapTo(linkedSetOf()) { it.blogId.toLong() }
+        val retirementRoots = retirementIntents(accountBinding)
+            .mapTo(linkedSetOf()) { it.sourceBlogId }
+        val reachability = AppSyncCleanupReachability(
+            indexedRootBlogIds = indexedRoots,
+            activeRecoveryRootBlogIds = AppSyncCleanupReachabilityAnalyzer.activeRecoveryRootIds(
+                durableStore.activeSessions(accountBinding),
+            ),
+            pinnedCheckpointRootBlogIds = pinnedRoots,
+            retirementRootBlogIds = retirementRoots,
+        )
+        return AppSyncCleanupCoordinator(
+            store = observationStore,
+            deleteBlog = { blogId ->
+                when (val deleted = provider.deleteBlog(
+                    AppSyncBlogDeleteRequest(BlogId(blogId.toInt()), formHash),
+                )) {
+                    is AppSyncCloudResult.VerifiedSuccess,
+                    AppSyncCloudResult.NotFound,
+                    -> AppSyncCleanupDeleteResult.Verified
+                    is AppSyncCloudResult.NetworkFailed,
+                    is AppSyncCloudResult.Timeout,
+                    AppSyncCloudResult.Maintenance,
+                    -> AppSyncCleanupDeleteResult.Retryable(deleted.describeForJournal())
+                    else -> AppSyncCleanupDeleteResult.Terminal(deleted.describeForJournal())
+                }
+            },
+            nowMillis = nowMillis,
+        ).observeAndClean(
+            accountBinding = accountBinding.value,
+            candidates = candidates,
+            reachability = reachability,
+            authoritativeIndexFingerprint = index.fingerprint,
+            dryRun = capacityFlags.cleanupDryRun,
+            deletionEnabled = capacityFlags.mayDeleteCleanupCandidates(),
+        )
+    }
+
     private fun checkpointRemoteKey(checkpointId: String): String =
         "$CHECKPOINT_REMOTE_KEY_PREFIX$checkpointId"
 
@@ -859,7 +1104,13 @@ internal class YamiboAppSyncJournalRemote(
         store.loadKind(AppSyncRemoteBlogKind.Journal).forEach {
             cachedJournals[it.remoteKey] = it
         }
+        store.loadKind(AppSyncRemoteBlogKind.JournalRoot).forEach {
+            cachedJournals[it.remoteKey] = it
+        }
         store.loadKind(AppSyncRemoteBlogKind.Checkpoint).forEach {
+            cachedCheckpoints[it.remoteKey] = it
+        }
+        store.loadKind(AppSyncRemoteBlogKind.CheckpointRoot).forEach {
             cachedCheckpoints[it.remoteKey] = it
         }
         var indexedReplicaKeys = emptySet<String>()
@@ -914,7 +1165,7 @@ internal class YamiboAppSyncJournalRemote(
             }
             when (val result = loadJournal(candidate, accountBinding)) {
                 is JournalCandidateResult.Valid -> {
-                    saveJournal(candidate, result.journal)
+                    saveJournal(candidate.copy(kind = result.kind), result.journal)
                     loadedJournals += result.journal
                 }
                 JournalCandidateResult.NotFound -> {
@@ -941,7 +1192,7 @@ internal class YamiboAppSyncJournalRemote(
             }
             when (val result = loadCheckpoint(candidate, accountBinding)) {
                 is CheckpointCandidateResult.Valid -> {
-                    saveCheckpoint(candidate, result.checkpoint)
+                    saveCheckpoint(candidate.copy(kind = result.kind), result.checkpoint)
                     loadedCheckpoints += result.checkpoint
                 }
                 CheckpointCandidateResult.NotFound -> {
@@ -1090,7 +1341,10 @@ internal class YamiboAppSyncJournalRemote(
                     when (val result = loadJournal(candidate, accountBinding)) {
                         is JournalCandidateResult.Valid -> {
                             val remoteKey = result.journal.payload.replicaKey()
-                            saveJournal(candidate.copy(remoteKey = remoteKey), result.journal)
+                            saveJournal(
+                                candidate.copy(remoteKey = remoteKey, kind = result.kind),
+                                result.journal,
+                            )
                             loaded += result.journal
                         }
                         is JournalCandidateResult.Retryable ->
@@ -1144,7 +1398,7 @@ internal class YamiboAppSyncJournalRemote(
                     )
                     when (val result = loadCheckpoint(candidate, accountBinding)) {
                         is CheckpointCandidateResult.Valid -> {
-                            saveCheckpoint(candidate, result.checkpoint)
+                            saveCheckpoint(candidate.copy(kind = result.kind), result.checkpoint)
                             checkpoints += result.checkpoint
                         }
                         is CheckpointCandidateResult.Retryable ->
@@ -1183,11 +1437,29 @@ internal class YamiboAppSyncJournalRemote(
             else -> return CheckpointCandidateResult.Terminal(result.describeForJournal())
         }
         if (page.blogInfo.blogId != candidate.blogId ||
-            !page.blogInfo.title.startsWith(AppSyncJournalDefaults.CHECKPOINT_TITLE_PREFIX)
+            (!page.blogInfo.title.startsWith(AppSyncJournalDefaults.CHECKPOINT_TITLE_PREFIX) &&
+                !page.blogInfo.title.startsWith(AppSyncJournalDefaults.ROOT_TITLE_PREFIX))
         ) {
             return CheckpointCandidateResult.Terminal("Checkpoint reader identity does not match")
         }
-        return when (val validation = checkpointCodec.validateReaderHtml(page.rootBlog.contentHtml)) {
+        val rootBody = readerText(page.rootBlog.contentHtml)
+        val canonical = when (val loaded = loadCanonicalEnvelope(
+            rootBody,
+            AppSyncSegmentPayloadKind.Checkpoint,
+            accountBinding,
+        )) {
+            is CanonicalEnvelopeResult.Valid -> loaded.body
+            is CanonicalEnvelopeResult.Retryable ->
+                return CheckpointCandidateResult.Retryable(loaded.reason)
+            is CanonicalEnvelopeResult.Terminal ->
+                return CheckpointCandidateResult.Terminal(loaded.reason)
+        }
+        val kind = if (rootBody.contains(AppSyncSegmentEnvelopeCodec.ROOT_MARKER)) {
+            AppSyncRemoteBlogKind.CheckpointRoot
+        } else {
+            AppSyncRemoteBlogKind.Checkpoint
+        }
+        return when (val validation = checkpointCodec.validate(canonical)) {
             is AppSyncCheckpointValidation.Valid -> {
                 if (validation.envelope.payload.accountBinding != accountBinding) {
                     CheckpointCandidateResult.Terminal("Checkpoint account binding does not match")
@@ -1197,6 +1469,7 @@ internal class YamiboAppSyncJournalRemote(
                             remoteId = candidate.blogId.value.toString(),
                             envelope = validation.envelope,
                         ),
+                        kind,
                     )
                 }
             }
@@ -1219,11 +1492,29 @@ internal class YamiboAppSyncJournalRemote(
             else -> return JournalCandidateResult.Terminal(result.describeForJournal())
         }
         if (page.blogInfo.blogId != candidate.blogId ||
-            !page.blogInfo.title.startsWith(AppSyncJournalDefaults.JOURNAL_TITLE_PREFIX)
+            (!page.blogInfo.title.startsWith(AppSyncJournalDefaults.JOURNAL_TITLE_PREFIX) &&
+                !page.blogInfo.title.startsWith(AppSyncJournalDefaults.ROOT_TITLE_PREFIX))
         ) {
             return JournalCandidateResult.Terminal("Journal reader identity does not match")
         }
-        return when (val validation = journalCodec.validateReaderHtml(page.rootBlog.contentHtml)) {
+        val rootBody = readerText(page.rootBlog.contentHtml)
+        val canonical = when (val loaded = loadCanonicalEnvelope(
+            rootBody,
+            AppSyncSegmentPayloadKind.Journal,
+            accountBinding,
+        )) {
+            is CanonicalEnvelopeResult.Valid -> loaded.body
+            is CanonicalEnvelopeResult.Retryable ->
+                return JournalCandidateResult.Retryable(loaded.reason)
+            is CanonicalEnvelopeResult.Terminal ->
+                return JournalCandidateResult.Terminal(loaded.reason)
+        }
+        val kind = if (rootBody.contains(AppSyncSegmentEnvelopeCodec.ROOT_MARKER)) {
+            AppSyncRemoteBlogKind.JournalRoot
+        } else {
+            AppSyncRemoteBlogKind.Journal
+        }
+        return when (val validation = journalCodec.validate(canonical)) {
             is AppSyncJournalValidation.Valid -> {
                 if (validation.envelope.payload.accountBinding != accountBinding) {
                     JournalCandidateResult.Terminal("Journal account binding does not match")
@@ -1234,6 +1525,7 @@ internal class YamiboAppSyncJournalRemote(
                             fingerprint = validation.envelope.fingerprint,
                             payload = validation.envelope.payload,
                         ),
+                        kind,
                     )
                 }
             }
@@ -1278,12 +1570,76 @@ internal class YamiboAppSyncJournalRemote(
         }
     }
 
+    private suspend fun loadCanonicalEnvelope(
+        rootBody: String,
+        expectedKind: AppSyncSegmentPayloadKind,
+        accountBinding: SyncAccountBinding,
+    ): CanonicalEnvelopeResult {
+        if (!rootBody.contains(AppSyncSegmentEnvelopeCodec.ROOT_MARKER)) {
+            return CanonicalEnvelopeResult.Valid(rootBody)
+        }
+        val root = segmentCodec.decodeRoot(rootBody).getOrElse {
+            return CanonicalEnvelopeResult.Terminal("Segmented root is invalid")
+        }
+        if (root.accountBinding != accountBinding.value ||
+            root.kind != expectedKind.name.lowercase()
+        ) {
+            return CanonicalEnvelopeResult.Terminal("Segmented root binding does not match")
+        }
+        val segmentBodies = linkedMapOf<String, String>()
+        val segmentBlogIds = mutableListOf<Long>()
+        var nextId: String? = root.headBlogId
+        repeat(root.segmentCount) {
+            val id = nextId ?: return CanonicalEnvelopeResult.Terminal("Segment chain ended early")
+            val blogId = id.toIntOrNull()?.let(::BlogId)
+                ?: return CanonicalEnvelopeResult.Terminal("Segment Blog id is invalid")
+            val page = when (val fetched = provider.fetchBlog(blogId)) {
+                is AppSyncCloudResult.VerifiedSuccess -> fetched.value
+                AppSyncCloudResult.NotFound ->
+                    return CanonicalEnvelopeResult.Retryable("Committed segment is not visible yet")
+                is AppSyncCloudResult.NetworkFailed,
+                is AppSyncCloudResult.Timeout,
+                AppSyncCloudResult.Maintenance,
+                -> return CanonicalEnvelopeResult.Retryable(fetched.describeForJournal())
+                else -> return CanonicalEnvelopeResult.Terminal(fetched.describeForJournal())
+            }
+            if (page.blogInfo.blogId != blogId ||
+                !page.blogInfo.title.startsWith(AppSyncJournalDefaults.SEGMENT_TITLE_PREFIX)
+            ) {
+                return CanonicalEnvelopeResult.Terminal("Segment reader identity does not match")
+            }
+            val body = readerText(page.rootBlog.contentHtml)
+            val segment = segmentCodec.decodeSegment(body).getOrElse {
+                return CanonicalEnvelopeResult.Terminal("Segment payload is invalid")
+            }
+            segmentBodies[id] = body
+            segmentBlogIds += blogId.value.toLong()
+            nextId = segment.nextBlogId
+        }
+        return when (val reconstructed = segmentCodec.reconstruct(root, segmentBodies::get)) {
+            is AppSyncSegmentReconstruction.Valid ->
+                CanonicalEnvelopeResult.Valid(
+                    reconstructed.canonicalEnvelope,
+                    segmentBlogIds,
+                )
+            is AppSyncSegmentReconstruction.Invalid ->
+                CanonicalEnvelopeResult.Terminal(reconstructed.reason)
+        }
+    }
+
+    private fun readerText(html: String): String = try {
+        Ksoup.parseBodyFragment(html).body().text()
+    } catch (_: Throwable) {
+        html
+    }
+
     private suspend fun updateIndexBestEffort(
         accountBinding: SyncAccountBinding,
         classSelection: AppSyncBlogClassSelection,
         formHash: FormHash,
     ) {
-        val journals = store.loadKind(AppSyncRemoteBlogKind.Journal)
+        val journals = store.loadKind(AppSyncRemoteBlogKind.Journal) +
+            store.loadKind(AppSyncRemoteBlogKind.JournalRoot)
         if (journals.isEmpty()) return
         val existing = store.load(INDEX_REMOTE_KEY)
         val existingPayload = existing?.let { stored ->
@@ -1306,7 +1662,10 @@ internal class YamiboAppSyncJournalRemote(
                     fingerprint = it.fingerprint,
                 )
             },
-            checkpoints = store.loadKind(AppSyncRemoteBlogKind.Checkpoint).mapNotNull {
+            checkpoints = (
+                store.loadKind(AppSyncRemoteBlogKind.Checkpoint) +
+                    store.loadKind(AppSyncRemoteBlogKind.CheckpointRoot)
+                ).mapNotNull {
                 val checkpointId = checkpointId(it.remoteKey)
                 val fingerprint = it.fingerprint ?: return@mapNotNull null
                 AppSyncIndexCheckpointReference(
@@ -1468,7 +1827,10 @@ internal class YamiboAppSyncJournalRemote(
             journal.payload.resolvedPublishedThroughSequence()
 
     private sealed interface JournalCandidateResult {
-        data class Valid(val journal: LoadedAppSyncJournal) : JournalCandidateResult
+        data class Valid(
+            val journal: LoadedAppSyncJournal,
+            val kind: AppSyncRemoteBlogKind = AppSyncRemoteBlogKind.Journal,
+        ) : JournalCandidateResult
         data object NotFound : JournalCandidateResult
         data class Retryable(val reason: String) : JournalCandidateResult
         data class Terminal(val reason: String) : JournalCandidateResult
@@ -1485,10 +1847,22 @@ internal class YamiboAppSyncJournalRemote(
     }
 
     private sealed interface CheckpointCandidateResult {
-        data class Valid(val checkpoint: LoadedAppSyncCheckpoint) : CheckpointCandidateResult
+        data class Valid(
+            val checkpoint: LoadedAppSyncCheckpoint,
+            val kind: AppSyncRemoteBlogKind = AppSyncRemoteBlogKind.Checkpoint,
+        ) : CheckpointCandidateResult
         data object NotFound : CheckpointCandidateResult
         data class Retryable(val reason: String) : CheckpointCandidateResult
         data class Terminal(val reason: String) : CheckpointCandidateResult
+    }
+
+    private sealed interface CanonicalEnvelopeResult {
+        data class Valid(
+            val body: String,
+            val segmentBlogIds: List<Long> = emptyList(),
+        ) : CanonicalEnvelopeResult
+        data class Retryable(val reason: String) : CanonicalEnvelopeResult
+        data class Terminal(val reason: String) : CanonicalEnvelopeResult
     }
 
     private sealed interface ClassSelectionResult {
@@ -1506,7 +1880,6 @@ internal class YamiboAppSyncJournalRemote(
         const val INDEX_REMOTE_KEY = "index"
         const val CHECKPOINT_REMOTE_KEY_PREFIX = "checkpoint:"
         const val MAX_DISCOVERY_PAGES = 100
-        const val SAFE_BLOG_BODY_CHAR_LIMIT = AppSyncPayloadBudget.HARD_LIMIT_CHARS
     }
 }
 

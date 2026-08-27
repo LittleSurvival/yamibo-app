@@ -53,6 +53,11 @@ internal object AppSyncPortabilityPolicy {
         local("appupdateignoredversioncode"),
         local("backupfolderuri"),
         local("backuplastautobackupat"),
+        local("appsynccapacityv2readsenabled"),
+        local("appsynccapacityv2writesenabled"),
+        local("appsynccapacityautomaticlegacyrecoveryenabled"),
+        local("appsynccapacitycleanupdryrun"),
+        local("appsynccapacitycleanupdeletionenabled"),
     )
 
     val fieldDeclarations: List<AppSyncFieldPortability> = listOf(

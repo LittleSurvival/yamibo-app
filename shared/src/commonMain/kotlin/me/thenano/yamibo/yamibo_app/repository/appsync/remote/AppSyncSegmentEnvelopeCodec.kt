@@ -68,7 +68,9 @@ internal class AppSyncSegmentEnvelopeCodec(
         while (offset < canonicalEnvelope.length) {
             require(chunks.size < maximumSegments) { "AppSync envelope requires too many segments" }
             var low = 1
-            var high = canonicalEnvelope.length - offset
+            // No accepted chunk can exceed the final Blog budget. Bounding the search avoids
+            // repeatedly allocating multi-megabyte substrings at the 16 MiB codec limit.
+            var high = minOf(canonicalEnvelope.length - offset, budget.targetChars)
             var accepted = 0
             while (low <= high) {
                 val candidateLength = low + (high - low) / 2

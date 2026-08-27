@@ -10,6 +10,7 @@ internal enum class AppSyncRemoteBlogKind {
     Journal,
     Checkpoint,
     JournalRoot,
+    CheckpointRoot,
     Segment,
 }
 internal data class StoredAppSyncRemoteBlog(

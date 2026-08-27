@@ -58,7 +58,11 @@ internal class CheckpointCoordinator(
         }
         val coverage = projection.coverage
         val entities = projection.entities
-        val checkpointId = deterministicCheckpointId(coverage.asStableMap(), entities)
+        val portableSnapshot = projection.snapshot.withPortableAppSyncPayloads()
+        val checkpointId = deterministicPortableCheckpointId(
+            coverage.asStableMap(),
+            entities,
+        )
         if (store.verifiedCheckpoints().any { it.checkpointId == checkpointId }) {
             return CheckpointCreationResult.NotNeeded
         }
@@ -67,7 +71,7 @@ internal class CheckpointCoordinator(
             checkpointId = checkpointId,
             accountBinding = accountBinding,
             coverage = coverage,
-            snapshot = projection.snapshot.withPortableAppSyncPayloads(),
+            snapshot = portableSnapshot,
             resolvedEntities = entities,
             tombstones = entities.mapNotNull { entity ->
                 entity.tombstone?.let {
@@ -157,27 +161,33 @@ internal class CheckpointCoordinator(
             CheckpointCreationResult.Paused(result.reason)
     }
 
-    private fun deterministicCheckpointId(
-        coverage: Map<String, Long>,
-        entities: Collection<ResolvedSyncEntity>,
-    ): String {
-        val material = buildString {
-            coverage.forEach { (key, sequence) -> append(key).append('=').append(sequence).append(';') }
-            entities.sortedWith(
-                compareBy(
-                    { it.key.domainId.value },
-                    { it.key.entityId.value },
-                    { it.key.generation },
-                ),
-            ).forEach {
-                append(it.key.domainId.value)
-                append('|').append(it.key.entityId.value)
-                append('|').append(it.key.generation)
-                append('|').append(it.fields.values.map { field -> field.operation.operationId.value }.sorted())
-                append('|').append(it.tombstone?.operationId?.value)
-                append(';')
-            }
+}
+
+internal fun deterministicPortableCheckpointId(
+    coverage: Map<String, Long>,
+    entities: Collection<ResolvedSyncEntity>,
+): String {
+    val material = buildString {
+        coverage.entries.sortedBy { it.key }.forEach { (key, sequence) ->
+            append(key).append('=').append(sequence).append(';')
         }
-        return "cp-${stableAppSyncFingerprint(material).take(24)}"
+        entities.sortedWith(
+            compareBy(
+                { it.key.domainId.value },
+                { it.key.entityId.value },
+                { it.key.generation },
+            ),
+        ).forEach {
+            append(it.key.domainId.value)
+            append('|').append(it.key.entityId.value)
+            append('|').append(it.key.generation)
+            it.fields.entries.sortedBy { entry -> entry.key }.forEach { (field, resolved) ->
+                append('|').append(field).append('=').append(resolved.value)
+            }
+            append("|relation=").append(it.relationPresent)
+            append("|tombstone=").append(it.tombstone != null)
+            append(';')
+        }
     }
+    return "cp-${stableAppSyncFingerprint(material).take(24)}"
 }

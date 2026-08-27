@@ -940,3 +940,24 @@ RSS 目錄進度,RSS catalog progress,RSS 目錄進度,RSS 目录进度
 查看通知,View messages,查看通知,查看通知
 不再提醒（僅限今日）,Do not remind again today,不再提醒（僅限今日）,不再提醒（仅限今日）
 您有新的通知，快來看看吧 !,"You have a new notification. Come take a look!",您有新的通知，快來看看吧 !,您有新的通知，快来看看吧 !
+復原資料大小,Recovery payload size,復原資料大小,恢复数据大小
+復原分段進度,Recovery segment progress,復原分段進度,恢复分段进度
+復原待處理操作,Pending recovery operations,復原待處理操作,待处理恢复操作
+需要處理,Needs attention,需要處理,需要处理
+正在分析舊同步資料,Analyzing legacy sync data,正在分析舊同步資料,正在分析旧同步数据
+正在建立安全復原資料,Preparing safe recovery data,正在建立安全復原資料,正在建立安全恢复数据
+正在分段上傳復原資料,Uploading recovery data in segments,正在分段上傳復原資料,正在分段上传恢复数据
+正在驗證復原索引根,Verifying the recovery root,正在驗證復原索引根,正在验证恢复索引根
+正在提交雲端索引,Committing the cloud index,正在提交雲端索引,正在提交云端索引
+正在套用已驗證復原結果,Activating the verified recovery,正在套用已驗證復原結果,正在应用已验证恢复结果
+正在安全清理舊同步資料,Safely cleaning legacy sync data,正在安全清理舊同步資料,正在安全清理旧同步数据
+復原需要處理,Recovery needs attention,復原需要處理,恢复需要处理
+分析中,Analyzing,分析中,分析中
+準備中,Preparing,準備中,准备中
+分段上傳中,Uploading segments,分段上傳中,分段上传中
+發布根索引中,Publishing root,發布根索引中,发布根索引中
+提交索引中,Committing index,提交索引中,提交索引中
+本機啟用中,Activating locally,本機啟用中,本地启用中
+安全清理中,Cleaning safely,安全清理中,安全清理中
+正在自動修復過大的舊同步資料；可稍後重試，進度不會遺失,Automatically repairing oversized legacy sync data; retry later without losing progress,正在自動修復過大的舊同步資料；可稍後重試，進度不會遺失,正在自动修复过大的旧同步数据；稍后重试不会丢失进度
+{} 的資料無法安全轉移，請保留本機資料並查看復原詳情,{} data cannot be transferred safely; keep local data and review recovery details,{} 的資料無法安全轉移，請保留本機資料並查看復原詳情,{} 的数据无法安全转移，请保留本地数据并查看恢复详情

@@ -56,6 +56,7 @@ internal enum class AppSyncRecoveryPhase {
 internal enum class AppSyncRecoveryMode {
     LegacyShadow,
     SegmentedJournal,
+    SegmentedCheckpoint,
     ;
 
     companion object
@@ -87,6 +88,8 @@ internal data class AppSyncRecoverySession(
     val updatedAtEpochMillis: Long,
     val completedAtEpochMillis: Long?,
     val acknowledgedSourceOperationIds: Set<String> = emptySet(),
+    val encodedChars: Int? = null,
+    val targetBudgetChars: Int = 42_000,
 )
 
 internal data class AppSyncRecoverySegmentWrite(
