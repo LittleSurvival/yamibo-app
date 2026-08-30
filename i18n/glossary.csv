@@ -872,3 +872,8 @@ App 啟動時同步,Sync on app start,App 啟動時同步,App 启动时同步
 已選擇下載與備份資料夾,Download and backup folder selected,已選擇下載與備份資料夾,已选择下载与备份文件夹
 無法選擇資料夾,Unable to select folder,無法選擇資料夾,无法选择文件夹
 下載、備份資料夾與緩存清理設定,"Download and backup folder, and cache cleanup settings",下載、備份資料夾與緩存清理設定,下载、备份文件夹与缓存清理设置
+字體樣式,Font style,字體樣式,字体样式
+預設粗體,Default bold,預設粗體,默认粗体
+將閱讀器正文預設顯示為粗體,Show reader body text in bold by default,將閱讀器正文預設顯示為粗體,将阅读器正文默认显示为粗体
+預設斜體,Default italic,預設斜體,默认斜体
+將閱讀器正文預設顯示為斜體,Show reader body text in italic by default,將閱讀器正文預設顯示為斜體,将阅读器正文默认显示为斜体

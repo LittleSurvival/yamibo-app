@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import me.thenano.yamibo.yamibo_app.LocalNovelReaderSettingsRepository
 import me.thenano.yamibo.yamibo_app.profile.settings.components.SettingsChipRow
 import me.thenano.yamibo.yamibo_app.profile.settings.components.SettingsSlider
+import me.thenano.yamibo.yamibo_app.profile.settings.components.SettingsToggleRow
 import me.thenano.yamibo.yamibo_app.repository.settings.ReaderChineseConversionOption
 import me.thenano.yamibo.yamibo_app.repository.settings.ReaderScrollButtonDisplayMode
 import me.thenano.yamibo.yamibo_app.repository.settings.ReaderScrollButtonJumpTarget
@@ -92,6 +93,32 @@ fun NovelLineSpacingSetting() {
         steps = 39,
         valueDisplay = { "${(it * 100f).roundToInt() / 100f}x" },
         onValueChange = { novelSettingsRepo.lineSpacing.setValue(it) }
+    )
+}
+
+@Composable
+fun NovelDefaultBoldSetting() {
+    val novelSettingsRepo = LocalNovelReaderSettingsRepository.current
+    val enabled = novelSettingsRepo.defaultBold.state()
+
+    SettingsToggleRow(
+        title = i18n("預設粗體"),
+        subtitle = i18n("將閱讀器正文預設顯示為粗體"),
+        checked = enabled,
+        onCheckedChange = { novelSettingsRepo.defaultBold.setValue(it) },
+    )
+}
+
+@Composable
+fun NovelDefaultItalicSetting() {
+    val novelSettingsRepo = LocalNovelReaderSettingsRepository.current
+    val enabled = novelSettingsRepo.defaultItalic.state()
+
+    SettingsToggleRow(
+        title = i18n("預設斜體"),
+        subtitle = i18n("將閱讀器正文預設顯示為斜體"),
+        checked = enabled,
+        onCheckedChange = { novelSettingsRepo.defaultItalic.setValue(it) },
     )
 }
 
