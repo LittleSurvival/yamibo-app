@@ -184,6 +184,11 @@ private fun NovelReaderContent() {
     ReaderFontSelectorSetting()
     Spacer(Modifier.height(24.dp))
 
+    SectionLabel(i18n("字體樣式"))
+    NovelDefaultBoldSetting()
+    NovelDefaultItalicSetting()
+    Spacer(Modifier.height(24.dp))
+
     SectionLabel(i18n("內容寬度"))
     NovelContentWidthSetting()
     Spacer(Modifier.height(24.dp))

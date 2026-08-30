@@ -32,6 +32,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
@@ -419,6 +420,8 @@ private fun RubyTextBlock(
     fontSizeSp: Float,
     lineHeightSp: Float,
     textColor: Color,
+    fontWeight: FontWeight,
+    fontStyle: FontStyle,
     modifier: Modifier = Modifier,
     onTextLayout: (TextLayoutResult) -> Unit,
 ) {
@@ -428,20 +431,24 @@ private fun RubyTextBlock(
     val textMeasurer = rememberTextMeasurer()
     val density = LocalDensity.current
     val rubyFontSizeSp = fontSizeSp * 0.72f
-    val baseStyle = remember(fontFamily, fontSizeSp, textColor) {
+    val baseStyle = remember(fontFamily, fontSizeSp, textColor, fontWeight, fontStyle) {
         TextStyle(
             color = textColor,
             fontFamily = fontFamily,
             fontSize = fontSizeSp.sp,
             lineHeight = fontSizeSp.sp,
+            fontWeight = fontWeight,
+            fontStyle = fontStyle,
         )
     }
-    val rubyStyle = remember(fontFamily, rubyFontSizeSp, textColor) {
+    val rubyStyle = remember(fontFamily, rubyFontSizeSp, textColor, fontWeight, fontStyle) {
         TextStyle(
             color = textColor,
             fontFamily = fontFamily,
             fontSize = rubyFontSizeSp.sp,
             lineHeight = rubyFontSizeSp.sp,
+            fontWeight = fontWeight,
+            fontStyle = fontStyle,
         )
     }
 
@@ -518,6 +525,8 @@ private fun RubyTextBlock(
                 fontFamily = fontFamily,
                 fontSize = fontSizeSp.sp,
                 lineHeight = lineHeightSp.sp,
+                fontWeight = fontWeight,
+                fontStyle = fontStyle,
                 textAlign = textAlign,
             ),
             modifier = Modifier.fillMaxWidth(),
@@ -553,6 +562,10 @@ private fun HtmlBlockRenderer(
     val novelSettingsRepo = LocalNovelReaderSettingsRepository.current
     val fontSize = novelSettingsRepo.fontSize.state()
     val lineSpacing = novelSettingsRepo.lineSpacing.state()
+    val defaultBold = novelSettingsRepo.defaultBold.state()
+    val defaultItalic = novelSettingsRepo.defaultItalic.state()
+    val defaultFontWeight = if (defaultBold) FontWeight.Bold else FontWeight.Normal
+    val defaultFontStyle = if (defaultItalic) FontStyle.Italic else FontStyle.Normal
     @Suppress("DEPRECATION") val clipboardManager = LocalClipboardManager.current
     val isDarkTheme = (colors.creamBackground.red + colors.creamBackground.green + colors.creamBackground.blue) < 1.5f
 
@@ -714,6 +727,8 @@ private fun HtmlBlockRenderer(
                     fontSizeSp = fontSize.toFloat(),
                     lineHeightSp = lineHeightSp,
                     textColor = colors.htmlTextDark,
+                    fontWeight = defaultFontWeight,
+                    fontStyle = defaultFontStyle,
                     modifier = textModifier,
                     onTextLayout = { layoutResult.value = it },
                 )
@@ -725,6 +740,8 @@ private fun HtmlBlockRenderer(
                         fontFamily = fontFamily,
                         fontSize = fontSize.sp,
                         lineHeight = lineHeightSp.sp,
+                        fontWeight = defaultFontWeight,
+                        fontStyle = defaultFontStyle,
                         textAlign = block.textAlign
                     ),
                     modifier = textModifier,
@@ -1236,7 +1253,8 @@ private fun HtmlBlockRenderer(
                                                                     fontFamily = fontFamily,
                                                                     fontSize = tableFontSize.sp,
                                                                     lineHeight = tableLineHeightSp.sp,
-                                                                    fontWeight = if (cell.isHeader) FontWeight.Bold else FontWeight.Normal,
+                                                                    fontWeight = if (cell.isHeader || defaultBold) FontWeight.Bold else FontWeight.Normal,
+                                                                    fontStyle = defaultFontStyle,
                                                                     textAlign = innerBlock.textAlign
                                                                 )
                                                             )
