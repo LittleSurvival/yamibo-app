@@ -1,7 +1,11 @@
-TEAM_ID=
+// Keep the signing team local to each developer or CI environment.
+TEAM_ID =
+#include? "Config.local.xcconfig"
+#include "AppIdentifiers.xcconfig"
 
-PRODUCT_NAME=yamibo_app
-PRODUCT_BUNDLE_IDENTIFIER=me.thenano.yamibo.yamibo_app.yamibo_app$(TEAM_ID)
+PRODUCT_NAME = yamibo_app
+PRODUCT_BUNDLE_IDENTIFIER = $(YAMIBO_IOS_BUNDLE_ID)
+DEVELOPMENT_TEAM = $(TEAM_ID)
 
-CURRENT_PROJECT_VERSION=1
-MARKETING_VERSION=1.0
+CURRENT_PROJECT_VERSION = 1
+MARKETING_VERSION = 1.0

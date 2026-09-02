@@ -21,6 +21,17 @@ val localProperties = Properties().apply {
         file.inputStream().use(::load)
     }
 }
+val iosIdentifiers = Properties().apply {
+    val file = rootProject.layout.projectDirectory
+        .file("iosApp/Configuration/AppIdentifiers.xcconfig")
+        .asFile
+    require(file.isFile) { "Missing iOS identifier configuration: ${file.path}" }
+    file.inputStream().use(::load)
+}
+val yamiboIosBundleId = iosIdentifiers.getProperty("YAMIBO_IOS_BUNDLE_ID")
+    ?.trim()
+    ?.takeIf { it.isNotEmpty() }
+    ?: error("YAMIBO_IOS_BUNDLE_ID must be set in iosApp/Configuration/AppIdentifiers.xcconfig")
 
 fun localProperty(name: String): String? =
     localProperties.getProperty(name)?.takeIf { it.isNotBlank() }
@@ -54,6 +65,7 @@ kotlin {
         iosTarget.binaries.framework {
             baseName = "ComposeApp"
             isStatic = true
+            binaryOption("bundleId", yamiboIosBundleId)
         }
     }
 
