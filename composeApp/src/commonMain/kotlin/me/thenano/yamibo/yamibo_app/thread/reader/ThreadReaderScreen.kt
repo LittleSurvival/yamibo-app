@@ -1,6 +1,5 @@
 package me.thenano.yamibo.yamibo_app.thread.reader
 
-import YamiboIcons
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -12,8 +11,6 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -91,11 +88,7 @@ import me.thenano.yamibo.yamibo_app.thread.reader.debug.DebugRecomposeProbe
 import me.thenano.yamibo.yamibo_app.thread.reader.debug.debugPerfLog
 import me.thenano.yamibo.yamibo_app.thread.reader.debug.isThreadReaderPerfDebugEnabled
 import me.thenano.yamibo.yamibo_app.thread.reader.debug.isThreadReaderReferencePlanningEnabled
-import me.thenano.yamibo.yamibo_app.util.buildImageRequest
-import me.thenano.yamibo.yamibo_app.util.imageSourceForDiagnostics
-import me.thenano.yamibo.yamibo_app.util.normalizeImageUrl
-import me.thenano.yamibo.yamibo_app.util.shareText
-import me.thenano.yamibo.yamibo_app.util.state
+import me.thenano.yamibo.yamibo_app.util.*
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
 import me.thenano.yamibo.yamibo_app.util.time.epochMillisOrNull
 import me.thenano.yamibo.yamibo_app.webview.action.IActionWebView

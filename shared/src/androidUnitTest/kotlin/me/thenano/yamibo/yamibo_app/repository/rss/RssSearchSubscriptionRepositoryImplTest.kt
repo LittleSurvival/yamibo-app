@@ -214,6 +214,62 @@ class RssSearchSubscriptionRepositoryImplTest {
         assertTrue("lastSearchId" !in operations.first().fields)
     }
 
+    @Test
+    fun appSyncWritesDoNotReplaceNewSubscriptionId() = runBlocking {
+        val db = inMemoryDatabase()
+        val store = SqlDelightAppSyncOperationStore(db).also {
+            it.initialize("generation")
+            it.bindAccount(SyncAccountBinding("account"), AppSyncInstallationState.Active)
+        }
+        val recorder = AppSyncMutationRecorder(
+            enabled = true,
+            store = store,
+            domainState = SqlDelightSyncDomainStateAdapter(
+                db = db,
+                materializer = DatabaseSyncDomainMaterializer(db, MapSettingsStore()),
+                nowMillis = { 100 },
+            ),
+            nowMillis = { 100 },
+        )
+        recorder.record(
+            domain = "test.seed",
+            entityId = "existing-operation",
+            kind = SyncOperationKind.Put,
+            fields = emptyMap(),
+        ) {}
+        val repository = RssSearchSubscriptionRepositoryImpl(
+            db,
+            FakeAuthRepository(),
+            FakeForumRepository(),
+            recorder,
+        )
+
+        val createdId = assertIs<YamiboResult.Success<Long>>(
+            repository.createFromSearch(
+                title = "app",
+                query = "app",
+                forumId = null,
+                forumName = null,
+                searchPage = SearchPage(query = "app", totalCount = 0, threads = emptyList()),
+            ),
+        ).value
+
+        assertEquals(repository.subscriptions.value.single().id, createdId)
+        assertEquals(createdId, repository.getSubscription(createdId)?.id)
+        assertEquals(createdId, repository.getCachedCatalogPage(createdId, 1)?.subscription?.id)
+
+        val ensuredId = assertIs<YamiboResult.Success<Long>>(
+            repository.ensureSubscription(
+                query = "other",
+                forumId = null,
+                forumName = null,
+            ),
+        ).value
+
+        assertTrue(ensuredId != createdId)
+        assertEquals(ensuredId, repository.getSubscription(ensuredId)?.id)
+    }
+
     private fun inMemoryDatabase(): Database {
         val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
         Database.Schema.create(driver)

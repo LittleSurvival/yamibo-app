@@ -75,6 +75,7 @@ class RssSearchSubscriptionRepositoryImpl private constructor(
         val now = currentTimeMillis()
         val scopedForumId = searchPage.forumId ?: forumId
         val scopedForumName = forumName ?: scopedForumId?.let { YamiboForum.toForumName(it) }
+        var insertedId: Long? = null
         recordSubscriptionMutation(
             entityId = rssSearchSubscriptionSyncId(keyword, scopedForumId?.value?.toLong()),
             kind = SyncOperationKind.Put,
@@ -103,8 +104,10 @@ class RssSearchSubscriptionRepositoryImpl private constructor(
                 lastSearchId = searchPage.searchId?.value?.toLong(),
                 lastTotalCount = searchPage.totalCount.toLong(),
             )
+            // AppSync inserts into other tables after this callback, so capture the connection-wide row id here.
+            insertedId = subscriptionQueries.lastInsertedId().executeAsOne()
         }
-        val id = subscriptionQueries.lastInsertedId().executeAsOne()
+        val id = checkNotNull(insertedId) { "RSS subscription insert did not produce an id" }
         saveSearchPageCache(
             subscriptionId = id,
             pageIndex = searchPage.pageNav?.currentPage ?: 1,
@@ -127,6 +130,7 @@ class RssSearchSubscriptionRepositoryImpl private constructor(
         findBySearch(keyword, forumId)?.let { return YamiboResult.Success(it.id) }
         val now = currentTimeMillis()
         val scopedForumName = forumName ?: forumId?.let { YamiboForum.toForumName(it) }
+        var insertedId: Long? = null
         recordSubscriptionMutation(
             entityId = rssSearchSubscriptionSyncId(keyword, forumId?.value?.toLong()),
             kind = SyncOperationKind.Put,
@@ -155,8 +159,10 @@ class RssSearchSubscriptionRepositoryImpl private constructor(
                 lastSearchId = null,
                 lastTotalCount = 0,
             )
+            // AppSync inserts into other tables after this callback, so capture the connection-wide row id here.
+            insertedId = subscriptionQueries.lastInsertedId().executeAsOne()
         }
-        val id = subscriptionQueries.lastInsertedId().executeAsOne()
+        val id = checkNotNull(insertedId) { "RSS subscription insert did not produce an id" }
         reloadState()
         return YamiboResult.Success(id)
     }
