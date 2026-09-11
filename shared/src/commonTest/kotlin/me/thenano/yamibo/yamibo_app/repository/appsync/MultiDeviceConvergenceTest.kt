@@ -51,7 +51,7 @@ class MultiDeviceConvergenceTest {
             sequence = sequence,
             accountBinding = SyncAccountBinding("account"),
             domainId = SyncDomainId("settings"),
-            entityId = SyncEntityId("theme"),
+            entityId = SyncEntityId("appsettings.thememode"),
             kind = SyncOperationKind.Patch,
             fields = mapOf("value" to "value-$index", "field-$index" to "$index"),
             createdAtEpochMillis = index.toLong(),

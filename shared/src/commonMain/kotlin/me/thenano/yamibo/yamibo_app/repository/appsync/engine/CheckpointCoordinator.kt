@@ -10,6 +10,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointT
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointValidation
 import me.thenano.yamibo.yamibo_app.repository.backup.YamiboBackupFile
 import me.thenano.yamibo.yamibo_app.repository.appsync.withPortableAppSyncPayloads
+import me.thenano.yamibo.yamibo_app.repository.appsync.withoutExcludedAppSyncPayloads
 import me.thenano.yamibo.yamibo_app.store.appsync.AppSyncOperationStore
 
 internal sealed interface CheckpointCreationResult {
@@ -57,7 +58,7 @@ internal class CheckpointCoordinator(
             return CheckpointCreationResult.NotNeeded
         }
         val coverage = projection.coverage
-        val entities = projection.entities
+        val entities = projection.entities.withoutExcludedAppSyncPayloads()
         val portableSnapshot = projection.snapshot.withPortableAppSyncPayloads()
         val checkpointId = deterministicPortableCheckpointId(
             coverage.asStableMap(),

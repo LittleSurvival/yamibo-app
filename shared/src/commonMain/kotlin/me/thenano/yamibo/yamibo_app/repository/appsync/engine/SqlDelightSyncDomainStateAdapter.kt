@@ -6,11 +6,13 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDomainId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncEntityId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperation
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncPortabilityPolicy
+import me.thenano.yamibo.yamibo_app.repository.appsync.withoutExcludedAppSyncPayloads
 
 internal interface SyncDomainMaterializer {
     fun apply(entity: ResolvedSyncEntity)
     fun reconcileProjections()
     fun clearSyncableData() = Unit
+    fun preserveLocalPresentationDuring(replace: () -> Unit) = replace()
 }
 
 internal class SqlDelightSyncDomainStateAdapter(
@@ -57,7 +59,7 @@ internal class SqlDelightSyncDomainStateAdapter(
     }
 
     override fun applyWithinTransaction(result: OperationReductionResult) {
-        val ordered = result.entities.values.sortedWith(
+        val ordered = result.entities.values.map { it.withoutExcludedAppSyncPayloads() }.sortedWith(
             compareBy(
                 { MATERIALIZATION_ORDER[it.key.domainId.value] ?: Int.MAX_VALUE },
                 { it.key.entityId.value },
@@ -82,21 +84,23 @@ internal class SqlDelightSyncDomainStateAdapter(
     }
 
     override fun adoptCheckpoint(entities: Collection<ResolvedSyncEntity>) {
-        adoptCheckpointWithinTransaction(entities)
+        queries.transaction { adoptCheckpointWithinTransaction(entities) }
         materializer.reconcileProjections()
     }
 
     override fun adoptCheckpointWithinTransaction(entities: Collection<ResolvedSyncEntity>) {
-        queries.clearResolvedEntities()
-        materializer.clearSyncableData()
-        entities.sortedWith(
-            compareBy(
-                { MATERIALIZATION_ORDER[it.key.domainId.value] ?: Int.MAX_VALUE },
-                { it.key.entityId.value },
-            ),
-        ).forEach { entity ->
-            persist(entity)
-            materializer.apply(entity)
+        materializer.preserveLocalPresentationDuring {
+            queries.clearResolvedEntities()
+            materializer.clearSyncableData()
+            entities.withoutExcludedAppSyncPayloads().sortedWith(
+                compareBy(
+                    { MATERIALIZATION_ORDER[it.key.domainId.value] ?: Int.MAX_VALUE },
+                    { it.key.entityId.value },
+                ),
+            ).forEach { entity ->
+                persist(entity)
+                materializer.apply(entity)
+            }
         }
     }
 
@@ -118,7 +122,7 @@ internal class SqlDelightSyncDomainStateAdapter(
             domainId = entity.key.domainId.value,
             entityId = entity.key.entityId.value,
             entityGeneration = entity.key.generation,
-            encodedState = json.encodeToString(ResolvedSyncEntity.serializer(), entity),
+            encodedState = json.encodeToString(ResolvedSyncEntity.serializer(), entity.withoutExcludedAppSyncPayloads()),
             updatedAtEpochMillis = nowMillis(),
         )
     }

@@ -130,7 +130,7 @@ class AppSyncV2CompatibilityTest {
             sequence = sequence,
             accountBinding = SyncAccountBinding("account"),
             domainId = SyncDomainId("settings"),
-            entityId = SyncEntityId("theme"),
+            entityId = SyncEntityId("appsettings.thememode"),
             kind = SyncOperationKind.Patch,
             fields = mapOf("value" to "dark"),
             createdAtEpochMillis = 1,

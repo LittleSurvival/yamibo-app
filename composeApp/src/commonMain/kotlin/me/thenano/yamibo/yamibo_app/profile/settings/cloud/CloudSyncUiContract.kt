@@ -6,6 +6,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncService
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncServicePhase
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncServiceStatus
@@ -61,6 +63,7 @@ internal enum class CloudSyncDetailLabel {
     RecoveryPayload,
     RecoverySegments,
     RecoveryPending,
+    RecoveryRetry,
     RecoveryBlocker,
     LatestResult,
     ;
@@ -74,6 +77,7 @@ internal enum class CloudSyncDetailLabel {
         RecoveryPayload -> i18n("復原資料大小")
         RecoverySegments -> i18n("復原分段進度")
         RecoveryPending -> i18n("復原待處理操作")
+        RecoveryRetry -> i18n("等待重試")
         RecoveryBlocker -> i18n("需要處理")
         LatestResult -> i18n("最近結果")
     }
@@ -214,6 +218,7 @@ internal data class CloudSyncUiState(
     val operation: CloudSyncOperation = CloudSyncOperation.Idle,
     val automaticEnabled: Boolean = false,
     val automaticAvailable: Boolean = false,
+    val manualSyncAvailable: Boolean = false,
     val automaticStatus: CloudSyncAutomaticStatus = CloudSyncAutomaticStatus.Unsupported,
     val syncOnAppStart: Boolean = false,
     val syncOnForegroundExit: Boolean = false,
@@ -296,6 +301,12 @@ internal class AppSyncCloudUiController(
             serviceState = it
             publishState()
         }.launchIn(scope)
+        scope.launch {
+            while (isActive) {
+                delay(1_000)
+                service.currentStatus()
+            }
+        }
     }
 
     override fun refresh() {
@@ -335,7 +346,11 @@ internal class AppSyncCloudUiController(
     }
 
     override fun syncNow() {
-        scope.launch { service.synchronizeNow() }
+        service.prepareManualRecovery()
+        scope.launch {
+            scheduler?.runManual()
+            if (scheduler?.ownsManualExecution != true) service.synchronizeNow()
+        }
     }
 
     override fun requestForceOverride(direction: CloudSyncForceDirection) {
@@ -459,16 +474,7 @@ private fun CloudSyncForcePreview.toService() = AppSyncForcePreview(
 internal fun AppSyncServiceStatus.toUiState(
     backgroundSchedulerAvailable: Boolean,
 ): CloudSyncUiState {
-    val recoveryPhases = setOf(
-        AppSyncServicePhase.RecoveryClassifying,
-        AppSyncServicePhase.RecoveryStaging,
-        AppSyncServicePhase.RecoveryUploadingSegments,
-        AppSyncServicePhase.RecoveryPublishingRoot,
-        AppSyncServicePhase.RecoveryCommittingIndex,
-        AppSyncServicePhase.RecoveryActivatingLocal,
-        AppSyncServicePhase.RecoveryCleaning,
-    )
-    val busy = phase == AppSyncServicePhase.Running || phase in recoveryPhases
+    val busy = phase == AppSyncServicePhase.Running
     val available = phase == AppSyncServicePhase.Active
     val needsAttention = phase in setOf(
         AppSyncServicePhase.PausedAuth,
@@ -488,6 +494,9 @@ internal fun AppSyncServiceStatus.toUiState(
         statusMessage = presentationMessage,
         operation = if (busy) CloudSyncOperation.Syncing else CloudSyncOperation.Idle,
         automaticEnabled = automaticEnabled,
+        manualSyncAvailable = !busy && phase !in setOf(
+            AppSyncServicePhase.Quarantined, AppSyncServicePhase.Disabled,
+        ),
         automaticAvailable = backgroundSchedulerAvailable &&
             phase in setOf(
                 AppSyncServicePhase.Active,
@@ -529,6 +538,12 @@ internal fun AppSyncServiceStatus.toUiState(
                 ),
             )
             recoveryStatus?.let { recovery ->
+                recovery.nextRetryAtEpochMillis?.let { retryAt ->
+                    add(CloudSyncDetail(
+                        CloudSyncDetailLabel.RecoveryRetry,
+                        CloudSyncDetailValue.Timestamp(formatDateTime(retryAt)),
+                    ))
+                }
                 add(
                     CloudSyncDetail(
                         CloudSyncDetailLabel.RecoveryPayload,

@@ -90,6 +90,7 @@ internal data class AppSyncRecoverySession(
     val acknowledgedSourceOperationIds: Set<String> = emptySet(),
     val encodedChars: Int? = null,
     val targetBudgetChars: Int = 42_000,
+    val retryIdentity: String? = null,
 )
 
 internal data class AppSyncRecoverySegmentWrite(

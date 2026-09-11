@@ -141,7 +141,7 @@ class OperationChangeSummaryTest {
         kind: SyncOperationKind,
         value: String,
         domain: String = "settings",
-        entity: String = "feature",
+        entity: String = "appsettings.messagenotificationenabled",
         fields: Map<String, String?> = mapOf("type" to "bool", "value" to value),
         causalContext: SyncCausalContext = SyncCausalContext(),
     ): SyncOperation {

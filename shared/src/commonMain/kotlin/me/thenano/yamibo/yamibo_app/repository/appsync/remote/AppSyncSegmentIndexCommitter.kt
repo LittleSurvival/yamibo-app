@@ -25,6 +25,7 @@ internal class AppSyncSegmentIndexCommitter(
     private val recoveryStore: SqlDelightAppSyncRecoveryStore,
     private val indexCodec: AppSyncIndexEnvelopeCodec = AppSyncIndexEnvelopeCodec(),
     private val nowMillis: () -> Long,
+    private val reconcileIndex: suspend (expectedFingerprint: String?) -> BlogId? = { null },
 ) {
     suspend fun commitJournalRoot(
         sessionId: String,
@@ -54,6 +55,21 @@ internal class AppSyncSegmentIndexCommitter(
         checkpointId: String?,
         classSelection: AppSyncBlogClassSelection,
         formHash: FormHash,
+    ): AppSyncSegmentIndexCommitResult = try {
+        commitVerifiedRoot(sessionId, checkpointId, classSelection, formHash)
+    } catch (failure: AppSyncReconciliationFailure) {
+        when {
+            failure.authenticationRequired -> AppSyncSegmentIndexCommitResult.FormExpired
+            failure.terminal -> AppSyncSegmentIndexCommitResult.Terminal(failure.reason)
+            else -> AppSyncSegmentIndexCommitResult.Retryable(failure.reason)
+        }
+    }
+
+    private suspend fun commitVerifiedRoot(
+        sessionId: String,
+        checkpointId: String?,
+        classSelection: AppSyncBlogClassSelection,
+        formHash: FormHash,
     ): AppSyncSegmentIndexCommitResult {
         val session = recoveryStore.session(sessionId)
             ?: return AppSyncSegmentIndexCommitResult.Terminal("Recovery session is missing")
@@ -69,10 +85,11 @@ internal class AppSyncSegmentIndexCommitter(
             ?: return AppSyncSegmentIndexCommitResult.Terminal("Verified recovery fingerprint is missing")
         val replicaKey = SyncReplicaKey(session.targetDeviceId, session.targetDeviceEpoch).stableKey
         val existing = remoteStore.load(INDEX_REMOTE_KEY)
-        val currentPayload = if (existing == null) {
+        val currentIndexId = reconcileIndex(null) ?: existing?.blogId
+        val currentPayload = if (currentIndexId == null) {
             AppSyncIndexPayload(session.accountBinding, updatedAtEpochMillis = nowMillis())
         } else {
-            when (val loaded = loadIndex(existing.blogId)) {
+            when (val loaded = loadIndex(currentIndexId)) {
                 is LoadedIndex.Valid -> loaded.payload
                 LoadedIndex.NotFound -> return AppSyncSegmentIndexCommitResult.Conflict(
                     "Previously verified Index is missing",
@@ -92,6 +109,27 @@ internal class AppSyncSegmentIndexCommitter(
         val checkpointReference = checkpointId?.let {
             AppSyncIndexCheckpointReference(it, rootBlogId, rootFingerprint)
         }
+        if (currentIndexId != null &&
+            (journalReference == null ||
+                currentPayload.journals.singleOrNull { it.replicaKey == replicaKey } == journalReference) &&
+            (checkpointReference == null ||
+                currentPayload.checkpoints.singleOrNull { it.checkpointId == checkpointId } == checkpointReference)
+        ) {
+            // A prior POST may have committed before its acknowledgement was lost. Keep
+            // the freshly read Index, including references added by other devices.
+            val canonical = indexCodec.validate(indexCodec.encode(currentPayload)) as AppSyncIndexValidation.Valid
+            remoteStore.save(StoredAppSyncRemoteBlog(
+                remoteKey = INDEX_REMOTE_KEY,
+                kind = AppSyncRemoteBlogKind.Index,
+                blogId = currentIndexId,
+                classId = (classSelection as? AppSyncBlogClassSelection.Existing)?.classId,
+                fingerprint = canonical.envelope.fingerprint,
+                validatedAtEpochMillis = nowMillis(),
+                contentUpdatedAtEpochMillis = currentPayload.updatedAtEpochMillis,
+            ))
+            recoveryStore.markIndexCommitted(sessionId, nowMillis())
+            return AppSyncSegmentIndexCommitResult.Verified
+        }
         val desiredPayload = currentPayload.copy(
             journals = journalReference?.let { reference ->
                 currentPayload.journals.filterNot { it.replicaKey == replicaKey } + reference
@@ -103,9 +141,41 @@ internal class AppSyncSegmentIndexCommitter(
         )
         val encoded = indexCodec.encode(desiredPayload)
         val expected = (indexCodec.validate(encoded) as AppSyncIndexValidation.Valid).envelope
+        reconcileIndex(expected.fingerprint)?.let { candidateId ->
+            when (val loaded = loadIndex(candidateId)) {
+                is LoadedIndex.Valid -> if (
+                    loaded.fingerprint == expected.fingerprint &&
+                    (journalReference == null ||
+                        loaded.payload.journals.singleOrNull {
+                            it.replicaKey == replicaKey
+                        } == journalReference) &&
+                    (checkpointReference == null ||
+                        loaded.payload.checkpoints.singleOrNull {
+                            it.checkpointId == checkpointId
+                        } == checkpointReference)
+                ) {
+                    remoteStore.save(
+                        StoredAppSyncRemoteBlog(
+                            remoteKey = INDEX_REMOTE_KEY,
+                            kind = AppSyncRemoteBlogKind.Index,
+                            blogId = candidateId,
+                            classId = (classSelection as? AppSyncBlogClassSelection.Existing)?.classId,
+                            fingerprint = loaded.fingerprint,
+                            validatedAtEpochMillis = nowMillis(),
+                            contentUpdatedAtEpochMillis = loaded.payload.updatedAtEpochMillis,
+                        ),
+                    )
+                    recoveryStore.markIndexCommitted(sessionId, nowMillis())
+                    return AppSyncSegmentIndexCommitResult.Verified
+                }
+                is LoadedIndex.Terminal ->
+                    return AppSyncSegmentIndexCommitResult.Terminal(loaded.reason)
+                else -> Unit
+            }
+        }
         val submitted = provider.submitBlog(
             AppSyncBlogWriteRequest(
-                blogId = existing?.blogId,
+                blogId = currentIndexId,
                 title = APP_SYNC_INDEX_TITLE,
                 message = encoded,
                 classSelection = classSelection,
@@ -114,24 +184,29 @@ internal class AppSyncSegmentIndexCommitter(
         )
         val candidates = when (submitted) {
             is AppSyncCloudResult.VerifiedSuccess ->
-                (listOfNotNull(existing?.blogId) + submitted.value.candidateBlogIds).distinct()
+                (listOfNotNull(currentIndexId) + submitted.value.candidateBlogIds).distinct()
             is AppSyncCloudResult.AcknowledgedButUnverified ->
-                listOfNotNull(existing?.blogId, submitted.candidateBlogId).distinct()
+                listOfNotNull(currentIndexId, submitted.candidateBlogId).distinct()
             is AppSyncCloudResult.FormExpired, AppSyncCloudResult.NotLoggedIn ->
                 return AppSyncSegmentIndexCommitResult.FormExpired
             is AppSyncCloudResult.NetworkFailed,
             is AppSyncCloudResult.Timeout,
             is AppSyncCloudResult.HttpFailed,
             AppSyncCloudResult.Maintenance,
-            -> listOfNotNull(existing?.blogId)
+            -> listOfNotNull(currentIndexId)
             else -> return AppSyncSegmentIndexCommitResult.Terminal(submitted.describeForJournal())
         }
-        if (candidates.isEmpty()) {
+        val authoritativeCandidates = if (candidates.isEmpty()) {
+            listOfNotNull(reconcileIndex(expected.fingerprint))
+        } else {
+            candidates
+        }
+        if (authoritativeCandidates.isEmpty()) {
             return AppSyncSegmentIndexCommitResult.Retryable(
                 "Index outcome is ambiguous and has no authoritative candidate",
             )
         }
-        candidates.forEach { candidateId ->
+        authoritativeCandidates.forEach { candidateId ->
             when (val loaded = loadIndex(candidateId)) {
                 is LoadedIndex.Valid -> if (
                     loaded.fingerprint == expected.fingerprint &&

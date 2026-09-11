@@ -3,6 +3,8 @@ package me.thenano.yamibo.yamibo_app.repository.appsync.domain
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDomainId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperation
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationKind
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncPortability
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncPortabilityPolicy
 import me.thenano.yamibo.yamibo_app.repository.backup.favoriteUpdateEventIdentity
 import me.thenano.yamibo.yamibo_app.repository.rss.normalizeRssSearchKeyword
 import me.thenano.yamibo.yamibo_app.repository.rss.rssSearchSubscriptionSyncId
@@ -32,7 +34,9 @@ internal data class SyncDomainContract(
     fun validate(operation: SyncOperation): String? {
         if (operation.domainId != id) return "Operation domain does not match contract"
         if (operation.kind !in allowedKinds) return "Operation kind is not allowed by ${id.value}"
-        val missing = requiredFieldsByKind[operation.kind].orEmpty() - operation.fields.keys
+        val missing = requiredFieldsByKind[operation.kind].orEmpty().filter {
+            AppSyncPortabilityPolicy.field(id.value, it).portability == AppSyncPortability.Portable
+        }.toSet() - operation.fields.keys
         if (missing.isNotEmpty()) return "Missing required fields: ${missing.sorted().joinToString()}"
         allowedFieldsByKind[operation.kind]?.let { allowed ->
             val unexpected = operation.fields.keys - allowed

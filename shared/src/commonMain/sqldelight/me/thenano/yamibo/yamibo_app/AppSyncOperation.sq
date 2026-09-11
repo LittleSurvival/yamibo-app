@@ -481,15 +481,16 @@ INSERT INTO AppSyncRecoverySession(
     sessionId, accountBinding, mode, sourceDeviceId, sourceDeviceEpoch,
     targetDeviceId, targetDeviceEpoch, targetWriterNonce, targetFirstSequence, generationId,
     sourceOperationIdsJson, acknowledgedSourceOperationIdsJson, replacementFingerprint, phase,
-    retryCount, nextRetryAtEpochMillis, lastErrorCategory,
+    retryCount, retryIdentity, nextRetryAtEpochMillis, lastErrorCategory,
     blockingDomain, redactedBlockingEntity, rootBlogId, rootFingerprint,
     indexCommitted, createdAtEpochMillis, updatedAtEpochMillis, completedAtEpochMillis
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, NULL, NULL, NULL, NULL, NULL, 0, ?, ?, NULL);
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, ?, ?, NULL);
 
 transitionRecoverySession:
 UPDATE AppSyncRecoverySession
 SET phase = ?,
     retryCount = ?,
+    retryIdentity = ?,
     nextRetryAtEpochMillis = ?,
     lastErrorCategory = ?,
     blockingDomain = ?,
@@ -498,14 +499,24 @@ SET phase = ?,
     completedAtEpochMillis = ?
 WHERE sessionId = ? AND phase = ?;
 
+clearRecoveryRetry:
+UPDATE AppSyncRecoverySession
+SET retryCount = 0, retryIdentity = NULL, nextRetryAtEpochMillis = NULL,
+    lastErrorCategory = NULL
+WHERE sessionId = ?;
+
 markRecoveryRootVerified:
 UPDATE AppSyncRecoverySession
-SET rootBlogId = ?, rootFingerprint = ?, phase = 'COMMITTING_INDEX', updatedAtEpochMillis = ?
+SET rootBlogId = ?, rootFingerprint = ?, phase = 'COMMITTING_INDEX',
+    retryCount = 0, retryIdentity = NULL, nextRetryAtEpochMillis = NULL,
+    lastErrorCategory = NULL, updatedAtEpochMillis = ?
 WHERE sessionId = ? AND phase = 'PUBLISHING_ROOT';
 
 markRecoveryIndexCommitted:
 UPDATE AppSyncRecoverySession
-SET indexCommitted = 1, phase = 'ACTIVATING_LOCAL', updatedAtEpochMillis = ?
+SET indexCommitted = 1, phase = 'ACTIVATING_LOCAL',
+    retryCount = 0, retryIdentity = NULL, nextRetryAtEpochMillis = NULL,
+    lastErrorCategory = NULL, updatedAtEpochMillis = ?
 WHERE sessionId = ? AND phase = 'COMMITTING_INDEX' AND rootBlogId IS NOT NULL;
 
 insertRecoveryShadowOperation:

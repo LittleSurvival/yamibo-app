@@ -12,6 +12,8 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationId
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.ResolvedSyncEntity
 import me.thenano.yamibo.yamibo_app.repository.backup.CloudBackupPayloadCodec
 import me.thenano.yamibo.yamibo_app.repository.backup.YamiboBackupFile
+import me.thenano.yamibo.yamibo_app.repository.appsync.withPortableAppSyncPayloads
+import me.thenano.yamibo.yamibo_app.repository.appsync.withoutExcludedAppSyncPayloads
 import okio.Buffer
 import okio.ByteString.Companion.decodeBase64
 import okio.GzipSink
@@ -76,8 +78,8 @@ internal class AppSyncCheckpointEnvelopeCodec(
             checkpointId = checkpointId,
             accountBinding = accountBinding,
             coverage = coverage,
-            encodedSnapshot = backupCodec.encode(snapshot).getOrThrow(),
-            resolvedEntities = resolvedEntities.sortedWith(
+            encodedSnapshot = backupCodec.encode(snapshot.withPortableAppSyncPayloads()).getOrThrow(),
+            resolvedEntities = resolvedEntities.withoutExcludedAppSyncPayloads().sortedWith(
                 compareBy(
                     { it.key.domainId.value },
                     { it.key.entityId.value },
@@ -98,6 +100,13 @@ internal class AppSyncCheckpointEnvelopeCodec(
 
     fun encode(payload: AppSyncCheckpointPayload): String {
         validatePayload(payload)?.let { throw IllegalArgumentException(it) }
+        require(payload.resolvedEntities == payload.resolvedEntities.withoutExcludedAppSyncPayloads()) {
+            "Checkpoint contains excluded AppSync projection fields"
+        }
+        val snapshot = backupCodec.decode(payload.encodedSnapshot).getOrThrow()
+        require(snapshot == snapshot.withPortableAppSyncPayloads()) {
+            "Checkpoint contains excluded AppSync snapshot fields"
+        }
         val payloadJson = json.encodeToString(AppSyncCheckpointPayload.serializer(), payload)
         val fingerprint = stableAppSyncFingerprint(payloadJson)
         val encodedPayload = compress(payloadJson)

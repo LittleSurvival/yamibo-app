@@ -38,23 +38,40 @@ class AppSyncRecoveryRetryPolicyTest {
                 "payload", 1_000, segmentedStrategy = true,
             ),
         )
-        val third = assertIs<AppSyncRecoveryRetryDecision.RetryAt>(
+        val second = assertIs<AppSyncRecoveryRetryDecision.RetryAt>(
             policy.decide(
-                session(retryCount = 2), AppSyncRecoveryFailureCategory.Timeout,
+                session(retryCount = 1, retryIdentity = first.retryIdentity),
+                AppSyncRecoveryFailureCategory.Timeout,
                 "payload", 1_000, segmentedStrategy = true,
             ),
         )
         assertEquals(1_100, first.atEpochMillis)
-        assertEquals(1_250, third.atEpochMillis)
-        assertEquals(first.retryIdentity, third.retryIdentity)
-        assertIs<AppSyncRecoveryRetryDecision.NeedsAttention>(
+        assertEquals(1_200, second.atEpochMillis)
+        assertEquals(first.retryIdentity, second.retryIdentity)
+        val third = assertIs<AppSyncRecoveryRetryDecision.NeedsAttention>(
             policy.decide(
-                session(retryCount = 3), AppSyncRecoveryFailureCategory.Network,
+                session(retryCount = 2, retryIdentity = first.retryIdentity),
+                AppSyncRecoveryFailureCategory.Network,
                 "payload", 1_000, segmentedStrategy = true,
             ),
         )
+        assertEquals(first.retryIdentity, third.retryIdentity)
     }
 
+    @Test
+    fun aDifferentImmutableTargetStartsANewFailureSequence() {
+        val policy = AppSyncRecoveryRetryPolicy(maximumRetries = 3, baseDelayMillis = 100)
+        val first = assertIs<AppSyncRecoveryRetryDecision.RetryAt>(
+            policy.decide(
+                session(retryCount = 2, retryIdentity = "old-target"),
+                AppSyncRecoveryFailureCategory.Network,
+                "payload", 1_000, segmentedStrategy = true, retryTarget = "segment:2",
+            ),
+        )
+
+        assertEquals(1, first.retryCount)
+        assertEquals(1_100, first.atEpochMillis)
+    }
     @Test
     fun permanentPolicyAndTotalSizeFailuresNeverScheduleAutomaticRetry() {
         listOf(
@@ -69,7 +86,10 @@ class AppSyncRecoveryRetryPolicyTest {
         }
     }
 
-    private fun session(retryCount: Long = 0) = AppSyncRecoverySession(
+    private fun session(
+        retryCount: Long = 0,
+        retryIdentity: String? = null,
+    ) = AppSyncRecoverySession(
         sessionId = "session",
         accountBinding = SyncAccountBinding("account"),
         mode = AppSyncRecoveryMode.LegacyShadow,
@@ -94,5 +114,6 @@ class AppSyncRecoveryRetryPolicyTest {
         createdAtEpochMillis = 1,
         updatedAtEpochMillis = 1,
         completedAtEpochMillis = null,
+        retryIdentity = retryIdentity,
     )
 }

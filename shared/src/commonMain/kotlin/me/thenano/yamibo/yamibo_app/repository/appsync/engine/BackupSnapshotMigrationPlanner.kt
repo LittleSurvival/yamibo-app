@@ -5,6 +5,8 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncEntityId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationKind
 import me.thenano.yamibo.yamibo_app.repository.appsync.appSyncThreadCoverOrNull
 import me.thenano.yamibo.yamibo_app.repository.appsync.isAppSyncLocalOnlySetting
+import me.thenano.yamibo.yamibo_app.repository.appsync.withPortableAppSyncPayloads
+import me.thenano.yamibo.yamibo_app.repository.appsync.portableAppSyncFields
 import me.thenano.yamibo.yamibo_app.repository.backup.YamiboBackupFile
 import me.thenano.yamibo.yamibo_app.store.appsync.LocalSyncOperationDraft
 
@@ -17,7 +19,8 @@ internal class BackupSnapshotMigrationPlanner {
     fun plan(snapshot: YamiboBackupFile): List<LocalSyncOperationDraft> =
         planWithDiagnostics(snapshot).drafts
 
-    fun planWithDiagnostics(snapshot: YamiboBackupFile): BackupSnapshotMigrationPlan {
+    fun planWithDiagnostics(sourceSnapshot: YamiboBackupFile): BackupSnapshotMigrationPlan {
+        val snapshot = sourceSnapshot.withPortableAppSyncPayloads()
         val categories = snapshot.favorites.categories.associateBy { it.localId }
         val categorySyncIds = categories.mapValues { (_, category) ->
             requireNotNull(category.syncId) { "Favorite category is missing a stable sync id" }
@@ -406,7 +409,7 @@ internal class BackupSnapshotMigrationPlanner {
             domainId = SyncDomainId(domain),
             entityId = SyncEntityId(entityId),
             kind = SyncOperationKind.Put,
-            fields = fields,
+            fields = portableAppSyncFields(domain, entityId, fields),
         )
 
     private fun relation(domain: String, entityId: String, fields: Map<String, String?>) =

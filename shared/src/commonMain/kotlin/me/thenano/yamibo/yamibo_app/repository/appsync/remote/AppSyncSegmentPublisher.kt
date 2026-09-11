@@ -43,6 +43,23 @@ internal class AppSyncSegmentPublisher(
         identity: String,
         classSelection: AppSyncBlogClassSelection,
         formHash: FormHash,
+    ): AppSyncSegmentPublishResult = try {
+        publishVerified(sessionId, canonicalEnvelope, kind, identity, classSelection, formHash)
+    } catch (failure: AppSyncReconciliationFailure) {
+        when {
+            failure.authenticationRequired -> AppSyncSegmentPublishResult.FormExpired
+            failure.terminal -> AppSyncSegmentPublishResult.Terminal(failure.reason)
+            else -> AppSyncSegmentPublishResult.Retryable(failure.reason)
+        }
+    }
+
+    private suspend fun publishVerified(
+        sessionId: String,
+        canonicalEnvelope: String,
+        kind: AppSyncSegmentPayloadKind,
+        identity: String,
+        classSelection: AppSyncBlogClassSelection,
+        formHash: FormHash,
     ): AppSyncSegmentPublishResult {
         val session = recoveryStore.session(sessionId)
             ?: return AppSyncSegmentPublishResult.Terminal("Recovery session is missing")
@@ -80,6 +97,28 @@ internal class AppSyncSegmentPublisher(
                 expectedFingerprint = fingerprint,
                 nextBlogId = nextBlogId?.value?.toLong(),
             )
+            if (existing != null) {
+                val reconciled = reconcileSegment(session.generationId, index, fingerprint)
+                if (reconciled != null) {
+                    when (
+                        val verified = verifySegment(
+                            reconciled, body, kind, session.generationId, index,
+                        )
+                    ) {
+                        is Verification.Valid -> {
+                            recoveryStore.markSegmentVerified(
+                                sessionId, index, fingerprint, reconciled.value.toLong(), nowMillis(),
+                            )
+                            nextBlogId = reconciled
+                            continue
+                        }
+                        is Verification.Retryable ->
+                            return AppSyncSegmentPublishResult.Retryable(verified.reason)
+                        is Verification.Terminal ->
+                            return AppSyncSegmentPublishResult.Terminal(verified.reason)
+                    }
+                }
+            }
             val submitted = provider.submitBlog(
                 AppSyncBlogWriteRequest(
                     blogId = null,
@@ -133,6 +172,22 @@ internal class AppSyncSegmentPublisher(
             return AppSyncSegmentPublishResult.ReadyToCommitIndex(
                 current.rootBlogId, rootFingerprint, rootBody,
             )
+        }
+        reconcileRoot(session.generationId, rootFingerprint)?.let { reconciled ->
+            when (val verified = verifyRoot(reconciled, rootBody, kind, session.generationId)) {
+                is Verification.Valid -> {
+                    recoveryStore.markRootVerified(
+                        sessionId, reconciled.value.toLong(), rootFingerprint, nowMillis(),
+                    )
+                    return AppSyncSegmentPublishResult.ReadyToCommitIndex(
+                        reconciled.value.toLong(), rootFingerprint, rootBody,
+                    )
+                }
+                is Verification.Retryable ->
+                    return AppSyncSegmentPublishResult.Retryable(verified.reason)
+                is Verification.Terminal ->
+                    return AppSyncSegmentPublishResult.Terminal(verified.reason)
+            }
         }
         val submittedRoot = provider.submitBlog(
             AppSyncBlogWriteRequest(

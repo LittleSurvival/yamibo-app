@@ -60,6 +60,104 @@ import me.thenano.yamibo.yamibo_app.store.appsync.StoredAppSyncRemoteBlog
 
 class AppSyncSegmentPublisherTest {
     @Test
+    fun productionReconciliationAcceptsHtmlNormalizedSegmentRootAndIndexWithoutDuplicatePost() = runBlocking {
+        for (ambiguousSubmission in 1..3) {
+            val fixture = fixture()
+            fixture.recovery.rollbackPreCommit(fixture.session.sessionId)
+            fixture.remoteStore.saveClassId(fixture.account, BlogClassId(7))
+            val provider = FakeProvider().apply { ambiguousSubmissionNumber = ambiguousSubmission }
+            val installation = requireNotNull(fixture.operations.installation())
+            val payload = AppSyncJournalPayload(
+                accountBinding = fixture.account,
+                deviceId = installation.deviceId,
+                deviceEpoch = installation.deviceEpoch,
+                writerNonce = installation.writerNonce,
+                firstSequence = fixture.source.sequence.value,
+                lastSequence = fixture.source.sequence.value,
+                operations = listOf(fixture.source),
+                observed = SyncCausalContext(),
+                heartbeatAtEpochMillis = 100,
+                protocolReadVersion = 2,
+            )
+            val remote = YamiboAppSyncJournalRemote(
+                provider, fixture.remoteStore, nowMillis = { 100 }, recoveryStore = fixture.recovery,
+            )
+            assertIs<me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalPublishResult.Verified>(
+                remote.publishOwnJournalSegmented(payload, setOf(fixture.source.operationId), emptyList(), FORM_HASH),
+            )
+            assertEquals(1, provider.submittedTitles.count { it.contains(" Segment ") })
+            assertEquals(1, provider.submittedTitles.count { it.contains(" Root ") })
+            assertEquals(1, provider.submittedTitles.count { it == APP_SYNC_INDEX_TITLE })
+            assertTrue(fixture.operations.pendingOperations().isEmpty())
+        }
+    }
+
+    @Test
+    fun sameTargetThirdFailureStopsAndExplicitResumePreservesVerifiedSegments() = runBlocking {
+        val fixture = fixture()
+        val codec = AppSyncSegmentEnvelopeCodec(AppSyncPayloadBudget(4_096))
+        val provider = FakeProvider().apply { failSubmissionNumber = 2 }
+        var now = 100L
+        fun coordinator() = AppSyncSegmentedJournalCommitCoordinator(
+            AppSyncSegmentPublisher(provider, fixture.recovery, codec, nowMillis = { now }),
+            AppSyncSegmentIndexCommitter(provider, fixture.remoteStore, fixture.recovery, nowMillis = { now }),
+            fixture.recovery, nowMillis = { now },
+        )
+        suspend fun run() = coordinator().commit(
+            fixture.session.sessionId, "x".repeat(12_000), "identity", CLASS_SELECTION, FORM_HASH,
+        )
+        assertIs<AppSyncSegmentedJournalCommitResult.Retryable>(run())
+        assertEquals(1, fixture.recovery.segmentWrites(fixture.session.sessionId).count { it.blogId != null })
+        val afterFirst = requireNotNull(fixture.recovery.session(fixture.session.sessionId))
+        assertEquals(1L, afterFirst.retryCount)
+        assertIs<AppSyncSegmentedJournalCommitResult.Retryable>(run())
+        assertEquals(2, provider.submittedTitles.size) // Waiting does not consume an attempt or POST.
+        now = requireNotNull(afterFirst.nextRetryAtEpochMillis)
+        provider.failSubmissionNumber = 3
+        assertIs<AppSyncSegmentedJournalCommitResult.Retryable>(run())
+        now = requireNotNull(fixture.recovery.session(fixture.session.sessionId)?.nextRetryAtEpochMillis)
+        provider.failSubmissionNumber = 4
+        assertIs<AppSyncSegmentedJournalCommitResult.Terminal>(run())
+        val exhausted = requireNotNull(fixture.recovery.session(fixture.session.sessionId))
+        assertEquals(3L, exhausted.retryCount)
+        assertEquals("retry-exhausted", exhausted.lastErrorCategory)
+        assertEquals(me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.NeedsAttention, exhausted.phase)
+        fixture.recovery.resumeRetryExhaustedRecovery(fixture.account, ++now)
+        provider.failSubmissionNumber = null
+        assertIs<AppSyncSegmentedJournalCommitResult.Verified>(run())
+        assertEquals(provider.blogs.size, provider.submittedTitles.size - 3)
+    }
+
+    @Test
+    fun committedIndexIsReusedAfterRestartEvenWhenTimestampAdvances() = runBlocking {
+        val fixture = fixture()
+        val provider = FakeProvider()
+        publishReady(fixture, provider)
+        val session = requireNotNull(fixture.recovery.session(fixture.session.sessionId))
+        val index = AppSyncIndexPayload(
+            fixture.account,
+            journals = listOf(me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncIndexJournalReference(
+                me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncReplicaKey(
+                    session.targetDeviceId, session.targetDeviceEpoch,
+                ).stableKey,
+                requireNotNull(session.rootBlogId).toInt(), requireNotNull(session.rootFingerprint),
+            )),
+            updatedAtEpochMillis = 40,
+        )
+        provider.storeBlog(BlogId(900), APP_SYNC_INDEX_TITLE, AppSyncIndexEnvelopeCodec().encode(index))
+        val before = provider.submittedTitles.size
+        val committer = AppSyncSegmentIndexCommitter(
+            provider, fixture.remoteStore, fixture.recovery,
+            nowMillis = { 99_000 }, reconcileIndex = { BlogId(900) },
+        )
+        assertIs<AppSyncSegmentIndexCommitResult.Verified>(
+            committer.commitJournalRoot(session.sessionId, CLASS_SELECTION, FORM_HASH),
+        )
+        assertEquals(before, provider.submittedTitles.size)
+        assertTrue(requireNotNull(fixture.recovery.session(session.sessionId)).indexCommitted)
+    }
+
+    @Test
     fun publishesTailToHeadUsingDirectIdVerificationAndResumesVerifiedProgress() = runBlocking {
         val fixture = fixture()
         val codec = AppSyncSegmentEnvelopeCodec(AppSyncPayloadBudget(4_096))
@@ -274,13 +372,14 @@ class AppSyncSegmentPublisherTest {
         val codec = AppSyncSegmentEnvelopeCodec(AppSyncPayloadBudget(4_096))
         val envelope = "portable".repeat(2_000)
         publishReady(fixture, provider)
+        var attemptTime = 50L
         val coordinator = AppSyncSegmentedJournalCommitCoordinator(
             publisher(provider, fixture.recovery, codec),
             AppSyncSegmentIndexCommitter(
                 provider, fixture.remoteStore, fixture.recovery, nowMillis = { 40L },
             ),
             fixture.recovery,
-            nowMillis = { 50L },
+            nowMillis = { attemptTime },
         )
 
         provider.failSubmissionNumber = provider.submittedTitles.size + 1
@@ -295,6 +394,7 @@ class AppSyncSegmentPublisherTest {
         )
 
         provider.failSubmissionNumber = null
+        attemptTime = requireNotNull(fixture.recovery.session(fixture.session.sessionId)?.nextRetryAtEpochMillis)
         val verified = assertIs<AppSyncSegmentedJournalCommitResult.Verified>(
             coordinator.commit(
                 fixture.session.sessionId, envelope, "identity", CLASS_SELECTION, FORM_HASH,
@@ -355,7 +455,7 @@ class AppSyncSegmentPublisherTest {
         )
         assertEquals(installation.deviceId, fixture.operations.installation()?.deviceId)
         assertTrue(fixture.operations.installation()?.journalBlogId != null)
-        assertEquals(0, provider.fetchListCalls)
+        assertTrue(provider.fetchListCalls > 0)
     }
 
     @Test
@@ -385,6 +485,7 @@ class AppSyncSegmentPublisherTest {
             20L,
         )
         fixture.recovery.startSegmentedJournal(session.sessionId, 21L)
+        var attemptTime = 50L
         val coordinator = AppSyncSegmentedCheckpointCommitCoordinator(
             publisher(
                 provider,
@@ -395,7 +496,7 @@ class AppSyncSegmentPublisherTest {
                 provider, fixture.remoteStore, fixture.recovery, nowMillis = { 40L },
             ),
             fixture.recovery,
-            nowMillis = { 50L },
+            nowMillis = { attemptTime },
         )
 
         provider.failSubmissionNumber = 2
@@ -408,6 +509,7 @@ class AppSyncSegmentPublisherTest {
         assertTrue(fixture.recovery.session(session.sessionId)?.indexCommitted == false)
 
         provider.failSubmissionNumber = null
+        attemptTime = requireNotNull(fixture.recovery.session(session.sessionId)?.nextRetryAtEpochMillis)
         val verified = assertIs<AppSyncSegmentedCheckpointCommitResult.Verified>(
             coordinator.commit(
                 session.sessionId, checkpointId, envelope, CLASS_SELECTION, FORM_HASH,
@@ -536,11 +638,11 @@ class AppSyncSegmentPublisherTest {
         val snapshot = me.thenano.yamibo.yamibo_app.repository.backup.YamiboBackupFile(
             appVersionCode = 1,
             createdAt = 200L,
-            settings = (0 until 4_000).map { index ->
-                me.thenano.yamibo.yamibo_app.repository.backup.BackupSetting(
-                    key = "portable-$index-${stableAppSyncFingerprint("key-$index")}",
-                    type = me.thenano.yamibo.yamibo_app.repository.backup.BackupSettingType.String,
-                    value = stableAppSyncFingerprint("value-$index-a") +
+            notes = (0 until 4_000).map { index ->
+                me.thenano.yamibo.yamibo_app.repository.backup.BackupDetailNote(
+                    targetType = "Thread", targetId = index.toLong() + 1, authorId = 0,
+                    createdAt = 100, updatedAt = 200,
+                    content = stableAppSyncFingerprint("value-$index-a") +
                         stableAppSyncFingerprint("value-$index-b"),
                 )
             },
@@ -649,7 +751,21 @@ class AppSyncSegmentPublisherTest {
 
         override suspend fun fetchMyBlogs(blogClassId: BlogClassId?, page: Int): AppSyncCloudResult<UserSpaceBlogPage> {
             fetchListCalls += 1
-            return AppSyncCloudResult.NotFound
+            return AppSyncCloudResult.VerifiedSuccess(UserSpaceBlogPage(
+                blogs = blogs.values.map { blog ->
+                    io.github.littlesurvival.dto.model.BlogSummary(
+                        title = blog.blogInfo.title,
+                        bId = blog.blogInfo.blogId,
+                        url = "https://example.invalid/blog",
+                        description = "",
+                        author = USER,
+                        timeInfo = blog.rootBlog.timeInfo,
+                    )
+                },
+                blogClasses = listOf(io.github.littlesurvival.dto.page.BlogPageClassInfo(
+                    "YamiboAppSync", BlogClassId(7),
+                )),
+            ))
         }
 
         override suspend fun fetchBlog(blogId: BlogId): AppSyncCloudResult<BlogPage> =

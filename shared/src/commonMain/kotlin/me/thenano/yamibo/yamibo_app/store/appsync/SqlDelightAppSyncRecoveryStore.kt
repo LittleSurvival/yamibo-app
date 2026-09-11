@@ -175,6 +175,7 @@ internal class SqlDelightAppSyncRecoveryStore(
                 completedAtEpochMillis = completedAtEpochMillis,
                 encodedChars = encodedChars?.toInt(),
                 targetBudgetChars = targetBudgetChars.toInt(),
+                retryIdentity = retryIdentity,
             )
 
     fun recordPayloadMeasurement(
@@ -270,14 +271,21 @@ internal class SqlDelightAppSyncRecoveryStore(
         verifiedAtEpochMillis: Long,
     ) {
         requireSession(sessionId)
-        queries.markRecoverySegmentVerified(
-            blogId = blogId,
-            verifiedFingerprint = expectedFingerprint,
-            verifiedAtEpochMillis = verifiedAtEpochMillis,
-            sessionId = sessionId,
-            segmentIndex = segmentIndex.toLong(),
-            expectedFingerprint = expectedFingerprint,
-        )
+        db.transaction {
+            queries.markRecoverySegmentVerified(
+                blogId = blogId,
+                verifiedFingerprint = expectedFingerprint,
+                verifiedAtEpochMillis = verifiedAtEpochMillis,
+                sessionId = sessionId,
+                segmentIndex = segmentIndex.toLong(),
+                expectedFingerprint = expectedFingerprint,
+            )
+            check(segmentWrites(sessionId).any {
+                it.segmentIndex == segmentIndex && it.expectedFingerprint == expectedFingerprint &&
+                    it.verifiedFingerprint == expectedFingerprint && it.blogId == blogId
+            }) { "Segment verification did not match persisted intent" }
+            queries.clearRecoveryRetry(sessionId)
+        }
     }
 
     fun segmentWrites(sessionId: String): List<AppSyncRecoverySegmentWrite> =
@@ -524,12 +532,44 @@ internal class SqlDelightAppSyncRecoveryStore(
         }
     }
 
+    fun resumeRetryExhaustedRecovery(
+        accountBinding: SyncAccountBinding,
+        nowEpochMillis: Long,
+    ): AppSyncRecoverySession? = db.transactionWithResult {
+        val session = recoverySession(accountBinding) ?: return@transactionWithResult null
+        if (session.phase != AppSyncRecoveryPhase.NeedsAttention ||
+            session.retryIdentity == null || session.lastErrorCategory != "retry-exhausted"
+        ) {
+            return@transactionWithResult session
+        }
+        val writes = segmentWrites(session.sessionId)
+        val resumedPhase = when {
+            session.mode == AppSyncRecoveryMode.LegacyShadow &&
+                shadowOperations(session.sessionId).isEmpty() -> AppSyncRecoveryPhase.Classifying
+            writes.isEmpty() || writes.any {
+                it.blogId == null || it.verifiedFingerprint != it.expectedFingerprint
+            } -> AppSyncRecoveryPhase.PublishingSegments
+            session.rootBlogId == null -> AppSyncRecoveryPhase.PublishingRoot
+            !session.indexCommitted -> AppSyncRecoveryPhase.CommittingIndex
+            else -> AppSyncRecoveryPhase.ActivatingLocal
+        }
+        transition(
+            sessionId = session.sessionId,
+            expected = AppSyncRecoveryPhase.NeedsAttention,
+            next = resumedPhase,
+            nowEpochMillis = nowEpochMillis,
+            retryCount = 0,
+            retryIdentity = null,
+        )
+        requireSession(session.sessionId)
+    }
     fun transition(
         sessionId: String,
         expected: AppSyncRecoveryPhase,
         next: AppSyncRecoveryPhase,
         nowEpochMillis: Long,
         retryCount: Long = requireSession(sessionId).retryCount,
+        retryIdentity: String? = requireSession(sessionId).retryIdentity,
         nextRetryAtEpochMillis: Long? = null,
         lastErrorCategory: String? = null,
         blockingDomain: String? = null,
@@ -538,6 +578,7 @@ internal class SqlDelightAppSyncRecoveryStore(
         queries.transitionRecoverySession(
             phase = next.toDb(),
             retryCount = retryCount,
+            retryIdentity = retryIdentity,
             nextRetryAtEpochMillis = nextRetryAtEpochMillis,
             lastErrorCategory = lastErrorCategory,
             blockingDomain = blockingDomain,

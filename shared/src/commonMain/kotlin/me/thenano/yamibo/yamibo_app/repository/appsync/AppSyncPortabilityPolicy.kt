@@ -38,8 +38,8 @@ internal sealed interface AppSyncPortableEntityResult {
  * The single source of truth for AppSync and backup portability decisions.
  *
  * Settings use normalized suffix matching because historical registries used both dotted and
- * prefixed keys. Unknown settings remain portable so adding a normal preference does not require
- * a release-time allow-list update. Known device-local/cache entries are fail-closed.
+ * prefixed keys. Portable settings require an explicit declaration; arbitrary prefixes must not
+ * gain permission merely by ending with a known preference name. Local backup rules are separate.
  */
 internal object AppSyncPortabilityPolicy {
     const val MAX_SANITIZED_ENTITY_BYTES: Int = 256 * 1024
@@ -58,17 +58,44 @@ internal object AppSyncPortabilityPolicy {
         local("appsynccapacityautomaticlegacyrecoveryenabled"),
         local("appsynccapacitycleanupdryrun"),
         local("appsynccapacitycleanupdeletionenabled"),
+        local("signinlaunchreminderdismisseddate").copy(includeInLocalBackup = true),
+        local("signinlaunchreminderdismisstoday").copy(includeInLocalBackup = true),
     )
 
+    private val portableSettingKeys: Set<String> = buildSet {
+        fun declare(prefix: String, names: String) {
+            names.split(" ").filter(String::isNotBlank).forEach { add("$prefix.$it") }
+        }
+        declare("appsettings", "thememode themescheme language ismangamode clearcacheonapplaunch " +
+            "showhomeswiperimages messagenotificationenabled messagenotificationinterval " +
+            "messagenotificationdailylimit appfontid skipfavoriteremovalconfirm " +
+            "favoriteaddsyncpromptenabled favoriteadddownloadpromptenabled favoriteaddsyncdefault " +
+            "favoriteremovesyncpromptenabled favoriteremovesyncdefault favoritegridmode favoritesortmode " +
+            "favoritesortdescending favoriteupdateinterval favoriteupdateautodownload " +
+            "downloadedcontentrefreshautoupdate appupdatepreferredsourceindex appupdatelaunchcheckthreshold " +
+            "backupinterval backupmaxautofiles signinmode signinlaunchreminderenabled signinallowrepair " +
+            "signinreminderfrequency signindirectwebview")
+        declare("novelreadersettings", "fontsize linespacing readerfontid defaultbold defaultitalic " +
+            "contentwidthfraction keepsystembarsbackground chineseconversion threadreadermode " +
+            "threadtouchzone threadreversetouchzones scrollbuttondisplaymode scrollbuttondirectionthreshold " +
+            "scrollbuttonjumptarget showpageprogresshint")
+        declare("mangareadersettings", "readingmode touchzone reversetouchzones")
+    }
+
+    fun isSettingDeclared(key: String): Boolean = setting(key) != null ||
+        key.lowercase() in portableSettingKeys
+
     val fieldDeclarations: List<AppSyncFieldPortability> = listOf(
-        AppSyncFieldPortability(
-            domain = "reading.thread",
-            field = "threadCover",
-            portability = AppSyncPortability.Portable,
-            semanticLimitBytes = 8 * 1024,
-            sanitizer = ::portableRemoteUrlOrNull,
-        ),
-    )
+        "favorite.item" to "coverUrl",
+        "favorite.update-event" to "coverUrl",
+        "reading.thread" to "threadCover",
+        "reading.tag-manga" to "coverUrl",
+        "reading.tag-catalog" to "coverUrl",
+        "reading.rss-search" to "coverUrl",
+        "reading.rss-catalog" to "coverUrl",
+    ).map { (domain, field) ->
+        AppSyncFieldPortability(domain, field, AppSyncPortability.Cache)
+    }
 
     fun setting(key: String): AppSyncSettingPortability? {
         val normalized = normalizeSettingKey(key)
@@ -76,7 +103,9 @@ internal object AppSyncPortabilityPolicy {
     }
 
     fun settingPortability(key: String): AppSyncPortability =
-        setting(key)?.portability ?: AppSyncPortability.Portable
+        setting(key)?.portability ?: if (key.lowercase() in portableSettingKeys) {
+            AppSyncPortability.Portable
+        } else AppSyncPortability.DeviceLocal
 
     fun field(domain: String, field: String): AppSyncFieldPortability =
         fieldDeclarations.firstOrNull { it.domain == domain && it.field == field }
@@ -101,7 +130,8 @@ internal object AppSyncPortabilityPolicy {
         if (domain == "settings" && !isSettingPortable(entityId)) {
             return AppSyncPortableEntityResult.Portable(emptyMap())
         }
-        val sanitized = fields.mapValues { (field, value) ->
+        val sanitized = fields.filterKeys { field(domain, it).portability == AppSyncPortability.Portable }
+            .mapValues { (field, value) ->
             val declaration = field(domain, field)
             when (declaration.portability) {
                 AppSyncPortability.DeviceLocal, AppSyncPortability.Cache -> null

@@ -1,6 +1,8 @@
 package me.thenano.yamibo.yamibo_app.repository.appsync.remote
 
 import io.github.littlesurvival.dto.value.FormHash
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncRecoveryAttempts
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncRecoveryFailureCategory
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryMode
 import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncRecoveryStore
@@ -21,6 +23,34 @@ internal class AppSyncSegmentedCheckpointCommitCoordinator(
     private val nowMillis: () -> Long,
 ) {
     suspend fun commit(
+        sessionId: String,
+        checkpointId: String,
+        canonicalEnvelope: String,
+        classSelection: AppSyncBlogClassSelection,
+        formHash: FormHash,
+    ): AppSyncSegmentedCheckpointCommitResult {
+        val session = recoveryStore.session(sessionId)
+            ?: return AppSyncSegmentedCheckpointCommitResult.Terminal("Recovery session is missing")
+        if (session.phase == AppSyncRecoveryPhase.NeedsAttention) {
+            return AppSyncSegmentedCheckpointCommitResult.Terminal("Recovery requires attention")
+        }
+        if ((session.nextRetryAtEpochMillis ?: 0) > nowMillis()) {
+            return AppSyncSegmentedCheckpointCommitResult.Retryable("Waiting for persisted retry time")
+        }
+        val result = commitVerified(sessionId, checkpointId, canonicalEnvelope, classSelection, formHash)
+        val category = when (result) {
+            is AppSyncSegmentedCheckpointCommitResult.Retryable -> AppSyncRecoveryFailureCategory.AmbiguousWrite
+            is AppSyncSegmentedCheckpointCommitResult.Conflict -> AppSyncRecoveryFailureCategory.IndexConflict
+            is AppSyncSegmentedCheckpointCommitResult.Terminal -> AppSyncRecoveryFailureCategory.PolicyViolation
+            else -> null
+        }
+        if (category != null && AppSyncRecoveryAttempts(recoveryStore, nowMillis).recordFailure(sessionId, category)) {
+            return AppSyncSegmentedCheckpointCommitResult.Terminal("Recovery requires attention")
+        }
+        return result
+    }
+
+    private suspend fun commitVerified(
         sessionId: String,
         checkpointId: String,
         canonicalEnvelope: String,

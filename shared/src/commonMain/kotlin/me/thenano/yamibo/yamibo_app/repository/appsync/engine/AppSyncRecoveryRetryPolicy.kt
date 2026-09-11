@@ -21,16 +21,20 @@ internal sealed interface AppSyncRecoveryRetryDecision {
     ) : AppSyncRecoveryRetryDecision
 
     data class SwitchToSegmentation(val retryIdentity: String) : AppSyncRecoveryRetryDecision
-    data class NeedsAttention(val reason: String, val retryIdentity: String) : AppSyncRecoveryRetryDecision
+    data class NeedsAttention(
+        val reason: String,
+        val retryIdentity: String,
+        val failureCount: Long,
+    ) : AppSyncRecoveryRetryDecision
 }
 
 internal class AppSyncRecoveryRetryPolicy(
-    private val maximumRetries: Long = 5,
+    private val maximumRetries: Long = 3,
     private val baseDelayMillis: Long = 30_000,
     private val maximumDelayMillis: Long = 6 * 60 * 60 * 1_000L,
 ) {
     init {
-        require(maximumRetries >= 0)
+        require(maximumRetries > 0)
         require(baseDelayMillis > 0)
         require(maximumDelayMillis >= baseDelayMillis)
     }
@@ -43,12 +47,14 @@ internal class AppSyncRecoveryRetryPolicy(
         encodedChars: Int? = null,
         targetChars: Int? = null,
         segmentedStrategy: Boolean,
+        retryTarget: String = session.phase.name,
     ): AppSyncRecoveryRetryDecision {
         require(payloadFingerprint.isNotBlank())
+        require(retryTarget.isNotBlank())
         val retryIdentity = listOf(
-            session.phase.name,
             session.generationId,
             payloadFingerprint,
+            retryTarget,
         ).joinToString(":")
         if (
             category == AppSyncRecoveryFailureCategory.SingleBodyOversized ||
@@ -56,16 +62,21 @@ internal class AppSyncRecoveryRetryPolicy(
         ) {
             return AppSyncRecoveryRetryDecision.SwitchToSegmentation(retryIdentity)
         }
-        if (category in setOf(
+        if (
+            category in setOf(
                 AppSyncRecoveryFailureCategory.PolicyViolation,
                 AppSyncRecoveryFailureCategory.UnsupportedTotalSize,
             )
         ) {
-            return AppSyncRecoveryRetryDecision.NeedsAttention(category.name, retryIdentity)
+            return AppSyncRecoveryRetryDecision.NeedsAttention(
+                category.name, retryIdentity, failureCount = 1,
+            )
         }
-        val nextRetry = session.retryCount + 1
-        if (nextRetry > maximumRetries) {
-            return AppSyncRecoveryRetryDecision.NeedsAttention("retry-exhausted", retryIdentity)
+        val nextRetry = if (session.retryIdentity == retryIdentity) session.retryCount + 1 else 1
+        if (nextRetry >= maximumRetries) {
+            return AppSyncRecoveryRetryDecision.NeedsAttention(
+                "retry-exhausted", retryIdentity, failureCount = nextRetry,
+            )
         }
         val exponent = (nextRetry - 1).coerceAtMost(30).toInt()
         val delay = (baseDelayMillis * (1L shl exponent)).coerceAtMost(maximumDelayMillis)

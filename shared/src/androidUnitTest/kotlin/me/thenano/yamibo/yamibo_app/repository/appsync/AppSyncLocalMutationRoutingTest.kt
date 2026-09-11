@@ -3,6 +3,7 @@ package me.thenano.yamibo.yamibo_app.repository.appsync
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
+import kotlin.test.assertNull
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
@@ -131,14 +132,14 @@ class AppSyncLocalMutationRoutingTest {
         val recorder = recorder(db, store)
         val recordingStore = OperationRecordingSettingsStore(db, settings, recorder)
 
-        recordingStore.putString("theme", "dark")
+        recordingStore.putString("appsettings.thememode", "dark")
 
-        assertEquals("dark", recordingStore.getString("theme", "light"))
-        assertEquals("dark", settings.getString("theme", "light"))
+        assertEquals("dark", recordingStore.getString("appsettings.thememode", "light"))
+        assertEquals("dark", settings.getString("appsettings.thememode", "light"))
         assertTrue(store.pendingOperations().isEmpty())
         assertEquals(
             "local-pending-bootstrap-migration",
-            db.appSyncOperationQueries.getSyncSettingValue("theme").executeAsOne().winnerOperationId,
+            db.appSyncOperationQueries.getSyncSettingValue("appsettings.thememode").executeAsOne().winnerOperationId,
         )
     }
 
@@ -239,10 +240,10 @@ class AppSyncLocalMutationRoutingTest {
     }
 
     @Test
-    fun threadCoverOperationsOnlyCarryHttpLinks() = runBlocking {
+    fun threadCoverOperationsExcludeEveryCoverWithoutChangingLocalHistory() = runBlocking {
         val cases = listOf(
-            "http://example.com/cover.jpg" to "http://example.com/cover.jpg",
-            "https://example.com/cover.jpg" to "https://example.com/cover.jpg",
+            "http://example.com/cover.jpg" to null,
+            "https://example.com/cover.jpg" to null,
             "data:image/png;base64,AAAA" to null,
             "http://data:image/png;base64,AAAA" to null,
             "file:///tmp/cover.jpg" to null,
@@ -261,6 +262,7 @@ class AppSyncLocalMutationRoutingTest {
             )
 
             assertEquals(expected, fixture.store.pendingOperations().single().fields["threadCover"], input)
+            assertEquals(input, fixture.db.readingHistoryQueries.getAllForBackup().executeAsList().single().threadCover)
         }
     }
 
@@ -305,6 +307,38 @@ class AppSyncLocalMutationRoutingTest {
     }
 
     @Test
+    fun unknownSettingStaysLocalWithoutOutboxOrSyncProjection() {
+        val fixture = activeFixture()
+        val local = MapSettingsStore()
+        val recording = OperationRecordingSettingsStore(fixture.db, local, fixture.recorder)
+        val key = "appsettings.futurehtmlcache"
+        recording.putString(key, "<html>local cache</html>")
+        assertEquals("<html>local cache</html>", local.getString(key, ""))
+        assertEquals("<html>local cache</html>", recording.getString(key, ""))
+        assertTrue(fixture.store.pendingOperations().isEmpty())
+        assertNull(fixture.db.appSyncOperationQueries.getSyncSettingValue(key).executeAsOneOrNull())
+        assertTrue(fixture.db.appSyncOperationQueries.getResolvedEntities().executeAsList().isEmpty())
+    }
+
+    @Test
+    fun remoteReadingProgressPreservesExistingLocalCover() = runBlocking {
+        val source = activeFixture()
+        val sourceHistory = OperationRecordingReadHistoryRepository(AndroidReadHistoryRepository(source.db), source.recorder)
+        sourceHistory.savePosition(sampleThread().copy(page = 2, threadCover = "https://example.test/remote"))
+        val target = activeFixture()
+        val targetHistory = AndroidReadHistoryRepository(target.db)
+        targetHistory.savePosition(sampleThread().copy(threadCover = "content://local-cover"))
+        val adapter = SqlDelightSyncDomainStateAdapter(target.db,
+            DatabaseSyncDomainMaterializer(target.db, MapSettingsStore()), nowMillis = { 200 })
+        applyAllOperations(source, adapter)
+        val row = target.db.readingHistoryQueries.getAllForBackup().executeAsList().single()
+        assertEquals(2, row.page)
+        assertEquals("content://local-cover", row.threadCover)
+        assertFalse(target.db.appSyncOperationQueries.getResolvedEntities().executeAsList().single()
+            .encodedState.contains("cover", ignoreCase = true))
+    }
+
+    @Test
     fun remoteSettingTombstoneDeletesCanonicalAndPlatformProjection() {
         val db = inMemoryDatabase()
         val store = SqlDelightAppSyncOperationStore(db).also {
@@ -322,12 +356,12 @@ class AppSyncLocalMutationRoutingTest {
             settings,
             AppSyncMutationRecorder(true, store, domainState, nowMillis = { 100 }),
         )
-        recordingStore.putString("theme", "dark")
-        recordingStore.remove("theme")
+        recordingStore.putString("appsettings.thememode", "dark")
+        recordingStore.remove("appsettings.thememode")
 
-        settings.putString("theme", "stale")
+        settings.putString("appsettings.thememode", "stale")
         db.appSyncOperationQueries.upsertSyncSettingValue(
-            settingKey = "theme",
+            settingKey = "appsettings.thememode",
             type = "string",
             value_ = "stale",
             winnerOperationId = "stale",
@@ -335,19 +369,19 @@ class AppSyncLocalMutationRoutingTest {
         )
         domainState.apply(OperationReducer().reduce(operations = store.pendingOperations()))
 
-        assertFalse(settings.hasKey("theme"))
+        assertFalse(settings.hasKey("appsettings.thememode"))
         assertEquals(
             null,
-            db.appSyncOperationQueries.getSyncSettingValue("theme").executeAsOneOrNull(),
+            db.appSyncOperationQueries.getSyncSettingValue("appsettings.thememode").executeAsOneOrNull(),
         )
     }
 
     @Test
     fun checkpointReplacementClearsStalePlatformSettingProjection() {
         val db = inMemoryDatabase()
-        val settings = MapSettingsStore().also { it.putString("theme", "stale") }
+        val settings = MapSettingsStore().also { it.putString("appsettings.thememode", "stale") }
         db.appSyncOperationQueries.upsertSyncSettingValue(
-            settingKey = "theme",
+            settingKey = "appsettings.thememode",
             type = "string",
             value_ = "stale",
             winnerOperationId = "stale",
@@ -361,10 +395,10 @@ class AppSyncLocalMutationRoutingTest {
 
         domainState.adoptCheckpoint(emptyList())
 
-        assertFalse(settings.hasKey("theme"))
+        assertFalse(settings.hasKey("appsettings.thememode"))
         assertEquals(
             null,
-            db.appSyncOperationQueries.getSyncSettingValue("theme").executeAsOneOrNull(),
+            db.appSyncOperationQueries.getSyncSettingValue("appsettings.thememode").executeAsOneOrNull(),
         )
     }
 

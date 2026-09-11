@@ -12,10 +12,10 @@ import me.thenano.yamibo.yamibo_app.repository.backup.YamiboBackupFile
 
 class AppSyncPayloadFilteringTest {
     @Test
-    fun threadCoverSanitizerOnlyAcceptsHttpAndHttpsLinks() {
-        assertEquals("http://example.com/a.jpg", appSyncThreadCoverOrNull("http://example.com/a.jpg"))
-        assertEquals("https://example.com/a.jpg", appSyncThreadCoverOrNull("https://example.com/a.jpg"))
-        assertEquals("HTTPS://example.com/a.jpg", appSyncThreadCoverOrNull(" HTTPS://example.com/a.jpg "))
+    fun threadCoverSanitizerExcludesRemoteAndLocalCovers() {
+        assertNull(appSyncThreadCoverOrNull("http://example.com/a.jpg"))
+        assertNull(appSyncThreadCoverOrNull("https://example.com/a.jpg"))
+        assertNull(appSyncThreadCoverOrNull(" HTTPS://example.com/a.jpg "))
         assertNull(appSyncThreadCoverOrNull("data:image/png;base64,AAAA"))
         assertNull(appSyncThreadCoverOrNull("http://data:image/png;base64,AAAA"))
         assertNull(appSyncThreadCoverOrNull("content://cover/1"))
@@ -46,7 +46,7 @@ class AppSyncPayloadFilteringTest {
             settings = listOf(
                 BackupSetting("appsettings.signpagehtmlcache", BackupSettingType.String, "<html>cache</html>"),
                 BackupSetting("appsettings.signpagehtmlcacheupdatedat", BackupSettingType.String, "123"),
-                BackupSetting("theme", BackupSettingType.String, "dark"),
+                BackupSetting("appsettings.thememode", BackupSettingType.String, "dark"),
             ),
             readingState = BackupReadingState(
                 threadHistory = listOf(threadHistory("http://data:image/png;base64,AAAA")),
@@ -55,12 +55,12 @@ class AppSyncPayloadFilteringTest {
 
         val drafts = BackupSnapshotMigrationPlanner().plan(snapshot)
 
-        assertEquals(setOf("theme"), drafts.filter { it.domainId.value == "settings" }.mapTo(mutableSetOf()) { it.entityId.value })
+        assertEquals(setOf("appsettings.thememode"), drafts.filter { it.domainId.value == "settings" }.mapTo(mutableSetOf()) { it.entityId.value })
         assertNull(drafts.single { it.domainId.value == "reading.thread" }.fields["threadCover"])
     }
 
     @Test
-    fun bootstrapSnapshotPreservesValidHttpThreadCover() {
+    fun bootstrapSnapshotExcludesHttpCoverWithoutChangingSource() {
         val cover = "https://example.com/cover.jpg"
         val snapshot = YamiboBackupFile(
             appVersionCode = 1,
@@ -70,7 +70,8 @@ class AppSyncPayloadFilteringTest {
 
         val draft = BackupSnapshotMigrationPlanner().plan(snapshot).single()
 
-        assertEquals(cover, draft.fields["threadCover"])
+        assertNull(draft.fields["threadCover"])
+        assertEquals(cover, snapshot.readingState.threadHistory.single().threadCover)
     }
 
     private fun threadHistory(threadCover: String?) = BackupThreadReadingHistory(

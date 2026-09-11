@@ -41,6 +41,22 @@ class AppSyncJournalEnvelopeCodecTest {
     }
 
     @Test
+    fun sanitizedV2KeepsLegacyRequiredNullCoverShapeWithoutRestoringCoverData() {
+        val source = payload()
+        val operation = source.operations.single().copy(
+            domainId = SyncDomainId("reading.rss-search"),
+            kind = SyncOperationKind.Put,
+            fields = mapOf("subscriptionSyncId" to "rss:1", "lastVisitTime" to "100"),
+        )
+        val encoded = codec.encode(source.copy(operations = listOf(operation)))
+        val wire = assertIs<AppSyncJournalValidation.Valid>(codec.validate(encoded)).envelope.payload
+        assertTrue(wire.operations.single().fields.containsKey("coverUrl"))
+        assertNull(wire.operations.single().fields["coverUrl"])
+        assertEquals(operation, wire.operations.single().withoutExcludedAppSyncPayloads())
+        assertEquals(encoded, codec.encode(wire))
+    }
+
+    @Test
     fun legacySchemaOneJournalRemainsReadable() {
         val payload = payload()
         val json = Json {
@@ -235,7 +251,7 @@ class AppSyncJournalEnvelopeCodecTest {
             sequence = syncSequence,
             accountBinding = account,
             domainId = SyncDomainId("settings"),
-            entityId = SyncEntityId("theme"),
+            entityId = SyncEntityId("appsettings.thememode"),
             kind = SyncOperationKind.Patch,
             fields = mapOf("value" to "dark"),
             createdAtEpochMillis = 123,

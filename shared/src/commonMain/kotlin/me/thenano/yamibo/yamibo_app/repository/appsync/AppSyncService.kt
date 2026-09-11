@@ -620,6 +620,10 @@ class AppSyncService(
         ).also { mutableStatus.value = it }
     }
 
+    fun prepareManualRecovery() {
+        val binding = currentAccountBinding() ?: return
+        recoveryStore.resumeRetryExhaustedRecovery(binding, nowMillis())
+    }
     suspend fun synchronizeNow(
         forceDiscovery: Boolean = false,
         trigger: String = "manual",
@@ -1358,6 +1362,11 @@ class AppSyncService(
                 appSyncRecoveryStatus(session, recoveryStore.segmentWrites(session.sessionId))
             }
         val phase = phaseOverride?.takeIf { it == AppSyncServicePhase.Running }
+            ?: AppSyncServicePhase.PausedAuth.takeIf { state == AppSyncInstallationState.PausedAuth }
+            ?: AppSyncServicePhase.Running.takeIf {
+                recoveryStatus != null &&
+                    (store.currentLease()?.expiresAtEpochMillis ?: 0) > nowMillis()
+            }
             ?: recoveryStatus?.phase?.toServicePhase()
             ?: phaseOverride ?: when (state) {
             AppSyncInstallationState.Unbound,
@@ -1372,7 +1381,7 @@ class AppSyncService(
         return AppSyncServiceStatus(
             phase = phase,
             automaticEnabled = installation.automaticEnabled,
-            pendingOperationCount = store.pendingOperations().size,
+            pendingOperationCount = db.appSyncOperationQueries.countPendingOperations().executeAsOne().toInt(),
             lastVerifiedAtEpochMillis = installation.lastVerifiedHeartbeatAt,
             message = message,
             presentationMessage = when {

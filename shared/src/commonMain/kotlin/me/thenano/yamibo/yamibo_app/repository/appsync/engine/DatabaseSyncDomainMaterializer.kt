@@ -11,6 +11,55 @@ internal class DatabaseSyncDomainMaterializer(
     private val settingsStore: SettingsStore,
     private val recordPortabilityEvidence: (AppSyncPortabilityEvidence) -> Unit = {},
 ) : SyncDomainMaterializer {
+    // Only survives the surrounding synchronous replacement transaction. Never persisted in
+    // an AppSync table or transported; entries for deleted entities are deliberately not restored.
+    private var replacementCovers: Map<Pair<String, String>, String>? = null
+
+    override fun preserveLocalPresentationDuring(replace: () -> Unit) {
+        check(replacementCovers == null) { "Nested checkpoint replacement is not supported" }
+        replacementCovers = buildMap {
+            fun remember(domain: String, id: String, cover: String?) {
+                if (cover != null) put(domain to id, cover)
+            }
+            db.localFavoriteItemQueries.getAll().executeAsList().forEach {
+                remember("favorite.item", "${it.targetType}|${it.targetId}|${it.authorId}", it.coverUrl)
+            }
+            db.readingHistoryQueries.getAllForBackup().executeAsList().forEach {
+                remember("reading.thread", "${it.threadId}|${it.threadType}|${it.authorId}|${it.historyOrigin}", it.threadCover)
+            }
+            db.mangaTagReadingHistoryQueries.getAll().executeAsList().forEach {
+                remember("reading.tag-manga", it.tagId.toString(), it.coverUrl)
+            }
+            db.tagCatalogReadingHistoryQueries.getAll().executeAsList().forEach {
+                remember("reading.tag-catalog", it.tagId.toString(), it.coverUrl)
+            }
+            val subscriptionKeys = db.rssSearchSubscriptionQueries.getAll().executeAsList().associate {
+                it.id to rssSearchSubscriptionSyncId(it.query, it.forumId)
+            }
+            db.rssSearchReadingHistoryQueries.getAll().executeAsList().forEach { history ->
+                subscriptionKeys[history.subscriptionId]?.let {
+                    remember("reading.rss-search", it, history.coverUrl)
+                }
+            }
+            db.rssCatalogReadingHistoryQueries.getAll().executeAsList().forEach { history ->
+                subscriptionKeys[history.subscriptionId]?.let {
+                    remember("reading.rss-catalog", it, history.coverUrl)
+                }
+            }
+            db.favoriteUpdateEventQueries.getAll().executeAsList().forEach {
+                remember("favorite.update-event", it.syncId, it.coverUrl)
+            }
+        }
+        try {
+            replace()
+        } finally {
+            replacementCovers = null
+        }
+    }
+
+    private fun preservedCover(entity: ResolvedSyncEntity): String? =
+        replacementCovers?.get(entity.key.domainId.value to entity.key.entityId.value)
+
     override fun apply(entity: ResolvedSyncEntity) {
         when (entity.key.domainId.value) {
             "settings" -> applySetting(entity)
@@ -220,7 +269,7 @@ internal class DatabaseSyncDomainMaterializer(
                 targetType,
                 targetId,
                 fields.require("title"),
-                fields["coverUrl"],
+                preservedCover(entity),
                 fields["lastUpdatedTime"]?.toLongOrNull(),
                 fields["forumId"]?.toLongOrNull(),
                 fields["forumName"],
@@ -231,7 +280,7 @@ internal class DatabaseSyncDomainMaterializer(
         } else {
             queries.updateFavoriteItem(
                 fields.require("title"),
-                fields["coverUrl"],
+                existing.coverUrl,
                 fields["lastUpdatedTime"]?.toLongOrNull(),
                 fields["forumId"]?.toLongOrNull(),
                 fields["forumName"],
@@ -373,15 +422,11 @@ internal class DatabaseSyncDomainMaterializer(
         }
         val fields = entity.values()
         val portableThreadCover = appSyncThreadCoverOrNull(fields["threadCover"])
-        val existingThreadCover = if (fields["threadCover"] != null && portableThreadCover == null) {
-            db.readingHistoryQueries.getByThreadKey(
+        val existingThreadCover = db.readingHistoryQueries.getByThreadKey(
                 threadId = fields.long("threadId"),
                 threadType = fields.require("threadType"),
                 authorId = fields.long("authorId"),
             ).executeAsOneOrNull()?.threadCover
-        } else {
-            null
-        }
         if (fields["threadCover"] != null && portableThreadCover == null) {
             recordPortabilityEvidence(
                 AppSyncPortabilityEvidence(
@@ -395,7 +440,7 @@ internal class DatabaseSyncDomainMaterializer(
             threadId = fields.long("threadId"),
             threadType = fields.require("threadType"),
             threadName = fields.require("threadName"),
-            threadCover = portableThreadCover ?: existingThreadCover,
+            threadCover = preservedCover(entity) ?: portableThreadCover ?: existingThreadCover,
             forumName = fields["forumName"],
             forumId = fields["forumId"]?.toLongOrNull(),
             authorId = fields.long("authorId"),
@@ -451,7 +496,7 @@ internal class DatabaseSyncDomainMaterializer(
             fields["firstVisibleItemIndex"]?.toLongOrNull(),
             fields["firstVisibleItemOffset"]?.toLongOrNull(),
             fields.long("lastVisitTime"),
-            fields["coverUrl"],
+            preservedCover(entity) ?: db.mangaTagReadingHistoryQueries.getByTagId(fields.long("tagId")).executeAsOneOrNull()?.coverUrl,
         )
     }
 
@@ -480,7 +525,7 @@ internal class DatabaseSyncDomainMaterializer(
             fields["firstVisibleItemIndex"]?.toLongOrNull(),
             fields["firstVisibleItemOffset"]?.toLongOrNull(),
             fields.long("lastVisitTime"),
-            fields["coverUrl"],
+            preservedCover(entity) ?: db.tagCatalogReadingHistoryQueries.getByTagId(fields.long("tagId")).executeAsOneOrNull()?.coverUrl,
         )
     }
 
@@ -508,7 +553,7 @@ internal class DatabaseSyncDomainMaterializer(
             fields["firstVisibleItemIndex"]?.toLongOrNull(),
             fields["firstVisibleItemOffset"]?.toLongOrNull(),
             fields.long("lastVisitTime"),
-            fields["coverUrl"],
+            preservedCover(entity) ?: db.rssSearchReadingHistoryQueries.getBySubscriptionId(parent.id).executeAsOneOrNull()?.coverUrl,
         )
     }
 
@@ -544,7 +589,7 @@ internal class DatabaseSyncDomainMaterializer(
             fields["firstVisibleItemIndex"]?.toLongOrNull(),
             fields["firstVisibleItemOffset"]?.toLongOrNull(),
             fields.long("lastVisitTime"),
-            fields["coverUrl"],
+            preservedCover(entity) ?: db.rssCatalogReadingHistoryQueries.getBySubscriptionId(parent.id).executeAsOneOrNull()?.coverUrl,
         )
     }
 
@@ -578,6 +623,7 @@ internal class DatabaseSyncDomainMaterializer(
             return
         }
         val fields = entity.values()
+        val localCover = preservedCover(entity) ?: queries.getBySyncId(syncId).executeAsOneOrNull()?.coverUrl
         val readAt = fields["readAt"]?.toLongOrNull()
         val dismissedAt = fields["dismissedAt"]?.toLongOrNull()
         queries.upsertBySyncId(
@@ -591,7 +637,7 @@ internal class DatabaseSyncDomainMaterializer(
             mode = fields.require("mode"),
             summary = fields.require("summary"),
             detailIds = fields.require("detailIds"),
-            coverUrl = fields["coverUrl"],
+            coverUrl = localCover,
             detectedAt = fields.long("detectedAt"),
             readAt = readAt,
             dismissedAt = dismissedAt,
@@ -606,7 +652,7 @@ internal class DatabaseSyncDomainMaterializer(
             title = fields.require("title"),
             latestPostTitle = fields["latestPostTitle"],
             summary = fields.require("summary"),
-            coverUrl = fields["coverUrl"],
+            coverUrl = localCover,
             readAt = readAt,
             dismissedAt = dismissedAt,
             syncId = syncId,

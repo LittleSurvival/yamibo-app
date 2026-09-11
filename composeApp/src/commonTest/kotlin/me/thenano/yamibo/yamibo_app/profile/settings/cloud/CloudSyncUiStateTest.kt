@@ -319,8 +319,10 @@ class CloudSyncUiStateTest {
             recoveryStatus = recovery,
         ).toUiState(backgroundSchedulerAvailable = true)
 
-        assertEquals(CloudSyncStatus.Checking, state.status)
-        assertEquals(CloudSyncOperation.Syncing, state.operation)
+        assertEquals(CloudSyncStatus.Unavailable, state.status)
+        assertEquals(CloudSyncOperation.Idle, state.operation)
+        assertTrue(state.manualSyncAvailable)
+        assertTrue(state.details.any { it.label == CloudSyncDetailLabel.RecoveryRetry })
         assertFalse(state.actionsAvailable)
         assertTrue(state.refreshAvailable)
         assertEquals(

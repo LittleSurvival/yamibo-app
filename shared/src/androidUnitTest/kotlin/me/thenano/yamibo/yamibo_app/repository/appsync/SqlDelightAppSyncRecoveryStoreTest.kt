@@ -114,6 +114,31 @@ class SqlDelightAppSyncRecoveryStoreTest {
     }
 
     @Test
+    fun migration42AddsStableRetryIdentityWithoutRewritingSessions() {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        driver.execute(
+            null,
+            "CREATE TABLE AppSyncRecoverySession (sessionId TEXT NOT NULL PRIMARY KEY)",
+            0,
+        )
+
+        Database.Schema.migrate(driver, oldVersion = 42, newVersion = 43)
+
+        val columns = driver.executeQuery(
+            null,
+            "PRAGMA table_info('AppSyncRecoverySession')",
+            { cursor ->
+                app.cash.sqldelight.db.QueryResult.Value(
+                    buildSet {
+                        while (cursor.next().value) add(requireNotNull(cursor.getString(1)))
+                    },
+                )
+            },
+            0,
+        ).value
+        assertTrue(columns.contains("retryIdentity"))
+    }
+    @Test
     fun everyRecoveryPhaseSurvivesStoreRestart() {
         AppSyncRecoveryPhase.entries.forEach { phase ->
             val fixture = fixture()
@@ -187,7 +212,7 @@ class SqlDelightAppSyncRecoveryStoreTest {
         recovery.markIndexCommitted(first.sessionId, 15)
         recovery.activateCommittedSession(first.sessionId, 16)
         val nextSource = fixture.operations.appendLocalOperation(
-            fixture.account, SyncDomainId("settings"), SyncEntityId("theme"), 1,
+            fixture.account, SyncDomainId("settings"), SyncEntityId("appsettings.thememode"), 1,
             SyncOperationKind.Patch, mapOf("type" to "string", "value" to "light"),
             fixture.operations.causalContext(), 17, SyncOperationOrigin.UserAction,
         )
@@ -561,7 +586,7 @@ class SqlDelightAppSyncRecoveryStoreTest {
             sequence = sequence,
             accountBinding = session.accountBinding,
             domainId = SyncDomainId("settings"),
-            entityId = SyncEntityId("theme"),
+            entityId = SyncEntityId("appsettings.thememode"),
             kind = SyncOperationKind.Patch,
             fields = mapOf("type" to "string", "value" to "dark"),
             causalContext = SyncCausalContext(),

@@ -90,7 +90,7 @@ class CheckpointCoordinatorTest {
     fun checkpointIdUsesPortableResolvedValuesNotLocalOperationMetadata() {
         val fixture = fixture()
         val operation = fixture.store.allOutboxOperations().single().first
-        val key = SyncEntityKey(SyncDomainId("settings"), SyncEntityId("theme"), 1)
+        val key = SyncEntityKey(SyncDomainId("settings"), SyncEntityId("appsettings.thememode"), 1)
         val first = ResolvedSyncEntity(
             key = key,
             fields = linkedMapOf(
@@ -133,7 +133,7 @@ class CheckpointCoordinatorTest {
         val operation = store.appendLocalOperation(
             accountBinding = account,
             domainId = SyncDomainId("settings"),
-            entityId = SyncEntityId("theme"),
+            entityId = SyncEntityId("appsettings.thememode"),
             entityGeneration = 1,
             kind = SyncOperationKind.Put,
             fields = mapOf("type" to "string", "value" to "dark"),

@@ -453,10 +453,12 @@ private fun AutomaticSyncSection(
             },
         )
         CloudActionButton(
-            text = i18n("立即同步"),
+            text = if (state.phase == AppSyncServicePhase.RecoveryNeedsAttention) {
+                i18n("繼續修復")
+            } else i18n("立即同步"),
             icon = YamiboIcons.Sync,
             primary = false,
-            enabled = state.automaticAvailable && !state.isBusy,
+            enabled = state.manualSyncAvailable && !state.isBusy,
             testTag = "app_sync_sync_now",
             onClick = onSyncNow,
         )

@@ -189,7 +189,7 @@ class ManualSyncOverrideCoordinatorTest {
             sequence = sequence,
             accountBinding = account,
             domainId = SyncDomainId("settings"),
-            entityId = SyncEntityId("theme"),
+            entityId = SyncEntityId("appsettings.thememode"),
             kind = SyncOperationKind.Put,
             fields = mapOf("type" to "string", "value" to value),
             createdAtEpochMillis = 10,

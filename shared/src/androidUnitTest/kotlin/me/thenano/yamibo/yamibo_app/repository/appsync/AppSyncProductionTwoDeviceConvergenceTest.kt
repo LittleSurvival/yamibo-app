@@ -62,7 +62,7 @@ class AppSyncProductionTwoDeviceConvergenceTest {
         val rssIdA = insertRssSubscription(deviceA.db, "query")
         val rssIdB = insertRssSubscription(deviceB.db, "query")
 
-        deviceA.settings.putString("theme", "dark")
+        deviceA.settings.putString("appsettings.thememode", "dark")
         deviceA.favorites.ensureDefaults()
         val defaultCategory = deviceA.favorites.getDefaultCategory()
         deviceA.favorites.addNormalThreadFavorite(
@@ -95,7 +95,7 @@ class AppSyncProductionTwoDeviceConvergenceTest {
         assertHistoryPresent(deviceB.history, histories, rssIdB, expectedOffset = 10L)
         assertCanonicalProjectionEquals(deviceA, deviceB)
 
-        deviceA.settings.putString("theme", "light")
+        deviceA.settings.putString("appsettings.thememode", "light")
         val removed = assertNotNull(
             deviceA.favorites.getFavoriteItem(
                 FavoriteStoreRepository.FavoriteTargetType.ThreadNormal,
@@ -109,7 +109,7 @@ class AppSyncProductionTwoDeviceConvergenceTest {
         val secondA = sync(deviceA)
         val secondB = sync(deviceB)
         assertEquals(0, secondA.quarantineCount + secondB.quarantineCount)
-        assertEquals("light", deviceB.settings.getString("theme", "missing"))
+        assertEquals("light", deviceB.settings.getString("appsettings.thememode", "missing"))
         assertEquals(listOf("kept"), deviceB.favorites.getAllFavoriteItems().map { it.title })
         assertTrue(deviceB.updates.getActiveEvents().isEmpty())
         assertEquals(null, deviceB.history.getTagMangaReaderModeHistoryPosition(histories.manga.tagId))

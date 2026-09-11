@@ -1,6 +1,7 @@
 package me.thenano.yamibo.yamibo_app.repository.appsync.engine
 
 import kotlinx.serialization.Serializable
+import me.thenano.yamibo.yamibo_app.repository.appsync.withoutExcludedAppSyncPayloads
 import me.thenano.yamibo.yamibo_app.repository.appsync.domain.SyncConflictPolicy
 import me.thenano.yamibo.yamibo_app.repository.appsync.domain.SyncDomainRegistry
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncCausalRelation
@@ -64,12 +65,13 @@ internal class OperationReducer(
         current: Map<SyncEntityKey, ResolvedSyncEntity> = emptyMap(),
         operations: Iterable<SyncOperation>,
     ): OperationReductionResult {
-        val entities = current.toMutableMap()
+        val entities = current.values.withoutExcludedAppSyncPayloads().associateBy { it.key }.toMutableMap()
         val conflicts = mutableListOf<SyncConflictRecord>()
         val quarantined = mutableListOf<SyncQuarantinedOperation>()
         val applied = linkedMapOf<SyncOperationId, SyncOperation>()
 
         operations
+            .map { it.withoutExcludedAppSyncPayloads() }
             .distinctBy { it.operationId }
             .sortedBy { it.operationId }
             .forEach { operation ->

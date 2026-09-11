@@ -3,6 +3,7 @@ package me.thenano.yamibo.yamibo_app.appsync
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import kotlinx.coroutines.CancellationException
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.db.DatabaseFactory
@@ -26,7 +27,6 @@ class AppSyncWorker(
     params: WorkerParameters,
 ) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result = try {
-        if (runAttemptCount >= MAX_RETRY_ATTEMPTS) return Result.failure()
         val client = AndroidYamiboClientProvider.get(applicationContext)
         val auth = AndroidAuthRepository(
             AndroidCookieStore(applicationContext),
@@ -40,6 +40,11 @@ class AppSyncWorker(
             settingsStore = rawSettings,
             authRepository = auth,
         )
+        // Recovery counts failures per immutable target in SQL. A run counter would stop
+        // a healthy recovery after three different segments each needed one retry.
+        if (service.currentStatus().recoveryStatus == null &&
+            runAttemptCount >= MAX_RETRY_ATTEMPTS
+        ) return Result.failure()
         val settings = service.operationRecordingSettingsStore(db, rawSettings)
         val appSettings = AppSettingsRepository(settings)
         val novelSettings = NovelReaderSettingsRepository(settings)
@@ -56,12 +61,23 @@ class AppSyncWorker(
         )
         val pendingGeneration = service.pendingAutomaticTriggerGeneration()
         val previousPhase = service.currentStatus().phase
-        val phase = service.synchronizeNow(trigger = "background_workmanager").phase
+        val status = service.synchronizeNow(trigger = "background_workmanager")
+        val phase = status.phase
         if (shouldNotifyBackgroundQuarantine(previousPhase, phase)) {
             AndroidAppSyncNotificationRepository(applicationContext).showQuarantined()
         }
         if (pendingGeneration != null && phase.isDurableAutomaticTriggerOutcome()) {
             service.accountAutomaticTrigger(pendingGeneration)
+        }
+        val recovery = status.recoveryStatus
+        if (recovery != null && phase !in setOf(
+                AppSyncServicePhase.RecoveryNeedsAttention, AppSyncServicePhase.PausedAuth,
+                AppSyncServicePhase.Quarantined, AppSyncServicePhase.Disabled,
+            )
+        ) {
+            AndroidAppSyncBackgroundScheduler(applicationContext)
+                .continueRecovery(recovery.nextRetryAtEpochMillis)
+            return Result.success()
         }
         when (phase) {
             AppSyncServicePhase.Active -> {
@@ -86,12 +102,14 @@ class AppSyncWorker(
             AppSyncServicePhase.RecoveryCleaning,
             -> Result.retry()
         }
+    } catch (error: CancellationException) {
+        throw error
     } catch (error: Throwable) {
         Logger.e("AppSyncWorker", "Background AppSync failed", error)
         Result.retry()
     }
 
     private companion object {
-        const val MAX_RETRY_ATTEMPTS = 5
+        const val MAX_RETRY_ATTEMPTS = 3
     }
 }

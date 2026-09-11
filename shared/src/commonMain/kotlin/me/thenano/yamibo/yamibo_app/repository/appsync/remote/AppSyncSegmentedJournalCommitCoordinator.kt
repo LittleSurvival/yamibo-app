@@ -1,6 +1,8 @@
 package me.thenano.yamibo.yamibo_app.repository.appsync.remote
 
 import io.github.littlesurvival.dto.value.FormHash
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncRecoveryAttempts
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncRecoveryFailureCategory
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryMode
 import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncRecoveryStore
@@ -25,6 +27,34 @@ internal class AppSyncSegmentedJournalCommitCoordinator(
     private val nowMillis: () -> Long,
 ) {
     suspend fun commit(
+        sessionId: String,
+        canonicalEnvelope: String,
+        identity: String,
+        classSelection: AppSyncBlogClassSelection,
+        formHash: FormHash,
+    ): AppSyncSegmentedJournalCommitResult {
+        val session = recoveryStore.session(sessionId)
+            ?: return AppSyncSegmentedJournalCommitResult.Terminal("Recovery session is missing")
+        if (session.phase == AppSyncRecoveryPhase.NeedsAttention) {
+            return AppSyncSegmentedJournalCommitResult.Terminal("Recovery requires attention")
+        }
+        if ((session.nextRetryAtEpochMillis ?: 0) > nowMillis()) {
+            return AppSyncSegmentedJournalCommitResult.Retryable("Waiting for persisted retry time")
+        }
+        val result = commitVerified(sessionId, canonicalEnvelope, identity, classSelection, formHash)
+        val category = when (result) {
+            is AppSyncSegmentedJournalCommitResult.Retryable -> AppSyncRecoveryFailureCategory.AmbiguousWrite
+            is AppSyncSegmentedJournalCommitResult.Conflict -> AppSyncRecoveryFailureCategory.IndexConflict
+            is AppSyncSegmentedJournalCommitResult.Terminal -> AppSyncRecoveryFailureCategory.PolicyViolation
+            else -> null
+        }
+        if (category != null && AppSyncRecoveryAttempts(recoveryStore, nowMillis).recordFailure(sessionId, category)) {
+            return AppSyncSegmentedJournalCommitResult.Terminal("Recovery requires attention")
+        }
+        return result
+    }
+
+    private suspend fun commitVerified(
         sessionId: String,
         canonicalEnvelope: String,
         identity: String,

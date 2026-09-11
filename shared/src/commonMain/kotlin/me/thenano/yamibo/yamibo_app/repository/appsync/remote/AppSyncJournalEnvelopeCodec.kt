@@ -11,6 +11,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDeviceId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperation
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncReplicaKey
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncWriterNonce
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationKind
 import okio.Buffer
 import okio.ByteString.Companion.decodeBase64
 import okio.GzipSink
@@ -99,7 +100,14 @@ internal class AppSyncJournalEnvelopeCodec(
 ) {
     fun encode(payload: AppSyncJournalPayload): String {
         validatePayload(payload)?.let { throw IllegalArgumentException(it) }
-        val payloadJson = json.encodeToString(AppSyncJournalPayload.serializer(), payload)
+        // Older v2 reducers require these keys on Put even when no cover exists. Keep only
+        // the nullable wire shape; canonical storage/projections must not carry cover fields.
+        val compatiblePayload = payload.copy(operations = payload.operations.map { operation ->
+            if (operation.kind == SyncOperationKind.Put && operation.domainId.value in LEGACY_COVER_REQUIRED_DOMAINS) {
+                operation.copy(fields = mapOf("coverUrl" to null) + operation.fields)
+            } else operation
+        })
+        val payloadJson = json.encodeToString(AppSyncJournalPayload.serializer(), compatiblePayload)
         val fingerprint = stableAppSyncFingerprint(payloadJson)
         val encodedPayload = compress(payloadJson)
         return buildString {
@@ -207,6 +215,10 @@ internal class AppSyncJournalEnvelopeCodec(
 
     private fun invalid(reason: String, markerPresent: Boolean) =
         AppSyncJournalValidation.Invalid(reason, markerPresent)
+
+    private val LEGACY_COVER_REQUIRED_DOMAINS = setOf(
+        "reading.tag-catalog", "reading.rss-search", "reading.rss-catalog", "favorite.update-event",
+    )
 
     private fun compress(value: String): String {
         val bytes = value.encodeToByteArray()

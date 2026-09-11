@@ -135,7 +135,7 @@ class OperationSyncEngineTest {
 
         val operation = fixture.store.pendingOperations().single()
         assertEquals(SyncOperationOrigin.Migration, operation.origin)
-        assertEquals("dark", fixture.domain.value("settings", "theme", "value"))
+        assertEquals("dark", fixture.domain.value("settings", "appsettings.thememode", "value"))
         assertEquals(AppSyncInstallationState.Active, fixture.store.installation()?.state)
     }
 
@@ -151,7 +151,7 @@ class OperationSyncEngineTest {
 
         assertIs<AppSyncBootstrapResult.Ready>(fixture.bootstrap.bootstrap(account))
 
-        assertEquals("dark", fixture.domain.value("settings", "theme", "value"))
+        assertEquals("dark", fixture.domain.value("settings", "appsettings.thememode", "value"))
         assertEquals(1, fixture.store.pendingOperations().size)
         assertEquals(SyncOperationOrigin.Migration, fixture.store.pendingOperations().single().origin)
     }
@@ -184,7 +184,7 @@ class OperationSyncEngineTest {
 
         assertIs<AppSyncBootstrapResult.Ready>(fixture.bootstrap.bootstrap(account))
 
-        assertEquals("dark", fixture.domain.value("settings", "theme", "value"))
+        assertEquals("dark", fixture.domain.value("settings", "appsettings.thememode", "value"))
         assertEquals(coverage.asStableMap(), fixture.store.causalContext().asStableMap())
     }
 
@@ -193,12 +193,12 @@ class OperationSyncEngineTest {
         val remote = FakeJournalRemote()
         val theme = standaloneSettingOperation(
             value = "dark",
-            entity = "theme",
+            entity = "appsettings.thememode",
             deviceValue = "remote-a",
         )
         val font = standaloneSettingOperation(
             value = "large",
-            entity = "font",
+            entity = "novelreadersettings.readerfontid",
             deviceValue = "remote-b",
         )
         listOf("checkpoint-a" to theme, "checkpoint-b" to font).forEach {
@@ -243,8 +243,8 @@ class OperationSyncEngineTest {
 
         assertIs<AppSyncBootstrapResult.Ready>(fixture.bootstrap.bootstrap(account))
 
-        assertEquals("dark", fixture.domain.value("settings", "theme", "value"))
-        assertEquals("large", fixture.domain.value("settings", "font", "value"))
+        assertEquals("dark", fixture.domain.value("settings", "appsettings.thememode", "value"))
+        assertEquals("large", fixture.domain.value("settings", "novelreadersettings.readerfontid", "value"))
         assertEquals(0, remote.publishCount)
     }
 
@@ -323,7 +323,7 @@ class OperationSyncEngineTest {
             fixture.engine.synchronize(account, formHash),
         )
 
-        assertEquals("dark", fixture.domain.value("settings", "theme", "value"))
+        assertEquals("dark", fixture.domain.value("settings", "appsettings.thememode", "value"))
         assertTrue(fixture.store.causalContext().includes(canonical))
         val installation = requireNotNull(fixture.store.installation())
         assertEquals(
@@ -405,7 +405,7 @@ class OperationSyncEngineTest {
 
         assertIs<AppSyncBootstrapResult.Ready>(fixture.bootstrap.bootstrap(account))
 
-        assertEquals("dark", fixture.domain.value("settings", "theme", "value"))
+        assertEquals("dark", fixture.domain.value("settings", "appsettings.thememode", "value"))
         assertTrue(fixture.store.pendingOperations().isEmpty())
         assertEquals(0, remote.publishCount)
     }
@@ -436,7 +436,7 @@ class OperationSyncEngineTest {
                 migrationSetting("system"),
                 LocalSyncOperationDraft(
                     domainId = SyncDomainId("settings"),
-                    entityId = SyncEntityId("local-only"),
+                    entityId = SyncEntityId("appsettings.appfontid"),
                     kind = SyncOperationKind.Put,
                     fields = mapOf("type" to "string", "value" to "kept"),
                 ),
@@ -454,8 +454,8 @@ class OperationSyncEngineTest {
         val result = assertIs<AppSyncBootstrapResult.Ready>(fixture.bootstrap.bootstrap(account))
 
         assertEquals(AppSyncBootstrapMode.Join, result.mode)
-        assertEquals("system", fixture.domain.value("settings", "theme", "value"))
-        assertEquals("kept", fixture.domain.value("settings", "local-only", "value"))
+        assertEquals("system", fixture.domain.value("settings", "appsettings.thememode", "value"))
+        assertEquals("kept", fixture.domain.value("settings", "appsettings.appfontid", "value"))
         assertEquals(2, fixture.store.pendingOperations().size)
         assertEquals("rollback", fixture.store.latestBootstrapRollbackSnapshot()?.encodedSnapshot)
         assertEquals(AppSyncInstallationState.Active, fixture.store.installation()?.state)
@@ -483,7 +483,7 @@ class OperationSyncEngineTest {
 
         assertEquals(1, captureCount)
         assertEquals(1, fixture.store.pendingOperations().size)
-        assertEquals("dark", fixture.domain.value("settings", "theme", "value"))
+        assertEquals("dark", fixture.domain.value("settings", "appsettings.thememode", "value"))
     }
 
     @Test
@@ -512,7 +512,7 @@ class OperationSyncEngineTest {
                 database.appSyncOperationQueries.upsertResolvedEntity(
                     entityKey = "settings|theme|1",
                     domainId = "settings",
-                    entityId = "theme",
+                    entityId = "appsettings.thememode",
                     entityGeneration = 1,
                     encodedState = "fixture",
                     updatedAtEpochMillis = 1_001,
@@ -536,7 +536,7 @@ class OperationSyncEngineTest {
             migrationDrafts = listOf(
                 LocalSyncOperationDraft(
                     domainId = SyncDomainId("settings"),
-                    entityId = SyncEntityId("local-only"),
+                    entityId = SyncEntityId("appsettings.appfontid"),
                     kind = SyncOperationKind.Put,
                     fields = mapOf("type" to "string", "value" to "kept"),
                 ),
@@ -546,8 +546,8 @@ class OperationSyncEngineTest {
 
         assertIs<AppSyncBootstrapResult.Ready>(fixture.bootstrap.bootstrap(account))
 
-        assertEquals("dark", fixture.domain.value("settings", "theme", "value"))
-        assertEquals("kept", fixture.domain.value("settings", "local-only", "value"))
+        assertEquals("dark", fixture.domain.value("settings", "appsettings.thememode", "value"))
+        assertEquals("kept", fixture.domain.value("settings", "appsettings.appfontid", "value"))
         assertEquals(1, fixture.store.pendingOperations().size)
     }
 
@@ -559,7 +559,7 @@ class OperationSyncEngineTest {
 
         assertIs<AppSyncBootstrapResult.Ready>(fixture.bootstrap.bootstrap(account))
 
-        assertEquals("dark", fixture.domain.value("settings", "theme", "value"))
+        assertEquals("dark", fixture.domain.value("settings", "appsettings.thememode", "value"))
         assertEquals(1, fixture.store.pendingOperations().size)
         assertEquals(
             SyncOperationOrigin.UserAction,
@@ -583,7 +583,7 @@ class OperationSyncEngineTest {
             second.engine.synchronize(account, formHash),
         )
 
-        assertEquals("dark", second.domain.value("settings", "theme", "value"))
+        assertEquals("dark", second.domain.value("settings", "appsettings.thememode", "value"))
         assertEquals(2, remote.journalCount)
     }
 
@@ -617,8 +617,8 @@ class OperationSyncEngineTest {
         first.engine.synchronize(account, formHash)
 
         assertEquals(
-            first.domain.value("settings", "theme", "value"),
-            second.domain.value("settings", "theme", "value"),
+            first.domain.value("settings", "appsettings.thememode", "value"),
+            second.domain.value("settings", "appsettings.thememode", "value"),
         )
         assertEquals(2, remote.journalCount)
     }
@@ -894,7 +894,7 @@ class OperationSyncEngineTest {
         activate(fixture)
         val evidence = mutableListOf<RolloutDemandEvidence>()
         val domains = listOf(
-            DomainMutation("settings", { "theme" }) { index ->
+            DomainMutation("settings", { "appsettings.thememode" }) { index ->
                 mapOf("value" to "value-$index")
             },
             DomainMutation("favorite.item", { "thread:$it" }) { index ->
@@ -1023,7 +1023,7 @@ class OperationSyncEngineTest {
         val operation = fixture.store.appendLocalOperation(
             accountBinding = account,
             domainId = SyncDomainId("settings"),
-            entityId = SyncEntityId("theme"),
+            entityId = SyncEntityId("appsettings.thememode"),
             entityGeneration = 1,
             kind = SyncOperationKind.Patch,
             fields = mapOf("value" to value),
@@ -1098,14 +1098,14 @@ class OperationSyncEngineTest {
 
     private fun migrationSetting(value: String) = LocalSyncOperationDraft(
         domainId = SyncDomainId("settings"),
-        entityId = SyncEntityId("theme"),
+        entityId = SyncEntityId("appsettings.thememode"),
         kind = SyncOperationKind.Put,
         fields = mapOf("type" to "string", "value" to value),
     )
 
     private fun standaloneSettingOperation(
         value: String,
-        entity: String = "theme",
+        entity: String = "appsettings.thememode",
         deviceValue: String = "remote",
     ): me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperation {
         val device = me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDeviceId(deviceValue)

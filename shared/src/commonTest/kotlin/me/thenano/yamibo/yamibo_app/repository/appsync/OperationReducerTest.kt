@@ -271,7 +271,7 @@ class OperationReducerTest {
         device: String,
         sequence: Long,
         domain: String = "settings",
-        entity: String = "theme",
+        entity: String = "appsettings.thememode",
         kind: SyncOperationKind = SyncOperationKind.Patch,
         fields: Map<String, String?>,
         context: SyncCausalContext = SyncCausalContext(),

@@ -666,10 +666,10 @@ class SqlDelightAppSyncOperationStoreTest {
     fun forcePullMaterializationFailureDoesNotClearExternalSettingsProjection() {
         val db = inMemoryDatabase()
         val store = activeStore(db)
-        val settings = FakeSettingsStore().also { it.putString("theme", "dark") }
-        db.appSyncOperationQueries.recordKnownSyncSettingKey("theme")
+        val settings = FakeSettingsStore().also { it.putString("appsettings.thememode", "dark") }
+        db.appSyncOperationQueries.recordKnownSyncSettingKey("appsettings.thememode")
         db.appSyncOperationQueries.upsertSyncSettingValue(
-            settingKey = "theme",
+            settingKey = "appsettings.thememode",
             type = "string",
             value_ = "dark",
             winnerOperationId = "existing",
@@ -695,10 +695,10 @@ class SqlDelightAppSyncOperationStoreTest {
             )
         }
 
-        assertEquals("dark", settings.getString("theme", "missing"))
+        assertEquals("dark", settings.getString("appsettings.thememode", "missing"))
         assertEquals(
             "dark",
-            db.appSyncOperationQueries.getSyncSettingValue("theme")
+            db.appSyncOperationQueries.getSyncSettingValue("appsettings.thememode")
                 .executeAsOne()
                 .settingValue,
         )
@@ -714,7 +714,7 @@ class SqlDelightAppSyncOperationStoreTest {
         store.appendLocalOperation(
             accountBinding = SyncAccountBinding("account"),
             domainId = SyncDomainId("settings"),
-            entityId = SyncEntityId("theme"),
+            entityId = SyncEntityId("appsettings.thememode"),
             entityGeneration = 1,
             kind = SyncOperationKind.Patch,
             fields = mapOf("value" to "dark"),
@@ -734,7 +734,7 @@ class SqlDelightAppSyncOperationStoreTest {
             sequence = sequence,
             accountBinding = SyncAccountBinding("account"),
             domainId = SyncDomainId("settings"),
-            entityId = SyncEntityId("theme"),
+            entityId = SyncEntityId("appsettings.thememode"),
             kind = SyncOperationKind.Patch,
             fields = mapOf("value" to "light"),
             createdAtEpochMillis = 100,

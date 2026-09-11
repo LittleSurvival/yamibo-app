@@ -47,7 +47,7 @@ internal class AppSyncMutationRecorder(
             entityId = SyncEntityId(entityId),
             entityGeneration = entityGeneration,
             kind = kind,
-            fields = fields,
+            fields = portableAppSyncFields(domain, entityId, fields),
             causalContext = store.causalContext(),
             createdAtEpochMillis = nowMillis(),
             origin = SyncOperationOrigin.UserAction,
@@ -77,7 +77,9 @@ internal class AppSyncMutationRecorder(
         }
         return store.appendLocalOperations(
             accountBinding = account,
-            drafts = drafts,
+            drafts = drafts.map { it.copy(fields = portableAppSyncFields(
+                it.domainId.value, it.entityId.value, it.fields,
+            )) },
             causalContext = store.causalContext(),
             createdAtEpochMillis = nowMillis(),
             origin = SyncOperationOrigin.UserAction,
@@ -156,7 +158,9 @@ internal class AppSyncMutationRecorder(
             causalContext = store.causalContext(),
             createdAtEpochMillis = nowMillis(),
             origin = SyncOperationOrigin.UserAction,
-            localMutation = mutation,
+            localMutation = { mutation().map { it.copy(fields = portableAppSyncFields(
+                it.domainId.value, it.entityId.value, it.fields,
+            )) } },
             afterOperationsCreated = { operations ->
                 operations.forEach(domainState::recordLocal)
             },
