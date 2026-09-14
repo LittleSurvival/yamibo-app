@@ -1,0 +1,7 @@
+CREATE TABLE AppSyncRecoveryCarryForward (
+    sourceOperationId TEXT NOT NULL PRIMARY KEY,
+    replacementOperationId TEXT NOT NULL UNIQUE,
+    sessionId TEXT NOT NULL,
+    accountBinding TEXT NOT NULL,
+    createdAtEpochMillis INTEGER NOT NULL
+);

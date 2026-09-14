@@ -60,6 +60,155 @@ import me.thenano.yamibo.yamibo_app.store.appsync.StoredAppSyncRemoteBlog
 
 class AppSyncSegmentPublisherTest {
     @Test
+    fun productionRestartKeepsOriginalEnvelopeAndLeavesNewMutationsPending() = runBlocking {
+        val fixture = fixture()
+        fixture.recovery.rollbackPreCommit(fixture.session.sessionId)
+        fixture.remoteStore.saveClassId(fixture.account, BlogClassId(7))
+        val provider = FakeProvider().apply { failSubmissionNumber = 2 }
+        val installation = requireNotNull(fixture.operations.installation())
+        val payload = AppSyncJournalPayload(
+            accountBinding = fixture.account,
+            deviceId = installation.deviceId,
+            deviceEpoch = installation.deviceEpoch,
+            writerNonce = installation.writerNonce,
+            firstSequence = fixture.source.sequence.value,
+            lastSequence = fixture.source.sequence.value,
+            operations = listOf(fixture.source),
+            observed = SyncCausalContext(),
+            heartbeatAtEpochMillis = 100,
+            protocolReadVersion = 2,
+        )
+        val remote = YamiboAppSyncJournalRemote(
+            provider, fixture.remoteStore, nowMillis = { 100 }, recoveryStore = fixture.recovery,
+        )
+        assertIs<me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalPublishResult.Unknown>(
+            remote.publishOwnJournalSegmented(payload, setOf(fixture.source.operationId), emptyList(), FORM_HASH),
+        )
+        val originalSession = requireNotNull(fixture.recovery.recoverySession(fixture.account))
+        val originalEnvelope = fixture.database.appSyncOperationQueries
+            .getRecoveryPayload(originalSession.sessionId).executeAsOne().canonicalEnvelope
+        val lateOperation = fixture.operations.appendLocalOperation(
+            fixture.account, SyncDomainId("settings"), SyncEntityId("appsettings.thememode"), 1,
+            SyncOperationKind.Patch, mapOf("value" to "dark", "type" to "string"), SyncCausalContext(), 200,
+            SyncOperationOrigin.UserAction,
+        )
+        val changedObserved = SyncCausalContext().advance(
+            me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncReplicaKey(installation.deviceId, installation.deviceEpoch),
+            SyncSequence(fixture.source.sequence.value),
+        )
+        val restarted = YamiboAppSyncJournalRemote(
+            provider, SqlDelightAppSyncRemoteBlogStore(fixture.database), nowMillis = { 1_000_000 },
+            recoveryStore = SqlDelightAppSyncRecoveryStore(fixture.database),
+        )
+        provider.failSubmissionNumber = null
+        val result = assertIs<me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalPublishResult.Verified>(
+            restarted.publishOwnJournalSegmented(payload.copy(
+                operations = payload.operations + lateOperation,
+                lastSequence = lateOperation.sequence.value,
+                observed = changedObserved,
+                checkpointAcknowledgements = listOf(
+                    me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointAcknowledgement("new-checkpoint", changedObserved),
+                ),
+                heartbeatAtEpochMillis = 1_000_000,
+            ), setOf(fixture.source.operationId, lateOperation.operationId), emptyList(), FORM_HASH),
+        )
+        assertEquals(originalEnvelope, AppSyncJournalEnvelopeCodec().encode(result.journal.payload))
+        assertEquals(originalSession.generationId, fixture.recovery.recoverySession(fixture.account)?.generationId)
+        assertEquals(1, provider.submittedTitles.count { it.contains(" Segment ") })
+        assertEquals(listOf(lateOperation.operationId), fixture.operations.pendingOperations().map { it.operationId })
+    }
+
+    @Test
+    fun stagedLegacyRecoveryPreservesEnvelopeAndCarriesNewMutationsAcrossRotation() = runBlocking {
+        val fixture = fixture()
+        fixture.remoteStore.saveClassId(fixture.account, BlogClassId(7))
+        val provider = FakeProvider().apply { failSubmissionNumber = 2 }
+        val classifier = me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncLegacyOperationClassifier()
+        val remote = YamiboAppSyncJournalRemote(
+            provider, fixture.remoteStore, nowMillis = { 100 }, recoveryStore = fixture.recovery,
+        )
+        assertIs<me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncLegacyRecoveryResult.Retryable>(
+            remote.recoverLegacyOperations(
+                classifier.classify(listOf(fixture.source), emptySet(), true),
+                SyncCausalContext(), emptyList(), emptyList(), FORM_HASH,
+            ),
+        )
+        val pinned = fixture.database.appSyncOperationQueries.getRecoveryPayload(fixture.session.sessionId).executeAsOne()
+        val lateOperation = fixture.operations.appendLocalOperation(
+            fixture.account, SyncDomainId("settings"), SyncEntityId("appsettings.thememode"), 1,
+            SyncOperationKind.Patch, mapOf("value" to "dark", "type" to "string"), SyncCausalContext(), 200,
+            SyncOperationOrigin.UserAction,
+        )
+        val restarted = YamiboAppSyncJournalRemote(
+            provider, SqlDelightAppSyncRemoteBlogStore(fixture.database), nowMillis = { 1_000_000 },
+            recoveryStore = SqlDelightAppSyncRecoveryStore(fixture.database),
+        )
+        provider.failSubmissionNumber = null
+        assertIs<me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncLegacyRecoveryResult.Verified>(
+            restarted.recoverLegacyOperations(
+                classifier.classify(listOf(fixture.source, lateOperation), setOf(fixture.source.operationId), true),
+                SyncCausalContext(), listOf(
+                    me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointAcknowledgement("new-checkpoint", SyncCausalContext()),
+                ), emptyList(), FORM_HASH,
+            ),
+        )
+        val carried = fixture.operations.pendingOperations().single()
+        assertEquals(lateOperation.fields, carried.fields)
+        assertEquals(fixture.session.targetDeviceEpoch, carried.deviceEpoch)
+        assertEquals(fixture.session.targetDeviceEpoch, fixture.operations.installation()?.deviceEpoch)
+        assertEquals(lateOperation, fixture.operations.allOutboxOperations().single { it.first.operationId == lateOperation.operationId }.first)
+        assertEquals(
+            me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.Completed,
+            fixture.recovery.session(fixture.session.sessionId)?.phase,
+        )
+        assertEquals(pinned, fixture.database.appSyncOperationQueries.getRecoveryPayload(fixture.session.sessionId).executeAsOne())
+        assertEquals(1, provider.submittedTitles.count { it.contains(" Segment ") })
+        val frozen = (AppSyncJournalEnvelopeCodec().validate(pinned.canonicalEnvelope) as AppSyncJournalValidation.Valid).envelope.payload
+        val originalRootId = BlogId(requireNotNull(fixture.recovery.session(fixture.session.sessionId)?.rootBlogId).toInt())
+        val originalRoot = provider.blogs.getValue(originalRootId)
+        val nextPayload = frozen.copy(
+            operations = frozen.operations + carried,
+            lastSequence = carried.sequence.value,
+            publishedThroughSequence = carried.sequence.value,
+            observed = fixture.operations.causalContext(),
+        )
+        val writesBefore = provider.submittedTitles.size
+        assertIs<me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalPublishResult.StoragePressure>(
+            restarted.publishOwnJournal(nextPayload, null, FORM_HASH),
+        )
+        assertEquals(writesBefore, provider.submittedTitles.size)
+        assertIs<me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalPublishResult.Verified>(
+            restarted.publishOwnJournalSegmented(nextPayload, setOf(carried.operationId), emptyList(), FORM_HASH),
+        )
+        assertEquals(originalRoot, provider.blogs.getValue(originalRootId))
+        assertTrue(fixture.operations.pendingOperations().isEmpty())
+        assertEquals(1, fixture.database.appSyncOperationQueries.getRecoveryCarryForward(fixture.session.sessionId).executeAsList().size)
+
+        // Metadata-only heartbeats still use a new root, with no fabricated source operations.
+        assertIs<me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalPublishResult.Verified>(
+            restarted.publishOwnJournalSegmented(nextPayload.copy(
+                checkpointAcknowledgements = listOf(
+                    me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointAcknowledgement("after-carry", SyncCausalContext()),
+                ),
+            ), emptySet(), emptyList(), FORM_HASH),
+        )
+        assertTrue(fixture.operations.pendingOperations().isEmpty())
+    }
+
+    @Test
+    fun legacyUnpinnedIntentsWithDifferentEnvelopeStopBeforeAnyNewWrite() = runBlocking {
+        val fixture = fixture()
+        val provider = FakeProvider()
+        fixture.recovery.saveSegmentIntent(fixture.session.sessionId, 0, 1, "old-fingerprint", null)
+        val result = publisher(provider, fixture.recovery, AppSyncSegmentEnvelopeCodec()).publish(
+            fixture.session.sessionId, "changed-envelope", AppSyncSegmentPayloadKind.Journal,
+            "identity", CLASS_SELECTION, FORM_HASH,
+        )
+        assertIs<AppSyncSegmentPublishResult.Terminal>(result)
+        assertTrue(provider.submittedTitles.isEmpty())
+    }
+
+    @Test
     fun productionReconciliationAcceptsHtmlNormalizedSegmentRootAndIndexWithoutDuplicatePost() = runBlocking {
         for (ambiguousSubmission in 1..3) {
             val fixture = fixture()

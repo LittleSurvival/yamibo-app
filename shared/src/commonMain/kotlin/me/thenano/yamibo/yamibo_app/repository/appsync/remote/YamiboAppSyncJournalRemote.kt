@@ -350,6 +350,16 @@ internal class YamiboAppSyncJournalRemote(
     ): AppSyncJournalPublishResult {
         val remoteKey = payload.replicaKey()
         val cached = store.load(remoteKey)
+        // Never edit an indexed immutable root in place, even if the next journal is small.
+        // The engine routes StoragePressure through the verified segmented commit protocol.
+        val recoveringJournal = recoveryStore?.activeSessions(payload.accountBinding)?.any {
+            it.mode == me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryMode.SegmentedJournal
+        } == true
+        if (cached?.kind == AppSyncRemoteBlogKind.JournalRoot || recoveringJournal) {
+            return AppSyncJournalPublishResult.StoragePressure(
+                journalCodec.encode(payload).length, AppSyncPayloadBudget.DEFAULT_TARGET_CHARS,
+            )
+        }
         if (cached != null) {
             var verifiedCached = verifiedJournalCache[remoteKey]?.takeIf {
                 it.remoteId == cached.blogId.value.toString() &&
@@ -466,11 +476,6 @@ internal class YamiboAppSyncJournalRemote(
                 "An active device cannot read segmented AppSync Journals",
             )
         }
-        if (acknowledgementOperationIds.isEmpty()) {
-            return AppSyncJournalPublishResult.TerminalFailure(
-                "Segmented Journal publication requires pending operation identities",
-            )
-        }
         val classSelection = when (val resolved = resolveClassSelection(payload.accountBinding)) {
             is ClassSelectionResult.Success -> resolved.selection
             is ClassSelectionResult.Retryable ->
@@ -478,16 +483,29 @@ internal class YamiboAppSyncJournalRemote(
             is ClassSelectionResult.Terminal ->
                 return AppSyncJournalPublishResult.TerminalFailure(resolved.reason)
         }
-        val sessionFingerprint = payload.segmentedSessionFingerprint(journalCodec)
-        val session = durableStore.createOrResumeSegmentedJournal(
+        val activeSession = durableStore.activeSessions(payload.accountBinding).singleOrNull()
+        if (activeSession != null && (
+                activeSession.mode != me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryMode.SegmentedJournal ||
+                    activeSession.sourceDeviceId != payload.deviceId || activeSession.sourceDeviceEpoch != payload.deviceEpoch
+                )
+        ) return AppSyncJournalPublishResult.Conflict("Another recovery generation must finish first")
+        // Finish the frozen source set first. Mutations created during a retry remain pending
+        // for the next generation and must not change this generation's content or identity.
+        val session = activeSession ?: durableStore.createOrResumeSegmentedJournal(
             payload.accountBinding,
             acknowledgementOperationIds.mapTo(linkedSetOf()) { it.value },
-            sessionFingerprint,
+            payload.segmentedSessionFingerprint(journalCodec),
             nowMillis(),
         )
-        val stablePayload = payload.forSegmentedSession(session.createdAtEpochMillis)
-        val canonicalEnvelope = journalCodec.encode(stablePayload)
+        if (session.phase == me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.NeedsAttention) {
+            return AppSyncJournalPublishResult.TerminalFailure("Recovery requires attention")
+        }
+        val canonicalEnvelope = durableStore.pinPayload(
+            session.sessionId, AppSyncSegmentPayloadKind.Journal.name,
+            SyncReplicaKey(payload.deviceId, payload.deviceEpoch).stableKey,
+        ) { journalCodec.encode(payload.forSegmentedSession(session.createdAtEpochMillis)) }
         val envelope = journalCodec.validate(canonicalEnvelope) as AppSyncJournalValidation.Valid
+        val stablePayload = envelope.envelope.payload
         durableStore.recordPayloadMeasurement(
             session.sessionId,
             canonicalEnvelope.length,
@@ -569,19 +587,16 @@ internal class YamiboAppSyncJournalRemote(
         if (classifications.isEmpty() || classifications.none { it.requiresRecovery }) {
             return AppSyncLegacyRecoveryResult.Verified(0, 0, 0, 0)
         }
-        val plan = AppSyncLegacyRecoveryPlanner().plan(classifications)
-        if (plan.unknownOperationIds.isNotEmpty()) {
-            return AppSyncLegacyRecoveryResult.Retryable(
-                "Authoritative evidence is missing for ${plan.unknownOperationIds.size} operations",
-            )
-        }
         val accountBinding = classifications.first().operation.accountBinding
         if (classifications.any { it.operation.accountBinding != accountBinding }) {
             return AppSyncLegacyRecoveryResult.NeedsAttention(
                 "Legacy recovery cannot span multiple accounts",
             )
         }
-        val existing = durableStore.recoverySession(accountBinding)
+        val existing = durableStore.activeSessions(accountBinding).singleOrNull()
+        if (existing != null && existing.mode !=
+            me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryMode.LegacyShadow
+        ) return AppSyncLegacyRecoveryResult.Conflict("Another recovery generation must finish first")
         if (existing?.phase ==
             me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.NeedsAttention
         ) {
@@ -589,11 +604,27 @@ internal class YamiboAppSyncJournalRemote(
                 "Legacy recovery requires attention for ${existing.blockingDomain ?: "unknown domain"}",
             )
         }
-        val sourceIds = classifications.mapTo(linkedSetOf()) { it.operation.operationId.value }
-        var session = durableStore.createOrResume(
+        val sessionClassifications = if (existing == null) classifications else classifications.filter {
+            it.operation.operationId.value in existing.sourceOperationIds
+        }
+        val sourceIds = sessionClassifications.mapTo(linkedSetOf()) { it.operation.operationId.value }
+        if (existing != null && sourceIds != existing.sourceOperationIds) {
+            return AppSyncLegacyRecoveryResult.Retryable("Recovery source evidence is incomplete")
+        }
+        val staged = existing != null && durableStore.shadowOperations(existing.sessionId).isNotEmpty()
+        val plan = AppSyncLegacyRecoveryPlanner().plan(sessionClassifications)
+        if (existing != null && !staged && existing.replacementFingerprint != legacyRecoveryFingerprint(sessionClassifications)) {
+            return AppSyncLegacyRecoveryResult.Conflict("Unstaged recovery evidence changed; reconciliation is required")
+        }
+        if (!staged && plan.unknownOperationIds.isNotEmpty()) {
+            return AppSyncLegacyRecoveryResult.Retryable(
+                "Authoritative evidence is missing for ${plan.unknownOperationIds.size} operations",
+            )
+        }
+        var session = existing ?: durableStore.createOrResume(
             accountBinding = accountBinding,
             sourceOperationIds = sourceIds,
-            replacementFingerprint = legacyRecoveryFingerprint(classifications),
+            replacementFingerprint = legacyRecoveryFingerprint(sessionClassifications),
             nowEpochMillis = nowMillis(),
             acknowledgedSourceOperationIds = plan.verifiedPresentSourceIds
                 .mapTo(linkedSetOf()) { it.value },
@@ -606,7 +637,7 @@ internal class YamiboAppSyncJournalRemote(
             }
         }
 
-        plan.needsAttention.firstOrNull()?.let { blocker ->
+        plan.needsAttention.firstOrNull()?.takeUnless { staged }?.let { blocker ->
             if (session.phase ==
                 me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.Classifying
             ) {
@@ -624,7 +655,7 @@ internal class YamiboAppSyncJournalRemote(
                 "${blocker.domain} entity exceeds ${blocker.limitBytes} encoded bytes",
             )
         }
-        if (plan.replacements.isEmpty()) {
+        if (!staged && plan.replacements.isEmpty()) {
             if (session.phase !=
                 me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.Completed
             ) {
@@ -634,7 +665,7 @@ internal class YamiboAppSyncJournalRemote(
                 sourceOperationCount = sourceIds.size,
                 acknowledgedSourceCount = plan.verifiedPresentSourceIds.size,
                 replacementOperationCount = 0,
-                scrubbedLegacyPayloadCount = classifications.count { it.requiresRecovery },
+                scrubbedLegacyPayloadCount = sessionClassifications.count { it.requiresRecovery },
             )
         }
         if (session.phase in setOf(
@@ -692,7 +723,9 @@ internal class YamiboAppSyncJournalRemote(
                     resolved.reason,
                 )
         }
-        val canonicalEnvelope = journalCodec.encode(payload)
+        val canonicalEnvelope = durableStore.pinPayload(
+            session.sessionId, AppSyncSegmentPayloadKind.Journal.name, targetReplica.stableKey,
+        ) { journalCodec.encode(payload) }
         val validated = journalCodec.validate(canonicalEnvelope) as AppSyncJournalValidation.Valid
         durableStore.recordPayloadMeasurement(
             session.sessionId,
@@ -731,9 +764,9 @@ internal class YamiboAppSyncJournalRemote(
                 )
                 AppSyncLegacyRecoveryResult.Verified(
                     sourceOperationCount = sourceIds.size,
-                    acknowledgedSourceCount = plan.verifiedPresentSourceIds.size,
+                    acknowledgedSourceCount = session.acknowledgedSourceOperationIds.size,
                     replacementOperationCount = operations.size,
-                    scrubbedLegacyPayloadCount = classifications.count { it.requiresRecovery },
+                    scrubbedLegacyPayloadCount = sessionClassifications.count { it.requiresRecovery },
                 )
             }
             AppSyncSegmentedJournalCommitResult.FormExpired -> AppSyncLegacyRecoveryResult.FormExpired
@@ -938,11 +971,13 @@ internal class YamiboAppSyncJournalRemote(
             payloadFingerprint = stableAppSyncFingerprint(payload.checkpointId),
             nowEpochMillis = nowMillis(),
         )
-        val stablePayload = payload.forSegmentedSession(session.createdAtEpochMillis)
-        val stableCanonicalEnvelope = checkpointCodec.encode(stablePayload)
+        val stableCanonicalEnvelope = durableStore.pinPayload(
+            session.sessionId, AppSyncSegmentPayloadKind.Checkpoint.name, payload.checkpointId,
+        ) { checkpointCodec.encode(payload.forSegmentedSession(session.createdAtEpochMillis)) }
         val stableExpectedEnvelope = (
             checkpointCodec.validate(stableCanonicalEnvelope) as AppSyncCheckpointValidation.Valid
         ).envelope
+        val stablePayload = stableExpectedEnvelope.payload
         durableStore.recordPayloadMeasurement(
             session.sessionId,
             stableCanonicalEnvelope.length,

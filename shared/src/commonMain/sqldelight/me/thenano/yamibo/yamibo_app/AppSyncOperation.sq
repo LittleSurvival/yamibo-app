@@ -476,6 +476,28 @@ getRecoverySession:
 SELECT * FROM AppSyncRecoverySession
 WHERE sessionId = ?;
 
+getRecoveryPayload:
+SELECT * FROM AppSyncRecoveryPayload WHERE sessionId = ?;
+
+insertRecoveryPayload:
+INSERT INTO AppSyncRecoveryPayload(
+    sessionId, payloadKind, payloadIdentity, canonicalEnvelope, envelopeFingerprint
+) VALUES (?, ?, ?, ?, ?);
+
+deleteRecoveryPayload:
+DELETE FROM AppSyncRecoveryPayload WHERE sessionId = ?;
+
+insertRecoveryCarryForward:
+INSERT INTO AppSyncRecoveryCarryForward(
+    sourceOperationId, replacementOperationId, sessionId, accountBinding, createdAtEpochMillis
+) VALUES (?, ?, ?, ?, ?);
+
+getRecoveryCarryForward:
+SELECT * FROM AppSyncRecoveryCarryForward WHERE sessionId = ? ORDER BY replacementOperationId;
+
+updateRecoveryProvenance:
+UPDATE AppSyncResolvedEntity SET encodedState = ?, updatedAtEpochMillis = ? WHERE entityKey = ?;
+
 insertRecoverySession:
 INSERT INTO AppSyncRecoverySession(
     sessionId, accountBinding, mode, sourceDeviceId, sourceDeviceEpoch,

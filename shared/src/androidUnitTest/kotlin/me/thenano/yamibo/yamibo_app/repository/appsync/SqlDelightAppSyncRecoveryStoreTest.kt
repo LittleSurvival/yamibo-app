@@ -29,6 +29,40 @@ import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncRecoveryStore
 
 class SqlDelightAppSyncRecoveryStoreTest {
     @Test
+    fun pinnedPayloadSurvivesRestartAndRollbackRemovesIt() {
+        val fixture = fixture()
+        val recovery = SqlDelightAppSyncRecoveryStore(fixture.database)
+        val session = recovery.createOrResume(fixture.account, setOf(fixture.source.operationId.value), "pin", 10)
+        assertEquals("first-envelope", recovery.pinPayload(session.sessionId, "Journal", "replica") { "first-envelope" })
+        val restarted = SqlDelightAppSyncRecoveryStore(fixture.database)
+        assertEquals("first-envelope", restarted.pinPayload(session.sessionId, "Journal", "replica") {
+            error("A persisted envelope must not be regenerated")
+        })
+        assertFailsWith<IllegalArgumentException> {
+            restarted.pinPayload(session.sessionId, "Journal", "another-replica") { "changed" }
+        }
+        assertFailsWith<IllegalArgumentException> {
+            restarted.pinPayload(session.sessionId, "Checkpoint", "replica") { "changed" }
+        }
+        restarted.rollbackPreCommit(session.sessionId)
+        assertNull(fixture.database.appSyncOperationQueries.getRecoveryPayload(session.sessionId).executeAsOneOrNull())
+    }
+
+    @Test
+    fun migration43PreservesExistingSessionWithoutInventingPayload() {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        driver.execute(null, "CREATE TABLE AppSyncRecoverySession (sessionId TEXT NOT NULL PRIMARY KEY)", 0)
+        driver.execute(null, "INSERT INTO AppSyncRecoverySession VALUES ('existing')", 0)
+        Database.Schema.migrate(driver, oldVersion = 43, newVersion = 44)
+        val count = driver.executeQuery(null, "SELECT count(*) FROM AppSyncRecoverySession", { cursor ->
+            cursor.next()
+            app.cash.sqldelight.db.QueryResult.Value(cursor.getLong(0))
+        }, 0).value
+        assertEquals(1L, count)
+        assertNull(Database(driver).appSyncOperationQueries.getRecoveryPayload("existing").executeAsOneOrNull())
+    }
+
+    @Test
     fun migration39CreatesDurableRecoverySchema() {
         val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
 
@@ -441,7 +475,7 @@ class SqlDelightAppSyncRecoveryStoreTest {
     }
 
     @Test
-    fun verifiedIndexCommitActivatesReplacementAndSupersedesOnlyClassifiedSource() {
+    fun verifiedIndexActivationCarriesUncoveredPendingRowsAndIsIdempotent() {
         val fixture = fixture()
         val unrelated = fixture.operations.appendLocalOperation(
             accountBinding = fixture.account,
@@ -479,6 +513,20 @@ class SqlDelightAppSyncRecoveryStoreTest {
 
         recovery.markIndexCommitted(session.sessionId, 23)
         recovery.activateCommittedRecovery(session.sessionId, 24)
+        val carried = fixture.operations.pendingOperations().single()
+        assertEquals(unrelated.fields, carried.fields)
+        assertEquals(unrelated.createdAtEpochMillis, carried.createdAtEpochMillis)
+        assertEquals(unrelated.origin, carried.origin)
+        assertEquals(shadow.sequence.value + 1, carried.sequence.value)
+        assertTrue(carried.causalContext.includes(shadow))
+        assertTrue(carried.causalContext.includes(unrelated))
+        val mappings = fixture.database.appSyncOperationQueries.getRecoveryCarryForward(session.sessionId).executeAsList()
+        assertEquals(unrelated.operationId.value, mappings.single().sourceOperationId)
+        assertEquals(carried.operationId.value, mappings.single().replacementOperationId)
+        val outboxBeforeRetry = fixture.operations.allOutboxOperations()
+        SqlDelightAppSyncRecoveryStore(fixture.database).activateCommittedRecovery(session.sessionId, 25)
+        assertEquals(outboxBeforeRetry, fixture.operations.allOutboxOperations())
+        assertEquals(mappings, fixture.database.appSyncOperationQueries.getRecoveryCarryForward(session.sessionId).executeAsList())
 
         val rows = fixture.operations.allOutboxOperations().associate { it.first.operationId to it.second }
         assertEquals(AppSyncOperationLifecycle.SupersededByRecovery, rows[fixture.source.operationId])

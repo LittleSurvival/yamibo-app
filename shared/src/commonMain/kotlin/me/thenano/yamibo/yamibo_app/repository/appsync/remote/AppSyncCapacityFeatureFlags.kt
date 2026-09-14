@@ -24,6 +24,7 @@ internal object AppSyncCapacityFeatureFlagKeys {
     const val CLEANUP_DELETION = "appSyncCapacityCleanupDeletionEnabled"
 }
 
+/** Initial generation key only; retries reuse the persisted session and its pinned envelope. */
 internal fun AppSyncJournalPayload.segmentedSessionFingerprint(
     codec: AppSyncJournalEnvelopeCodec,
 ): String = me.thenano.yamibo.yamibo_app.repository.appsync.domain.stableAppSyncFingerprint(

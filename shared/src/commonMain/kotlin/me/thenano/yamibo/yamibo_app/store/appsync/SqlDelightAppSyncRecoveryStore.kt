@@ -15,6 +15,11 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncIdentityGen
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperation
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationCodec
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncCausalContext
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncSequence
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncReplicaKey
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationId
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.ResolvedSyncEntity
+import me.thenano.yamibo.yamibo_app.repository.appsync.withoutExcludedAppSyncPayloads
 
 internal class SqlDelightAppSyncRecoveryStore(
     private val db: Database,
@@ -74,7 +79,7 @@ internal class SqlDelightAppSyncRecoveryStore(
         mode: AppSyncRecoveryMode,
         acknowledgedSourceOperationIds: Set<String>,
     ): AppSyncRecoverySession {
-        require(sourceOperationIds.isNotEmpty() || mode == AppSyncRecoveryMode.SegmentedCheckpoint) {
+        require(sourceOperationIds.isNotEmpty() || mode != AppSyncRecoveryMode.LegacyShadow) {
             "Recovery requires source operations"
         }
         require(acknowledgedSourceOperationIds.all { it in sourceOperationIds }) {
@@ -86,6 +91,7 @@ internal class SqlDelightAppSyncRecoveryStore(
                 db.transaction {
                     queries.deleteRecoverySegmentWrites(existing.sessionId)
                     queries.deleteRecoveryShadowOperations(existing.sessionId)
+                    queries.deleteRecoveryPayload(existing.sessionId)
                     queries.deleteCompletedRecoverySession(existing.sessionId)
                 }
             } else {
@@ -140,6 +146,35 @@ internal class SqlDelightAppSyncRecoveryStore(
 
     fun session(sessionId: String): AppSyncRecoverySession? =
         queries.getRecoverySession(sessionId).executeAsOneOrNull()?.toModel()
+
+    /** Freeze the first wire envelope before any remote intent; retries never regenerate it. */
+    fun pinPayload(
+        sessionId: String,
+        payloadKind: String,
+        payloadIdentity: String,
+        canonicalEnvelope: () -> String,
+    ): String = db.transactionWithResult {
+        val session = requireSession(sessionId)
+        require(payloadKind == if (session.mode == AppSyncRecoveryMode.SegmentedCheckpoint) "Checkpoint" else "Journal")
+        require(payloadIdentity.isNotBlank())
+        val existing = queries.getRecoveryPayload(sessionId).executeAsOneOrNull()
+        if (existing != null) {
+            require(existing.payloadKind == payloadKind && existing.payloadIdentity == payloadIdentity) {
+                "Recovery payload identity changed"
+            }
+            check(stableAppSyncFingerprint(existing.canonicalEnvelope) == existing.envelopeFingerprint) {
+                "Recovery payload integrity check failed"
+            }
+            existing.canonicalEnvelope
+        } else {
+            val encoded = canonicalEnvelope()
+            require(encoded.isNotBlank())
+            queries.insertRecoveryPayload(
+                sessionId, payloadKind, payloadIdentity, encoded, stableAppSyncFingerprint(encoded),
+            )
+            encoded
+        }
+    }
 
     fun activeSessions(accountBinding: SyncAccountBinding): List<AppSyncRecoverySession> =
         queries.getActiveRecoverySessions(accountBinding.value).executeAsList().map { it.toModel() }
@@ -334,9 +369,10 @@ internal class SqlDelightAppSyncRecoveryStore(
         })
     }
 
-    fun activateCommittedRecovery(sessionId: String, activatedAtEpochMillis: Long) {
+    fun activateCommittedRecovery(sessionId: String, activatedAtEpochMillis: Long) = db.transaction {
         val session = requireSession(sessionId)
         require(session.mode == AppSyncRecoveryMode.LegacyShadow)
+        if (session.phase == AppSyncRecoveryPhase.Completed) return@transaction
         require(session.phase == AppSyncRecoveryPhase.ActivatingLocal && session.indexCommitted)
         val rootBlogId = requireNotNull(session.rootBlogId)
         val rootFingerprint = requireNotNull(session.rootFingerprint)
@@ -353,67 +389,113 @@ internal class SqlDelightAppSyncRecoveryStore(
             queries.getOutboxOperation(it).executeAsOneOrNull() != null
         }) { "A classified source operation disappeared before activation" }
 
-        db.transaction {
-            shadow.forEach { operation ->
-                require(queries.getOutboxOperation(operation.operationId.value).executeAsOneOrNull() == null)
-                queries.insertOutboxOperation(
-                    operationId = operation.operationId.value,
-                    deviceId = operation.deviceId.value,
-                    deviceEpoch = operation.deviceEpoch.value,
-                    sequence = operation.sequence.value,
-                    accountBinding = operation.accountBinding.value,
-                    domainId = operation.domainId.value,
-                    entityId = operation.entityId.value,
-                    entityGeneration = operation.entityGeneration,
-                    kind = operation.kind.name,
-                    fieldsJson = json.encodeToString(operation.fields),
-                    causalContextJson = json.encodeToString(
-                        SyncCausalContext.serializer(), operation.causalContext,
-                    ),
-                    createdAtEpochMillis = operation.createdAtEpochMillis,
-                    origin = operation.origin.name,
-                    bulkDeleteAuthorizationId = operation.bulkDeleteAuthorizationId,
-                    schemaVersion = operation.schemaVersion.toLong(),
-                    lifecycle = AppSyncOperationLifecycle.Acknowledged.toDb(),
-                    acknowledgedAtEpochMillis = activatedAtEpochMillis,
+        val operationStore = SqlDelightAppSyncOperationStore(db, json)
+        val pending = operationStore.pendingOperations().filter { it.operationId.value !in session.sourceOperationIds }
+        require(pending.all { it.accountBinding == session.accountBinding })
+        val targetReplica = SyncReplicaKey(session.targetDeviceId, session.targetDeviceEpoch)
+        val replacements = linkedMapOf<SyncOperationId, SyncOperation>()
+        pending.forEachIndexed { index, source ->
+            val sequence = SyncSequence(session.targetFirstSequence + shadow.size + index)
+            val replacement = source.copy(
+                operationId = SyncOperation.idFor(session.targetDeviceId, session.targetDeviceEpoch, sequence),
+                deviceId = session.targetDeviceId,
+                deviceEpoch = session.targetDeviceEpoch,
+                sequence = sequence,
+                causalContext = source.causalContext
+                    .advance(source.replicaKey, source.sequence)
+                    .advance(targetReplica, SyncSequence(sequence.value - 1)),
+            )
+            replacements[source.operationId] = replacement
+            insertOperation(replacement, AppSyncOperationLifecycle.PendingLocal, null)
+            queries.insertRecoveryCarryForward(
+                source.operationId.value, replacement.operationId.value, sessionId,
+                session.accountBinding.value, activatedAtEpochMillis,
+            )
+        }
+        remapCarriedProvenance(replacements, activatedAtEpochMillis)
+        shadow.forEach { operation ->
+            require(queries.getOutboxOperation(operation.operationId.value).executeAsOneOrNull() == null)
+            insertOperation(operation, AppSyncOperationLifecycle.Acknowledged, activatedAtEpochMillis)
+        }
+        if (session.acknowledgedSourceOperationIds.isNotEmpty()) {
+            queries.markOperationsAcknowledged(
+                acknowledgedAtEpochMillis = activatedAtEpochMillis,
+                operationId = session.acknowledgedSourceOperationIds.toList(),
+            )
+        }
+        val superseded = session.sourceOperationIds - session.acknowledgedSourceOperationIds
+        if (superseded.isNotEmpty()) {
+            queries.markOperationsSupersededByRecovery(superseded.toList())
+        }
+        queries.upsertRemoteBlog(
+            remoteKey = "recovery-root:${session.generationId}",
+            kind = AppSyncRemoteBlogKind.JournalRoot.name.uppercase(),
+            blogId = rootBlogId,
+            classId = null,
+            fingerprint = rootFingerprint,
+            validatedAtEpochMillis = activatedAtEpochMillis,
+            contentUpdatedAtEpochMillis = activatedAtEpochMillis,
+        )
+        queries.activateRecoveryGeneration(
+            accountBinding = session.accountBinding.value,
+            deviceId = session.targetDeviceId.value,
+            deviceEpoch = session.targetDeviceEpoch.value,
+            writerNonce = session.targetWriterNonce.value,
+            nextSequence = session.targetFirstSequence + shadow.size + replacements.size,
+            journalBlogId = rootBlogId,
+            lastVerifiedHeartbeatAt = activatedAtEpochMillis,
+            deviceId_ = session.sourceDeviceId.value,
+            deviceEpoch_ = session.sourceDeviceEpoch.value,
+        )
+        queries.upsertCausalWatermark(
+            targetReplica.stableKey, session.targetFirstSequence + shadow.size + replacements.size - 1,
+        )
+        transition(
+            sessionId = sessionId,
+            expected = AppSyncRecoveryPhase.ActivatingLocal,
+            next = AppSyncRecoveryPhase.Completed,
+            nowEpochMillis = activatedAtEpochMillis,
+        )
+    }
+
+    private fun insertOperation(operation: SyncOperation, lifecycle: AppSyncOperationLifecycle, acknowledgedAt: Long?) {
+        queries.insertOutboxOperation(
+            operationId = operation.operationId.value,
+            deviceId = operation.deviceId.value,
+            deviceEpoch = operation.deviceEpoch.value,
+            sequence = operation.sequence.value,
+            accountBinding = operation.accountBinding.value,
+            domainId = operation.domainId.value,
+            entityId = operation.entityId.value,
+            entityGeneration = operation.entityGeneration,
+            kind = operation.kind.name,
+            fieldsJson = json.encodeToString(operation.fields),
+            causalContextJson = json.encodeToString(SyncCausalContext.serializer(), operation.causalContext),
+            createdAtEpochMillis = operation.createdAtEpochMillis,
+            origin = operation.origin.name,
+            bulkDeleteAuthorizationId = operation.bulkDeleteAuthorizationId,
+            schemaVersion = operation.schemaVersion.toLong(),
+            lifecycle = lifecycle.toDb(),
+            acknowledgedAtEpochMillis = acknowledgedAt,
+        )
+    }
+
+    private fun remapCarriedProvenance(replacements: Map<SyncOperationId, SyncOperation>, nowEpochMillis: Long) {
+        replacements.values.map { it.domainId to it.entityId }.distinct().forEach { (domain, entity) ->
+            queries.getResolvedEntitiesByDomainAndEntity(domain.value, entity.value).executeAsList().forEach { row ->
+                val state = json.decodeFromString(ResolvedSyncEntity.serializer(), row.encodedState)
+                val remapped = state.copy(
+                    fields = state.fields.mapValues { (_, field) ->
+                        replacements[field.operation.operationId]?.let { field.copy(operation = it) } ?: field
+                    },
+                    tombstone = state.tombstone?.let { replacements[it.operationId] ?: it },
+                    relationOperation = state.relationOperation?.let { replacements[it.operationId] ?: it },
+                )
+                if (remapped != state) queries.updateRecoveryProvenance(
+                    json.encodeToString(ResolvedSyncEntity.serializer(), remapped.withoutExcludedAppSyncPayloads()),
+                    nowEpochMillis, row.entityKey,
                 )
             }
-            if (session.acknowledgedSourceOperationIds.isNotEmpty()) {
-                queries.markOperationsAcknowledged(
-                    acknowledgedAtEpochMillis = activatedAtEpochMillis,
-                    operationId = session.acknowledgedSourceOperationIds.toList(),
-                )
-            }
-            val superseded = session.sourceOperationIds - session.acknowledgedSourceOperationIds
-            if (superseded.isNotEmpty()) {
-                queries.markOperationsSupersededByRecovery(superseded.toList())
-            }
-            queries.upsertRemoteBlog(
-                remoteKey = "recovery-root:${session.generationId}",
-                kind = AppSyncRemoteBlogKind.JournalRoot.name.uppercase(),
-                blogId = rootBlogId,
-                classId = null,
-                fingerprint = rootFingerprint,
-                validatedAtEpochMillis = activatedAtEpochMillis,
-                contentUpdatedAtEpochMillis = activatedAtEpochMillis,
-            )
-            queries.activateRecoveryGeneration(
-                accountBinding = session.accountBinding.value,
-                deviceId = session.targetDeviceId.value,
-                deviceEpoch = session.targetDeviceEpoch.value,
-                writerNonce = session.targetWriterNonce.value,
-                nextSequence = session.targetFirstSequence + shadow.size,
-                journalBlogId = rootBlogId,
-                lastVerifiedHeartbeatAt = activatedAtEpochMillis,
-                deviceId_ = session.sourceDeviceId.value,
-                deviceEpoch_ = session.sourceDeviceEpoch.value,
-            )
-            transition(
-                sessionId = sessionId,
-                expected = AppSyncRecoveryPhase.ActivatingLocal,
-                next = AppSyncRecoveryPhase.Completed,
-                nowEpochMillis = activatedAtEpochMillis,
-            )
         }
     }
 
@@ -505,10 +587,12 @@ internal class SqlDelightAppSyncRecoveryStore(
             queries.getOutboxOperation(it).executeAsOneOrNull() != null
         })
         db.transaction {
-            queries.markOperationsAcknowledged(
-                acknowledgedAtEpochMillis = activatedAtEpochMillis,
-                operationId = session.sourceOperationIds.toList(),
-            )
+            if (session.sourceOperationIds.isNotEmpty()) {
+                queries.markOperationsAcknowledged(
+                    acknowledgedAtEpochMillis = activatedAtEpochMillis,
+                    operationId = session.sourceOperationIds.toList(),
+                )
+            }
             queries.upsertRemoteBlog(
                 remoteKey = "journal-root:${session.generationId}",
                 kind = AppSyncRemoteBlogKind.JournalRoot.name.uppercase(),
@@ -599,6 +683,7 @@ internal class SqlDelightAppSyncRecoveryStore(
         db.transaction {
             queries.deleteRecoverySegmentWrites(sessionId)
             queries.deleteRecoveryShadowOperations(sessionId)
+            queries.deleteRecoveryPayload(sessionId)
             queries.deleteRecoverySession(sessionId)
         }
     }

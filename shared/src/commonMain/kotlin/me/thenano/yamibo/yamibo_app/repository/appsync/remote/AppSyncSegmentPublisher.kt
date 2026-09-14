@@ -70,13 +70,27 @@ internal class AppSyncSegmentPublisher(
             )
         ) return AppSyncSegmentPublishResult.Terminal("Recovery phase cannot publish segments")
 
+        val pinnedEnvelope = recoveryStore.pinPayload(sessionId, kind.name, identity) { canonicalEnvelope }
         val drafts = codec.split(
-            canonicalEnvelope = canonicalEnvelope,
+            canonicalEnvelope = pinnedEnvelope,
             accountBinding = session.accountBinding.value,
             kind = kind,
             identity = identity,
             generationId = session.generationId,
         )
+        // Older sessions may have intents but no persisted envelope. Validate the entire
+        // existing chain before creating anything, rather than discovering drift mid-upload.
+        val intents = recoveryStore.segmentWrites(sessionId).associateBy { it.segmentIndex }
+        if (intents.values.any { intent ->
+                val draft = drafts.getOrNull(intent.segmentIndex)
+                val nextId = intents[intent.segmentIndex + 1]?.blogId
+                draft == null || intent.segmentCount != drafts.size ||
+                    intent.nextBlogId != nextId ||
+                    intent.expectedFingerprint != stableAppSyncFingerprint(codec.encodeSegment(
+                        codec.withNextBlogId(draft, nextId?.toString()),
+                    ))
+            }
+        ) return AppSyncSegmentPublishResult.Terminal("Persisted segment plan does not match recovery payload")
         var nextBlogId: BlogId? = null
         for (index in drafts.indices.reversed()) {
             val draft = drafts[index]
@@ -163,7 +177,7 @@ internal class AppSyncSegmentPublisher(
             )
         }
         val headId = requireNotNull(nextBlogId)
-        val root = codec.root(drafts, headId.value.toString(), canonicalEnvelope)
+        val root = codec.root(drafts, headId.value.toString(), pinnedEnvelope)
         val rootBody = codec.encodeRoot(root)
         val rootFingerprint = stableAppSyncFingerprint(rootBody)
         val current = recoveryStore.session(sessionId)
