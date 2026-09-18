@@ -86,3 +86,11 @@ Native checkpoint activation 在 settings reconciliation 成功後，於同一�
 舊版 v2 reader 不理解此 discriminator 表示；v3 writer 仍必須等所有相關 reader 能力與 rollout gate 通過。停用 v3 writer 後的 sanitized v2 回退需要另外核對可讀能力，不能把此表示宣稱為任意舊客戶端都可讀。完整回退流程與能力公告仍待完成。
 
 Legacy publication 現在有共用相容性檢查：journal 操作、checkpoint 的各欄位 provenance／relation／tombstone 來源及 snapshot event 若包含新版 portable discriminator，v1/v2 codec 拒絕編碼；正式單篇／分段 journal、checkpoint 與 legacy shadow recovery 在 provider 請求或工作建立前回報明確相容性原因。讀取驗證沒有改成拒絕新版識別。這是避免錯誤降版的保護，並不代表 sanitized v2 回退轉換已完成；後續 adapter 必須取得可驗證原始 legacy 證據，或使用另行核對的新 reader 相容策略。
+
+## Sanitized v2 操作轉換邊界
+
+`AppSyncSanitizedV2OperationExporter` 接受完整 canonical operation block，先驗證 schema、大小、操作身分及共用刪除授權，再將 typed portable 欄位轉回 v2 字串值。舊格式契約需要的實體識別由 structured key 還原；Patch 只補契約必要的識別欄位，Delete 只有原刪除授權證明，不附帶陳舊實體內容。預設 detail event discriminator 可由 immutable detail IDs 還原；portable ambiguous discriminator 則明確回報 reader compatibility 限制，不嘗試重新塞入舊標題／摘要。
+
+每筆輸出須通過現行 legacy domain 契約，並重新匯入為與來源完全相同的 canonical operation 與 proof。任何一筆不符即拒絕整批；診斷只有固定原因，不包含使用者資料。快取、父實體標籤和本機欄位不從 materialized projection 補回。
+
+目前語料中 RSS 訂閱、tag catalog／RSS search／RSS catalog 瀏覽歷程、FavoriteUpdate event 的 legacy Put 契約仍要求已排除的欄位，轉換回報 LegacyContract。這是尚待解決的 reader／writer 契約相容問題，不能透過恢復已排除資料迴避。此 adapter 尚未接入正式 fallback dispatch，不代表任意舊 reader 均可讀、來源已確認、v3 root 已替換或完整回退已完成；正式發布仍須 reader capability、durable intent、index readback 與原 v3 root 保護。
