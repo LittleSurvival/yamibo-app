@@ -152,13 +152,19 @@ internal class SqlDelightAppSyncRecoveryStore(
         sessionId: String,
         payloadKind: String,
         payloadIdentity: String,
+        transportVersion: Int = 2,
         canonicalEnvelope: () -> String,
     ): String = db.transactionWithResult {
         val session = requireSession(sessionId)
+        require(transportVersion in 2..3) { "Unsupported recovery transport version" }
+        require(transportVersion != 3 || session.mode != AppSyncRecoveryMode.LegacyShadow) {
+            "Native v3 publication cannot use legacy shadow recovery"
+        }
         require(payloadKind == if (session.mode == AppSyncRecoveryMode.SegmentedCheckpoint) "Checkpoint" else "Journal")
         require(payloadIdentity.isNotBlank())
         val existing = queries.getRecoveryPayload(sessionId).executeAsOneOrNull()
         if (existing != null) {
+            require(existing.transportVersion == transportVersion.toLong()) { "Recovery transport version changed" }
             require(existing.payloadKind == payloadKind && existing.payloadIdentity == payloadIdentity) {
                 "Recovery payload identity changed"
             }
@@ -169,11 +175,58 @@ internal class SqlDelightAppSyncRecoveryStore(
         } else {
             val encoded = canonicalEnvelope()
             require(encoded.isNotBlank())
+            if (transportVersion == 3) {
+                val kind = if (payloadKind == "Journal")
+                    me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3PayloadKind.Journal
+                    else me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3PayloadKind.Checkpoint
+                val document = me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3DocumentCodec()
+                    .discover(encoded, session.accountBinding.value, kind)
+                val metadata = when (document) {
+                    is me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3DocumentRead.Journal -> {
+                        require(document.document.deviceId == session.sourceDeviceId.value &&
+                            document.document.deviceEpoch == session.sourceDeviceEpoch.value &&
+                            document.document.writerNonce == session.targetWriterNonce.value) { "Native recovery writer changed" }
+                        document.metadata
+                    }
+                    is me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3DocumentRead.Checkpoint -> document.metadata
+                    else -> error("Native recovery payload is invalid or unsupported")
+                }
+                require(metadata.identity == payloadIdentity) { "Native recovery payload identity mismatch" }
+            }
             queries.insertRecoveryPayload(
                 sessionId, payloadKind, payloadIdentity, encoded, stableAppSyncFingerprint(encoded),
+                transportVersion.toLong(),
             )
             encoded
         }
+    }
+
+    /** Persist before the first native root POST. False means a prior attempt may have run;
+     * the caller must reconcile it authoritatively before considering another create.
+     */
+    fun pinNativeRootIntent(sessionId: String, fingerprint: String): Boolean = db.transactionWithResult {
+        val session = requireSession(sessionId)
+        require(session.phase == AppSyncRecoveryPhase.PublishingRoot || session.phase == AppSyncRecoveryPhase.CommittingIndex)
+        require(fingerprint.length == 64 && fingerprint.all { it in '0'..'9' || it in 'a'..'f' })
+        val payload = requireNotNull(queries.getRecoveryPayload(sessionId).executeAsOneOrNull())
+        require(payload.transportVersion == 3L) { "Native root intent requires a native payload" }
+        check(stableAppSyncFingerprint(payload.canonicalEnvelope) == payload.envelopeFingerprint) {
+            "Native recovery payload integrity check failed"
+        }
+        payload.rootIntentFingerprint?.let {
+            require(it == fingerprint) { "Native root intent cannot change" }
+            return@transactionWithResult false
+        }
+        require(session.phase == AppSyncRecoveryPhase.PublishingRoot)
+        val writes = segmentWrites(sessionId)
+        val count = writes.map { it.segmentCount }.distinct().singleOrNull()
+        require(count != null && writes.size == count && writes.map { it.segmentIndex } == (0 until count).toList() &&
+            writes.all { it.blogId != null && it.blogId in 1..Int.MAX_VALUE.toLong() && it.verifiedFingerprint == it.expectedFingerprint }) {
+            "Native root intent requires a complete verified segment chain"
+        }
+        queries.pinNativeRootIntent(fingerprint, sessionId)
+        check(queries.getRecoveryPayload(sessionId).executeAsOne().rootIntentFingerprint == fingerprint)
+        true
     }
 
     fun activeSessions(accountBinding: SyncAccountBinding): List<AppSyncRecoverySession> =
@@ -344,6 +397,10 @@ internal class SqlDelightAppSyncRecoveryStore(
         verifiedAtEpochMillis: Long,
     ) {
         val session = requireSession(sessionId)
+        queries.getRecoveryPayload(sessionId).executeAsOneOrNull()?.takeIf { it.transportVersion == 3L }?.let {
+            require(rootBlogId in 1..Int.MAX_VALUE.toLong()) { "Native root Blog identity is invalid" }
+            require(it.rootIntentFingerprint == rootFingerprint) { "Native root verification does not match its durable intent" }
+        }
         require(session.phase == AppSyncRecoveryPhase.PublishingRoot)
         require(segmentWrites(sessionId).let { writes ->
             val declaredCount = writes.map { it.segmentCount }.distinct().singleOrNull()

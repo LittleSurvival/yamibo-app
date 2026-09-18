@@ -481,8 +481,12 @@ SELECT * FROM AppSyncRecoveryPayload WHERE sessionId = ?;
 
 insertRecoveryPayload:
 INSERT INTO AppSyncRecoveryPayload(
-    sessionId, payloadKind, payloadIdentity, canonicalEnvelope, envelopeFingerprint
-) VALUES (?, ?, ?, ?, ?);
+    sessionId, payloadKind, payloadIdentity, canonicalEnvelope, envelopeFingerprint, transportVersion
+) VALUES (?, ?, ?, ?, ?, ?);
+
+pinNativeRootIntent:
+UPDATE AppSyncRecoveryPayload SET rootIntentFingerprint = ?
+WHERE sessionId = ? AND transportVersion = 3 AND rootIntentFingerprint IS NULL;
 
 deleteRecoveryPayload:
 DELETE FROM AppSyncRecoveryPayload WHERE sessionId = ?;

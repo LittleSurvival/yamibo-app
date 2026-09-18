@@ -13,3 +13,7 @@ root 保存原始 v3 metadata、generation、封套 SHA-256／字元數、段數
 正式 `YamiboAppSyncJournalRemote` 已能辨識並讀取原生 v3 root，逐段 GET 核對 Blog ID 與完整分段標題，再提供既有 canonical cloud planner／index-bound checkpoint 驗證。root 使用既有 journal／checkpoint 主文件標題供 discovery 尋找；分段使用 v3 segment 標題。HTML reader 保留 v3 root／segment 的換行。缺段會回報可重試；損壞 root／chain 保留 canonical 讀取問題，不能被視為空雲端，也不能交給 legacy writer 原地覆寫。
 
 目前完成規劃、codec、重組及 production reader。durable 分段發布、attempt／reconciliation／index commit、reader capability 提升與 writer rollout 尚待接線；此文件不表示已啟用 v3 發布。測試涵蓋兩種文件、大型封套、確切預算邊界、Unicode、無效來源、段數與累積大小限制、遺失／竄改／順序／循環／跨帳號、真實 fake-provider reader 與 checkpoint index 證據。
+
+Migration 48 為 frozen recovery payload 增加 transportVersion 與 native root intent fingerprint。既有資料預設 transport 2，維持舊分段流程。相同 session 不得在 2／3 之間切換；native 3 第一次保存前驗證完整 canonical 文件、帳號、identity，journal 另核對 session 的 device／epoch／writer nonce。native payload 不接受 LegacyShadow session。重試沿用第一次保存的封套，不執行新的 payload builder。
+
+`pinNativeRootIntent` 只在 native payload 已保存、完整 segment chain 已確認且進入 PublishingRoot 時首次建立不可變 root 摘要。回傳 true 表示首次 intent；回傳 false 表示之前的 POST 可能已經發生，發布器必須先做 authoritative reconciliation。不同摘要不能覆蓋同一 intent；`markRootVerified` 也必須符合這份 intent 才能推進 CommittingIndex。這些 store API 是後續 native publisher 的持久化基礎，目前尚未宣告分段 POST／重試／index commit 已接線完成。

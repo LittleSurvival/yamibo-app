@@ -1,0 +1,2 @@
+ALTER TABLE AppSyncRecoveryPayload ADD COLUMN transportVersion INTEGER NOT NULL DEFAULT 2;
+ALTER TABLE AppSyncRecoveryPayload ADD COLUMN rootIntentFingerprint TEXT;

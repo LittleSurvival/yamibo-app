@@ -28,6 +28,92 @@ import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncOperationStor
 import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncRecoveryStore
 
 class SqlDelightAppSyncRecoveryStoreTest {
+    @Test fun nativeJournalPinRequiresSessionWriterIdentity() {
+        val fixture = fixture()
+        val recovery = SqlDelightAppSyncRecoveryStore(fixture.database)
+        val session = recovery.createOrResumeSegmentedJournal(fixture.account, setOf(fixture.source.operationId.value), "source", 10)
+        val installation = requireNotNull(fixture.operations.installation())
+        val identity = "${installation.deviceId.value}:${installation.deviceEpoch.value}"
+        val journal = me.thenano.yamibo.yamibo_app.repository.appsync.schema.AppSyncCanonicalJournal(
+            me.thenano.yamibo.yamibo_app.repository.appsync.schema.AppSyncCanonicalOperationBlock(fixture.account.value, emptyList()),
+            installation.deviceId.value, installation.deviceEpoch.value, installation.writerNonce.value,
+            0, 0, emptyMap(), emptyList(), 1, 3, 3, "test", 0)
+        val codec = me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3DocumentCodec()
+        assertFailsWith<IllegalArgumentException> {
+            recovery.pinPayload(session.sessionId, "Journal", identity, 3) {
+                codec.encodeJournal(identity, journal.copy(writerNonce = "restored"))
+            }
+        }
+        assertNull(fixture.database.appSyncOperationQueries.getRecoveryPayload(session.sessionId).executeAsOneOrNull())
+        val encoded = codec.encodeJournal(identity, journal)
+        assertEquals(encoded, recovery.pinPayload(session.sessionId, "Journal", identity, 3) { encoded })
+        recovery.rollbackPreCommit(session.sessionId)
+        assertNull(fixture.database.appSyncOperationQueries.getRecoveryPayload(session.sessionId).executeAsOneOrNull())
+        assertEquals(listOf(fixture.source), fixture.operations.pendingOperations())
+    }
+
+    @Test fun nativePayloadAndRootIntentSurviveRestartWithoutChangingProtocolOrBody() {
+        val fixture = fixture()
+        val recovery = SqlDelightAppSyncRecoveryStore(fixture.database)
+        val session = recovery.createOrResumeSegmentedCheckpoint(fixture.account, "native", "source", 10)
+        val document = me.thenano.yamibo.yamibo_app.repository.appsync.schema.AppSyncCanonicalCheckpoint(
+            "native", fixture.account.value, 1, emptyMap(), emptyList())
+        val envelope = me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3DocumentCodec().encodeCheckpoint(document)
+        assertEquals(envelope, recovery.pinPayload(session.sessionId, "Checkpoint", "native", 3) { envelope })
+        val restarted = SqlDelightAppSyncRecoveryStore(fixture.database)
+        assertEquals(envelope, restarted.pinPayload(session.sessionId, "Checkpoint", "native", 3) { error("Must use frozen bytes") })
+        assertFailsWith<IllegalArgumentException> { restarted.pinPayload(session.sessionId, "Checkpoint", "native") { "legacy" } }
+        restarted.startSegmentedJournal(session.sessionId, 11)
+        assertFailsWith<IllegalArgumentException> { restarted.pinNativeRootIntent(session.sessionId, "a".repeat(64)) }
+        restarted.saveSegmentIntent(session.sessionId, 0, 1, "segment", null)
+        restarted.transition(session.sessionId, AppSyncRecoveryPhase.PublishingSegments, AppSyncRecoveryPhase.PublishingRoot, 12)
+        assertFailsWith<IllegalArgumentException> { restarted.pinNativeRootIntent(session.sessionId, "a".repeat(64)) }
+        restarted.markSegmentVerified(session.sessionId, 0, "segment", 42, 13)
+        assertTrue(restarted.pinNativeRootIntent(session.sessionId, "a".repeat(64)))
+        val again = SqlDelightAppSyncRecoveryStore(fixture.database)
+        assertEquals(false, again.pinNativeRootIntent(session.sessionId, "a".repeat(64)))
+        assertFailsWith<IllegalArgumentException> { again.pinNativeRootIntent(session.sessionId, "b".repeat(64)) }
+        assertFailsWith<IllegalArgumentException> { again.markRootVerified(session.sessionId, 43, "b".repeat(64), 14) }
+        assertEquals(AppSyncRecoveryPhase.PublishingRoot, again.session(session.sessionId)?.phase)
+        again.markRootVerified(session.sessionId, 43, "a".repeat(64), 14)
+        assertEquals(AppSyncRecoveryPhase.CommittingIndex, again.session(session.sessionId)?.phase)
+        assertEquals(false, again.pinNativeRootIntent(session.sessionId, "a".repeat(64)))
+        assertEquals(false, again.session(session.sessionId)?.indexCommitted)
+        assertTrue(fixture.operations.pendingOperations().isNotEmpty())
+    }
+
+    @Test fun nativeRecoveryRejectsWrongAccountIdentityAndLegacySessionBeforePinning() {
+        val fixture = fixture()
+        val recovery = SqlDelightAppSyncRecoveryStore(fixture.database)
+        val session = recovery.createOrResumeSegmentedCheckpoint(fixture.account, "native", "source", 10)
+        val codec = me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3DocumentCodec()
+        val cp = me.thenano.yamibo.yamibo_app.repository.appsync.schema.AppSyncCanonicalCheckpoint(
+            "native", fixture.account.value, 1, emptyMap(), emptyList())
+        for (body in listOf("legacy body", codec.encodeCheckpoint(cp.copy(accountBinding = "other")),
+            codec.encodeCheckpoint(cp.copy(checkpointId = "other")))) {
+            assertFailsWith<Exception> { recovery.pinPayload(session.sessionId, "Checkpoint", "native", 3) { body } }
+            assertNull(fixture.database.appSyncOperationQueries.getRecoveryPayload(session.sessionId).executeAsOneOrNull())
+        }
+        recovery.rollbackPreCommit(session.sessionId)
+        val legacy = recovery.createOrResume(fixture.account, setOf(fixture.source.operationId.value), "legacy", 20)
+        assertFailsWith<IllegalArgumentException> { recovery.pinPayload(legacy.sessionId, "Journal", "native", 3) { "invalid" } }
+    }
+
+    @Test fun migration48KeepsExistingPayloadInLegacyTransportWithoutInventingRootIntent() {
+        JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).use { driver ->
+            driver.execute(null, "CREATE TABLE AppSyncRecoverySession (sessionId TEXT NOT NULL PRIMARY KEY)", 0)
+            driver.execute(null, "INSERT INTO AppSyncRecoverySession VALUES ('existing')", 0)
+            Database.Schema.migrate(driver, 43, 44)
+            driver.execute(null, "INSERT INTO AppSyncRecoveryPayload VALUES ('existing', 'Journal', 'replica', 'body', 'digest')", 0)
+            Database.Schema.migrate(driver, 48, 49)
+            val row = Database(driver).appSyncOperationQueries.getRecoveryPayload("existing").executeAsOne()
+            assertEquals("body", row.canonicalEnvelope)
+            assertEquals("digest", row.envelopeFingerprint)
+            assertEquals(2L, row.transportVersion)
+            assertNull(row.rootIntentFingerprint)
+        }
+    }
+
     @Test
     fun pinnedPayloadSurvivesRestartAndRollbackRemovesIt() {
         val fixture = fixture()
@@ -59,7 +145,10 @@ class SqlDelightAppSyncRecoveryStoreTest {
             app.cash.sqldelight.db.QueryResult.Value(cursor.getLong(0))
         }, 0).value
         assertEquals(1L, count)
-        assertNull(Database(driver).appSyncOperationQueries.getRecoveryPayload("existing").executeAsOneOrNull())
+        val payloadCount = driver.executeQuery(null, "SELECT count(*) FROM AppSyncRecoveryPayload", { cursor ->
+            cursor.next(); app.cash.sqldelight.db.QueryResult.Value(cursor.getLong(0))
+        }, 0).value
+        assertEquals(0L, payloadCount)
     }
 
     @Test
