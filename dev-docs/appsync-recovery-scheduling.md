@@ -27,6 +27,24 @@ adb -s <isolated-serial> install -r composeApp/build/outputs/apk/androidTest/deb
 adb -s <isolated-serial> shell am instrument -w -e class me.thenano.yamibo.yamibo_app.appsync.AndroidRecoverySchedulingTest me.thenano.yamibo.yamibo_app.debug.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
-這組測試不是完整雲端 recovery E2E；WorkManager 程序死亡／重開機、`1 / total` 到 index 與 cleanup 的端對端驗收仍待完成，iOS 背景排程亦未由這份 Android 實作涵蓋。
+這組測試不是完整雲端 recovery E2E；執行中 worker 死亡、`1 / total` 到 index 與 cleanup 的端對端驗收仍待完成，iOS 背景排程亦未由這份 Android 實作涵蓋。
 
 2026-09-18 驗證：隔離 Android 15 x86_64 emulator 上 4 項 instrumentation 測試全部通過；743 項 shared、15 項 CloudSyncUiState 測試亦全部通過，零失敗、錯誤或略過。
+
+## 已入列工作跨程序與裝置重啟
+
+`AndroidRecoveryRestartTest` 提供三個可分別呼叫的 stage。stage 1 以持久化合成 ledger 建立一天後的工作；stage 2 在新 instrumentation 程序驗證原 UUID、deadline 與 enqueue 證據，並確認再次接續仍只有一筆有效工作；stage 3 清理 fixture。一般整組執行只驗證 fixture 重建，不能當作裝置重啟證據。
+
+2026-09-18 在上述獨立 emulator 依以下順序實際執行：stage 1 → force-stop → stage 2 → emulator reboot → 等待 `sys.boot_completed=1` → stage 2 → stage 3。四次 stage 呼叫均回報 `OK (1 test)`。這證明已入列工作在停止程序與裝置重啟後可對帳，尚未證明執行到一半的 provider 操作可自動恢復。
+
+```powershell
+$runner = 'me.thenano.yamibo.yamibo_app.debug.test/androidx.test.runner.AndroidJUnitRunner'
+$testClass = 'me.thenano.yamibo.yamibo_app.appsync.AndroidRecoveryRestartTest'
+adb -s <isolated-serial> shell am instrument -w -e class "$testClass#stage1Enqueue" $runner
+adb -s <isolated-serial> shell am force-stop me.thenano.yamibo.yamibo_app.debug
+adb -s <isolated-serial> shell am instrument -w -e class "$testClass#stage2VerifyAfterRestart" $runner
+adb -s <isolated-serial> reboot
+# 等待 adb 重新連線，且 sys.boot_completed=1，再執行下列步驟。
+adb -s <isolated-serial> shell am instrument -w -e class "$testClass#stage2VerifyAfterRestart" $runner
+adb -s <isolated-serial> shell am instrument -w -e class "$testClass#stage3Cleanup" $runner
+```
