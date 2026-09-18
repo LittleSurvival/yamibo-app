@@ -16,7 +16,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncVerifiedChec
 internal sealed interface AppSyncCanonicalActivationResult {
     data class Applied(val pendingOperationCount: Int, val excludedCount: Int, val noOpCount: Int,
         val settingsReconciled: Boolean, val removedLocalRows: Int = 0,
-        val removedLocalPayloadBytes: Long = 0) : AppSyncCanonicalActivationResult
+        val removedLocalPayloadBytes: Long = 0, val cleanupPending: Boolean = false) : AppSyncCanonicalActivationResult
     data class NeedsAttention(val reason: String,
         val mergeFailure: AppSyncPendingMergeFailure? = null) : AppSyncCanonicalActivationResult
 }
@@ -87,6 +87,8 @@ internal class AppSyncCanonicalCheckpointActivator(
         require(operations.installation()?.accountBinding == session.accountBinding)
         if (session.phase == AppSyncRecoveryPhase.Completed && session.indexCommitted) {
             AppSyncCanonicalActivationResult.Applied(operations.pendingOperations().count { it.accountBinding == session.accountBinding }, 0, 0, true)
+        } else if (session.phase == AppSyncRecoveryPhase.Cleaning) {
+            cleanCheckpointBatch(sessionId)
         } else {
             val verified = recovery.nativeCheckpointForActivation(sessionId)
             val plan = cloud?.let { AppSyncCanonicalRecoveryPlanner().prepare(verified, it) }
@@ -98,11 +100,21 @@ internal class AppSyncCanonicalCheckpointActivator(
                 require(current.blogId == verified.blogId && current.fingerprint == verified.fingerprint &&
                     current.indexFingerprint == verified.indexFingerprint)
             })
-            if (result is AppSyncCanonicalActivationResult.Applied && result.settingsReconciled)
-                recovery.completeNativeCheckpointActivation(sessionId, nowMillis())
-            result
+            if (result is AppSyncCanonicalActivationResult.Applied && result.settingsReconciled) {
+                recovery.beginNativeCheckpointCleanup(sessionId, nowMillis())
+                val cleaned = cleanCheckpointBatch(sessionId)
+                result.copy(removedLocalRows = cleaned.removedLocalRows,
+                    removedLocalPayloadBytes = cleaned.removedLocalPayloadBytes, cleanupPending = cleaned.cleanupPending)
+            } else result
         }
     } catch (_: Exception) { AppSyncCanonicalActivationResult.NeedsAttention("Native checkpoint activation could not complete") }
+
+    private fun cleanCheckpointBatch(sessionId: String): AppSyncCanonicalActivationResult.Applied {
+        val result = me.thenano.yamibo.yamibo_app.repository.appsync.cleanup.AppSyncCanonicalLocalPruner(db, state)
+            .pruneRecoveryCheckpoint(sessionId, nowMillis())
+        return AppSyncCanonicalActivationResult.Applied(operations.pendingOperations().size, 0, 0, true,
+            result.removedRows, result.removedPayloadBytes, result.hasMore)
+    }
 
     fun activate(verified: AppSyncVerifiedCanonicalCheckpoint,
         remoteOperations: AppSyncCanonicalOperationBlock? = null,

@@ -62,7 +62,7 @@ internal class AppSyncV3CommitCoordinator(
             recovery.startSegmentedJournal(sessionId, nowMillis())
             session = requireNotNull(recovery.session(sessionId))
         }
-        if (session.phase !in setOf(AppSyncRecoveryPhase.ActivatingLocal, AppSyncRecoveryPhase.Completed)) {
+        if (session.phase !in setOf(AppSyncRecoveryPhase.ActivatingLocal, AppSyncRecoveryPhase.Cleaning, AppSyncRecoveryPhase.Completed)) {
             when (val result = committer.commit(sessionId, envelope,
                 if (checkpoint) AppSyncV3PayloadKind.Checkpoint else AppSyncV3PayloadKind.Journal, identity, selection, formHash,
                 requiredCheckpoint = cloud?.checkpoint)) {
@@ -75,14 +75,18 @@ internal class AppSyncV3CommitCoordinator(
         }
         require(recovery.usesNativeTransport(sessionId))
         if (checkpoint || cloud != null) {
-            val activation = if (checkpoint) requireNotNull(checkpointActivator).activateRecovery(recovery, sessionId, cloud)
-                else requireNotNull(checkpointActivator).activateJournalRecovery(recovery, sessionId, requireNotNull(cloud))
-            when (val result = activation) {
-                is AppSyncCanonicalActivationResult.Applied -> if (!result.settingsReconciled)
-                    return AppSyncSegmentedJournalCommitResult.Retryable("Native settings reconciliation is pending")
-                is AppSyncCanonicalActivationResult.NeedsAttention ->
-                    return AppSyncSegmentedJournalCommitResult.Conflict(result.reason)
-            }
+            do {
+                val activation = if (checkpoint) requireNotNull(checkpointActivator).activateRecovery(recovery, sessionId, cloud)
+                    else requireNotNull(checkpointActivator).activateJournalRecovery(recovery, sessionId, requireNotNull(cloud))
+                when (val result = activation) {
+                    is AppSyncCanonicalActivationResult.Applied -> if (!result.settingsReconciled)
+                        return AppSyncSegmentedJournalCommitResult.Retryable("Native settings reconciliation is pending")
+                    is AppSyncCanonicalActivationResult.NeedsAttention ->
+                        return AppSyncSegmentedJournalCommitResult.Conflict(result.reason)
+                }
+                val remaining = activation.cleanupPending
+                if (remaining) kotlinx.coroutines.yield()
+            } while (remaining)
         } else recovery.activateCommittedSession(sessionId, nowMillis())
         session = requireNotNull(recovery.session(sessionId))
         require(session.phase == AppSyncRecoveryPhase.Completed && session.indexCommitted)

@@ -611,7 +611,7 @@ internal class SqlDelightAppSyncRecoveryStore(
         verifiedAtEpochMillis: Long) = db.transaction {
         val session = requireSession(sessionId)
         require(session.phase == AppSyncRecoveryPhase.CommittingIndex ||
-            (session.phase == AppSyncRecoveryPhase.ActivatingLocal && session.indexCommitted))
+            (session.phase in setOf(AppSyncRecoveryPhase.ActivatingLocal, AppSyncRecoveryPhase.Cleaning) && session.indexCommitted))
         require(indexBlogId in 1..Int.MAX_VALUE.toLong() && verifiedAtEpochMillis >= 0)
         val payload = requireNotNull(queries.getRecoveryPayload(sessionId).executeAsOneOrNull())
         require(payload.transportVersion == 3L && payload.rootIntentFingerprint != null &&
@@ -748,7 +748,7 @@ internal class SqlDelightAppSyncRecoveryStore(
     fun nativeCheckpointForActivation(sessionId: String): AppSyncVerifiedCanonicalCheckpoint = db.transactionWithResult {
         val session = requireSession(sessionId)
         require(session.mode == AppSyncRecoveryMode.SegmentedCheckpoint && session.indexCommitted &&
-            session.phase == AppSyncRecoveryPhase.ActivatingLocal)
+            session.phase in setOf(AppSyncRecoveryPhase.ActivatingLocal, AppSyncRecoveryPhase.Cleaning))
         val installation = requireNotNull(SqlDelightAppSyncOperationStore(db, json).installation())
         require(installation.accountBinding == session.accountBinding && installation.deviceId == session.sourceDeviceId &&
             installation.deviceEpoch == session.sourceDeviceEpoch && installation.writerNonce == session.targetWriterNonce &&
@@ -761,7 +761,7 @@ internal class SqlDelightAppSyncRecoveryStore(
             intent.body, payload.canonicalEnvelope))
     }
 
-    fun completeNativeCheckpointActivation(sessionId: String, completedAtEpochMillis: Long) = db.transaction {
+    fun beginNativeCheckpointCleanup(sessionId: String, completedAtEpochMillis: Long) = db.transaction {
         val verified = nativeCheckpointForActivation(sessionId)
         val head = requireNotNull(db.appSyncCanonicalStateQueries.getState().executeAsOneOrNull())
         require(head.accountBinding == verified.document.accountBinding && head.settingsReconciliationPending == 0L)
@@ -771,7 +771,8 @@ internal class SqlDelightAppSyncRecoveryStore(
         queries.upsertRemoteBlog("checkpoint-root:${requireSession(sessionId).generationId}",
             AppSyncRemoteBlogKind.CheckpointRoot.name.uppercase(), verified.blogId, null, verified.fingerprint,
             completedAtEpochMillis, completedAtEpochMillis)
-        transition(sessionId, AppSyncRecoveryPhase.ActivatingLocal, AppSyncRecoveryPhase.Completed, completedAtEpochMillis)
+        transition(sessionId, AppSyncRecoveryPhase.ActivatingLocal, AppSyncRecoveryPhase.Cleaning, completedAtEpochMillis,
+            retryCount = 0, retryIdentity = null)
     }
 
     fun nativeJournalForActivation(sessionId: String): AppSyncV3DocumentRead.Journal = db.transactionWithResult {

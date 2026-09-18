@@ -1,6 +1,7 @@
 package me.thenano.yamibo.yamibo_app.repository.appsync
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import kotlinx.coroutines.async
 import kotlin.test.*
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.*
@@ -14,6 +15,66 @@ import me.thenano.yamibo.yamibo_app.store.appsync.*
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 
 class AppSyncCanonicalCheckpointActivatorTest {
+    @Test fun checkpointCleanupResumesBatchesWithoutReplayingSettingsOrDeletingLaterEdits() = fixture {
+        val sources = List(260) { append("18") }
+        val cp = assertIs<AppSyncCanonicalPendingMergeResult.Ready>(AppSyncCanonicalPendingMerge()
+            .prepare(checkpoint, sources, "covered", 10)).checkpoint
+        store.markAcknowledged(sources.map { it.operationId }.toSet(), 16)
+        val (recovery, id) = stageNativeCheckpoint(document = cp)
+        val first = assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activateRecovery(recovery, id))
+        assertEquals(128, first.removedLocalRows)
+        assertTrue(first.cleanupPending)
+        assertEquals(AppSyncRecoveryPhase.Cleaning, recovery.session(id)?.phase)
+        assertNull(recovery.session(id)?.completedAtEpochMillis)
+        val later = append("22")
+        state.recordLocalBatch(account.value, listOf(later))
+        preferences.values["novelreadersettings.fontsize"] = 22
+        AppSyncRecoveryAttempts(recovery, { now }).recordFailure(id, AppSyncRecoveryFailureCategory.Network)
+        assertEquals(1L, recovery.session(id)?.retryCount)
+        now = assertNotNull(recovery.session(id)?.nextRetryAtEpochMillis)
+        val restarted = SqlDelightAppSyncRecoveryStore(db)
+        val second = assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activateRecovery(restarted, id))
+        assertEquals(128, second.removedLocalRows)
+        assertTrue(second.cleanupPending)
+        assertEquals(0L, restarted.session(id)?.retryCount)
+        assertNull(restarted.session(id)?.nextRetryAtEpochMillis)
+        val last = assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activateRecovery(restarted, id))
+        assertEquals(4, last.removedLocalRows)
+        assertFalse(last.cleanupPending)
+        assertEquals(AppSyncRecoveryPhase.Completed, restarted.session(id)?.phase)
+        assertEquals(listOf(later), store.pendingOperations())
+        assertEquals(22, preferences.values["novelreadersettings.fontsize"])
+        assertEquals(260L, db.appSyncLocalPruneQueries.getAudit(account.value).executeAsOne().removedRows)
+        assertEquals(0, assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activateRecovery(restarted, id)).removedLocalRows)
+    }
+
+    @Test fun cancelledCoordinatorRetainsCleaningAndNextRunDrainsAllRemainingBatches() = fixture {
+        val sources = List(260) { append("18") }
+        val cp = assertIs<AppSyncCanonicalPendingMergeResult.Ready>(AppSyncCanonicalPendingMerge()
+            .prepare(checkpoint, sources, "covered", 10)).checkpoint
+        store.markAcknowledged(sources.map { it.operationId }.toSet(), 16)
+        val (recovery, id) = stageNativeCheckpoint(document = cp)
+        val continuation = nativeContinuation(recovery)
+        val cloud = AppSyncCanonicalCloudPlan.Ready(verified(cp), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
+        kotlinx.coroutines.runBlocking {
+            val work = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                continuation.resume(account, io.github.littlesurvival.dto.value.FormHash("test"), cloud)
+            }
+            val immediate = if (work.isCompleted) work.await() else null
+            assertEquals(AppSyncRecoveryPhase.Cleaning, recovery.session(id)?.phase, immediate.toString())
+            work.cancel()
+            work.join()
+            assertTrue(work.isCancelled)
+            assertEquals(132, store.allOutboxOperations().size)
+            assertEquals(0L, recovery.session(id)?.retryCount)
+            assertNull(recovery.session(id)?.nextRetryAtEpochMillis)
+            assertIs<OperationSyncResult.Converged>(nativeContinuation(SqlDelightAppSyncRecoveryStore(db))
+                .resume(account, io.github.littlesurvival.dto.value.FormHash("test"), cloud))
+        }
+        assertEquals(AppSyncRecoveryPhase.Completed, recovery.session(id)?.phase)
+        assertTrue(store.allOutboxOperations().isEmpty())
+        assertEquals(260L, db.appSyncLocalPruneQueries.getAudit(account.value).executeAsOne().removedRows)
+    }
     @Test fun verifiedRemoteCoveragePrunesOnlyCoveredAcknowledgedPayloadAfterCanonicalRebuild() = fixture {
         val excluded = store.appendLocalOperation(account, SyncDomainId("settings"), SyncEntityId("future.private.cache"), 1,
             SyncOperationKind.Put, mapOf("type" to "string", "value" to "合成快取".repeat(20_000)),
@@ -385,7 +446,7 @@ class AppSyncCanonicalCheckpointActivatorTest {
         assertNull(state.read(account.value))
         assertTrue(store.verifiedCheckpoints().isEmpty())
         recovery.markNativeIndexCommitted(id, 400, assertNotNull(recovery.nativeIndexIntent(id)).body, 12)
-        assertFailsWith<IllegalArgumentException> { recovery.completeNativeCheckpointActivation(id, 20) }
+        assertFailsWith<IllegalArgumentException> { recovery.beginNativeCheckpointCleanup(id, 20) }
         store.rotateDeviceEpoch(account, AppSyncInstallationState.Active)
         assertIs<AppSyncCanonicalActivationResult.NeedsAttention>(activator().activateRecovery(recovery, id))
         assertNull(state.read(account.value))
@@ -620,7 +681,8 @@ class AppSyncCanonicalCheckpointActivatorTest {
             return assertIs<AppSyncCanonicalPendingMergeResult.Ready>(AppSyncCanonicalPendingMerge().prepare(
                 checkpoint, listOf(remote), "latest-remote", 101)).checkpoint
         }
-        fun stageNativeCheckpoint(committed: Boolean = true): Pair<SqlDelightAppSyncRecoveryStore, String> {
+        fun stageNativeCheckpoint(committed: Boolean = true, document: AppSyncCanonicalCheckpoint = checkpoint): Pair<SqlDelightAppSyncRecoveryStore, String> {
+            val checkpoint = document
             val recovery = SqlDelightAppSyncRecoveryStore(db)
             val session = recovery.createOrResumeSegmentedCheckpoint(account, checkpoint.checkpointId, "source", 1)
             recovery.pinPayload(session.sessionId, "Checkpoint", checkpoint.checkpointId, 3) {
