@@ -27,3 +27,7 @@ Production engine 現在把完整 cloud planner 通過的 indexed canonical chec
 同步前的 snapshot 安全稽核使用 canonical typed 值比較，不以已移除的 legacy provenance 判斷資料缺漏。只補存在於本機的 live rows，不從缺少本機列推導刪除；修復操作與 canonical head 在同一交易中保存。Essential 值無法正規化時，保留資料並回報稽核失敗。
 
 Migration 46 在 canonical head 增加外部設定待重整標記。完整套用設為待重整，local command 保存 head 時保留標記。偏好設定重整失敗或程序中斷後，snapshot 稽核前先從最新 head 重建設定 mirror 並重試；成功才清除標記，避免把未套用的舊偏好值寫成新操作。重整已完成時不重放舊 mirror，以保留後續使用者編輯。
+
+Migration 47 新增帳號隔離的 reader cohort 證據表。engine 每次取得 cloud load 結果後通知 store；只有完整 discovery 且沒有缺頁／驗證問題的結果能建立證據，cache-only、失敗、缺少 index 指定 replica、重複 replica／physical ID 衝突都撤銷先前證據。保存資料只有 replica、writer nonce、remote ID、文件摘要、read version 與 heartbeat，不保存操作內容，也不進入可攜備份。
+
+`canWrite` 還要求 installation 為 Active、自身 replica 已遠端宣告 read >= 3 且 writer nonce 相符、所有相關 active reader 支援 v3、證據未逾五分鐘，且 writer 開關、本機完整 reader 與效能驗收三項外部條件皆通過。九十天 inactive 判斷以完整掃描當下為準，不能只等待本機時間流逝就把舊 reader 排除；時鐘倒退也不授權。reader 宣告目前仍為 v2，完整 v3 分段／bootstrap 等讀取路徑完成前不提高宣告。此證據表不是 index 寫入證明，也不授權清理；native writer 仍尚未接線啟用。

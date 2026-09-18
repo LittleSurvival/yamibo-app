@@ -48,6 +48,7 @@ internal sealed interface AppSyncJournalLoadResult {
         val canonicalDocuments: List<LoadedAppSyncCanonicalDocument> = emptyList(),
         val canonicalReadIssues: List<String> = emptyList(),
         val verifiedCanonicalCheckpoints: List<AppSyncVerifiedCanonicalCheckpoint> = emptyList(),
+        val authoritativeDiscovery: Boolean = false,
     ) : AppSyncJournalLoadResult {
         // Removed once every consuming coordinator can process canonical state. Until then,
         // a readable v3 account must never become an empty-cloud push or legacy cleanup.
@@ -271,6 +272,7 @@ internal class OperationSyncEngine(
     private val legacyClassifier: AppSyncLegacyOperationClassifier = AppSyncLegacyOperationClassifier(),
     private val activateCanonical: ((AppSyncCanonicalCloudPlan.Ready) -> AppSyncCanonicalActivationResult)? = null,
     private val hasCanonicalState: () -> Boolean = { false },
+    private val observeCloud: (SyncAccountBinding, AppSyncJournalLoadResult) -> Unit = { _, _ -> },
 ) {
     private val processMutex = Mutex()
     private val compaction = CompactionCoordinator(store, nowMillis, inactiveAfterMillis)
@@ -374,6 +376,7 @@ internal class OperationSyncEngine(
             } else {
                 initialLoad
             }
+            observeCloud(accountBinding, authoritativeLoad)
             val cloud = when (val result = authoritativeLoad) {
                 is AppSyncJournalLoadResult.Success -> result
                 AppSyncJournalLoadResult.NotLoggedIn -> {

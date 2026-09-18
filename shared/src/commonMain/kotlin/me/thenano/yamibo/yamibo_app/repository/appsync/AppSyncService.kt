@@ -339,6 +339,7 @@ class AppSyncService(
     private val nowMillis: () -> Long = ::currentTimeMillis,
 ) {
     private val store = SqlDelightAppSyncOperationStore(db)
+    private val readerCohortStore = me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncReaderCohortStore(db)
     private val canonicalState = me.thenano.yamibo.yamibo_app.repository.appsync.engine.SqlDelightCanonicalCheckpointState(
         db, DatabaseSyncDomainMaterializer(db, settingsStore),
     )
@@ -411,6 +412,7 @@ class AppSyncService(
             canonicalActivator.activate(plan.checkpoint, plan.canonicalOperations, plan.legacyOperations)
         },
         hasCanonicalState = { db.appSyncCanonicalStateQueries.getState().executeAsOneOrNull() != null },
+        observeCloud = { account, result -> readerCohortStore.observe(account, result, nowMillis()) },
     )
     private val manualOverride = ManualSyncOverrideCoordinator(
         store = store,

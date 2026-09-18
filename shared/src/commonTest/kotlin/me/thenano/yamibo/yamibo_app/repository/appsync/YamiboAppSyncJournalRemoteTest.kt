@@ -114,10 +114,12 @@ class YamiboAppSyncJournalRemoteTest {
         }
         setIndex(true)
         val loaded = assertIs<AppSyncJournalLoadResult.Success>(remote.loadJournals(ACCOUNT, true))
+        assertTrue(loaded.authoritativeDiscovery)
         assertEquals(cp, loaded.verifiedCanonicalCheckpoints.single().document)
         assertEquals(fingerprint, loaded.verifiedCanonicalCheckpoints.single().fingerprint)
         setIndex(false)
         val removed = assertIs<AppSyncJournalLoadResult.Success>(remote.loadJournals(ACCOUNT, false))
+        assertTrue(!removed.authoritativeDiscovery)
         assertTrue(removed.canonicalDocuments.isNotEmpty())
         assertTrue(removed.verifiedCanonicalCheckpoints.isEmpty())
         assertEquals(0, provider.submitCalls)

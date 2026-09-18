@@ -1,0 +1,5 @@
+CREATE TABLE AppSyncReaderCohort (
+    accountBinding TEXT NOT NULL PRIMARY KEY,
+    evidenceJson TEXT NOT NULL,
+    evidenceSha256 TEXT NOT NULL
+);

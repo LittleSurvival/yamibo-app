@@ -1584,6 +1584,7 @@ internal class YamiboAppSyncJournalRemote(
             checkpoints.distinctBy { it.remoteId to it.envelope.fingerprint },
             indexedReplicaKeys = indexedReplicaKeys,
             retirementDiscoveryIssues = retirementDiscoveryIssues.distinct(),
+            authoritativeDiscovery = true,
             canonicalDocuments = canonicalDocuments,
             canonicalReadIssues = canonicalReadIssues.distinct(),
             verifiedCanonicalCheckpoints = bindCanonicalCheckpoints(accountBinding, canonicalDocuments, verifiedIndex),

@@ -1,0 +1,8 @@
+getEvidence:
+SELECT * FROM AppSyncReaderCohort WHERE accountBinding = ?;
+
+putEvidence:
+INSERT OR REPLACE INTO AppSyncReaderCohort(accountBinding, evidenceJson, evidenceSha256) VALUES (?, ?, ?);
+
+invalidate:
+DELETE FROM AppSyncReaderCohort WHERE accountBinding = ?;
