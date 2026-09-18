@@ -426,7 +426,7 @@ class AppSyncService(
         nowMillis = nowMillis,
         ownerId = { SyncIdentityGenerator.writerNonce().value },
         activateCanonical = { plan ->
-            canonicalActivator.activate(plan.checkpoint, plan.canonicalOperations, plan.legacyOperations)
+            canonicalActivator.activateAndDrain(plan)
         },
         hasCanonicalState = { db.appSyncCanonicalStateQueries.getState().executeAsOneOrNull() != null },
         observeCloud = { account, result -> readerCohortStore.observe(account, result, nowMillis()) },

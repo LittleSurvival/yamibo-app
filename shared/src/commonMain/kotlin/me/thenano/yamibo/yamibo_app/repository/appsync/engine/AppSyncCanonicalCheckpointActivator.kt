@@ -33,6 +33,26 @@ internal class AppSyncCanonicalCheckpointActivator(
     private val nowMillis: () -> Long,
     private val merger: AppSyncCanonicalPendingMerge = AppSyncCanonicalPendingMerge(),
 ) {
+    /** One ordinary sync drains all eligible batches under the caller's engine lease.
+     * Each batch commits independently; cancellation leaves durable deletion/cursor progress.
+     */
+    suspend fun activateAndDrain(cloud: AppSyncCanonicalCloudPlan.Ready): AppSyncCanonicalActivationResult {
+        val initial = activate(cloud.checkpoint, cloud.canonicalOperations, cloud.legacyOperations)
+        if (initial !is AppSyncCanonicalActivationResult.Applied || !initial.settingsReconciled) return initial
+        var result: AppSyncCanonicalActivationResult.Applied = initial
+        val pruner = me.thenano.yamibo.yamibo_app.repository.appsync.cleanup.AppSyncCanonicalLocalPruner(db, state)
+        while (result.cleanupPending) {
+            kotlinx.coroutines.yield()
+            val batch = try { pruner.prune(cloud.checkpoint, nowMillis()) }
+            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { return AppSyncCanonicalActivationResult.NeedsAttention("Canonical reclamation must be retried") }
+            result = result.copy(removedLocalRows = result.removedLocalRows + batch.removedRows,
+                removedLocalPayloadBytes = result.removedLocalPayloadBytes + batch.removedPayloadBytes,
+                cleanupPending = batch.hasMore)
+        }
+        return result
+    }
+
     /** Install the current cloud plus the frozen, index-verified journal before acknowledging
      * its sources. External settings failure leaves the session resumable and unacknowledged.
      */
@@ -199,6 +219,6 @@ internal class AppSyncCanonicalCheckpointActivator(
             return AppSyncCanonicalActivationResult.NeedsAttention("Canonical state installed; local reclamation must be retried")
         } else null
         return AppSyncCanonicalActivationResult.Applied(pendingCount, ready.excludedCount, ready.noOpCount, reconciled,
-            pruned?.removedRows ?: 0, pruned?.removedPayloadBytes ?: 0)
+            pruned?.removedRows ?: 0, pruned?.removedPayloadBytes ?: 0, pruned?.hasMore ?: false)
     }
 }

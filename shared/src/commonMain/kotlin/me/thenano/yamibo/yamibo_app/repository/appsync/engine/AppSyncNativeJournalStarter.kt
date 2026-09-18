@@ -19,12 +19,12 @@ internal class AppSyncNativeJournalStarter(
     private val nowMillis: () -> Long,
     private val canWrite: () -> Boolean,
 ) {
-    fun start(account: SyncAccountBinding, cloud: AppSyncCanonicalCloudPlan.Ready): Result<String> = runCatching {
+    suspend fun start(account: SyncAccountBinding, cloud: AppSyncCanonicalCloudPlan.Ready): Result<String> = runCatching {
         check(canWrite()) { "Native writer rollout is not available" }
         require(recovery.recoverySession(account)?.phase.let { it == null || it == AppSyncRecoveryPhase.Completed }) {
             "An unfinished recovery already owns this account"
         }
-        val activation = activator.activate(cloud.checkpoint, cloud.canonicalOperations, cloud.legacyOperations)
+        val activation = activator.activateAndDrain(cloud)
         check(activation is AppSyncCanonicalActivationResult.Applied && activation.settingsReconciled) {
             "Canonical cloud activation must complete before publication"
         }
@@ -55,5 +55,5 @@ internal class AppSyncNativeJournalStarter(
             operations.markAcknowledged(covered.map { it.operationId }.toSet(), nowMillis())
             session.sessionId
         }
-    }
+    }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
 }

@@ -8,7 +8,7 @@
 
 Migration 53（schema version 54）新增裝置端 `AppSyncLocalPruneAudit`，只保存 account binding、checkpoint fingerprint、累計列數／payload bytes 及建立／更新時間，不保存 entity ID、operation ID 或 payload。此 domain 排除於 AppSync 與可攜備份。下一次符合證據要求的清理會移除已建立 30 天的 audit；持續追加計數不延長舊 audit 的保存期限。同步入口現在也會清除已到期 audit；未執行同步時的獨立到期排程仍待接線。
 
-Native checkpoint 與已有後續 checkpoint 完整覆蓋的 native journal，現依下述完成收據流程移除凍結 payload 與 segment intents；legacy 的相關主體與 applied receipts 仍保留，不執行 SQLite VACUUM，也不刪除雲端文件。一般 reader 清理的全部批次排程、UI 累計統計、獨立到期維護及實體頁面回收仍待完成。不能將這個有上限的邏輯主體清理，視為完整 storage-reclamation 規格或整體 recovery 已完成。
+Native checkpoint 與已有後續 checkpoint 完整覆蓋的 native journal，現依下述完成收據流程移除凍結 payload 與 segment intents；legacy 的相關主體與 applied receipts 仍保留，不執行 SQLite VACUUM，也不刪除雲端文件。UI 累計統計、獨立到期維護及實體頁面回收仍待完成。不能將這個有上限的邏輯主體清理，視為完整 storage-reclamation 規格或整體 recovery 已完成。
 
 測試涵蓋合成大型 cache 主體在 canonical rebuild 後刪除、仍 pending 的後續編輯保留、checkpoint／設定證據不足、active recovery 保護、每批上限、交易回滾與重新執行、損壞的 canonical head、錯誤 checkpoint、audit 到期與 migration 初始狀態。
 
@@ -55,4 +55,10 @@ Migration 55（schema version 56）新增裝置端 `AppSyncRetainedJournal`。�
 
 Migration 56（schema version 57）新增每列最後檢查的 checkpoint fingerprint，並在既有 payload-free prune audit 加入 removedRetainedJournals。一般 canonical 清理與 native checkpoint Cleaning 每批最多檢查 8 份保留 journal，逐份載入及解碼；同一 checkpoint 下，未覆蓋列保存檢查進度，後續批次繼續後面的列。新 checkpoint fingerprint 會使未刪除列重新符合檢查條件。
 
-清理沿用外層交易的 checkpoint digest／indexed evidence、installation account、canonical head 及設定重整檢查；每份保留資料另驗 journal envelope fingerprint、index SHA／fingerprint、account／replica 與 root reference，要求 checkpoint 覆蓋全部 published、observed、acknowledgement 與 causal dependencies。資料刪除、檢查進度和累計位元組／保留 journal 筆數同一交易提交；例外全部回滾，再次呼叫不重複計數。hasMore 包含尚未檢查的保留資料，native Cleaning 會接續批次；一般 reader 的獨立背景批次排程仍待補齊。audit 沿用建立日起 30 天到期，不保存 journal/index 主體。
+清理沿用外層交易的 checkpoint digest／indexed evidence、installation account、canonical head 及設定重整檢查；每份保留資料另驗 journal envelope fingerprint、index SHA／fingerprint、account／replica 與 root reference，要求 checkpoint 覆蓋全部 published、observed、acknowledgement 與 causal dependencies。資料刪除、檢查進度和累計位元組／保留 journal 筆數同一交易提交；例外全部回滾，再次呼叫不重複計數。hasMore 包含尚未檢查的保留資料，native Cleaning 與以下一般 reader 入口會接續批次。audit 沿用建立日起 30 天到期，不保存 journal/index 主體。
+
+## 一般同步的批次接續
+
+Production service 的 canonical activation callback 現為 suspend，透過 `activateAndDrain` 在同一次 engine 執行中完成所有符合條件的 outbox 與保留 journal 批次。第一次套用 cloud／pending 和設定後，後續批次只做重新驗證與清理，不重建 projection 或反覆套用偏好設定。回傳累計列數／位元組，全部檢查完才清除 cleanupPending。
+
+每批間 yield，取消會直接傳播，已提交刪除與 checkpoint-scoped 檢查進度保留；下一次執行從剩餘資料接續。批次間新增的 pending 編輯不受刪除，也不被舊設定 mirror 覆寫。新 journal starter 同樣先等待此清理完成，再凍結下一個發布 session，避免新的 active session 阻擋尚未完成的清理。獨立於同步觸發的到期排程、完整裝置端 process-death／WorkManager 驗收與清理 UI 統計仍待完成。

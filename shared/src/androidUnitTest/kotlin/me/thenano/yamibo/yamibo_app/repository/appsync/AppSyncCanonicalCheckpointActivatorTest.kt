@@ -15,6 +15,46 @@ import me.thenano.yamibo.yamibo_app.store.appsync.*
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 
 class AppSyncCanonicalCheckpointActivatorTest {
+    private fun AppSyncNativeJournalStarter.startBlocking(account: SyncAccountBinding, cloud: AppSyncCanonicalCloudPlan.Ready) =
+        kotlinx.coroutines.runBlocking { start(account, cloud) }
+
+    @Test fun ordinaryCanonicalSyncDrainsRetainedJournalsWithoutAnotherTrigger() = fixture {
+        retainJournalHistory(17)
+        val cp = assertNotNull(state.read(account.value)).copy(checkpointId = "drain-all")
+        val cloud = AppSyncCanonicalCloudPlan.Ready(verified(cp), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
+        val result = kotlinx.coroutines.runBlocking { activator().activateAndDrain(cloud) }
+        val applied = assertIs<AppSyncCanonicalActivationResult.Applied>(result)
+        assertFalse(applied.cleanupPending)
+        assertEquals(17, applied.removedLocalRows)
+        assertTrue(db.appSyncRetainedJournalQueries.getForAccount(account.value).executeAsList().isEmpty())
+        assertEquals(17L, db.appSyncLocalPruneQueries.getAudit(account.value).executeAsOne().removedRetainedJournals)
+    }
+
+    @Test fun ordinaryCleanupCancellationPreservesBatchProgressAndLaterPendingEdits() = fixture {
+        val sources = List(260) { append() }
+        store.markAcknowledged(sources.map { it.operationId }.toSet(), now)
+        val cp = assertIs<AppSyncCanonicalPendingMergeResult.Ready>(AppSyncCanonicalPendingMerge()
+            .prepare(checkpoint, sources, "large-reader-checkpoint", now)).checkpoint
+        val cloud = AppSyncCanonicalCloudPlan.Ready(verified(cp), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
+        kotlinx.coroutines.runBlocking {
+            val work = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { activator().activateAndDrain(cloud) }
+            assertFalse(work.isCompleted)
+            assertEquals(132, store.allOutboxOperations().size)
+            val later = append("22")
+            state.recordLocalBatch(account.value, listOf(later))
+            preferences.values["novelreadersettings.fontsize"] = 22
+            work.cancel()
+            work.join()
+            assertEquals(133, store.allOutboxOperations().size)
+            val resumed = assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activateAndDrain(cloud))
+            assertFalse(resumed.cleanupPending)
+            assertEquals(132, resumed.removedLocalRows)
+            assertEquals(listOf(later), store.pendingOperations())
+            assertEquals(22, preferences.values["novelreadersettings.fontsize"])
+            assertEquals(260L, db.appSyncLocalPruneQueries.getAudit(account.value).executeAsOne().removedRows)
+        }
+    }
+
     @Test fun corruptRetainedIndexPreservesPayloadAndRollsBackEarlierOutboxDeletion() = fixture {
         val id = retainJournalHistory(1).single()
         val cp = assertNotNull(state.read(account.value)).copy(checkpointId = "covered-retained")
@@ -278,7 +318,7 @@ class AppSyncCanonicalCheckpointActivatorTest {
         val recovery = SqlDelightAppSyncRecoveryStore(db)
         val cloud = AppSyncCanonicalCloudPlan.Ready(verified(), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
         val starter = AppSyncNativeJournalStarter(db, store, recovery, state, activator(), { now }, { true })
-        val id = starter.start(account, cloud).getOrThrow()
+        val id = starter.startBlocking(account, cloud).getOrThrow()
         assertEquals(AppSyncRecoveryPhase.Classifying, recovery.session(id)?.phase)
         assertEquals(setOf(first.operationId.value), recovery.session(id)?.sourceOperationIds)
         val frozen = recovery.nativePayload(id)
@@ -287,7 +327,7 @@ class AppSyncCanonicalCheckpointActivatorTest {
         assertEquals(3, read.document.protocolWriteVersion)
         assertEquals(listOf(first), store.pendingOperations())
         val later = append("22")
-        assertTrue(starter.start(account, cloud).isFailure)
+        assertTrue(starter.startBlocking(account, cloud).isFailure)
         assertEquals(frozen, SqlDelightAppSyncRecoveryStore(db).nativePayload(id))
         assertEquals(listOf(first, later), store.pendingOperations())
     }
@@ -299,7 +339,7 @@ class AppSyncCanonicalCheckpointActivatorTest {
         val second = append("22")
         val recovery = SqlDelightAppSyncRecoveryStore(db)
         val cloud = AppSyncCanonicalCloudPlan.Ready(verified(cp), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
-        val id = AppSyncNativeJournalStarter(db, store, recovery, state, activator(), { now }, { true }).start(account, cloud).getOrThrow()
+        val id = AppSyncNativeJournalStarter(db, store, recovery, state, activator(), { now }, { true }).startBlocking(account, cloud).getOrThrow()
         assertEquals(listOf(second), store.pendingOperations())
         assertEquals(setOf(second.operationId.value), recovery.session(id)?.sourceOperationIds)
         val frozen = recovery.nativePayload(id)
@@ -320,11 +360,11 @@ class AppSyncCanonicalCheckpointActivatorTest {
             }
         }
         val cloud = AppSyncCanonicalCloudPlan.Ready(verified(cp), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
-        assertTrue(AppSyncNativeJournalStarter(db, broken, recovery, state, activator(), { now }, { true }).start(account, cloud).isFailure)
+        assertTrue(AppSyncNativeJournalStarter(db, broken, recovery, state, activator(), { now }, { true }).startBlocking(account, cloud).isFailure)
         assertNull(recovery.recoverySession(account))
         assertEquals(listOf(first), store.pendingOperations())
         assertNotNull(state.read(account.value))
-        val id = AppSyncNativeJournalStarter(db, store, recovery, state, activator(), { now }, { true }).start(account, cloud).getOrThrow()
+        val id = AppSyncNativeJournalStarter(db, store, recovery, state, activator(), { now }, { true }).startBlocking(account, cloud).getOrThrow()
         assertTrue(recovery.usesNativeTransport(id))
         assertTrue(store.pendingOperations().isEmpty())
     }
@@ -334,11 +374,11 @@ class AppSyncCanonicalCheckpointActivatorTest {
         val recovery = SqlDelightAppSyncRecoveryStore(db)
         val cloud = AppSyncCanonicalCloudPlan.Ready(verified(), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
         preferences.fail = true
-        assertTrue(AppSyncNativeJournalStarter(db, store, recovery, state, activator(), { now }, { true }).start(account, cloud).isFailure)
+        assertTrue(AppSyncNativeJournalStarter(db, store, recovery, state, activator(), { now }, { true }).startBlocking(account, cloud).isFailure)
         assertNull(recovery.recoverySession(account))
         preferences.fail = false
         var checks = 0
-        assertTrue(AppSyncNativeJournalStarter(db, store, recovery, state, activator(), { now }, { ++checks < 3 }).start(account, cloud).isFailure)
+        assertTrue(AppSyncNativeJournalStarter(db, store, recovery, state, activator(), { now }, { ++checks < 3 }).startBlocking(account, cloud).isFailure)
         assertEquals(3, checks)
         assertNull(recovery.recoverySession(account))
         assertEquals(listOf(first), store.pendingOperations())

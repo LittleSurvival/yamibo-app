@@ -277,7 +277,7 @@ internal class OperationSyncEngine(
         authorizationLookup = store::loadBulkDeleteAuthorization,
     ),
     private val legacyClassifier: AppSyncLegacyOperationClassifier = AppSyncLegacyOperationClassifier(),
-    private val activateCanonical: ((AppSyncCanonicalCloudPlan.Ready) -> AppSyncCanonicalActivationResult)? = null,
+    private val activateCanonical: (suspend (AppSyncCanonicalCloudPlan.Ready) -> AppSyncCanonicalActivationResult)? = null,
     private val hasCanonicalState: () -> Boolean = { false },
     private val observeCloud: (SyncAccountBinding, AppSyncJournalLoadResult) -> Unit = { _, _ -> },
     private val canonicalRecovery: AppSyncCanonicalRecoveryContinuation? = null,
