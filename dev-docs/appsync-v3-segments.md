@@ -23,3 +23,9 @@ Migration 48 為 frozen recovery payload 增加 transportVersion 與 native root
 尚未確認的舊 intent 必須先呼叫注入的 authoritative discovery。找到原文件就回讀；只有完整掃描確認不存在才允許新 POST。未知結果、掃描失敗或歧義不能推定不存在。單次呼叫內，即使 POST 逾時後掃描回報不存在，也只回報可重試，不立即重送。驗證失敗、登入失效與 rollout gate 關閉分別保留可辨識結果；每次 POST 前重新檢查 gate。
 
 呼叫端仍須提供帳號/session lease、正式完整掃描及新鮮 reader-cohort gate。傳輸預算尚未另存於 session；不同設定造成的計畫變更會在任何 POST 前拒絕，而非改寫既有 generation。正式啟用前仍需完成固定傳輸設定、index 回讀提交、worker 重試及完整故障驗收。五項 SQLite／fake-provider 回歸涵蓋 frozen bytes、重啟、分段與 root 遺失回應、完整不存在證據、gate／登入／回讀錯誤、計畫變更及 pending 保留。
+
+`AppSyncV3ArtifactReconciler` 提供基於 provider 的完整分類掃描，限制最多 100 頁、10,000 個實體 ID，使用正式同步分類名稱核對每頁分類。分頁必須連續、current／total 一致，不接受重複 ID、無法解析的 next URL 或超限；只有全部頁面完成後才讀取所有同名候選。逐一核對實體 ID、標題與 reader 文字 SHA-256；唯一精確符合回傳 Found、多份符合回傳 Conflict，完整掃描無符合才回傳 Absent。同名舊 generation 不算本次寫入成功。任何未完成掃描、候選遺失／無法讀取、分類或分頁異常均回傳 Unknown；登入中斷另回傳 FormExpired，取消則向呼叫端傳播。
+
+這是沒有伺服器 snapshot token 的分頁讀取；無法保證掃描期間其他裝置不新增文件，呼叫端仍須持有本機帳號/session lease，並遵守 writer identity／cohort gate。元件不做遠端修改，也不以掃描結果授權清理。正式服務接線與 durable index commit 仍待完成。
+
+分段標題含 generation，因此同名分段只要摘要不同即回報 Conflict，不能視為不存在後再建立。root 主文件標題允許不同 generation，完整讀取的舊 root 可略過。本次測試將發布器的預設 fixture discovery 換成此元件，確保 readback mismatch 仍保留原 intent 且不重送；另覆蓋多頁完整掃描、缺頁、重複頁、上限、登入中斷、候選遺失、重複符合、同名舊 root 與分類不符。

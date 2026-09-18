@@ -3,6 +3,8 @@ package me.thenano.yamibo.yamibo_app.repository.appsync
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.github.littlesurvival.dto.model.TimeInfo
 import io.github.littlesurvival.dto.model.User
+import io.github.littlesurvival.dto.model.BlogSummary
+import io.github.littlesurvival.dto.model.PageNav
 import io.github.littlesurvival.dto.page.*
 import io.github.littlesurvival.dto.value.*
 import kotlinx.coroutines.runBlocking
@@ -33,7 +35,7 @@ class AppSyncV3SegmentPublisherTest {
             (1..200).associate { (it.toString().encodeUtf8().sha256().hex() + ":epoch") to 1L }, emptyList())
         val envelope = AppSyncV3DocumentCodec().encodeCheckpoint(document)
         val provider = Provider()
-        fun publisher(gate: suspend () -> Boolean = { true }, discovery: suspend (String, String) -> AppSyncV3ArtifactDiscovery = provider::discover) =
+        fun publisher(gate: suspend () -> Boolean = { true }, discovery: suspend (String, String) -> AppSyncV3ArtifactDiscovery = AppSyncV3ArtifactReconciler(provider, BlogClassId(7))::discover) =
             AppSyncV3SegmentPublisher(provider, SqlDelightAppSyncRecoveryStore(db), { 10 }, codec, gate, discovery)
         suspend fun publish(publisher: AppSyncV3SegmentPublisher = publisher(), source: String = envelope) = publisher.publish(
             session.sessionId, source, kind, "checkpoint", AppSyncBlogClassSelection.Existing(BlogClassId(7)), FormHash("test"))
@@ -117,6 +119,44 @@ class AppSyncV3SegmentPublisherTest {
         assertEquals(2, provider.posts.size)
     }
 
+    @Test fun discoveryCompletesPaginationBeforeClaimingFoundOrAbsent() = fixture {
+        assertIs<AppSyncV3SegmentPublishResult.ReadyToCommitIndex>(publish())
+        provider.pageSize = 1
+        val artifact = provider.artifacts.entries.last()
+        val reconciler = AppSyncV3ArtifactReconciler(provider, BlogClassId(7))
+        assertEquals(AppSyncV3ArtifactDiscovery.Found(BlogId(artifact.key)),
+            reconciler.discover(artifact.value.title, artifact.value.message.encodeUtf8().sha256().hex()))
+        assertEquals(provider.artifacts.size, provider.listReads)
+        provider.listFailureAt = 2
+        assertEquals(AppSyncV3ArtifactDiscovery.Unknown, reconciler.discover("missing", "0".repeat(64)))
+        provider.listFailureAt = null
+        assertEquals(AppSyncV3ArtifactDiscovery.Absent, reconciler.discover("missing", "0".repeat(64)))
+        assertEquals(AppSyncV3ArtifactDiscovery.Unknown,
+            AppSyncV3ArtifactReconciler(provider, BlogClassId(7), maxPages = 1).discover("missing", "0".repeat(64)))
+        provider.repeatPage = true
+        assertEquals(AppSyncV3ArtifactDiscovery.Unknown, reconciler.discover("missing", "0".repeat(64)))
+    }
+
+    @Test fun discoveryRejectsDuplicateMatchesAndUnreadableCandidates() = fixture {
+        assertIs<AppSyncV3SegmentPublishResult.ReadyToCommitIndex>(publish())
+        val artifact = provider.artifacts.entries.last()
+        val title = artifact.value.title
+        val sha = artifact.value.message.encodeUtf8().sha256().hex()
+        val reconciler = AppSyncV3ArtifactReconciler(provider, BlogClassId(7))
+        provider.authOnRead = true
+        assertEquals(AppSyncV3ArtifactDiscovery.FormExpired, reconciler.discover(title, sha))
+        provider.authOnRead = false
+        provider.missingRead = true
+        assertEquals(AppSyncV3ArtifactDiscovery.Unknown, reconciler.discover(title, sha))
+        provider.missingRead = false
+        provider.artifacts[999] = artifact.value
+        assertEquals(AppSyncV3ArtifactDiscovery.Conflict, reconciler.discover(title, sha))
+        provider.artifacts[999] = artifact.value.copy(message = "older generation")
+        assertEquals(AppSyncV3ArtifactDiscovery.Found(BlogId(artifact.key)), reconciler.discover(title, sha))
+        provider.wrongClass = true
+        assertEquals(AppSyncV3ArtifactDiscovery.Unknown, reconciler.discover(title, sha))
+    }
+
     private class Provider : AppSyncBlogProvider {
         val posts = mutableListOf<AppSyncBlogWriteRequest>()
         val artifacts = linkedMapOf<Int, AppSyncBlogWriteRequest>()
@@ -125,6 +165,12 @@ class AppSyncV3SegmentPublisherTest {
         var authOnRead = false
         var wrongRead = false
         var reads = 0
+        var pageSize = 10_000
+        var listReads = 0
+        var listFailureAt: Int? = null
+        var repeatPage = false
+        var missingRead = false
+        var wrongClass = false
         fun discover(title: String, sha: String): AppSyncV3ArtifactDiscovery {
             val ids = artifacts.filterValues { it.title == title && it.message.encodeUtf8().sha256().hex() == sha }.keys
             return when (ids.size) {
@@ -133,7 +179,18 @@ class AppSyncV3SegmentPublisherTest {
                 else -> AppSyncV3ArtifactDiscovery.Conflict
             }
         }
-        override suspend fun fetchMyBlogs(blogClassId: BlogClassId?, page: Int): AppSyncCloudResult<UserSpaceBlogPage> = error("Discovery supplied by fixture")
+        override suspend fun fetchMyBlogs(blogClassId: BlogClassId?, page: Int): AppSyncCloudResult<UserSpaceBlogPage> {
+            listReads++
+            if (page == listFailureAt) return AppSyncCloudResult.Timeout("list interrupted")
+            val total = maxOf(1, (artifacts.size + pageSize - 1) / pageSize)
+            val rows = artifacts.entries.drop((if (repeatPage) 0 else page - 1) * pageSize).take(pageSize)
+            return AppSyncCloudResult.VerifiedSuccess(UserSpaceBlogPage(
+                blogs = rows.map { (id, request) -> BlogSummary("[${AppSyncCloudConfigDefaults.BLOG_CLASS_NAME}] ${request.title}", BlogId(id),
+                    "https://example.invalid/blog", "", User(UserId(1), "test", null), TimeInfo("test", epoch = 1)) },
+                pageNav = PageNav(currentPage = page, totalPages = total),
+                blogClasses = listOf(BlogPageClassInfo(if (wrongClass) "wrong" else AppSyncCloudConfigDefaults.BLOG_CLASS_NAME, BlogClassId(7))),
+            ))
+        }
         override suspend fun submitBlog(request: AppSyncBlogWriteRequest): AppSyncCloudResult<AppSyncPostAcknowledgement> {
             posts += request
             val id = 100 + posts.size
@@ -144,6 +201,7 @@ class AppSyncV3SegmentPublisherTest {
         override suspend fun fetchBlog(blogId: BlogId): AppSyncCloudResult<BlogPage> {
             reads++
             if (authOnRead) return AppSyncCloudResult.NotLoggedIn
+            if (missingRead) return AppSyncCloudResult.NotFound
             val artifact = artifacts[blogId.value] ?: return AppSyncCloudResult.NotFound
             return AppSyncCloudResult.VerifiedSuccess(BlogPage(BlogInfo(blogId, artifact.title),
                 BlogComment(author = User(UserId(1), "test", null), contentHtml = if (wrongRead) "wrong" else artifact.message.replace("\n", "<br>"),
