@@ -73,11 +73,11 @@ internal class SqlDelightAppSyncReaderCohortStore(private val db: Database,
                 it.writerNonce.isBlank() || it.writerNonce.length > 1024 || it.remoteId.toIntOrNull()?.let { id -> id > 0 } != true ||
                 it.fingerprint.isBlank() || it.fingerprint.length > 128 || it.readVersion < 1 || it.heartbeat < 0 }) return
         val unique = readers.distinct()
-        if (unique.groupBy { it.replica }.any { it.value.size != 1 } ||
+        if (unique.groupBy { it.replica }.any { (_, history) -> history.map { it.writerNonce }.distinct().size != 1 } ||
             unique.groupBy { it.remoteId }.any { it.value.size != 1 } ||
             !unique.map { it.replica }.toSet().containsAll(cloud.indexedReplicaKeys)) return
         val evidence = AppSyncReaderCohortEvidence(account = account.value, observedAt = now,
-            readers = unique.sortedBy { it.replica })
+            readers = unique.sortedWith(compareBy({ it.replica }, { it.remoteId }, { it.fingerprint })))
         val encoded = json.encodeToString(AppSyncReaderCohortEvidence.serializer(), evidence)
         db.appSyncReaderCohortQueries.putEvidence(account.value, encoded, encoded.encodeUtf8().sha256().hex())
     }
@@ -105,12 +105,16 @@ internal class SqlDelightAppSyncReaderCohortStore(private val db: Database,
         val evidence = evidence(account) ?: return false
         if (now < evidence.observedAt || now - evidence.observedAt > maximumAgeMillis) return false
         val own = "${installation.deviceId.value}:${installation.deviceEpoch.value}"
-        val ownReader = evidence.readers.singleOrNull { it.replica == own } ?: return false
-        if (ownReader.writerNonce != installation.writerNonce.value || ownReader.readVersion < 3) return false
-        if (evidence.observedAt > ownReader.heartbeat && evidence.observedAt - ownReader.heartbeat > inactiveAfterMillis) return false
+        val ownHistory = evidence.readers.filter { it.replica == own }
+        if (ownHistory.isEmpty() || ownHistory.any { it.writerNonce != installation.writerNonce.value }) return false
+        fun active(reader: AppSyncReaderObservation): Boolean = reader.heartbeat >= evidence.observedAt ||
+            evidence.observedAt - reader.heartbeat <= inactiveAfterMillis
+        if (ownHistory.none(::active)) return false
         // Age against the authoritative observation, not against a later clock that might
         // silently age an incompatible reader out without discovering its newer heartbeat.
-        return evidence.readers.filter { it.replica == own || it.heartbeat >= evidence.observedAt ||
-            evidence.observedAt - it.heartbeat <= inactiveAfterMillis }.all { it.readVersion >= 3 }
+        // Retained generations are observations of the same writer, not duplicate devices.
+        // Keep every active observation: a newer compatible artifact cannot hide an active
+        // incompatible one, even when both claim the same writer nonce.
+        return evidence.readers.filter(::active).all { it.readVersion >= 3 }
     }
 }

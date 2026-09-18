@@ -404,6 +404,60 @@ class AppSyncCanonicalCheckpointActivatorTest {
                 sanitizedV2Fallback = true))
     }
 
+    @Test fun fallbackRemoteRoundTripRetainsNativeHistoryAndAllowsNextPublication() = fixture {
+        val provider = nativePublishingEnvironment().first
+        val own = assertNotNull(store.installation())
+        val identity = "${own.deviceId.value}:${own.deviceEpoch.value}"
+        val journal = AppSyncCanonicalJournal(AppSyncCanonicalOperationBlock(account.value, emptyList()),
+            own.deviceId.value, own.deviceEpoch.value, own.writerNonce.value, 0, 0, emptyMap(), emptyList(), now, 3, 3, "test", 0)
+        val body = AppSyncV3DocumentCodec().encodeJournal(identity, journal)
+        val original = assertNotNull(provider.artifacts[123]).copy(blogId = io.github.littlesurvival.dto.value.BlogId(125),
+            title = AppSyncJournalDefaults.journalTitle(own.deviceId, own.deviceEpoch), message = body)
+        provider.artifacts[125] = original
+        provider.artifacts[124] = assertNotNull(provider.artifacts[124]).copy(message = AppSyncIndexEnvelopeCodec().encode(
+            AppSyncIndexPayload(account, journals = listOf(AppSyncIndexJournalReference(identity, 125,
+                AppSyncCanonicalJournalCodec().encode(journal).sha256().hex())),
+                checkpoints = listOf(AppSyncIndexCheckpointReference(checkpoint.checkpointId, 123, verified().fingerprint)),
+                updatedAtEpochMillis = now)))
+        val blogs = SqlDelightAppSyncRemoteBlogStore(db).also {
+            it.saveClassId(account, io.github.littlesurvival.dto.value.BlogClassId(7))
+        }
+        val remote = YamiboAppSyncJournalRemote(provider, blogs, nowMillis = { now })
+        val cohort = SqlDelightAppSyncReaderCohortStore(db)
+        fun load(): AppSyncJournalLoadResult.Success {
+            val loaded = assertIs<AppSyncJournalLoadResult.Success>(kotlinx.coroutines.runBlocking { remote.loadJournals(account, true) })
+            assertTrue(loaded.authoritativeDiscovery)
+            assertTrue(loaded.canonicalReadIssues.isEmpty())
+            assertTrue(loaded.retirementDiscoveryIssues.isEmpty())
+            assertTrue(loaded.canonicalDocuments.any { it.remoteId == "125" })
+            cohort.observe(account, loaded, now)
+            assertTrue(cohort.canWriteSanitizedV2(assertNotNull(store.installation()), now, true))
+            return loaded
+        }
+        repeat(2) { index ->
+            now++
+            append((20 + index).toString())
+            val cloud = load()
+            val result = synchronize(cloud, fallbackContinuation(provider, allowed = {
+                cohort.canWriteSanitizedV2(assertNotNull(store.installation()), now, true)
+            }))
+            assertIs<OperationSyncResult.Converged>(result, "round $index: $result")
+            assertTrue(store.pendingOperations().isEmpty())
+            assertEquals(original, provider.artifacts[125])
+        }
+        val finalCloud = load()
+        assertEquals(2, finalCloud.journals.size)
+        assertEquals(3, assertNotNull(cohort.evidence(account)).readers.size)
+        assertIs<AppSyncCanonicalCloudPlan.Ready>(AppSyncCanonicalCloudPlanner().prepare(account, assertNotNull(store.installation()), finalCloud))
+        assertEquals(6, provider.posts.size)
+        val restricted = YamiboAppSyncJournalRemote(provider, blogs, nowMillis = { now },
+            capacityFlags = AppSyncCapacityFeatureFlags(v2ReadsEnabled = false))
+        val indexedOnly = assertIs<AppSyncJournalLoadResult.Success>(kotlinx.coroutines.runBlocking { restricted.loadJournals(account, true) })
+        assertEquals(1, indexedOnly.journals.size)
+        assertEquals(2L, indexedOnly.journals.single().payload.lastSequence)
+        assertIs<AppSyncCanonicalCloudPlan.Ready>(AppSyncCanonicalCloudPlanner().prepare(account, assertNotNull(store.installation()), indexedOnly))
+    }
+
     @Test fun engineFallbackDispatchForcesDiscoveryAndCompletesWithNativeWriterDisabled() = fixture {
         val first = append("20")
         val provider = nativePublishingEnvironment().first

@@ -1150,8 +1150,8 @@ internal class YamiboAppSyncJournalRemote(
         formHash: FormHash,
         pinnedCheckpointIds: Set<String>,
     ): AppSyncCleanupRunResult? {
-        // This is the only opportunistic full-list v2 scan. Index-committed v2 roots remain
-        // readable through loadCachedState even when this rollout switch is disabled.
+        // Cleanup independently enumerates v2 roots. Index-committed roots remain
+        // readable through cached and authoritative loads when this switch is disabled.
         if (!capacityFlags.mayReadV2(committedIndexReference = false)) return null
         val observationStore = cleanupObservationStore ?: return null
         val durableStore = recoveryStore ?: return null
@@ -1495,13 +1495,20 @@ internal class YamiboAppSyncJournalRemote(
             }
             .maxWithOrNull(compareBy({ it.timeInfo.epoch }, { it.bId.value }))
             ?.bId
-        for ((title, bId, _, _, _, timeInfo) in summaries) {
+        // Resolve the authoritative index before roots so referenced v2 artifacts stay
+        // readable even when opportunistic v2 discovery is disabled.
+        val orderedSummaries = summaries.sortedBy {
+            normalizeListTitle(it.title, AppSyncCloudConfigDefaults.BLOG_CLASS_NAME) != APP_SYNC_INDEX_TITLE
+        }
+        for ((title, bId, _, _, _, timeInfo) in orderedSummaries) {
             val normalizedTitle = normalizeListTitle(
                 title,
                 AppSyncCloudConfigDefaults.BLOG_CLASS_NAME,
             )
             when {
-                normalizedTitle.startsWith(AppSyncJournalDefaults.JOURNAL_TITLE_PREFIX) -> {
+                normalizedTitle.startsWith(AppSyncJournalDefaults.JOURNAL_TITLE_PREFIX) ||
+                    (normalizedTitle.startsWith(AppSyncJournalDefaults.ROOT_TITLE_PREFIX + "journal-") &&
+                        capacityFlags.mayReadV2(verifiedIndex?.payload?.journals?.any { it.blogId == bId.value } == true)) -> {
                     val candidate = StoredAppSyncRemoteBlog(
                         remoteKey = "candidate:${bId.value}",
                         kind = AppSyncRemoteBlogKind.Journal,
@@ -1561,7 +1568,9 @@ internal class YamiboAppSyncJournalRemote(
                             retirementDiscoveryIssues += "Index validation failed"
                     }
                 }
-                normalizedTitle.startsWith(AppSyncJournalDefaults.CHECKPOINT_TITLE_PREFIX) -> {
+                normalizedTitle.startsWith(AppSyncJournalDefaults.CHECKPOINT_TITLE_PREFIX) ||
+                    (normalizedTitle.startsWith(AppSyncJournalDefaults.ROOT_TITLE_PREFIX + "checkpoint-") &&
+                        capacityFlags.mayReadV2(verifiedIndex?.payload?.checkpoints?.any { it.blogId == bId.value } == true)) -> {
                     val candidate = StoredAppSyncRemoteBlog(
                         remoteKey = "checkpoint-candidate:${bId.value}",
                         kind = AppSyncRemoteBlogKind.Checkpoint,

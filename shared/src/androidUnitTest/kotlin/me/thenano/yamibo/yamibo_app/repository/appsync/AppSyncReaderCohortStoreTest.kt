@@ -27,6 +27,31 @@ class AppSyncReaderCohortStoreTest {
         assertFalse(allowed())
     }
 
+    @Test fun retainedGenerationsOfSameWriterKeepAllActiveCapabilityEvidence() = fixture {
+        val current = journal(heartbeat = 200, remoteId = "42")
+        val retained = journal(heartbeat = 180, remoteId = "43")
+        store.observe(account, cloud(current, retained), 200)
+        assertTrue(eligible())
+        assertTrue(store.canWriteSanitizedV2(installation, 200, true))
+        assertEquals(2, assertNotNull(store.evidence(account)).readers.size)
+        val before = store.evidence(account)
+        store.observe(account, cloud(retained, current, retained), 200)
+        assertEquals(before, store.evidence(account))
+        // Latest compatible heartbeat cannot erase incompatible active evidence.
+        store.observe(account, cloud(current, journal(2, heartbeat = 180, remoteId = "43")), 200)
+        assertFalse(eligible())
+        assertFalse(store.canWriteSanitizedV2(installation, 200, true))
+        assertFalse(eligible(221))
+        store.observe(account, cloud(current, journal(2, heartbeat = 99, remoteId = "43")), 200)
+        assertTrue(eligible())
+        store.observe(account, cloud(journal(heartbeat = 99), journal(heartbeat = 98, remoteId = "43")), 200)
+        assertFalse(eligible())
+        store.observe(account, cloud(current, journal(remoteId = "43", nonce = "restored")), 200)
+        assertNull(store.evidence(account))
+        store.observe(account, cloud(current, journal(heartbeat = 180, remoteId = "42")), 200)
+        assertNull(store.evidence(account))
+    }
+
     @Test fun rollbackPreparationPreservesJournalHistoryAndOnlyChangesWriteProtocol() = fixture {
         store.observe(account, cloud(journal()), 200)
         val own = installation.copy(nextSequence = 3)

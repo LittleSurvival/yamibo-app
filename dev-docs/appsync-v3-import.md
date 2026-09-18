@@ -187,3 +187,25 @@ stop，保留本文與來源，需恢復相容條件後 explicit resume。已提
 此開關不宣告 reader capability，不啟用雲端刪除；既有裝置 cohort／reader rollout 與實際裝置
 回退續跑驗收仍須完成。新增 engine integration 覆蓋強制探索、native writer 關閉時回退發布、
 開關切換時保留固定格式，以及已提交工作在所有 writer 關閉後恢復設定。
+
+
+## 保留歷史文件的 reader cohort
+
+完整探索可能同時看到原 v3 journal 與多代 sanitized v2 root。Cohort 保存各份觀察，允許同一
+replica 的多份文件，但必須具有相同 writer nonce；同一 physical Blog ID 的矛盾內容仍會使
+整次觀察失效。證據以 replica／remote ID／fingerprint 固定排序，重複探索不依賴列舉順序。
+
+Gate 要求本機至少一份仍活躍的觀察、相符 nonce，並核對所有活躍觀察的 read version >= 3。
+較新或已索引的相容文件不會覆蓋仍活躍的不相容證據；因此保留的舊 reader-version 文件仍可能
+阻擋 rollout，直到完整新探索證明其已超過 inactivity 規則或另有驗證完成的 retirement。
+Activity 一律以觀察時間計算，不因單純等待或重新呼叫 gate 而跳過不相容來源。
+
+遠端往返回歸使用正式 YamiboAppSyncJournalRemote、v3/v2 codecs、SQLite cohort 與 recovery
+adapter，搭配記憶體 provider：保留原 native journal，連續發布兩代回退日誌，再完整探索與
+canonical planning。這不是實際 Yamibo 網路或 Android 裝置驗收。
+
+
+完整探索現在先解析 authoritative index，再讀取清單中的 journal／checkpoint segment roots。
+一般 v2 探索關閉時，仍讀取目前 index 引用的 root。原先完整探索漏讀 root 的行為會讓下一輪
+只看見舊 direct journal，準備發布時因缺少前次操作而判定 SequenceGap；上述往返測試覆蓋此
+修正，並檢查關閉一般 v2 探索後最新已索引回退日誌仍可建立 canonical plan。
