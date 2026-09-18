@@ -21,6 +21,7 @@ internal class AppSyncNativeJournalStarter(
     private val activator: AppSyncCanonicalCheckpointActivator,
     private val nowMillis: () -> Long,
     private val canWrite: () -> Boolean,
+    private val sanitizedV2Fallback: Boolean = false,
 ) {
     suspend fun start(account: SyncAccountBinding, cloud: AppSyncCanonicalCloudPlan.Ready): Result<String> = runCatching {
         check(canWrite()) { "Native writer rollout is not available" }
@@ -47,7 +48,7 @@ internal class AppSyncNativeJournalStarter(
                 source.accountBinding == account && lifecycle == AppSyncOperationLifecycle.Acknowledged &&
                     source.sequence.value > (cloud.checkpoint.document.coverage[source.replicaKey.stableKey] ?: 0L)
             } else 0
-            if (acknowledgedTail >= 64) {
+            if (!sanitizedV2Fallback && acknowledgedTail >= 64) {
                 val timestamp = nowMillis()
                 val codec = AppSyncCanonicalCheckpointCodec()
                 val identity = codec.encode(local.copy(checkpointId = "candidate", createdAtEpochMillis = timestamp)).sha256().hex()
@@ -77,6 +78,7 @@ internal class AppSyncNativeJournalStarter(
             recovery.pinPayload(session.sessionId, "Journal", "${installation.deviceId.value}:${installation.deviceEpoch.value}", 3) {
                 prepared.envelope
             }
+            if (sanitizedV2Fallback) recovery.pinSanitizedV2Payload(session.sessionId, canWrite)
             operations.markAcknowledged(covered.map { it.operationId }.toSet(), nowMillis())
             session.sessionId
         }

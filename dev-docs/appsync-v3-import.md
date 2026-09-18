@@ -100,3 +100,11 @@ Legacy publication 現在有共用相容性檢查：journal 操作、checkpoint 
 `canWriteSanitizedV2` 與 v3 writer／benchmark 開關分離，但仍要求本機 reader ready、Active installation、相符 account／writer nonce、完整且未過期的 authoritative cohort，以及所有有效 reader 的 read version >= 3。證據缺失、cached scan、時間倒退或任何有效舊 reader 都不能通過。v3 `canWrite` 在此共同 reader 條件之外，仍保留原 writer 與 benchmark 開關。
 
 `AppSyncSanitizedV2JournalPreparation` 預設禁止準備，呼叫方必須提供上述能力檢查。它核對 installation writer 與 next sequence、驗證完整 canonical journal、轉換 portable operations，保留 causal／observed／published watermark、checkpoint acknowledgements、heartbeat 和 app version，僅將 write protocol 改為 2。v2 envelope 編碼後須重新解碼核對，並再次檢查 gate，才回傳固定 envelope 與 fingerprint。此結果不是遠端確認，不修改來源／outbox／索引。正式發布還需要每次網路寫入前重查 gate、durable intent、readback 與保護原 native root；這些接線仍待完成。
+
+## 回退 session 的固定 payload
+
+Migration 58→59 新增 `AppSyncV2FallbackPayload`，以 recovery session 為外鍵保存 v2 envelope、其 SHA-256 與原 canonical envelope 的 SHA-256；既有 session 不會憑空取得回退證據。`AppSyncNativeJournalStarter` 的顯式 `sanitizedV2Fallback` 選項，將 canonical journal、來源集合和 v2 bytes 放在同一個 DB transaction 內建立；此模式暫不觸發 native checkpoint cadence，避免回退時發出新的 v3 checkpoint。
+
+重新載入核對兩份固定 bytes、當前 writer 與 canonical→v2 轉換結果。後續本機操作不加入已固定的 journal；交易失敗會一起回復，pre-commit rollback 會清除附屬 payload，保留 pending sources。開始發布後不得把普通 native session 改成回退 session。v3 segment／index publisher 在回退綁定存在時拒絕執行，避免重新打開 v3 flag 後誤發錯誤格式。
+
+目前這個 starter 選項尚未由正式 service 啟用；v2 專用發布、索引確認與 canonical activation 還需接線並驗證中斷重試。因此 3.9 與完整回退驗收仍未完成。

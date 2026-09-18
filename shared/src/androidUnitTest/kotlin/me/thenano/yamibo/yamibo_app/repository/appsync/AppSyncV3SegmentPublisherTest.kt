@@ -18,6 +18,32 @@ import me.thenano.yamibo.yamibo_app.store.appsync.*
 import okio.ByteString.Companion.encodeUtf8
 
 class AppSyncV3SegmentPublisherTest {
+    @Test fun fallbackBindingRejectsNativePublishersBeforeProviderWrites() = fixture {
+        val (id, body, identity) = prepareJournal()
+        recovery.pinPayload(id, "Journal", identity, 3) { body }
+        val wire = recovery.pinSanitizedV2Payload(id) { true }
+        recovery.startSegmentedJournal(id, 3)
+        assertEquals(wire, SqlDelightAppSyncRecoveryStore(db).sanitizedV2Payload(id))
+        assertFalse(publisher().publish(id, body, AppSyncV3PayloadKind.Journal, identity,
+            AppSyncBlogClassSelection.Existing(BlogClassId(7)), FormHash("test")) is AppSyncV3SegmentPublishResult.ReadyToCommitIndex)
+        assertIs<AppSyncSegmentIndexCommitResult.Terminal>(committer().commit(id, body, AppSyncV3PayloadKind.Journal,
+            identity, AppSyncBlogClassSelection.Existing(BlogClassId(7)), FormHash("test")))
+        assertTrue(provider.posts.isEmpty())
+        assertTrue(recovery.segmentWrites(id).isEmpty())
+        driver.execute(null, "UPDATE AppSyncV2FallbackPayload SET envelope = envelope || 'x' WHERE sessionId = ?", 1) {
+            bindString(0, id)
+        }
+        assertFailsWith<IllegalArgumentException> { recovery.sanitizedV2Payload(id) }
+    }
+
+    @Test fun migration58StartsWithoutInventingFallbackEvidence() {
+        JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).use { driver ->
+            driver.execute(null, "CREATE TABLE AppSyncRecoverySession (sessionId TEXT NOT NULL PRIMARY KEY)", 0)
+            driver.execute(null, "INSERT INTO AppSyncRecoverySession VALUES ('existing')", 0)
+            Database.Schema.migrate(driver, 58, 59)
+            assertNull(Database(driver).appSyncV2FallbackPayloadQueries.getForSession("existing").executeAsOneOrNull())
+        }
+    }
     private val account = SyncAccountBinding("account")
     private val kind = AppSyncV3PayloadKind.Checkpoint
     private inner class Fixture(val db: Database, val driver: JdbcSqliteDriver) {

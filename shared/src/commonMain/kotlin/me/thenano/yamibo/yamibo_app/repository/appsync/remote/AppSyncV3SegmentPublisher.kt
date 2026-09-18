@@ -39,6 +39,7 @@ internal class AppSyncV3SegmentPublisher(private val provider: AppSyncBlogProvid
     suspend fun publish(sessionId: String, envelope: String, kind: AppSyncV3PayloadKind, identity: String,
         selection: AppSyncBlogClassSelection, formHash: FormHash): AppSyncV3SegmentPublishResult = try {
         if (!canWrite()) throw Stop(AppSyncV3SegmentPublishResult.Disabled)
+        require(!recovery.hasSanitizedV2Payload(sessionId)) { "Sanitized v2 recovery requires its own publisher" }
         val session = requireNotNull(recovery.session(sessionId)) { "Missing native recovery session" }
         require(session.phase in setOf(AppSyncRecoveryPhase.PublishingSegments, AppSyncRecoveryPhase.PublishingRoot,
             AppSyncRecoveryPhase.CommittingIndex)) { "Native recovery is not in a publishing phase" }

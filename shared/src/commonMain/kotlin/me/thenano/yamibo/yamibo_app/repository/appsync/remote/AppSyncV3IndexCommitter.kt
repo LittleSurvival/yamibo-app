@@ -37,6 +37,8 @@ internal class AppSyncV3IndexCommitter(
         selection: AppSyncBlogClassSelection.Existing, formHash: FormHash,
         requiredCheckpoint: AppSyncVerifiedCanonicalCheckpoint?): AppSyncSegmentIndexCommitResult {
         if (!canWrite()) return AppSyncSegmentIndexCommitResult.Terminal("Native index publication is disabled")
+        if (recovery.hasSanitizedV2Payload(sessionId))
+            return AppSyncSegmentIndexCommitResult.Terminal("Sanitized v2 recovery requires its own index publisher")
         val session = requireNotNull(recovery.session(sessionId))
         if (session.indexCommitted && session.phase in setOf(AppSyncRecoveryPhase.ActivatingLocal, AppSyncRecoveryPhase.Completed) && recovery.usesNativeTransport(sessionId))
             return AppSyncSegmentIndexCommitResult.Verified

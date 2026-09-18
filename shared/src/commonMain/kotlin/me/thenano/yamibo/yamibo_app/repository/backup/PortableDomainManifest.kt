@@ -50,6 +50,7 @@ internal object PortableDomainManifest {
         excluded("AppSyncLocalPrune", "Device-local payload-free reclamation accounting"),
         excluded("AppSyncNativeCompletion", "Device-local payload-free native recovery completion receipts"),
         excluded("AppSyncRetainedJournal", "Device-local native journal evidence awaiting verified checkpoint coverage"),
+        excluded("AppSyncV2FallbackPayload", "Device-local frozen sanitized v2 recovery transport evidence"),
         excluded("AppSyncInstallation", "Device and account binding metadata"),
         excluded("AppSyncRemoteBlog", "Remote transport cache"),
         excluded("authentication", "Credentials, cookies, and FormHash are device-local secrets"),

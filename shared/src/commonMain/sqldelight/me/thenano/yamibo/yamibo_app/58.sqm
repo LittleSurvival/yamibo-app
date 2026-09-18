@@ -1,0 +1,6 @@
+CREATE TABLE AppSyncV2FallbackPayload (
+    sessionId TEXT NOT NULL PRIMARY KEY REFERENCES AppSyncRecoverySession(sessionId) ON DELETE CASCADE,
+    nativeEnvelopeSha256 TEXT NOT NULL,
+    envelope TEXT NOT NULL,
+    envelopeSha256 TEXT NOT NULL
+);

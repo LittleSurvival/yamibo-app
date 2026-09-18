@@ -1,0 +1,9 @@
+getForSession:
+SELECT * FROM AppSyncV2FallbackPayload WHERE sessionId = ?;
+
+pin:
+INSERT INTO AppSyncV2FallbackPayload(sessionId, nativeEnvelopeSha256, envelope, envelopeSha256)
+VALUES (?, ?, ?, ?);
+
+deleteForSession:
+DELETE FROM AppSyncV2FallbackPayload WHERE sessionId = ?;

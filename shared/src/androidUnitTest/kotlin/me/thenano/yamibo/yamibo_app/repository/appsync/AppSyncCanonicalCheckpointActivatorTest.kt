@@ -243,6 +243,37 @@ class AppSyncCanonicalCheckpointActivatorTest {
     private fun AppSyncNativeJournalStarter.startBlocking(account: SyncAccountBinding, cloud: AppSyncCanonicalCloudPlan.Ready) =
         kotlinx.coroutines.runBlocking { start(account, cloud) }
 
+    @Test fun fallbackStarterFreezesBothFormatsAtomicallyAndPreservesLaterPendingSources() = fixture {
+        val first = append("20")
+        val recovery = SqlDelightAppSyncRecoveryStore(db)
+        val cloud = AppSyncCanonicalCloudPlan.Ready(verified(), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
+        val starter = AppSyncNativeJournalStarter(db, store, recovery, state, activator(), { now }, { true }, sanitizedV2Fallback = true)
+        val id = starter.startBlocking(account, cloud).getOrThrow()
+        val envelope = recovery.sanitizedV2Payload(id)
+        val parsed = assertIs<AppSyncJournalValidation.Valid>(AppSyncJournalEnvelopeCodec().validate(envelope)).envelope.payload
+        assertEquals(2, parsed.protocolWriteVersion)
+        assertEquals(listOf(first.operationId), parsed.operations.map { it.operationId })
+        assertEquals(setOf(first.operationId.value), recovery.session(id)?.sourceOperationIds)
+        assertEquals(AppSyncRecoveryPhase.Classifying, recovery.session(id)?.phase)
+        assertEquals(listOf(first), store.pendingOperations())
+        val later = append("22")
+        val restarted = SqlDelightAppSyncRecoveryStore(db)
+        assertEquals(envelope, restarted.sanitizedV2Payload(id))
+        assertEquals(listOf(first, later), store.pendingOperations())
+        db.appSyncV2FallbackPayloadQueries.deleteForSession(id)
+        assertFailsWith<IllegalStateException> {
+            db.transaction {
+                recovery.pinSanitizedV2Payload(id) { true }
+                error("abort")
+            }
+        }
+        assertFalse(recovery.hasSanitizedV2Payload(id))
+        assertEquals(envelope, recovery.pinSanitizedV2Payload(id) { true })
+        recovery.rollbackPreCommit(id)
+        assertFalse(recovery.hasSanitizedV2Payload(id))
+        assertEquals(listOf(first, later), store.pendingOperations())
+    }
+
     @Test fun ordinaryCanonicalSyncDrainsRetainedJournalsWithoutAnotherTrigger() = fixture {
         retainJournalHistory(17)
         val cp = assertNotNull(state.read(account.value)).copy(checkpointId = "drain-all")

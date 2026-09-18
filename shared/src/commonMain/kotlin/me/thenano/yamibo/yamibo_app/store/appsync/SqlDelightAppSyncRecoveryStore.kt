@@ -105,6 +105,7 @@ internal class SqlDelightAppSyncRecoveryStore(
             if (existing.phase == AppSyncRecoveryPhase.Completed) {
                 db.transaction {
                     preserveCompletedNativeJournal(existing.sessionId)
+                    db.appSyncV2FallbackPayloadQueries.deleteForSession(existing.sessionId)
                     queries.deleteRecoverySegmentWrites(existing.sessionId)
                     queries.deleteRecoveryShadowOperations(existing.sessionId)
                     queries.deleteRecoveryPayload(existing.sessionId)
@@ -164,6 +165,50 @@ internal class SqlDelightAppSyncRecoveryStore(
 
     fun session(sessionId: String): AppSyncRecoverySession? =
         queries.getRecoverySession(sessionId).executeAsOneOrNull()?.toModel()
+
+    fun hasSanitizedV2Payload(sessionId: String): Boolean =
+        db.appSyncV2FallbackPayloadQueries.getForSession(sessionId).executeAsOneOrNull() != null
+
+    /** Must share the starter's transaction with session/source/native payload creation. */
+    fun pinSanitizedV2Payload(sessionId: String, canWrite: () -> Boolean): String = db.transactionWithResult {
+        check(canWrite()) { "Sanitized v2 reader compatibility changed" }
+        val session = requireSession(sessionId)
+        require(session.mode == AppSyncRecoveryMode.SegmentedJournal)
+        val native = nativePayload(sessionId)
+        require(native.kind == AppSyncV3PayloadKind.Journal)
+        val journal = (AppSyncV3DocumentCodec().discover(native.body, session.accountBinding.value,
+            AppSyncV3PayloadKind.Journal) as? AppSyncV3DocumentRead.Journal)?.document
+            ?: error("Frozen canonical journal is invalid")
+        val installation = requireNotNull(SqlDelightAppSyncOperationStore(db, json).installation())
+        val prepared = me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncSanitizedV2JournalPreparation(canWrite)
+            .prepare(installation, journal) as? me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncV2JournalPreparation.Ready
+            ?: error("Canonical journal cannot be exported as sanitized v2")
+        val existing = db.appSyncV2FallbackPayloadQueries.getForSession(sessionId).executeAsOneOrNull()
+        val nativeSha = native.body.encodeUtf8().sha256().hex()
+        val wireSha = prepared.envelope.encodeUtf8().sha256().hex()
+        if (existing != null) {
+            require(existing.nativeEnvelopeSha256 == nativeSha && existing.envelope == prepared.envelope &&
+                existing.envelopeSha256 == wireSha) { "Frozen sanitized v2 payload changed" }
+        } else {
+            require(session.phase == AppSyncRecoveryPhase.Classifying && !session.indexCommitted &&
+                session.rootBlogId == null && segmentWrites(sessionId).isEmpty()) {
+                "Cannot convert an already publishing native session"
+            }
+            db.appSyncV2FallbackPayloadQueries.pin(sessionId, nativeSha, prepared.envelope, wireSha)
+        }
+        prepared.envelope
+    }
+
+    fun sanitizedV2Payload(sessionId: String): String = db.transactionWithResult {
+        val row = requireNotNull(db.appSyncV2FallbackPayloadQueries.getForSession(sessionId).executeAsOneOrNull())
+        require(row.envelope.encodeUtf8().sha256().hex() == row.envelopeSha256 &&
+            nativePayload(sessionId).body.encodeUtf8().sha256().hex() == row.nativeEnvelopeSha256) {
+            "Frozen sanitized v2 evidence changed"
+        }
+        // Re-export against the frozen canonical journal and current writer; no new bytes or
+        // phase changes are allowed. This read does not grant permission for a network write.
+        pinSanitizedV2Payload(sessionId) { true }
+    }
 
     /** Freeze the first wire envelope before any remote intent; retries never regenerate it. */
     fun pinPayload(
@@ -1146,6 +1191,7 @@ internal class SqlDelightAppSyncRecoveryStore(
             "Committed or ambiguous recovery cannot be rolled back without discovery"
         }
         db.transaction {
+            db.appSyncV2FallbackPayloadQueries.deleteForSession(sessionId)
             queries.deleteRecoverySegmentWrites(sessionId)
             queries.deleteRecoveryShadowOperations(sessionId)
             queries.deleteRecoveryPayload(sessionId)
