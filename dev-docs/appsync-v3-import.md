@@ -94,3 +94,9 @@ Legacy publication 現在有共用相容性檢查：journal 操作、checkpoint 
 每筆輸出須通過現行 legacy domain 契約，並重新匯入為與來源完全相同的 canonical operation 與 proof。任何一筆不符即拒絕整批；診斷只有固定原因，不包含使用者資料。快取、父實體標籤和本機欄位不從 materialized projection 補回。
 
 新版 legacy domain 契約已允許省略 canonical registry 判定為 Cache、ParentJoinable、DeviceLocal 或 BoundedPresentation 的欄位；Essential 與必要 Derived 識別仍須存在。使用者命名的 RSS title 仍屬 Essential 且不得省略；event 以已驗證 discriminator 還原識別，不要求重複顯示標題。本機 materializer 僅為缺少的非 nullable cache／顯示欄位提供空字串，RSS 歷程從現有 parent 取得省略的 title／query，不改寫 remote winners。這讓 19-domain 語料的 canonical operations 可經 sanitized v2 編碼、讀取、reduce 並套用資料庫。這項行為需要已更新的 reader；不能據此推論已發佈舊版客戶端也接受缺少欄位。此 adapter 尚未接入正式 fallback dispatch，不代表任意舊 reader 均可讀、來源已確認、v3 root 已替換或完整回退已完成；正式發布仍須 reader capability、durable intent、index readback 與原 v3 root 保護。
+
+## 回退 journal 與 reader gate
+
+`canWriteSanitizedV2` 與 v3 writer／benchmark 開關分離，但仍要求本機 reader ready、Active installation、相符 account／writer nonce、完整且未過期的 authoritative cohort，以及所有有效 reader 的 read version >= 3。證據缺失、cached scan、時間倒退或任何有效舊 reader 都不能通過。v3 `canWrite` 在此共同 reader 條件之外，仍保留原 writer 與 benchmark 開關。
+
+`AppSyncSanitizedV2JournalPreparation` 預設禁止準備，呼叫方必須提供上述能力檢查。它核對 installation writer 與 next sequence、驗證完整 canonical journal、轉換 portable operations，保留 causal／observed／published watermark、checkpoint acknowledgements、heartbeat 和 app version，僅將 write protocol 改為 2。v2 envelope 編碼後須重新解碼核對，並再次檢查 gate，才回傳固定 envelope 與 fingerprint。此結果不是遠端確認，不修改來源／outbox／索引。正式發布還需要每次網路寫入前重查 gate、durable intent、readback 與保護原 native root；這些接線仍待完成。

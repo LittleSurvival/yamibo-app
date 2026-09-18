@@ -92,7 +92,15 @@ internal class SqlDelightAppSyncReaderCohortStore(private val db: Database,
 
     fun canWrite(installation: AppSyncInstallation, now: Long, writerEnabled: Boolean,
         localReaderReady: Boolean, benchmarksApproved: Boolean): Boolean {
-        if (!writerEnabled || !localReaderReady || !benchmarksApproved || installation.state != AppSyncInstallationState.Active) return false
+        return writerEnabled && benchmarksApproved && canWriteSanitizedV2(installation, now, localReaderReady)
+    }
+
+    /** Sanitized v2 needs the updated reader contract even though the envelope is v2.
+     * Rolling back the v3 writer must not revoke read capability or bypass cohort evidence.
+     * A true result does not authorize replacing/deleting an indexed native artifact.
+     */
+    fun canWriteSanitizedV2(installation: AppSyncInstallation, now: Long, localReaderReady: Boolean): Boolean {
+        if (!localReaderReady || installation.state != AppSyncInstallationState.Active) return false
         val account = installation.accountBinding ?: return false
         val evidence = evidence(account) ?: return false
         if (now < evidence.observedAt || now - evidence.observedAt > maximumAgeMillis) return false

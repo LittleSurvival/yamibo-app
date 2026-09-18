@@ -11,6 +11,59 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.schema.*
 import me.thenano.yamibo.yamibo_app.store.appsync.*
 
 class AppSyncReaderCohortStoreTest {
+    @Test fun sanitizedV2RollbackKeepsReaderGateIndependentOfV3WriterAndBenchmarkFlags() = fixture {
+        fun allowed(now: Long = 200) = store.canWriteSanitizedV2(installation, now, true)
+        assertFalse(allowed())
+        store.observe(account, cloud(journal()), 200)
+        assertTrue(allowed())
+        assertFalse(store.canWrite(installation, 200, false, true, false))
+        assertFalse(store.canWriteSanitizedV2(installation, 200, false))
+        assertFalse(store.canWriteSanitizedV2(installation.copy(writerNonce = SyncWriterNonce("changed")), 200, true))
+        assertFalse(allowed(199))
+        assertFalse(allowed(251))
+        store.observe(account, cloud(journal(), journal(2, "old", 200, "43")), 200)
+        assertFalse(allowed())
+        store.observe(account, cloud(journal()).copy(authoritativeDiscovery = false), 200)
+        assertFalse(allowed())
+    }
+
+    @Test fun rollbackPreparationPreservesJournalHistoryAndOnlyChangesWriteProtocol() = fixture {
+        store.observe(account, cloud(journal()), 200)
+        val own = installation.copy(nextSequence = 3)
+        val replica = "${own.deviceId.value}:${own.deviceEpoch.value}"
+        val operations = (1L..2L).map { sequence -> AppSyncCanonicalOperation(own.deviceId.value, own.deviceEpoch.value,
+            sequence, 14, "2026-09-18", 1, SyncOperationKind.Patch, 100, SyncOperationOrigin.UserAction,
+            causalContext = mapOf(replica to sequence - 1), fields = mapOf(54 to AppSyncCanonicalValue.Integer(sequence))) }
+        val native = AppSyncCanonicalJournal(AppSyncCanonicalOperationBlock(account.value, operations),
+            own.deviceId.value, own.deviceEpoch.value, own.writerNonce.value, 1, 2,
+            mapOf(replica to 2, "other:epoch" to 40),
+            listOf(AppSyncCanonicalAcknowledgement("retained-native-checkpoint", mapOf("other:epoch" to 40))),
+            200, 3, 3, "test", 2)
+        val preparation = AppSyncSanitizedV2JournalPreparation { store.canWriteSanitizedV2(own, 200, true) }
+        val prepared = assertIs<AppSyncV2JournalPreparation.Ready>(preparation.prepare(own, native))
+        assertEquals(3, prepared.payload.protocolReadVersion)
+        assertEquals(2, prepared.payload.protocolWriteVersion)
+        assertEquals(native.observed, prepared.payload.observed.asStableMap())
+        assertEquals(native.publishedThroughSequence, prepared.payload.publishedThroughSequence)
+        assertEquals(native.acknowledgements.single().coverage, prepared.payload.checkpointAcknowledgements.single().coverage.asStableMap())
+        assertEquals(operations, prepared.payload.operations.map {
+            assertIs<AppSyncCanonicalOperationImport.Accepted>(AppSyncCanonicalOperationImporter().import(account.value, it)).operation
+        })
+        val read = assertIs<AppSyncJournalValidation.Valid>(AppSyncJournalEnvelopeCodec().validate(prepared.envelope))
+        assertEquals(2, read.envelope.schemaVersion)
+        assertEquals(prepared.fingerprint, read.envelope.fingerprint)
+        assertEquals(prepared, preparation.prepare(own, native))
+        assertIs<AppSyncV2JournalPreparation.NeedsAttention>(AppSyncSanitizedV2JournalPreparation().prepare(own, native))
+        assertEquals(AppSyncV2JournalFailure.Writer, assertIs<AppSyncV2JournalPreparation.NeedsAttention>(
+            preparation.prepare(own.copy(nextSequence = 2), native)).reason)
+        assertEquals(AppSyncV2JournalFailure.InvalidJournal, assertIs<AppSyncV2JournalPreparation.NeedsAttention>(
+            preparation.prepare(own, native.copy(firstSequence = 2))).reason)
+        var checks = 0
+        assertEquals(AppSyncV2JournalFailure.Compatibility, assertIs<AppSyncV2JournalPreparation.NeedsAttention>(
+            AppSyncSanitizedV2JournalPreparation { ++checks == 1 }.prepare(own, native)).reason)
+        assertEquals(2, checks)
+    }
+
     @Test fun migration47AddsAccountScopedEvidenceWithoutChangingExistingData() {
         JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).use { driver ->
             driver.execute(null, "CREATE TABLE retained (value TEXT NOT NULL)", 0)
