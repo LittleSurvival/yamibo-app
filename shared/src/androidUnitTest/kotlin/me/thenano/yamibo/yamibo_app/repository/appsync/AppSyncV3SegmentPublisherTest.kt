@@ -57,6 +57,103 @@ class AppSyncV3SegmentPublisherTest {
         JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).use { Database.Schema.create(it); Fixture(Database(it), it).block() }
     }
 
+    private fun Fixture.prepareLegacyMigration(): Pair<String, NativeRecoveryPayload> {
+        recovery.rollbackPreCommit(session.sessionId)
+        val codec = AppSyncCheckpointEnvelopeCodec()
+        val payload = codec.createPayload("legacy-base", account, SyncCausalContext(),
+            me.thenano.yamibo.yamibo_app.repository.backup.YamiboBackupFile(appVersionCode = 1, createdAt = 1), emptyList(), emptyList(), 1)
+        val body = codec.encode(payload)
+        val parsed = assertIs<AppSyncCheckpointValidation.Valid>(codec.validate(body)).envelope
+        val index = AppSyncIndexEnvelopeCodec().encode(AppSyncIndexPayload(account,
+            checkpoints = listOf(AppSyncIndexCheckpointReference(payload.checkpointId, 700, parsed.fingerprint)), updatedAtEpochMillis = 1))
+        val source = assertNotNull(AppSyncVerifiedLegacyCheckpoint.verify(account.value, 700, index, body))
+        val cloud = me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalLoadResult.Success(emptyList(),
+            checkpoints = listOf(me.thenano.yamibo.yamibo_app.repository.appsync.engine.LoadedAppSyncCheckpoint("700", parsed)),
+            authoritativeDiscovery = true, verifiedLegacyCheckpoints = listOf(source))
+        val id = me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncLegacyMigrationStarter(db, operations, recovery,
+            { 10 }, { true }).start(account, cloud).getOrThrow()
+        provider.artifacts[800] = AppSyncBlogWriteRequest(BlogId(800), APP_SYNC_INDEX_TITLE, index,
+            AppSyncBlogClassSelection.Existing(BlogClassId(7)), FormHash("test"))
+        recovery.startSegmentedJournal(id, 11)
+        return id to recovery.nativePayload(id)
+    }
+    private suspend fun Fixture.commitMigration(id: String, payload: NativeRecoveryPayload) = committer().commit(
+        id, payload.body, payload.kind, payload.identity, AppSyncBlogClassSelection.Existing(BlogClassId(7)), FormHash("test"))
+
+    @Test fun legacyMigrationRejectsMissingOrChangedSourceIndexBeforeAnyPublication() = fixture {
+        val (id, payload) = prepareLegacyMigration()
+        val request = provider.artifacts.getValue(800)
+        val codec = AppSyncIndexEnvelopeCodec()
+        val original = assertIs<AppSyncIndexValidation.Valid>(codec.validate(request.message)).envelope.payload
+        val wrong = listOf(original.copy(checkpoints = emptyList()), original.copy(updatedAtEpochMillis = 2),
+            original.copy(checkpoints = original.checkpoints.map { it.copy(blogId = 701) }),
+            original.copy(checkpoints = original.checkpoints.map { it.copy(fingerprint = "changed") }))
+        provider.artifacts.remove(800)
+        assertIs<AppSyncSegmentIndexCommitResult.Conflict>(commitMigration(id, payload))
+        for (changed in wrong) {
+            provider.artifacts[800] = request.copy(message = codec.encode(changed))
+            assertIs<AppSyncSegmentIndexCommitResult.Conflict>(commitMigration(id, payload))
+        }
+        assertTrue(provider.posts.isEmpty())
+        assertNull(recovery.nativeIndexIntent(id))
+        assertEquals(listOf(pending), operations.pendingOperations())
+        provider.artifacts[800] = request
+        assertIs<AppSyncSegmentIndexCommitResult.Verified>(commitMigration(id, payload))
+        val written = assertIs<AppSyncIndexValidation.Valid>(codec.validate(provider.posts.last().message)).envelope.payload
+        assertTrue(original.checkpoints.single() in written.checkpoints)
+        assertEquals(listOf(pending), operations.pendingOperations())
+    }
+
+    @Test fun legacyMigrationLostIndexResponseResumesTheExactFrozenIntentWithoutAnotherPost() = fixture {
+        val (id, payload) = prepareLegacyMigration()
+        assertIs<AppSyncV3SegmentPublishResult.ReadyToCommitIndex>(publisher().publish(id, payload.body, payload.kind, payload.identity,
+            AppSyncBlogClassSelection.Existing(BlogClassId(7)), FormHash("test")))
+        provider.timeoutAt = provider.posts.size + 1
+        provider.storeTimedOut = true
+        provider.onList = { if (provider.posts.size == provider.timeoutAt) provider.failIndexRead = true }
+        assertIs<AppSyncSegmentIndexCommitResult.Retryable>(commitMigration(id, payload))
+        val count = provider.posts.size
+        val intent = assertNotNull(recovery.nativeIndexIntent(id))
+        assertEquals(false, recovery.session(id)?.indexCommitted)
+        provider.onList = {}
+        provider.failIndexRead = false
+        assertIs<AppSyncSegmentIndexCommitResult.Verified>(commitMigration(id, payload))
+        assertEquals(count, provider.posts.size)
+        assertEquals(intent, recovery.nativeIndexIntent(id))
+        assertEquals(true, recovery.session(id)?.indexCommitted)
+        assertEquals(listOf(pending), operations.pendingOperations())
+    }
+
+    @Test fun nativeCommitEvidenceCannotDropTheFrozenLegacySource() = fixture {
+        val (id, payload) = prepareLegacyMigration()
+        val root = assertIs<AppSyncV3SegmentPublishResult.ReadyToCommitIndex>(publisher().publish(id, payload.body, payload.kind, payload.identity,
+            AppSyncBlogClassSelection.Existing(BlogClassId(7)), FormHash("test")))
+        val incomplete = AppSyncIndexEnvelopeCodec().encode(AppSyncIndexPayload(account,
+            checkpoints = listOf(AppSyncIndexCheckpointReference(payload.identity, root.rootBlogId.value,
+                root.root.metadata.canonicalFingerprint)), updatedAtEpochMillis = 20))
+        recovery.pinNativeIndexIntent(id, NativeRecoveryIndexIntent(incomplete, 800, provider.artifacts.getValue(800).message.encodeUtf8().sha256().hex()))
+        assertFails { recovery.markNativeIndexCommitted(id, 800, incomplete, 20) }
+        assertEquals(false, recovery.session(id)?.indexCommitted)
+        assertEquals(AppSyncRecoveryPhase.CommittingIndex, recovery.session(id)?.phase)
+        assertEquals(listOf(pending), operations.pendingOperations())
+    }
+
+    @Test fun legacyIndexChangeDuringSegmentPublicationPreventsIndexCommit() = fixture {
+        val (id, payload) = prepareLegacyMigration()
+        val original = provider.artifacts.getValue(800)
+        val codec = AppSyncIndexEnvelopeCodec()
+        val parsed = assertIs<AppSyncIndexValidation.Valid>(codec.validate(original.message)).envelope.payload
+        provider.onList = {
+            if (provider.posts.isNotEmpty()) provider.artifacts[800] = original.copy(message = codec.encode(parsed.copy(updatedAtEpochMillis = 2)))
+        }
+        assertIs<AppSyncSegmentIndexCommitResult.Conflict>(commitMigration(id, payload))
+        assertTrue(provider.posts.isNotEmpty())
+        assertTrue(provider.posts.none { it.title == APP_SYNC_INDEX_TITLE })
+        assertNull(recovery.nativeIndexIntent(id))
+        assertEquals(false, recovery.session(id)?.indexCommitted)
+        assertEquals(listOf(pending), operations.pendingOperations())
+    }
+
     @Test fun everyArtifactIsReadBackAndRestartReusesFrozenGenerationWithoutAcknowledgement() = fixture {
         val result = assertIs<AppSyncV3SegmentPublishResult.ReadyToCommitIndex>(publish())
         val count = provider.posts.size

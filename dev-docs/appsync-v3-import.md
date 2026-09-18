@@ -58,3 +58,7 @@ materializer 的內部輸入將本機值與勝出操作 ID／時間分開；還�
 `AppSyncLegacyMigrationStarter` 已提供交易式凍結入口：交易內重讀 installation 與 pending、執行上述完整合併、依候選 canonical bytes 產生新 v3 checkpoint identity，再一併建立 native recovery session、凍結 envelope 與 legacy source binding。它拒絕覆寫未完成工作及既有 canonical head，不啟用本機狀態、不確認 pending。凍結後新增的編輯留待後續 activation 合併。
 
 資料庫 migration 57（schema 58）在 recovery payload 新增 legacy blog ID、checkpoint ID、payload fingerprint 與 index fingerprint，原有工作預設全為 null。`freezeLegacyMigrationSource` 只接受同帳號的來源證據及最初 Classifying 階段；重複相同綁定保持冪等，部分缺失或不同綁定拒絕。來源欄位隨 payload 清理，不增加獨立保留期限。正式 engine／continuation 路由與 index commit 的 legacy base 核對仍待接線，writer gate 仍關閉。
+
+Native index committer 已接入凍結的 legacy source：分段發布前先完整掃描及讀回 index，要求來源 blog／checkpoint／fingerprint 仍被引用，且整份 index fingerprint 與規劃時相同；分段發布後再次核對。若上次 index POST 已成功但未確認，只有實體 index ID 與整份凍結意圖 SHA 完全一致，才允許跨過舊 index fingerprint 的差異。既有提交前 base 重讀仍保留，provider 沒有 CAS 的競爭限制也不變。
+
+本機 `markNativeIndexCommitted` 同時要求回讀 index 保留凍結的 legacy checkpoint 引用，避免只驗證新產物便提前承認遷移。偽 provider／SQLite 回歸涵蓋缺 index、移除來源、改 blog／fingerprint／index 時間、發布中競爭，以及 lost response 後重建 committer 不重複 POST；全程 pending 保持未確認。正式 engine／continuation 的 legacy 路由仍待完成。

@@ -40,6 +40,10 @@ internal class AppSyncV3IndexCommitter(
         val session = requireNotNull(recovery.session(sessionId))
         if (session.indexCommitted && session.phase in setOf(AppSyncRecoveryPhase.ActivatingLocal, AppSyncRecoveryPhase.Completed) && recovery.usesNativeTransport(sessionId))
             return AppSyncSegmentIndexCommitResult.Verified
+        val scanner = AppSyncV3ArtifactReconciler(provider, selection.classId)
+        val account = session.accountBinding.value
+        val migrationSource = if (recovery.usesNativeTransport(sessionId)) recovery.legacyMigrationSource(sessionId) else null
+        if (migrationSource != null) requireMigrationBase(sessionId, migrationSource, observe(scanner, account))
         val publication = when (val result = publisher.publish(sessionId, envelope, kind, identity, selection, formHash)) {
             is AppSyncV3SegmentPublishResult.ReadyToCommitIndex -> result
             AppSyncV3SegmentPublishResult.FormExpired -> return AppSyncSegmentIndexCommitResult.FormExpired
@@ -47,9 +51,8 @@ internal class AppSyncV3IndexCommitter(
             is AppSyncV3SegmentPublishResult.Retryable -> return AppSyncSegmentIndexCommitResult.Retryable(result.reason)
             is AppSyncV3SegmentPublishResult.NeedsAttention -> return AppSyncSegmentIndexCommitResult.Conflict(result.reason)
         }
-        val scanner = AppSyncV3ArtifactReconciler(provider, selection.classId)
-        val account = session.accountBinding.value
         var current = observe(scanner, account)
+        if (migrationSource != null) requireMigrationBase(sessionId, migrationSource, current)
         requiredCheckpoint?.let { checkpoint ->
             require(checkpoint.document.accountBinding == account)
             require(current?.envelope?.payload?.checkpoints?.any {
@@ -91,6 +94,21 @@ internal class AppSyncV3IndexCommitter(
         if (after?.sha == expectedSha) return confirm(sessionId, intent, after)
         requireBase(intent, after)
         return AppSyncSegmentIndexCommitResult.Retryable("Native index write is not yet visible")
+    }
+
+    private fun requireMigrationBase(sessionId: String,
+        source: me.thenano.yamibo.yamibo_app.store.appsync.NativeLegacyMigrationSource, current: Read?) {
+        requireNotNull(current) { "Legacy migration index is missing" }
+        require(current.envelope.payload.checkpoints.any {
+            it.blogId.toLong() == source.blogId && it.checkpointId == source.checkpointId && it.fingerprint == source.fingerprint
+        }) { "Legacy migration source is no longer indexed" }
+        val intent = recovery.nativeIndexIntent(sessionId)
+        // A lost POST response may already have replaced the old index with our exact frozen
+        // intent. Otherwise the entire source index must still match, including journal refs.
+        val ownWriteVisible = intent != null && intent.targetBlogId == current.id.value.toLong() && sha(intent.body) == current.sha
+        require(ownWriteVisible || current.envelope.fingerprint == source.indexFingerprint) {
+            "Legacy migration index changed before publication"
+        }
     }
 
     private fun confirm(sessionId: String, intent: NativeRecoveryIndexIntent, read: Read): AppSyncSegmentIndexCommitResult {

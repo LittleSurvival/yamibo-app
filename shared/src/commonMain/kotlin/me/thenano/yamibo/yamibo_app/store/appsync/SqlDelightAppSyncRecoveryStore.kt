@@ -802,6 +802,11 @@ internal class SqlDelightAppSyncRecoveryStore(
         val intent = requireNotNull(nativeIndexIntent(sessionId)) { "Native index intent is missing" }
         require(intent.targetBlogId == null || intent.targetBlogId == indexBlogId)
         require(AppSyncIndexEnvelopeCodec().encode(index.payload) == intent.body) { "Native index differs from frozen intent" }
+        legacyMigrationSource(sessionId)?.let { source ->
+            require(index.payload.checkpoints.any {
+                it.checkpointId == source.checkpointId && it.blogId.toLong() == source.blogId && it.fingerprint == source.fingerprint
+            }) { "Native migration index must retain the frozen legacy source" }
+        }
         val kind = AppSyncV3PayloadKind.valueOf(payload.payloadKind)
         val document = AppSyncV3DocumentCodec().discover(payload.canonicalEnvelope, session.accountBinding.value, kind)
         when (document) {
