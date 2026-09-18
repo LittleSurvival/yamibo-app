@@ -15,6 +15,82 @@ import me.thenano.yamibo.yamibo_app.store.appsync.*
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 
 class AppSyncCanonicalCheckpointActivatorTest {
+    @Test fun nativeCheckpointCompletionPurgesFrozenBodiesAndRetainsReplayReceipt() = fixture {
+        val pending = append()
+        val (recovery, id) = stageNativeCheckpoint()
+        val before = db.appSyncNativeCompletionQueries.getPayloadBytes(id).executeAsOne()
+        assertTrue(before > 0)
+        assertFailsWith<IllegalArgumentException> { recovery.completeNativeCheckpointCleanup(id, now) }
+        assertNotNull(db.appSyncOperationQueries.getRecoveryPayload(id).executeAsOneOrNull())
+        val completed = assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activateRecovery(recovery, id))
+        assertEquals(before, completed.removedLocalPayloadBytes)
+        assertNull(db.appSyncOperationQueries.getRecoveryPayload(id).executeAsOneOrNull())
+        assertTrue(recovery.segmentWrites(id).isEmpty())
+        val receipt = db.appSyncNativeCompletionQueries.getForSession(id).executeAsOne()
+        assertEquals(before, receipt.payloadBytesRemoved)
+        assertEquals(1L, receipt.segmentRowsRemoved)
+        assertEquals(300L, receipt.rootBlogId)
+        assertEquals(400L, receipt.indexBlogId)
+        assertTrue(SqlDelightAppSyncRecoveryStore(db).usesNativeTransport(id))
+        assertEquals(0, assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activateRecovery(recovery, id)).removedLocalRows)
+        assertFailsWith<IllegalArgumentException> {
+            recovery.pinPayload(id, "Checkpoint", checkpoint.checkpointId, 3) { error("Must not regenerate") }
+        }
+        assertEquals(listOf(pending), store.pendingOperations())
+        assertEquals(receipt, db.appSyncNativeCompletionQueries.getForSession(id).executeAsOne())
+    }
+
+    @Test fun interruptedFinalCleanupRollsBackReceiptPayloadDeletionAndCompletionTogether() = fixture {
+        val (recovery, id) = stageNativeCheckpoint()
+        val proof = recovery.nativeCheckpointForActivation(id)
+        assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(proof))
+        recovery.beginNativeCheckpointCleanup(id, now)
+        val payload = db.appSyncOperationQueries.getRecoveryPayload(id).executeAsOne()
+        val segments = recovery.segmentWrites(id)
+        assertFailsWith<IllegalStateException> {
+            db.transaction {
+                me.thenano.yamibo.yamibo_app.repository.appsync.cleanup.AppSyncCanonicalLocalPruner(db, state)
+                    .pruneRecoveryCheckpoint(id, now)
+                assertNull(db.appSyncOperationQueries.getRecoveryPayload(id).executeAsOneOrNull())
+                assertNotNull(db.appSyncNativeCompletionQueries.getForSession(id).executeAsOneOrNull())
+                error("interrupt final transaction")
+            }
+        }
+        assertEquals(AppSyncRecoveryPhase.Cleaning, recovery.session(id)?.phase)
+        assertEquals(payload, db.appSyncOperationQueries.getRecoveryPayload(id).executeAsOne())
+        assertEquals(segments, recovery.segmentWrites(id))
+        assertNull(db.appSyncNativeCompletionQueries.getForSession(id).executeAsOneOrNull())
+        assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activateRecovery(SqlDelightAppSyncRecoveryStore(db), id))
+        assertEquals(AppSyncRecoveryPhase.Completed, recovery.session(id)?.phase)
+    }
+
+    @Test fun nativeCompletionReceiptExpiresWithoutRemovingCurrentCanonicalStateOrPendingEdits() = fixture {
+        val pending = append()
+        val (recovery, id) = stageNativeCheckpoint()
+        activator().activateRecovery(recovery, id)
+        val head = state.read(account.value)
+        val retention = 30L * 24 * 60 * 60 * 1000
+        db.appSyncLocalPruneQueries.recordAudit(account.value, "a".repeat(64), now)
+        recovery.expireCompletedRecoveryMetadata(now + retention - 1)
+        assertNotNull(db.appSyncNativeCompletionQueries.getForSession(id).executeAsOneOrNull())
+        assertEquals(1, db.appSyncLocalPruneQueries.getAudit(account.value).executeAsList().size)
+        recovery.expireCompletedRecoveryMetadata(now + retention)
+        assertNull(db.appSyncNativeCompletionQueries.getForSession(id).executeAsOneOrNull())
+        assertNull(recovery.session(id))
+        assertEquals(head, state.read(account.value))
+        assertEquals(listOf(pending), store.pendingOperations())
+        assertTrue(db.appSyncLocalPruneQueries.getAudit(account.value).executeAsList().isEmpty())
+        recovery.expireCompletedRecoveryMetadata(now + retention + 1)
+    }
+
+    @Test fun nativeReceiptMigrationDoesNotInventCompletionEvidence() {
+        JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).use { driver ->
+            driver.execute(null, "CREATE TABLE AppSyncRecoverySession(sessionId TEXT PRIMARY KEY)", 0)
+            Database.Schema.migrate(driver, oldVersion = 54, newVersion = 55)
+            assertNull(Database(driver).appSyncNativeCompletionQueries.getForSession("missing").executeAsOneOrNull())
+        }
+    }
+
     @Test fun checkpointCleanupResumesBatchesWithoutReplayingSettingsOrDeletingLaterEdits() = fixture {
         val sources = List(260) { append("18") }
         val cp = assertIs<AppSyncCanonicalPendingMergeResult.Ready>(AppSyncCanonicalPendingMerge()

@@ -23,10 +23,12 @@ internal class AppSyncCanonicalLocalPruner(private val db: Database,
             require(recovery.session(sessionId)?.phase == AppSyncRecoveryPhase.Cleaning)
             val verified = recovery.nativeCheckpointForActivation(sessionId)
             val result = pruneVerified(verified, now, maximumRows, sessionId)
-            recovery.transition(sessionId, AppSyncRecoveryPhase.Cleaning,
-                if (result.hasMore) AppSyncRecoveryPhase.Cleaning else AppSyncRecoveryPhase.Completed, now,
-                retryCount = 0, retryIdentity = null)
-            result
+            if (result.hasMore) {
+                recovery.transition(sessionId, AppSyncRecoveryPhase.Cleaning, AppSyncRecoveryPhase.Cleaning, now,
+                    retryCount = 0, retryIdentity = null)
+                result
+            } else result.copy(removedPayloadBytes = result.removedPayloadBytes +
+                recovery.completeNativeCheckpointCleanup(sessionId, now))
         }
 
     private fun pruneVerified(verified: AppSyncVerifiedCanonicalCheckpoint, now: Long, maximumRows: Int,

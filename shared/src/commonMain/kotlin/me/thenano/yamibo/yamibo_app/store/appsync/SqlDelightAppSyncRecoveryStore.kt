@@ -28,6 +28,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3PayloadKi
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3SegmentConfiguration
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncVerifiedCanonicalCheckpoint
 import okio.ByteString.Companion.encodeUtf8
+import okio.ByteString.Companion.toByteString
 
 internal data class NativeRecoveryIndexIntent(val body: String, val targetBlogId: Long?, val baseSha256: String?)
 internal data class NativeRecoveryPayload(val body: String, val kind: AppSyncV3PayloadKind, val identity: String)
@@ -103,6 +104,8 @@ internal class SqlDelightAppSyncRecoveryStore(
                     queries.deleteRecoverySegmentWrites(existing.sessionId)
                     queries.deleteRecoveryShadowOperations(existing.sessionId)
                     queries.deleteRecoveryPayload(existing.sessionId)
+                    db.appSyncNativeCompletionQueries.deleteReceipt(existing.sessionId)
+                    db.appSyncNativeCompletionQueries.deleteWork(existing.sessionId)
                     queries.deleteCompletedRecoverySession(existing.sessionId)
                 }
             } else {
@@ -184,6 +187,9 @@ internal class SqlDelightAppSyncRecoveryStore(
             }
             existing.canonicalEnvelope
         } else {
+            require(db.appSyncNativeCompletionQueries.getForSession(sessionId).executeAsOneOrNull() == null) {
+                "Completed native recovery cannot recreate a discarded payload"
+            }
             val encoded = canonicalEnvelope()
             require(encoded.isNotBlank())
             if (transportVersion == 3) {
@@ -559,6 +565,69 @@ internal class SqlDelightAppSyncRecoveryStore(
 
     fun payloadTransportVersion(sessionId: String): Long? =
         queries.getRecoveryPayload(sessionId).executeAsOneOrNull()?.transportVersion
+            ?: if (hasNativeCompletionReceipt(sessionId)) 3L else null
+
+    private fun hasNativeCompletionReceipt(sessionId: String): Boolean {
+        val receipt = db.appSyncNativeCompletionQueries.getForSession(sessionId).executeAsOneOrNull() ?: return false
+        val session = requireSession(sessionId)
+        require(session.phase == AppSyncRecoveryPhase.Completed && session.indexCommitted &&
+            session.mode == AppSyncRecoveryMode.SegmentedCheckpoint &&
+            receipt.accountBinding == session.accountBinding.value && receipt.generationId == session.generationId &&
+            receipt.rootBlogId == session.rootBlogId && receipt.rootFingerprint == session.rootFingerprint &&
+            receipt.completedAtEpochMillis == session.completedAtEpochMillis)
+        return true
+    }
+
+    /** Called within the final proven local cleanup transaction, before reporting completion. */
+    fun completeNativeCheckpointCleanup(sessionId: String, now: Long): Long = db.transactionWithResult {
+        require(now >= 0)
+        val session = requireSession(sessionId)
+        require(session.phase == AppSyncRecoveryPhase.Cleaning)
+        val verified = nativeCheckpointForActivation(sessionId)
+        val head = requireNotNull(db.appSyncCanonicalStateQueries.getState().executeAsOneOrNull())
+        require(head.accountBinding == session.accountBinding.value && head.settingsReconciliationPending == 0L)
+        val headBytes = head.canonicalPayload.toByteString()
+        require(headBytes.sha256().hex() == head.canonicalSha256)
+        val canonical = me.thenano.yamibo.yamibo_app.repository.appsync.schema.AppSyncCanonicalCheckpointCodec()
+            .decode(head.accountBinding, head.checkpointId, headBytes)
+        require(verified.document.coverage.all { (replica, sequence) -> (canonical.coverage[replica] ?: 0L) >= sequence })
+        require(verified.document.coverage.none { (replica, sequence) ->
+            db.appSyncLocalPruneQueries.getCandidates(session.accountBinding.value, replica, sequence, 1).executeAsList().isNotEmpty()
+        }) { "Covered payload cleanup is incomplete" }
+        require(shadowOperations(sessionId).isEmpty()) { "Native checkpoint cannot discard unverified shadow operations" }
+        val payload = queries.getRecoveryPayload(sessionId).executeAsOne()
+        val receipts = db.appSyncNativeCompletionQueries
+        val bytes = receipts.getPayloadBytes(sessionId).executeAsOne()
+        val segments = segmentWrites(sessionId).size.toLong()
+        receipts.insertReceipt(sessionId, session.accountBinding.value, session.generationId,
+            verified.document.checkpointId, verified.fingerprint, requireNotNull(session.rootBlogId),
+            requireNotNull(session.rootFingerprint), requireNotNull(payload.verifiedIndexBlogId),
+            requireNotNull(payload.verifiedIndexFingerprint), bytes, segments, now)
+        queries.deleteRecoverySegmentWrites(sessionId)
+        queries.deleteRecoveryShadowOperations(sessionId)
+        queries.deleteRecoveryPayload(sessionId)
+        receipts.deleteWork(sessionId)
+        transition(sessionId, AppSyncRecoveryPhase.Cleaning, AppSyncRecoveryPhase.Completed, now,
+            retryCount = 0, retryIdentity = null)
+        bytes
+    }
+
+    /** Bounded metadata maintenance. Only receipts whose native payload was already purged qualify. */
+    fun expireCompletedRecoveryMetadata(now: Long) = db.transaction {
+        require(now >= 0)
+        val retention = 30L * 24 * 60 * 60 * 1000
+        if (now >= retention) {
+            db.appSyncLocalPruneQueries.expireAudit(now - retention)
+            val receipts = db.appSyncNativeCompletionQueries
+            receipts.getExpired(now - retention).executeAsList().forEach { id ->
+                require(hasNativeCompletionReceipt(id))
+                require(queries.getRecoveryPayload(id).executeAsOneOrNull() == null)
+                receipts.deleteWork(id)
+                receipts.deleteReceipt(id)
+                queries.deleteCompletedRecoverySession(id)
+            }
+        }
+    }
 
     fun nativePayload(sessionId: String): NativeRecoveryPayload {
         val session = requireSession(sessionId)

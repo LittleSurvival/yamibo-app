@@ -1,0 +1,23 @@
+getForSession:
+SELECT * FROM AppSyncNativeCompletion WHERE sessionId = ?;
+
+getPayloadBytes:
+SELECT length(CAST(canonicalEnvelope AS BLOB)) + length(CAST(COALESCE(indexIntentBody, '') AS BLOB)) AS payloadBytes
+FROM AppSyncRecoveryPayload WHERE sessionId = ?;
+
+insertReceipt:
+INSERT INTO AppSyncNativeCompletion(sessionId, accountBinding, generationId, checkpointId, checkpointFingerprint,
+rootBlogId, rootFingerprint, indexBlogId, indexFingerprint, payloadBytesRemoved, segmentRowsRemoved, completedAtEpochMillis)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+getExpired:
+SELECT AppSyncNativeCompletion.sessionId FROM AppSyncNativeCompletion
+JOIN AppSyncRecoverySession USING (sessionId)
+WHERE AppSyncNativeCompletion.completedAtEpochMillis <= ? AND AppSyncRecoverySession.phase = 'COMPLETED'
+ORDER BY AppSyncNativeCompletion.completedAtEpochMillis ASC LIMIT 128;
+
+deleteReceipt:
+DELETE FROM AppSyncNativeCompletion WHERE sessionId = ?;
+
+deleteWork:
+DELETE FROM AppSyncRecoveryWork WHERE sessionId = ?;

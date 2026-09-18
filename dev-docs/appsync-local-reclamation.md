@@ -6,9 +6,9 @@
 
 刪除與統計在同一 SQLite 交易中完成；交易中斷兩者一起回滾。成功刪除後再呼叫會跳過已不存在的列，因此不重複計數。`removedLocalRows`、`removedLocalPayloadBytes` 由 activation result 回傳。bytes 使用 SQLite `length(CAST(... AS BLOB))` 計算 fieldsJson 與 causalContextJson 的 UTF-8 位元組，不載入主體到 Kotlin，也不把此數值當作資料庫檔案已縮小。
 
-Migration 53（schema version 54）新增裝置端 `AppSyncLocalPruneAudit`，只保存 account binding、checkpoint fingerprint、累計列數／payload bytes 及建立／更新時間，不保存 entity ID、operation ID 或 payload。此 domain 排除於 AppSync 與可攜備份。下一次符合證據要求的清理會移除已建立 30 天的 audit；持續追加計數不延長舊 audit 的保存期限。獨立的到期排程仍待接線。
+Migration 53（schema version 54）新增裝置端 `AppSyncLocalPruneAudit`，只保存 account binding、checkpoint fingerprint、累計列數／payload bytes 及建立／更新時間，不保存 entity ID、operation ID 或 payload。此 domain 排除於 AppSync 與可攜備份。下一次符合證據要求的清理會移除已建立 30 天的 audit；持續追加計數不延長舊 audit 的保存期限。同步入口現在也會清除已到期 audit；未執行同步時的獨立到期排程仍待接線。
 
-此階段不刪除 recovery payload／shadow、segment intents 或 applied receipts，不執行 SQLite VACUUM，也不刪除雲端文件。Native checkpoint 的批次接續如下；journal recovery、一般 reader 清理的全部批次排程、UI 累計統計、30 天到期維護及實體頁面回收仍待完成。不能將這個有上限的邏輯主體清理，視為完整 storage-reclamation 規格或整體 recovery 已完成。
+Native checkpoint 的 recovery payload 與 segment intents 現依下述完成收據流程移除；legacy／journal 的相關主體與 applied receipts 仍保留，不執行 SQLite VACUUM，也不刪除雲端文件。Native checkpoint 的批次接續如下；journal recovery、一般 reader 清理的全部批次排程、UI 累計統計、30 天到期維護及實體頁面回收仍待完成。不能將這個有上限的邏輯主體清理，視為完整 storage-reclamation 規格或整體 recovery 已完成。
 
 測試涵蓋合成大型 cache 主體在 canonical rebuild 後刪除、仍 pending 的後續編輯保留、checkpoint／設定證據不足、active recovery 保護、每批上限、交易回滾與重新執行、損壞的 canonical head、錯誤 checkpoint、audit 到期與 migration 初始狀態。
 
@@ -20,6 +20,19 @@ Canonical checkpoint recovery 在 projection 與設定都啟用後，先保存 C
 
 每批 SQL 刪除、audit 與最後的 Completed 轉換在同一交易內。尚有符合條件的主體時回傳 cleanupPending，coordinator 在批次間 yield，再繼續下一批，不把正常批次切換當作網路失敗或等待重試。取消／程序中斷後保持 Cleaning，下次直接檢查 frozen 證據並接續刪除，不重新套用 projection／偏好設定，也不重新發布 root/index。批次間新增的 pending 操作及已更新的本機設定保留。
 
-Completed 在此僅表示這條 native checkpoint 路徑已完成目前支援的 covered-outbox 清理；其他 recovery payload、SQLite 空間與雲端退休工作仍須補齊，才滿足完整規格的完成判定。
+Completed 在此表示這條 native checkpoint 路徑已完成 covered-outbox 與凍結 recovery payload 清理；legacy／journal 清理、SQLite 空間與雲端退休工作仍須補齊，才滿足完整規格的完成判定。
 
 成功批次在同一交易內清除先前 retry count／identity／deadline；取消於批次間傳播，不額外計為失敗。2026-09-19：新增 260 筆分批重啟、並行後續編輯及 coordinator 取消後完整接續驗證；754 項 shared 與 15 項 CloudSyncUiState 測試全部通過。
+
+
+## 移除凍結主體與完成收據
+
+Migration 54（schema version 55）新增 `AppSyncNativeCompletion`。最後一批 checkpoint 清理再次核對凍結 checkpoint／index 證據、canonical head 的摘要與 coverage、已重整設定，並確認沒有仍符合刪除條件的 outbox。Native checkpoint 若含 shadow operation 會拒絕完成，不把未驗證內容當作可丟棄副本。
+
+完成收據保存 session／account／generation／checkpoint 身分、checkpoint／root／index 摘要與實體 Blog ID、移除的 payload bytes、segment rows 及完成時間，不保存封套、index body 或操作內容。收據寫入、凍結封套與 index body 刪除、segment intent 刪除、work ledger 刪除及 Completed 轉換都在同一交易中；中斷會完整回滾。最後一批的 removedLocalPayloadBytes 額外包含凍結封套與 index body 的 UTF-8 bytes，outbox 列數仍單獨計算。
+
+已清理的 native session 透過收據辨識 transport 3，重播直接保留完成結果；`pinPayload` 拒絕重建已丟棄主體。一般同步入口執行到期維護，每次最多移除 128 筆已完成且主體早已清掉的 30 天收據及 session，並清除到期的本機清理統計。新 recovery 取代舊 completed session 時也一併移除收據。維護不刪除當前 canonical head、普通本機資料、pending 操作或雲端文件。
+
+尚未執行同步的裝置不會準時觸發到期維護；獨立排程與 legacy／journal 主體的相同生命週期仍待完成。這些剩餘事項不因 native checkpoint 收據流程通過測試而視為已驗收。
+
+2026-09-19：完成主體移除、完成重播、交易回滾、到期邊界與 migration 回歸通過；758 項 shared 與 15 項 CloudSyncUiState 全數通過，零失敗、錯誤或略過。

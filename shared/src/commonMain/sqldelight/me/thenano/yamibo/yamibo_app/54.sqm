@@ -1,0 +1,14 @@
+CREATE TABLE AppSyncNativeCompletion (
+    sessionId TEXT NOT NULL PRIMARY KEY REFERENCES AppSyncRecoverySession(sessionId) ON DELETE CASCADE,
+    accountBinding TEXT NOT NULL,
+    generationId TEXT NOT NULL,
+    checkpointId TEXT NOT NULL,
+    checkpointFingerprint TEXT NOT NULL,
+    rootBlogId INTEGER NOT NULL,
+    rootFingerprint TEXT NOT NULL,
+    indexBlogId INTEGER NOT NULL,
+    indexFingerprint TEXT NOT NULL,
+    payloadBytesRemoved INTEGER NOT NULL,
+    segmentRowsRemoved INTEGER NOT NULL,
+    completedAtEpochMillis INTEGER NOT NULL
+);

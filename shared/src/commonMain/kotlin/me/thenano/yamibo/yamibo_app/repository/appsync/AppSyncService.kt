@@ -674,6 +674,7 @@ class AppSyncService(
         val binding = currentAccountBinding() ?: return pausedAuth(trigger)
         val demand = beginReliabilityDemand(trigger)
         return try {
+            recoveryStore.expireCompletedRecoveryMetadata(nowMillis())
             val installation = store.installation()
             if (installation == null || installation.accountBinding != binding) {
                 val bootstrapped = bootstrap(binding, forceDiscovery = true)
