@@ -237,6 +237,58 @@ class AppSyncCanonicalCheckpointActivatorTest {
         assertEquals(sequence, store.installation()?.nextSequence)
     }
 
+    @Test fun failedCanonicalBatchAndLaterCommandsRetainCorrectiveEdits() = fixture {
+        append()
+        activator().activate(verified())
+        val previous = state.read(account.value)
+        fun draft(value: String) = LocalSyncOperationDraft(SyncDomainId("settings"),
+            SyncEntityId("novelreadersettings.fontsize"), kind = SyncOperationKind.Patch,
+            fields = mapOf("type" to "int", "value" to value))
+        val recorder = recorder()
+        val batch = recorder.recordBatch(listOf(draft("invalid"), draft("18"))) {}
+        assertEquals(listOf("invalid", "18"), batch.map { it.fields["value"] })
+        assertEquals(AppSyncInstallationState.Quarantined, store.installation()?.state)
+        val correction = assertNotNull(recorder.record("settings", "novelreadersettings.fontsize", SyncOperationKind.Patch,
+            mapOf("type" to "int", "value" to "18")) {})
+        assertEquals(4L, correction.sequence.value)
+        assertEquals(listOf("18", "invalid", "18", "18"), store.pendingOperations().map { it.fields["value"] })
+        assertEquals(previous, state.read(account.value))
+    }
+
+    @Test fun quarantinedGenerationChangeDoesNotSuppressFollowingCorrection() = fixture {
+        append()
+        activator().activate(verified())
+        val previous = state.read(account.value)
+        val invalid = LocalSyncOperationDraft(SyncDomainId("settings"), SyncEntityId("novelreadersettings.fontsize"),
+            entityGeneration = 2, kind = SyncOperationKind.Patch, fields = mapOf("type" to "int", "value" to "22"))
+        val correction = invalid.copy(entityGeneration = 1, fields = mapOf("type" to "int", "value" to "18"))
+        val operations = recorder().recordBatch(listOf(invalid, correction)) {}
+        assertEquals(listOf(2L, 1L), operations.map { it.entityGeneration })
+        assertEquals(listOf("22", "18"), operations.map { it.fields["value"] })
+        assertEquals(3, store.pendingOperations().size)
+        assertEquals(previous, state.read(account.value))
+        assertEquals(AppSyncInstallationState.Quarantined, store.installation()?.state)
+    }
+
+    @Test fun canonicalRecorderImportsCompleteNineteenDomainCorpus() = fixture {
+        activator().activate(verified())
+        val sources = AppSyncSyntheticCorpus.create().journal.operations
+        val created = recorder().recordCommand {
+            sources.map { LocalSyncOperationDraft(it.domainId, it.entityId, it.entityGeneration, it.kind, it.fields,
+                it.bulkDeleteAuthorizationId) }
+        }
+        assertEquals(AppSyncCanonicalSchema.domains.keys, created.map { it.domainId.value }.toSet())
+        assertEquals(AppSyncInstallationState.Active, store.installation()?.state)
+        val canonical = assertNotNull(state.read(account.value))
+        assertEquals(AppSyncCanonicalSchema.domainsById.keys, canonical.entities.map { it.domainId }.toSet())
+        assertEquals(created.size.toLong(), canonical.coverage[created.first().replicaKey.stableKey])
+        assertEquals(created, store.pendingOperations())
+        assertTrue(db.appSyncOperationQueries.getResolvedEntities().executeAsList().isEmpty())
+        val merged = assertIs<AppSyncCanonicalPendingMergeResult.Ready>(AppSyncCanonicalPendingMerge().prepare(
+            checkpoint, created, canonical.checkpointId, canonical.createdAtEpochMillis))
+        assertEquals(canonical, merged.checkpoint)
+    }
+
     @Test fun recorderGenerationReadsCanonicalTombstoneWithoutLegacyProjection() = fixture {
         append()
         activator().activate(verified())

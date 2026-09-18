@@ -30,3 +30,7 @@ complete normalized storage, all producer acceptance, native writing or field-sp
 舊版完整狀態替換的生命週期已接線：`completeBootstrap` 與 `replaceWithVerifiedCloudState` 在 materialization 成功後，於同一筆 transaction 移除被取代的 canonical head。成功換帳號 bootstrap 後，recorder 因沒有 canonical head 而讀取新 legacy projection，不會再因舊帳號 binding 拒絕操作。單純 `prepareForCloudReset`、writer epoch rotation 或失敗的 bootstrap 不清除 canonical state；外層 transaction 失敗時會一起還原 canonical bytes、outbox lifecycle、installation 及 materialized rows。
 
 此清除只適用於上述既有完整 legacy replacement API，不放在一般 canonical activation、遠端 receipt 記錄或本機修改路徑。Canonical 到 canonical 的跨帳號 bootstrap、完整 v3 reset／force-pull UI 與 engine 路由仍需實作；本次不擴大其完成宣稱。
+
+批次準備遇到匯入或 reducer 失敗後，該 command 剩餘來源不再做 no-op 省略；installation 已處於 Quarantined 時，新 command 也保留完整 portable 來源。這避免「失敗修改 → 改回舊值」被誤認成沒有使用者操作，讓後續復原能保留修正順序。正常批次的暫存比較狀態則重新匯入實際送往 outbox 的欄位（包括 v2 必填欄位），與持久化來源一致。
+
+新增的 recorder 驗證使用完整 19 領域 synthetic corpus，經 `recordCommand` 產生 outbox，再獨立從這些來源執行 pending merge，要求 canonical 狀態與 coverage 完全一致。另驗證匯入失敗、已隔離的後續 command，以及 reducer 拒絕跨世代 patch 時，後面的修正不會被省略。這些測試不取代各 producer 的 UI／裝置驗收或 native v3 writer 測試。

@@ -187,7 +187,8 @@ internal class AppSyncMutationRecorder(
         val prepare by lazy {
             val canonical = canonicalState?.read(account)
             if (canonical == null) AppSyncMutationPreparation(domainState::entityState)::prepareFields
-            else AppSyncCanonicalMutationPreparation(canonical)::prepareFields
+            else AppSyncCanonicalMutationPreparation(canonical,
+                preserveAll = store.installation()?.state == AppSyncInstallationState.Quarantined)::prepareFields
         }
         return { operation -> prepare(operation) }
     }
