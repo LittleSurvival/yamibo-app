@@ -1,0 +1,9 @@
+CREATE TABLE AppSyncLocalPruneAudit (
+    accountBinding TEXT NOT NULL,
+    checkpointFingerprint TEXT NOT NULL,
+    removedRows INTEGER NOT NULL,
+    removedPayloadBytes INTEGER NOT NULL,
+    createdAtEpochMillis INTEGER NOT NULL,
+    updatedAtEpochMillis INTEGER NOT NULL,
+    PRIMARY KEY(accountBinding, checkpointFingerprint)
+);

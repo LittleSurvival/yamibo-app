@@ -14,6 +14,109 @@ import me.thenano.yamibo.yamibo_app.store.appsync.*
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 
 class AppSyncCanonicalCheckpointActivatorTest {
+    @Test fun verifiedRemoteCoveragePrunesOnlyCoveredAcknowledgedPayloadAfterCanonicalRebuild() = fixture {
+        val excluded = store.appendLocalOperation(account, SyncDomainId("settings"), SyncEntityId("future.private.cache"), 1,
+            SyncOperationKind.Put, mapOf("type" to "string", "value" to "合成快取".repeat(20_000)),
+            store.causalContext(), 1, SyncOperationOrigin.UserAction)
+        val cp = checkpoint.copy(coverage = mapOf(excluded.replicaKey.stableKey to excluded.sequence.value))
+        store.markAcknowledged(setOf(excluded.operationId), 2)
+        val later = append("22")
+        val uncovered = append("22")
+        store.markAcknowledged(setOf(uncovered.operationId), 3)
+        val result = assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(verified(cp)))
+        assertEquals(1, result.removedLocalRows)
+        assertTrue(result.removedLocalPayloadBytes >= 240_000)
+        assertNull(store.outboxOperation(excluded.operationId.value))
+        assertEquals(listOf(later), store.pendingOperations())
+        assertNotNull(store.outboxOperation(uncovered.operationId.value))
+        assertEquals(22, preferences.values["novelreadersettings.fontsize"])
+        assertTrue(state.read(account.value)!!.entities.none { it.entityId == excluded.entityId.value })
+        val audit = db.appSyncLocalPruneQueries.getAudit(account.value).executeAsOne()
+        assertEquals(result.removedLocalPayloadBytes, audit.removedPayloadBytes)
+        assertEquals(1L, audit.removedRows)
+        val again = assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(verified(cp)))
+        assertEquals(0, again.removedLocalRows)
+        assertEquals(audit, db.appSyncLocalPruneQueries.getAudit(account.value).executeAsOne())
+    }
+
+    @Test fun localPruneRequiresInstalledIndexEvidenceAndReconciledSettings() = fixture {
+        val source = append()
+        val prepared = assertIs<AppSyncCanonicalPendingMergeResult.Ready>(AppSyncCanonicalPendingMerge()
+            .prepare(checkpoint, listOf(source), "covered", 10)).checkpoint
+        val proof = verified(prepared)
+        val pruner = me.thenano.yamibo.yamibo_app.repository.appsync.cleanup.AppSyncCanonicalLocalPruner(db, state)
+        store.markAcknowledged(setOf(source.operationId), 16)
+        assertFailsWith<IllegalArgumentException> { pruner.prune(proof, now) }
+        preferences.fail = true
+        assertFalse(assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(proof)).settingsReconciled)
+        assertFailsWith<IllegalArgumentException> { pruner.prune(proof, now) }
+        assertNotNull(store.outboxOperation(source.operationId.value))
+        assertTrue(db.appSyncLocalPruneQueries.getAudit(account.value).executeAsList().isEmpty())
+        preferences.fail = false
+        assertEquals(1, assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(proof)).removedLocalRows)
+    }
+
+    @Test fun boundedLocalPruneRollsBackWithAuditAndResumesWithoutDuplicateAccounting() = fixture {
+        val sources = listOf(append("18"), append("20"), append("22"))
+        val cp = assertIs<AppSyncCanonicalPendingMergeResult.Ready>(AppSyncCanonicalPendingMerge()
+            .prepare(checkpoint, sources, "covered", 10)).checkpoint
+        val proof = verified(cp)
+        assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(proof))
+        store.markAcknowledged(sources.map { it.operationId }.toSet(), 16)
+        val pruner = me.thenano.yamibo.yamibo_app.repository.appsync.cleanup.AppSyncCanonicalLocalPruner(db, state)
+        assertFailsWith<IllegalStateException> {
+            db.transaction {
+                assertEquals(1, pruner.prune(proof, now, 1).removedRows)
+                error("interrupt transaction")
+            }
+        }
+        assertEquals(3, store.allOutboxOperations().size)
+        assertTrue(db.appSyncLocalPruneQueries.getAudit(account.value).executeAsList().isEmpty())
+        repeat(3) { assertEquals(1, pruner.prune(proof, now + it, 1).removedRows) }
+        assertEquals(0, pruner.prune(proof, now, 1).removedRows)
+        assertTrue(store.allOutboxOperations().isEmpty())
+        assertEquals(3L, db.appSyncLocalPruneQueries.getAudit(account.value).executeAsOne().removedRows)
+        assertEquals(22, preferences.values["novelreadersettings.fontsize"])
+        pruner.prune(proof, now + me.thenano.yamibo.yamibo_app.repository.appsync.cleanup.AppSyncCanonicalLocalPruner.RETENTION_MILLIS)
+        assertTrue(db.appSyncLocalPruneQueries.getAudit(account.value).executeAsList().isEmpty())
+    }
+
+    @Test fun activeRecoveryProtectsSourcesEvenWhenRemoteCheckpointCoversThem() = fixture {
+        val source = append()
+        val cp = assertIs<AppSyncCanonicalPendingMergeResult.Ready>(AppSyncCanonicalPendingMerge()
+            .prepare(checkpoint, listOf(source), "covered", 10)).checkpoint
+        val recovery = SqlDelightAppSyncRecoveryStore(db)
+        recovery.createOrResume(account, setOf(source.operationId.value), "active-source", 1)
+        store.markAcknowledged(setOf(source.operationId), 16)
+        val result = assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(verified(cp)))
+        assertEquals(0, result.removedLocalRows)
+        assertNotNull(store.outboxOperation(source.operationId.value))
+        assertTrue(db.appSyncLocalPruneQueries.getAudit(account.value).executeAsList().isEmpty())
+    }
+
+    @Test fun corruptedHeadOrWrongCheckpointEvidenceCannotAuthorizeLocalPruning() = fixture {
+        val source = append()
+        val cp = assertIs<AppSyncCanonicalPendingMergeResult.Ready>(AppSyncCanonicalPendingMerge()
+            .prepare(checkpoint, listOf(source), "covered", 10)).checkpoint
+        val proof = verified(cp)
+        activator().activate(proof)
+        store.markAcknowledged(setOf(source.operationId), 16)
+        val pruner = me.thenano.yamibo.yamibo_app.repository.appsync.cleanup.AppSyncCanonicalLocalPruner(db, state)
+        assertFailsWith<IllegalArgumentException> { pruner.prune(verified(cp.copy(checkpointId = "other")), now) }
+        val row = db.appSyncCanonicalStateQueries.getState().executeAsOne()
+        db.appSyncCanonicalStateQueries.putState(row.accountBinding, row.checkpointId, row.canonicalPayload, "0".repeat(64))
+        assertFailsWith<IllegalArgumentException> { pruner.prune(proof, now) }
+        assertNotNull(store.outboxOperation(source.operationId.value))
+        assertTrue(db.appSyncLocalPruneQueries.getAudit(account.value).executeAsList().isEmpty())
+    }
+
+    @Test fun pruneAuditMigrationCreatesNoInventedDeletionEvidence() {
+        JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).use { driver ->
+            Database.Schema.migrate(driver, oldVersion = 53, newVersion = 54)
+            assertTrue(Database(driver).appSyncLocalPruneQueries.getAudit(account.value).executeAsList().isEmpty())
+        }
+    }
+
     @Test fun engineResumesCommittedNativeRecoveryWhenWritesAreDisabledAndDoesNotRepublish() = fixture {
         val source = append()
         val (recovery, id) = stageNativeJournal(source)

@@ -1,0 +1,27 @@
+getCandidates:
+SELECT operationId,
+       length(CAST(fieldsJson AS BLOB)) + length(CAST(causalContextJson AS BLOB)) AS payloadBytes
+FROM AppSyncOutbox
+WHERE accountBinding = ? AND deviceId || ':' || deviceEpoch = ? AND sequence <= ?
+  AND lifecycle IN ('ACKNOWLEDGED', 'COMPACTED', 'SUPERSEDED_BY_RECOVERY')
+ORDER BY sequence ASC
+LIMIT ?;
+
+deleteCandidates:
+DELETE FROM AppSyncOutbox WHERE operationId IN ?
+AND lifecycle IN ('ACKNOWLEDGED', 'COMPACTED', 'SUPERSEDED_BY_RECOVERY');
+
+recordAudit:
+INSERT OR IGNORE INTO AppSyncLocalPruneAudit(accountBinding, checkpointFingerprint, removedRows, removedPayloadBytes, createdAtEpochMillis, updatedAtEpochMillis)
+VALUES (?, ?, 0, 0, ?, 0);
+
+addAudit:
+UPDATE AppSyncLocalPruneAudit SET removedRows = removedRows + ?,
+removedPayloadBytes = removedPayloadBytes + ?, updatedAtEpochMillis = ?
+WHERE accountBinding = ? AND checkpointFingerprint = ?;
+
+expireAudit:
+DELETE FROM AppSyncLocalPruneAudit WHERE createdAtEpochMillis <= ?;
+
+getAudit:
+SELECT * FROM AppSyncLocalPruneAudit WHERE accountBinding = ?;

@@ -15,7 +15,8 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncVerifiedChec
 
 internal sealed interface AppSyncCanonicalActivationResult {
     data class Applied(val pendingOperationCount: Int, val excludedCount: Int, val noOpCount: Int,
-        val settingsReconciled: Boolean) : AppSyncCanonicalActivationResult
+        val settingsReconciled: Boolean, val removedLocalRows: Int = 0,
+        val removedLocalPayloadBytes: Long = 0) : AppSyncCanonicalActivationResult
     data class NeedsAttention(val reason: String,
         val mergeFailure: AppSyncPendingMergeFailure? = null) : AppSyncCanonicalActivationResult
 }
@@ -179,6 +180,13 @@ internal class AppSyncCanonicalCheckpointActivator(
         // Preferences are external to SQLite. A failure here must not be reported as rollback;
         // replay will reconcile again after finding the already committed canonical state.
         val reconciled = state.reconcileSettings(verified.document.accountBinding)
-        return AppSyncCanonicalActivationResult.Applied(pendingCount, ready.excludedCount, ready.noOpCount, reconciled)
+        val pruned = if (reconciled) try {
+            me.thenano.yamibo.yamibo_app.repository.appsync.cleanup.AppSyncCanonicalLocalPruner(db, state)
+                .prune(verified, nowMillis())
+        } catch (_: Exception) {
+            return AppSyncCanonicalActivationResult.NeedsAttention("Canonical state installed; local reclamation must be retried")
+        } else null
+        return AppSyncCanonicalActivationResult.Applied(pendingCount, ready.excludedCount, ready.noOpCount, reconciled,
+            pruned?.removedRows ?: 0, pruned?.removedPayloadBytes ?: 0)
     }
 }
