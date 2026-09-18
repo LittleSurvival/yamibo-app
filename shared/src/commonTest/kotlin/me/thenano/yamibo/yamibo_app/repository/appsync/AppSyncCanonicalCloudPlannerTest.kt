@@ -50,6 +50,28 @@ class AppSyncCanonicalCloudPlannerTest {
         return LoadedAppSyncCanonicalDocument(remoteId, codec.discover(text, account.value, AppSyncV3PayloadKind.Journal))
     }
 
+    private fun discovered(checkpoint: AppSyncCanonicalCheckpoint) = LoadedAppSyncCanonicalDocument("99",
+        codec.discover(codec.encodeCheckpoint(checkpoint), account.value, AppSyncV3PayloadKind.Checkpoint))
+
+    @Test fun unindexedCheckpointCannotHideConflictingIdentity() {
+        assertIs<AppSyncCanonicalCloudPlan.Ready>(planner.prepare(account, installation,
+            cloud(canonical = listOf(discovered(base)))))
+        assertEquals(AppSyncCanonicalCloudFailure.CheckpointConflict,
+            failure(cloud(canonical = listOf(discovered(base.copy(createdAtEpochMillis = 2))))).reason)
+    }
+
+    @Test fun unindexedCheckpointCoverageMustBeRepresentedWithoutGrantingActivationAuthority() {
+        val later = assertIs<AppSyncCanonicalPendingMergeResult.Ready>(AppSyncCanonicalPendingMerge().prepare(
+            base, listOf(operation()), "unindexed", 2)).checkpoint
+        assertEquals(AppSyncCanonicalCloudFailure.CheckpointConflict,
+            failure(cloud(canonical = listOf(discovered(later)))).reason)
+        val ready = assertIs<AppSyncCanonicalCloudPlan.Ready>(planner.prepare(account, installation,
+            cloud(canonical = listOf(discovered(later), native()))))
+        assertEquals(base.checkpointId, ready.checkpoint.document.checkpointId)
+        assertEquals(AppSyncCanonicalCloudFailure.NoIndexedCheckpoint,
+            failure(cloud(emptyList(), listOf(discovered(later), native()))).reason)
+    }
+
     @Test fun checkpointSelectionRequiresVectorDominanceWithoutSummingCounters() {
         val a = base.copy(checkpointId = "a", coverage = mapOf("a:e" to Long.MAX_VALUE, "b:e" to 1))
         val b = base.copy(checkpointId = "b", coverage = mapOf("a:e" to Long.MAX_VALUE - 1, "b:e" to 2))

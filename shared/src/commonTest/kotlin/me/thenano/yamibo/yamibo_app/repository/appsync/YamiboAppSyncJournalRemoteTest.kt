@@ -180,6 +180,44 @@ class YamiboAppSyncJournalRemoteTest {
         assertTrue(provider.deleteRequests.isEmpty())
     }
 
+    @Test fun canonicalDuplicatePhysicalDocumentsSurviveIndexedCacheAndRestart() = runBlocking {
+        val checkpoint = AppSyncCanonicalCheckpoint("same-id", ACCOUNT.value, 1, emptyMap(), emptyList())
+        val journal = AppSyncCanonicalJournal(AppSyncCanonicalOperationBlock(ACCOUNT.value, emptyList()),
+            "device", "epoch", "writer", 0, 0, emptyMap(), emptyList(), 1, 3, 3, "test", null)
+        val codec = AppSyncV3DocumentCodec()
+        val checkpointTitle = AppSyncJournalDefaults.CHECKPOINT_TITLE_PREFIX + checkpoint.checkpointId
+        val journalTitle = AppSyncJournalDefaults.journalTitle(SyncDeviceId("device"), SyncDeviceEpoch("epoch"))
+        val bodies = listOf(
+            checkpointTitle to codec.encodeCheckpoint(checkpoint),
+            checkpointTitle to codec.encodeCheckpoint(checkpoint.copy(createdAtEpochMillis = 2)),
+            journalTitle to codec.encodeJournal("device:epoch", journal),
+            journalTitle to codec.encodeJournal("device:epoch", journal.copy(writerNonce = "restored")),
+            APP_SYNC_INDEX_TITLE to indexCodec.encode(AppSyncIndexPayload(ACCOUNT,
+                journals = listOf(AppSyncIndexJournalReference("device:epoch", 72, null)),
+                checkpoints = listOf(AppSyncIndexCheckpointReference("same-id", 70,
+                    AppSyncCanonicalCheckpointCodec().encode(checkpoint).sha256().hex())), updatedAtEpochMillis = 1)))
+        val provider = FakeProvider().apply {
+            pages[PageKey(null, 1)] = success(classPage())
+            pages[PageKey(CLASS_ID, 1)] = success(UserSpaceBlogPage(blogs = bodies.mapIndexed { i, (title, _) ->
+                summary(BlogId(70 + i), title) }))
+            bodies.forEachIndexed { i, (title, body) -> blogs[BlogId(70 + i)] = success(page(BlogId(70 + i), title, body)) }
+        }
+        val store = FakeRemoteStore()
+        val remote = remote(provider, store)
+        fun checkEvidence(result: AppSyncJournalLoadResult) {
+            val loaded = assertIs<AppSyncJournalLoadResult.Success>(result)
+            assertTrue(loaded.canonicalReadIssues.isEmpty())
+            assertEquals(setOf("70", "71", "72", "73"), loaded.canonicalDocuments.map { it.remoteId }.toSet())
+            assertEquals(4, loaded.canonicalDocuments.size)
+            assertEquals(checkpoint, loaded.verifiedCanonicalCheckpoints.single().document)
+        }
+        checkEvidence(remote.loadJournals(ACCOUNT, true))
+        checkEvidence(remote.loadJournals(ACCOUNT, false))
+        checkEvidence(remote(provider, store).loadJournals(ACCOUNT, false))
+        assertEquals(0, provider.submitCalls)
+        assertTrue(provider.deleteRequests.isEmpty())
+    }
+
     private val journalCodec = AppSyncJournalEnvelopeCodec()
     private val indexCodec = AppSyncIndexEnvelopeCodec()
     private val checkpointCodec = AppSyncCheckpointEnvelopeCodec()

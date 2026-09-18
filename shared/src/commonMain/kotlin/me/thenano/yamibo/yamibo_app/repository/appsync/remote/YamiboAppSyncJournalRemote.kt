@@ -1257,10 +1257,10 @@ internal class YamiboAppSyncJournalRemote(
             cachedJournals[it.blogId.value.toString()] = it
         }
         store.loadKind(AppSyncRemoteBlogKind.Checkpoint).forEach {
-            cachedCheckpoints[it.remoteKey] = it
+            cachedCheckpoints[it.blogId.value.toString()] = it
         }
         store.loadKind(AppSyncRemoteBlogKind.CheckpointRoot).forEach {
-            cachedCheckpoints[it.remoteKey] = it
+            cachedCheckpoints[it.blogId.value.toString()] = it
         }
         var indexedReplicaKeys = emptySet<String>()
         var verifiedIndex: IndexCandidateResult.Valid? = null
@@ -1284,7 +1284,7 @@ internal class YamiboAppSyncJournalRemote(
                     }
                     loadedIndex.payload.checkpoints.forEach { reference ->
                         val remoteKey = checkpointRemoteKey(reference.checkpointId)
-                        cachedCheckpoints[remoteKey] = StoredAppSyncRemoteBlog(
+                        cachedCheckpoints[reference.blogId.toString()] = StoredAppSyncRemoteBlog(
                             remoteKey = remoteKey,
                             kind = AppSyncRemoteBlogKind.Checkpoint,
                             blogId = BlogId(reference.blogId),
@@ -1367,7 +1367,7 @@ internal class YamiboAppSyncJournalRemote(
                     completedRetirements(accountBinding).any { it.matches(journal) }
                 }
                 .distinctBy { it.remoteId to it.fingerprint },
-            checkpoints = loadedCheckpoints.distinctBy { it.envelope.payload.checkpointId },
+            checkpoints = loadedCheckpoints.distinctBy { it.remoteId to it.envelope.fingerprint },
             indexedReplicaKeys = indexedReplicaKeys,
             canonicalDocuments = canonicalDocuments,
             canonicalReadIssues = canonicalReadIssues.distinct(),
@@ -1581,7 +1581,7 @@ internal class YamiboAppSyncJournalRemote(
                     completedRetirements(accountBinding).any { it.matches(journal) }
                 }
                 .distinctBy { it.remoteId to it.fingerprint },
-            checkpoints.distinctBy { it.envelope.payload.checkpointId },
+            checkpoints.distinctBy { it.remoteId to it.envelope.fingerprint },
             indexedReplicaKeys = indexedReplicaKeys,
             retirementDiscoveryIssues = retirementDiscoveryIssues.distinct(),
             canonicalDocuments = canonicalDocuments,
@@ -1615,8 +1615,10 @@ internal class YamiboAppSyncJournalRemote(
             }
         }
         documents += LoadedAppSyncCanonicalDocument(candidate.blogId.value.toString(), document)
-        store.save(candidate.copy(remoteKey = if (document is AppSyncV3DocumentRead.Checkpoint)
-            checkpointRemoteKey(document.document.checkpointId) else metadata.identity,
+        val remoteKey = if (document is AppSyncV3DocumentRead.Checkpoint)
+            checkpointRemoteKey(document.document.checkpointId) else metadata.identity
+        preservePhysicalLink(remoteKey, candidate.blogId)
+        store.save(candidate.copy(remoteKey = remoteKey,
             fingerprint = metadata.canonicalFingerprint, validatedAtEpochMillis = nowMillis()))
     }
 
@@ -2155,16 +2157,23 @@ internal class YamiboAppSyncJournalRemote(
         return BlogPagesResult.Success(pages)
     }
 
+    // Logical identities can be duplicated after a restore or ambiguous publication.
+    // Retain the displaced physical source so cache reloads cannot erase conflict evidence.
+    private fun preservePhysicalLink(remoteKey: String, blogId: BlogId) {
+        store.load(remoteKey)?.takeIf { it.blogId != blogId }?.let { previous ->
+            val prefix = when (previous.kind) {
+                AppSyncRemoteBlogKind.Checkpoint, AppSyncRemoteBlogKind.CheckpointRoot -> "checkpoint-candidate"
+                else -> "candidate"
+            }
+            store.save(previous.copy(remoteKey = "$prefix:${previous.blogId.value}"))
+        }
+    }
+
     private fun saveJournal(
         candidate: StoredAppSyncRemoteBlog,
         journal: LoadedAppSyncJournal,
     ) {
-        // Keep every physical journal: a restored installation can reuse a replica
-        // identity with a different writer or conflicting operations. A logical-key
-        // cache alone would erase that evidence on the next load (including restart).
-        store.load(journal.payload.replicaKey())?.takeIf { it.blogId != candidate.blogId }?.let { previous ->
-            store.save(previous.copy(remoteKey = "candidate:${previous.blogId.value}"))
-        }
+        preservePhysicalLink(journal.payload.replicaKey(), candidate.blogId)
         verifiedJournalCache[journal.payload.replicaKey()] = journal
         store.save(
             candidate.copy(
@@ -2180,6 +2189,7 @@ internal class YamiboAppSyncJournalRemote(
         candidate: StoredAppSyncRemoteBlog,
         checkpoint: LoadedAppSyncCheckpoint,
     ) {
+        preservePhysicalLink(checkpointRemoteKey(checkpoint.envelope.payload.checkpointId), candidate.blogId)
         verifiedCheckpointCache[checkpointRemoteKey(checkpoint.envelope.payload.checkpointId)] =
             checkpoint
         store.save(

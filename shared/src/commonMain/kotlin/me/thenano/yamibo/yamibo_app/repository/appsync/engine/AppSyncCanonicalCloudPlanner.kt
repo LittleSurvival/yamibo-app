@@ -39,15 +39,19 @@ internal class AppSyncCanonicalCloudPlanner {
             cloud.journals.any { it.payload.accountBinding != account }) return attention(AppSyncCanonicalCloudFailure.AccountMismatch)
         fun dominates(left: Map<String, Long>, right: Map<String, Long>) =
             right.all { (replica, sequence) -> (left[replica] ?: 0L) >= sequence }
-        val allCoverage = checkpoints.map { it.document.coverage } + cloud.checkpoints.map { it.envelope.payload.coverage.asStableMap() }
+        val allCoverage = checkpoints.map { it.document.coverage } + cloud.checkpoints.map { it.envelope.payload.coverage.asStableMap() } +
+            cloud.canonicalDocuments.mapNotNull { (it.document as? AppSyncV3DocumentRead.Checkpoint)?.document?.coverage }
         if (checkpoints.map { it.indexFingerprint }.distinct().size != 1)
             return attention(AppSyncCanonicalCloudFailure.CheckpointConflict)
         val codec = AppSyncCanonicalCheckpointCodec()
+        val checkpointFingerprints = linkedMapOf<String, String>()
         var verifiedBytes = 0L
         for (checkpoint in checkpoints) {
             val bytes = try { codec.encode(checkpoint.document) }
                 catch (_: Exception) { return attention(AppSyncCanonicalCloudFailure.InvalidDocument) }
             if (bytes.sha256().hex() != checkpoint.fingerprint) return attention(AppSyncCanonicalCloudFailure.InvalidDocument)
+            val previous = checkpointFingerprints.put(checkpoint.document.checkpointId, checkpoint.fingerprint)
+            if (previous != null && previous != checkpoint.fingerprint) return attention(AppSyncCanonicalCloudFailure.CheckpointConflict)
             verifiedBytes += bytes.size
             if (verifiedBytes > 64L * 1024 * 1024) return attention(AppSyncCanonicalCloudFailure.Budget)
         }
@@ -111,6 +115,12 @@ internal class AppSyncCanonicalCloudPlanner {
             val oldFingerprint = artifactFingerprints.put(loaded.remoteId, metadata.canonicalFingerprint)
             if (oldFingerprint != null && oldFingerprint != metadata.canonicalFingerprint)
                 return attention(AppSyncCanonicalCloudFailure.InvalidDocument)
+            if (read is AppSyncV3DocumentRead.Checkpoint) {
+                val previous = checkpointFingerprints.put(read.document.checkpointId, metadata.canonicalFingerprint)
+                if (previous != null && previous != metadata.canonicalFingerprint)
+                    return attention(AppSyncCanonicalCloudFailure.CheckpointConflict)
+                continue
+            }
             if (read !is AppSyncV3DocumentRead.Journal) continue
             val journal = read.document
             val replica = "${journal.deviceId}:${journal.deviceEpoch}"
