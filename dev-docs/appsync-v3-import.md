@@ -54,3 +54,7 @@ materializer 的內部輸入將本機值與勝出操作 ID／時間分開；還�
 `AppSyncLegacyCloudMigration` 為純規劃器，要求完整 authoritative discovery、同一 index 的 legacy checkpoint 證據、完整 indexed journal、帳號及 writer nonce 一致，並限制 checkpoint／journal／來源操作總數。它核對所有已讀 checkpoint coverage，以及 journal published、observed、acknowledged 與 causal history；各可完成的 checkpoint 經 journal 補齊後必須產生相同 canonical 狀態。只有雲端完整性成立後才合併目前 installation 的 pending，避免 pending 掩蓋雲端缺漏。
 
 輸出新 identity 的未發布候選、原始 legacy 證據及已涵蓋 pending IDs；不產生 canonical verification，不寫 DB、不確認來源、不清除資料。正式呼叫端仍須在凍結發布的交易內取得 pending，接入原有 native recovery 的發布／index 回讀／activation，並處理 snapshot-only 舊 checkpoint 與無 checkpoint 帳號。reader/writer rollout gate 仍維持關閉。
+
+`AppSyncLegacyMigrationStarter` 已提供交易式凍結入口：交易內重讀 installation 與 pending、執行上述完整合併、依候選 canonical bytes 產生新 v3 checkpoint identity，再一併建立 native recovery session、凍結 envelope 與 legacy source binding。它拒絕覆寫未完成工作及既有 canonical head，不啟用本機狀態、不確認 pending。凍結後新增的編輯留待後續 activation 合併。
+
+資料庫 migration 57（schema 58）在 recovery payload 新增 legacy blog ID、checkpoint ID、payload fingerprint 與 index fingerprint，原有工作預設全為 null。`freezeLegacyMigrationSource` 只接受同帳號的來源證據及最初 Classifying 階段；重複相同綁定保持冪等，部分缺失或不同綁定拒絕。來源欄位隨 payload 清理，不增加獨立保留期限。正式 engine／continuation 路由與 index commit 的 legacy base 核對仍待接線，writer gate 仍關閉。

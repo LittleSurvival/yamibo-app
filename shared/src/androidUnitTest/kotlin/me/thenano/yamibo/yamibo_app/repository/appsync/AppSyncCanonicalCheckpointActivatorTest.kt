@@ -15,6 +15,94 @@ import me.thenano.yamibo.yamibo_app.store.appsync.*
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 
 class AppSyncCanonicalCheckpointActivatorTest {
+    private fun legacyMigrationCloud(): AppSyncJournalLoadResult.Success {
+        val codec = AppSyncCheckpointEnvelopeCodec()
+        val payload = codec.createPayload("legacy-base", account, SyncCausalContext(),
+            me.thenano.yamibo.yamibo_app.repository.backup.YamiboBackupFile(appVersionCode = 1, createdAt = 1), emptyList(), emptyList(), 1)
+        val body = codec.encode(payload)
+        val parsed = assertIs<AppSyncCheckpointValidation.Valid>(codec.validate(body)).envelope
+        val index = AppSyncIndexEnvelopeCodec().encode(AppSyncIndexPayload(account,
+            checkpoints = listOf(AppSyncIndexCheckpointReference(payload.checkpointId, 123, parsed.fingerprint)), updatedAtEpochMillis = 1))
+        val source = assertNotNull(AppSyncVerifiedLegacyCheckpoint.verify(account.value, 123, index, body))
+        return AppSyncJournalLoadResult.Success(emptyList(), checkpoints = listOf(LoadedAppSyncCheckpoint("123", parsed)),
+            authoritativeDiscovery = true, verifiedLegacyCheckpoints = listOf(source))
+    }
+
+    @Test fun legacyMigrationFreezesPendingAndSourceEvidenceWithoutLocalActivation() = fixture {
+        val source = append()
+        val cloud = legacyMigrationCloud()
+        val recovery = SqlDelightAppSyncRecoveryStore(db)
+        val starter = AppSyncLegacyMigrationStarter(db, store, recovery, { now }, { true })
+        val id = starter.start(account, cloud).getOrThrow()
+        val frozen = recovery.nativePayload(id)
+        val checkpoint = assertIs<AppSyncV3DocumentRead.Checkpoint>(AppSyncV3DocumentCodec().discover(
+            frozen.body, account.value, AppSyncV3PayloadKind.Checkpoint)).document
+        assertEquals(1L, checkpoint.coverage[source.replicaKey.stableKey])
+        assertTrue(checkpoint.checkpointId.startsWith("v3-"))
+        assertNull(state.read(account.value))
+        assertTrue(preferences.values.isEmpty())
+        assertEquals(listOf(source), store.pendingOperations())
+        val evidence = assertNotNull(recovery.legacyMigrationSource(id))
+        assertEquals("legacy-base", evidence.checkpointId)
+        assertEquals(cloud.verifiedLegacyCheckpoints.single().fingerprint, evidence.fingerprint)
+        val later = append("22")
+        now++
+        assertTrue(starter.start(account, cloud).isFailure)
+        val restarted = SqlDelightAppSyncRecoveryStore(db)
+        assertEquals(frozen, restarted.nativePayload(id))
+        assertEquals(evidence, restarted.legacyMigrationSource(id))
+        assertEquals(listOf(source, later), store.pendingOperations())
+        restarted.freezeLegacyMigrationSource(id, cloud.verifiedLegacyCheckpoints.single())
+        assertEquals(evidence, restarted.legacyMigrationSource(id))
+    }
+
+    @Test fun legacyMigrationFreezeRollsBackAndProtectsExistingNativeState() = fixture {
+        val source = append()
+        val cloud = legacyMigrationCloud()
+        val recovery = SqlDelightAppSyncRecoveryStore(db)
+        val starter = AppSyncLegacyMigrationStarter(db, store, recovery, { now }, { true })
+        assertFailsWith<IllegalStateException> {
+            db.transaction {
+                starter.start(account, cloud).getOrThrow()
+                error("rollback after payload and source freeze")
+            }
+        }
+        assertNull(recovery.recoverySession(account))
+        assertEquals(listOf(source), store.pendingOperations())
+        var checks = 0
+        assertTrue(AppSyncLegacyMigrationStarter(db, store, recovery, { now }, { ++checks < 2 }).start(account, cloud).isFailure)
+        assertNull(recovery.recoverySession(account))
+        assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(verified()))
+        assertTrue(starter.start(account, cloud).isFailure)
+        assertNull(recovery.recoverySession(account))
+    }
+
+    @Test fun partiallyCorruptedMigrationBindingCannotBeRecreated() = fixture {
+        val cloud = legacyMigrationCloud()
+        val recovery = SqlDelightAppSyncRecoveryStore(db)
+        val id = AppSyncLegacyMigrationStarter(db, store, recovery, { now }, { true }).start(account, cloud).getOrThrow()
+        driver.execute(null, "UPDATE AppSyncRecoveryPayload SET legacySourceFingerprint = NULL", 0)
+        assertFails { recovery.legacyMigrationSource(id) }
+        assertFails { recovery.freezeLegacyMigrationSource(id, cloud.verifiedLegacyCheckpoints.single()) }
+        assertNotNull(recovery.nativePayload(id))
+        assertNull(state.read(account.value))
+    }
+
+    @Test fun migrationSourceColumnsPreserveExistingPayloadWithoutInventingEvidence() {
+        JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).use { driver ->
+            driver.execute(null, "CREATE TABLE AppSyncRecoveryPayload(sessionId TEXT PRIMARY KEY, canonicalEnvelope TEXT NOT NULL)", 0)
+            driver.execute(null, "INSERT INTO AppSyncRecoveryPayload VALUES ('old', 'frozen')", 0)
+            Database.Schema.migrate(driver, oldVersion = 57, newVersion = 58)
+            val values = driver.executeQuery(null,
+                "SELECT canonicalEnvelope, legacySourceBlogId, legacySourceCheckpointId, legacySourceFingerprint, legacySourceIndexFingerprint FROM AppSyncRecoveryPayload",
+                { cursor ->
+                    assertTrue(cursor.next().value)
+                    app.cash.sqldelight.db.QueryResult.Value((0..4).map { cursor.getString(it) })
+                }, 0).value
+            assertEquals(listOf("frozen", null, null, null, null), values)
+        }
+    }
+
     @Test fun nativeCheckpointCadencePublishesVerifiedReplacementAndCleansCoveredHistory() {
         for (count in listOf(63, 64)) fixture {
             val sources = List(count) { append() }

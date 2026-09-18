@@ -31,6 +31,9 @@ import okio.ByteString.Companion.encodeUtf8
 import okio.ByteString.Companion.toByteString
 
 internal data class NativeRecoveryIndexIntent(val body: String, val targetBlogId: Long?, val baseSha256: String?)
+internal data class NativeLegacyMigrationSource(val blogId: Long, val checkpointId: String,
+    val fingerprint: String, val indexFingerprint: String)
+
 internal data class NativeRecoveryPayload(val body: String, val kind: AppSyncV3PayloadKind, val identity: String)
 
 internal class SqlDelightAppSyncRecoveryStore(
@@ -216,6 +219,37 @@ internal class SqlDelightAppSyncRecoveryStore(
                 transportVersion.toLong(),
             )
             encoded
+        }
+    }
+
+    fun legacyMigrationSource(sessionId: String): NativeLegacyMigrationSource? {
+        val row = requireNotNull(queries.getRecoveryPayload(sessionId).executeAsOneOrNull())
+        if (row.legacySourceBlogId == null && row.legacySourceCheckpointId == null &&
+            row.legacySourceFingerprint == null && row.legacySourceIndexFingerprint == null) return null
+        require(row.transportVersion == 3L && row.payloadKind == "Checkpoint")
+        val blogId = requireNotNull(row.legacySourceBlogId)
+        val checkpointId = requireNotNull(row.legacySourceCheckpointId)
+        val fingerprint = requireNotNull(row.legacySourceFingerprint)
+        val indexFingerprint = requireNotNull(row.legacySourceIndexFingerprint)
+        require(blogId in 1..Int.MAX_VALUE.toLong() && checkpointId.isNotBlank() &&
+            fingerprint.isNotBlank() && indexFingerprint.isNotBlank())
+        return NativeLegacyMigrationSource(blogId, checkpointId, fingerprint, indexFingerprint)
+    }
+
+    fun freezeLegacyMigrationSource(sessionId: String,
+        source: me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncVerifiedLegacyCheckpoint
+    ) = db.transaction {
+        val session = requireSession(sessionId)
+        require(session.accountBinding.value == source.account && session.mode == AppSyncRecoveryMode.SegmentedCheckpoint)
+        val expected = NativeLegacyMigrationSource(source.blogId, source.read().payload.checkpointId,
+            source.fingerprint, source.indexFingerprint)
+        val existing = legacyMigrationSource(sessionId)
+        if (existing != null) require(existing == expected) { "Legacy migration source changed" }
+        else {
+            require(session.phase == AppSyncRecoveryPhase.Classifying && !session.indexCommitted)
+            queries.freezeLegacyMigrationSource(expected.blogId, expected.checkpointId, expected.fingerprint,
+                expected.indexFingerprint, sessionId)
+            require(legacyMigrationSource(sessionId) == expected)
         }
     }
 

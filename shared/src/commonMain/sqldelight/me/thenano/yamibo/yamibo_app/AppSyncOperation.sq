@@ -713,3 +713,10 @@ VALUES (?);
 getKnownSyncSettingKeys:
 SELECT settingKey FROM AppSyncKnownSettingKey
 ORDER BY settingKey ASC;
+
+freezeLegacyMigrationSource:
+UPDATE AppSyncRecoveryPayload
+SET legacySourceBlogId = ?, legacySourceCheckpointId = ?, legacySourceFingerprint = ?, legacySourceIndexFingerprint = ?
+WHERE sessionId = ? AND transportVersion = 3 AND payloadKind = 'Checkpoint'
+AND legacySourceBlogId IS NULL AND legacySourceCheckpointId IS NULL
+AND legacySourceFingerprint IS NULL AND legacySourceIndexFingerprint IS NULL;

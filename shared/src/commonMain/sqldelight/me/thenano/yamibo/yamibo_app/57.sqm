@@ -1,0 +1,4 @@
+ALTER TABLE AppSyncRecoveryPayload ADD COLUMN legacySourceBlogId INTEGER;
+ALTER TABLE AppSyncRecoveryPayload ADD COLUMN legacySourceCheckpointId TEXT;
+ALTER TABLE AppSyncRecoveryPayload ADD COLUMN legacySourceFingerprint TEXT;
+ALTER TABLE AppSyncRecoveryPayload ADD COLUMN legacySourceIndexFingerprint TEXT;

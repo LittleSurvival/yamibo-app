@@ -109,6 +109,7 @@ class SqlDelightAppSyncRecoveryStoreTest {
             Database.Schema.migrate(driver, 49, 50)
             Database.Schema.migrate(driver, 50, 51)
             Database.Schema.migrate(driver, 52, 53)
+            Database.Schema.migrate(driver, 57, 58)
             val row = Database(driver).appSyncOperationQueries.getRecoveryPayload("existing").executeAsOne()
             assertEquals("body", row.canonicalEnvelope)
             assertEquals("digest", row.envelopeFingerprint)
@@ -125,6 +126,10 @@ class SqlDelightAppSyncRecoveryStoreTest {
             assertNull(row.segmentTargetChars)
             assertNull(row.segmentMaximumCount)
             assertNull(row.segmentMaximumEnvelopeChars)
+            assertNull(row.legacySourceBlogId)
+            assertNull(row.legacySourceCheckpointId)
+            assertNull(row.legacySourceFingerprint)
+            assertNull(row.legacySourceIndexFingerprint)
         }
     }
 
