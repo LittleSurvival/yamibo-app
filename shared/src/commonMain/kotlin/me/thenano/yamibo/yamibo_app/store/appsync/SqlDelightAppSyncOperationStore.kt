@@ -411,6 +411,7 @@ internal class SqlDelightAppSyncOperationStore(
         createdAtEpochMillis: Long,
         origin: SyncOperationOrigin,
         localMutation: () -> List<LocalSyncOperationDraft>,
+        prepareOperationFields: (SyncOperation) -> Map<String, String?>?,
         afterOperationsCreated: (List<SyncOperation>) -> Unit,
     ): List<SyncOperation> {
         var created: List<SyncOperation>? = null
@@ -430,9 +431,10 @@ internal class SqlDelightAppSyncOperationStore(
                 "Local publication is disabled while installation is ${installation.state}"
             }
             val drafts = localMutation()
-            val operations = drafts.mapIndexed { index, draft ->
-                val sequence = SyncSequence(installation.nextSequence + index)
-                SyncOperation(
+            val operations = mutableListOf<SyncOperation>()
+            drafts.forEach { draft ->
+                val sequence = SyncSequence(installation.nextSequence + operations.size)
+                val operation = SyncOperation(
                     operationId = SyncOperation.idFor(
                         installation.deviceId,
                         installation.deviceEpoch,
@@ -452,6 +454,9 @@ internal class SqlDelightAppSyncOperationStore(
                     origin = origin,
                     bulkDeleteAuthorizationId = draft.bulkDeleteAuthorizationId,
                 )
+                prepareOperationFields(operation)?.let { fields ->
+                    operations += operation.copy(fields = fields)
+                }
             }
             afterOperationsCreated(operations)
             operations.forEach {

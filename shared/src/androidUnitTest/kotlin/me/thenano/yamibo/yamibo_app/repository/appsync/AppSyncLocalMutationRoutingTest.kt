@@ -19,6 +19,8 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.engine.OperationReducer
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.SqlDelightSyncDomainStateAdapter
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncInstallationState
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncAccountBinding
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDomainId
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncEntityId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationKind
 import me.thenano.yamibo.yamibo_app.repository.bookmark.BookMarkRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.detailnote.DetailNoteRepositoryImpl
@@ -34,6 +36,341 @@ import me.thenano.yamibo.yamibo_app.store.appsync.LocalSyncOperationDraft
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 
 class AppSyncLocalMutationRoutingTest {
+    @Test
+    fun repeatedBatchPatchesUsePriorAcceptedStateAndKeepSequencesContiguous() {
+        val fixture = activeFixture()
+        val first = LocalSyncOperationDraft(SyncDomainId("reading.thread"), SyncEntityId("42"),
+            kind = SyncOperationKind.Put, fields = mapOf("page" to "1", "threadName" to "unchanged"))
+        fun patch(page: String) = first.copy(kind = SyncOperationKind.Patch, fields = first.fields + ("page" to page))
+        val recorded = fixture.recorder.recordBatch(listOf(first, patch("1"), patch("2"), patch("02"), patch("1"))) {
+            // Preparation is private staging, not an early write to the projection table.
+            assertTrue(fixture.db.appSyncOperationQueries.getResolvedEntities().executeAsList().isEmpty())
+        }
+        assertEquals(listOf(SyncOperationKind.Put, SyncOperationKind.Patch, SyncOperationKind.Patch), recorded.map { it.kind })
+        assertEquals(listOf(1L, 2L, 3L), recorded.map { it.sequence.value })
+        assertEquals(listOf(mapOf("page" to "2"), mapOf("page" to "1")), recorded.drop(1).map { it.fields })
+        val reduced = OperationReducer().reduce(operations = recorded)
+        assertTrue(reduced.quarantined.isEmpty())
+        assertEquals("1", reduced.entities.values.single().fields.getValue("page").value)
+        assertEquals("unchanged", reduced.entities.values.single().fields.getValue("threadName").value)
+        assertEquals(4L, fixture.store.installation()?.nextSequence)
+    }
+
+    @Test
+    fun repeatedCommandCompactionDoesNotLeakStateIntoTheNextCommand() {
+        val fixture = activeFixture()
+        val first = LocalSyncOperationDraft(SyncDomainId("reading.thread"), SyncEntityId("42"),
+            kind = SyncOperationKind.Patch, fields = mapOf("page" to "1"))
+        val second = first.copy(fields = mapOf("page" to "2"))
+        assertEquals(2, fixture.recorder.recordCommand { listOf(first, first, second, second) }.size)
+        assertTrue(fixture.recorder.recordCommand { listOf(second, second) }.isEmpty())
+        assertEquals(1, fixture.recorder.recordCommand { listOf(first, first) }.size)
+        assertEquals(listOf(1L, 2L, 3L), fixture.store.pendingOperations().map { it.sequence.value })
+    }
+
+    @Test
+    fun batchStagingUsesMonotonicReducerWinnersRatherThanLastInputValues() {
+        val fixture = activeFixture()
+        val initial = LocalSyncOperationDraft(SyncDomainId("reading.time"), SyncEntityId("2026-09-17"),
+            kind = SyncOperationKind.Put, fields = mapOf("dateKey" to "2026-09-17", "durationMillis" to "100"))
+        val lower = initial.copy(kind = SyncOperationKind.Patch, fields = mapOf("durationMillis" to "50"))
+        val sameAsWinner = lower.copy(fields = mapOf("durationMillis" to "100"))
+        val recorded = fixture.recorder.recordBatch(listOf(initial, lower, lower, sameAsWinner)) {}
+        // With existing shared batch causality the 50s lose to 100. A simple map overlay
+        // would incorrectly suppress the second 50 and emit the redundant final 100.
+        assertEquals(listOf("100", "50", "50"), recorded.map { it.fields.getValue("durationMillis") })
+        val reduced = OperationReducer().reduce(operations = recorded)
+        assertTrue(reduced.quarantined.isEmpty())
+        assertEquals("100", reduced.entities.values.single().fields.getValue("durationMillis").value)
+    }
+
+    @Test
+    fun batchDeleteAndRecreationNeverReuseTheOldGenerationAsTheComparisonBase() {
+        val fixture = activeFixture()
+        val initial = LocalSyncOperationDraft(SyncDomainId("reading.thread"), SyncEntityId("42"),
+            kind = SyncOperationKind.Put, fields = mapOf("page" to "1"))
+        val deletion = initial.copy(kind = SyncOperationKind.Delete)
+        val recreation = initial.copy(entityGeneration = 2)
+        val unchanged = recreation.copy(kind = SyncOperationKind.Patch)
+        val changed = unchanged.copy(fields = mapOf("page" to "2"))
+        val operations = fixture.recorder.recordBatch(listOf(initial, deletion, recreation, unchanged, changed, changed)) {}
+        assertEquals(listOf(1L, 1L, 2L, 2L), operations.map { it.entityGeneration })
+        assertEquals(listOf(SyncOperationKind.Put, SyncOperationKind.Delete, SyncOperationKind.Put, SyncOperationKind.Patch),
+            operations.map { it.kind })
+        val reduced = OperationReducer().reduce(operations = operations)
+        assertTrue(reduced.quarantined.isEmpty())
+        val result = reduced.entities.values.single()
+        assertEquals(2L, result.key.generation)
+        assertNull(result.tombstone)
+        assertEquals("2", result.fields.getValue("page").value)
+    }
+
+    @Test
+    fun invalidHistoryPatchCannotBecomeTheBaseForDroppingALaterValidPatch() {
+        val fixture = activeFixture()
+        val source = AppSyncSyntheticCorpus.create().journal.operations.first { it.domainId.value == "reading.tag-catalog" }
+        val initial = LocalSyncOperationDraft(source.domainId, source.entityId, kind = source.kind, fields = source.fields)
+        val invalid = initial.copy(kind = SyncOperationKind.Patch, fields = mapOf("threadPage" to "99"))
+        val valid = invalid.copy(fields = source.fields + ("threadPage" to "99"))
+        val recorded = fixture.recorder.recordBatch(listOf(initial, invalid, valid, valid)) {}
+        assertEquals(3, recorded.size)
+        assertEquals(setOf("tagId", "lastVisitTime", "threadPage"), recorded.last().fields.keys)
+        val reduced = OperationReducer().reduce(operations = recorded)
+        assertEquals(1, reduced.quarantined.size)
+        assertEquals("99", reduced.entities.values.single().fields.getValue("threadPage").value)
+    }
+
+    @Test
+    fun compactBatchRollbackLeavesNoSequencesProjectionsOrLocalWritesAndCanRetry() {
+        val fixture = activeFixture()
+        val draft = LocalSyncOperationDraft(SyncDomainId("reading.thread"), SyncEntityId("42"),
+            kind = SyncOperationKind.Patch, fields = mapOf("page" to "1"))
+        assertFailsWith<IllegalStateException> {
+            fixture.recorder.recordBatch(listOf(draft, draft)) {
+                assertEquals(1, it.size)
+                fixture.db.appSyncOperationQueries.recordKnownSyncSettingKey("batch-rollback")
+                error("synthetic abort")
+            }
+        }
+        assertTrue(fixture.store.pendingOperations().isEmpty())
+        assertTrue(fixture.db.appSyncOperationQueries.getResolvedEntities().executeAsList().isEmpty())
+        assertFalse(fixture.db.appSyncOperationQueries.getKnownSyncSettingKeys().executeAsList().contains("batch-rollback"))
+        assertEquals(1L, fixture.store.installation()?.nextSequence)
+        assertEquals(1L, fixture.recorder.recordBatch(listOf(draft, draft)) {}.single().sequence.value)
+    }
+
+    @Test
+    fun malformedUnknownFieldNamesAreFilteredBeforeOperationConstruction() {
+        val fixture = activeFixture()
+        var called = false
+        val result = fixture.recorder.record("reading.thread", "42", SyncOperationKind.Patch,
+            mapOf("bad unknown key" to "private", "page" to "1")) { called = true }
+        assertTrue(called)
+        assertEquals(mapOf("page" to "1"), result?.fields)
+    }
+
+    @Test
+    fun readingUpdatesSendOnlyChangedFieldsAndStillRestoreOnAnotherDevice() = runBlocking {
+        val source = activeFixture()
+        val delegate = AndroidReadHistoryRepository(source.db)
+        val repository = OperationRecordingReadHistoryRepository(delegate, source.recorder)
+        repository.savePosition(sampleThread())
+        val updated = sampleThread().copy(page = 2, lastVisitTime = 2)
+        repository.savePosition(updated)
+        repository.savePosition(updated)
+        val operations = source.store.pendingOperations()
+        assertEquals(2, operations.size)
+        assertEquals(mapOf("page" to "2", "lastVisitTime" to "2"), operations.last().fields)
+        assertEquals(3L, source.store.installation()?.nextSequence)
+        assertEquals(updated, delegate.getPosition(updated.threadId, updated.threadType, updated.authorId))
+        val target = activeFixture()
+        val materializer = SqlDelightSyncDomainStateAdapter(target.db,
+            DatabaseSyncDomainMaterializer(target.db, MapSettingsStore()), nowMillis = { 100 })
+        applyAllOperations(source, materializer)
+        assertEquals(updated, AndroidReadHistoryRepository(target.db).getPosition(
+            updated.threadId, updated.threadType, updated.authorId))
+    }
+
+    @Test
+    fun typedNoOpPreservesCallbacksAndSequencesAcrossAllRecordingPaths() {
+        val fixture = activeFixture()
+        val draft = LocalSyncOperationDraft(SyncDomainId("reading.thread"), SyncEntityId("42"),
+            kind = SyncOperationKind.Patch, fields = mapOf("page" to "2", "anchorPostRatio" to "0.5"))
+        fixture.recorder.recordBatch(listOf(draft)) {}
+        val equivalent = draft.copy(fields = mapOf("page" to "+0002", "anchorPostRatio" to "5e-1"))
+        var callbacks = 0
+        assertNull(fixture.recorder.record("reading.thread", "42", equivalent.kind, equivalent.fields) {
+            assertNull(it); callbacks++
+        })
+        assertTrue(fixture.recorder.recordBatch(listOf(equivalent)) { assertTrue(it.isEmpty()); callbacks++ }.isEmpty())
+        assertTrue(fixture.recorder.recordCommand { callbacks++; listOf(equivalent) }.isEmpty())
+        assertEquals(3, callbacks)
+        assertEquals(1, fixture.store.pendingOperations().size)
+        assertEquals(2L, fixture.store.installation()?.nextSequence)
+    }
+
+    @Test
+    fun explicitNullDiffersFromAbsentAndRepeatedBatchTargetsAreNotComparedToStaleState() {
+        val fixture = activeFixture()
+        val draft = LocalSyncOperationDraft(SyncDomainId("reading.thread"), SyncEntityId("42"),
+            kind = SyncOperationKind.Patch, fields = mapOf("page" to "1"))
+        fixture.recorder.recordBatch(listOf(draft)) {}
+        val clear = draft.copy(fields = mapOf("anchorPostRatio" to null))
+        assertEquals(mapOf("anchorPostRatio" to null), fixture.recorder.recordBatch(listOf(clear)) {}.single().fields)
+        assertTrue(fixture.recorder.recordBatch(listOf(clear)) {}.isEmpty())
+        val changes = listOf(draft.copy(fields = mapOf("page" to "2")), draft)
+        assertEquals(2, fixture.recorder.recordBatch(changes) {}.size)
+        val reduction = OperationReducer().reduce(operations = fixture.store.pendingOperations())
+        assertTrue(reduction.quarantined.isEmpty())
+        assertEquals("1", reduction.entities.values.single().fields.getValue("page").value)
+        assertEquals(listOf(1L, 2L, 3L, 4L), fixture.store.pendingOperations().map { it.sequence.value })
+    }
+
+    @Test
+    fun compactHistoryPatchesRetainLegacyReaderRequiredIdentityAndTimestamp() {
+        val fixture = activeFixture()
+        val domains = setOf("reading.tag-catalog", "reading.rss-search", "reading.rss-catalog")
+        AppSyncSyntheticCorpus.create().journal.operations.filter { it.domainId.value in domains }.forEach { source ->
+            fixture.recorder.record(source.domainId.value, source.entityId.value, source.kind, source.fields) {}
+            val update = source.fields + ("firstVisibleItemOffset" to "99")
+            val patch = requireNotNull(fixture.recorder.record(source.domainId.value, source.entityId.value,
+                SyncOperationKind.Patch, update) {})
+            val identity = if (source.domainId.value == "reading.tag-catalog") "tagId" else "subscriptionSyncId"
+            assertEquals(setOf(identity, "lastVisitTime", "firstVisibleItemOffset"), patch.fields.keys)
+        }
+        assertTrue(OperationReducer().reduce(operations = fixture.store.pendingOperations()).quarantined.isEmpty())
+    }
+
+    @Test
+    fun settingsNoOpKeepsWinnerAndTimestampWhileChangedValuesStillPublish() {
+        val fixture = activeFixture()
+        val delegate = MapSettingsStore()
+        val settings = OperationRecordingSettingsStore(fixture.db, delegate, fixture.recorder)
+        val key = "appsettings.ismangamode"
+        settings.putBoolean(key, true)
+        val first = fixture.db.appSyncOperationQueries.getSyncSettingValue(key).executeAsOne()
+        settings.putBoolean(key, true)
+        assertEquals(first, fixture.db.appSyncOperationQueries.getSyncSettingValue(key).executeAsOne())
+        assertEquals(1, fixture.store.pendingOperations().size)
+        settings.putBoolean(key, false)
+        assertEquals(mapOf("value" to "false"), fixture.store.pendingOperations().last().fields)
+        assertEquals(false, delegate.getBoolean(key, true))
+        assertEquals(2, fixture.store.pendingOperations().size)
+    }
+
+    @Test
+    fun equivalentFloatSettingKeepsProvenanceAcrossNegativeZeroFormatting() {
+        val fixture = activeFixture()
+        val settings = OperationRecordingSettingsStore(fixture.db, MapSettingsStore(), fixture.recorder)
+        val key = "novelreadersettings.linespacing"
+        settings.putFloat(key, -0.0f)
+        val before = fixture.db.appSyncOperationQueries.getSyncSettingValue(key).executeAsOne()
+        settings.putFloat(key, 0.0f)
+        val after = fixture.db.appSyncOperationQueries.getSyncSettingValue(key).executeAsOne()
+        assertEquals(before.winnerOperationId, after.winnerOperationId)
+        assertEquals(before.updatedAtEpochMillis, after.updatedAtEpochMillis)
+        assertEquals(1, fixture.store.pendingOperations().size)
+        assertEquals(0.0f, settings.getFloat(key, 1.0f))
+    }
+
+    @Test
+    fun deletesDropStaleBodiesButKeepAuthorizedProofAndLegacyRelationIdentity() {
+        val fixture = activeFixture()
+        val stale = mapOf("page" to "1", "threadName" to "stale title")
+        assertTrue(requireNotNull(fixture.recorder.record("reading.thread", "42", SyncOperationKind.Delete,
+            stale) {}).fields.isEmpty())
+        val draft = LocalSyncOperationDraft(SyncDomainId("reading.thread"), SyncEntityId("43"),
+            kind = SyncOperationKind.Delete, fields = stale)
+        val authorized = fixture.recorder.recordAuthorizedDeleteBatch(listOf(draft), "reading-history:selected") {}.single()
+        assertEquals(AppSyncLegacyFieldRegistry.proofFields, authorized.fields.keys)
+        val relationFields = mapOf("targetType" to "ThreadNormal", "targetId" to "42", "authorId" to "0",
+            "categorySyncId" to "category", "createdAt" to "1")
+        val relation = requireNotNull(fixture.recorder.record("favorite.item-category", "relation",
+            SyncOperationKind.RelationRemove, relationFields) {})
+        assertEquals(setOf("targetType", "targetId", "authorId", "categorySyncId"), relation.fields.keys)
+    }
+
+    @Test
+    fun noOpLocalDatabaseMutationRollsBackWhenCallbackFails() {
+        val fixture = activeFixture()
+        fixture.recorder.record("reading.thread", "42", SyncOperationKind.Patch, mapOf("page" to "1")) {}
+        assertFailsWith<IllegalStateException> {
+            fixture.recorder.record("reading.thread", "42", SyncOperationKind.Patch, mapOf("page" to "1")) {
+                assertNull(it)
+                fixture.db.appSyncOperationQueries.recordKnownSyncSettingKey("synthetic-rollback")
+                error("synthetic failure")
+            }
+        }
+        assertEquals(1, fixture.store.pendingOperations().size)
+        assertEquals(2L, fixture.store.installation()?.nextSequence)
+        assertFalse(fixture.db.appSyncOperationQueries.getKnownSyncSettingKeys().executeAsList().contains("synthetic-rollback"))
+    }
+
+    @Test
+    fun unknownEntityRemainsLocalForSingleBatchAndCommandRecording() {
+        val fixture = activeFixture()
+        var mutations = 0
+        val draft = LocalSyncOperationDraft(
+            domainId = SyncDomainId("future.domain"),
+            entityId = SyncEntityId("private-id"),
+            kind = SyncOperationKind.Put, fields = mapOf("value" to "private payload"),
+        )
+        assertNull(fixture.recorder.record("future.domain", "private-id", SyncOperationKind.Put, draft.fields) {
+            assertNull(it)
+            mutations++
+        })
+        assertTrue(fixture.recorder.recordBatch(listOf(draft)) { assertTrue(it.isEmpty()); mutations++ }.isEmpty())
+        assertTrue(fixture.recorder.recordCommand { mutations++; listOf(draft) }.isEmpty())
+        assertEquals(3, mutations)
+        assertTrue(fixture.store.pendingOperations().isEmpty())
+        assertTrue(fixture.db.appSyncOperationQueries.getResolvedEntities().executeAsList().isEmpty())
+    }
+
+    @Test
+    fun unknownFieldsNeverEnterRecordedOperationsOrProjections() {
+        val fixture = activeFixture()
+        var localValue: String? = null
+        fixture.recorder.record("reading.thread", "42", SyncOperationKind.Patch,
+            mapOf("page" to "2", "futureCache" to "private sentinel")) {
+            localValue = "private sentinel"
+        }
+        assertEquals("private sentinel", localValue)
+        assertEquals(mapOf("page" to "2"), fixture.store.pendingOperations().single().fields)
+        assertFalse(fixture.db.appSyncOperationQueries.getResolvedEntities().executeAsOne().encodedState.contains("sentinel"))
+    }
+
+    @Test
+    fun mixedBatchAndCommandKeepKnownFieldsAndContiguousSequences() {
+        val fixture = activeFixture()
+        val excluded = LocalSyncOperationDraft(SyncDomainId("future.domain"), SyncEntityId("private"),
+            kind = SyncOperationKind.Put, fields = mapOf("value" to "private sentinel"))
+        val known = excluded.copy(domainId = SyncDomainId("reading.thread"), entityId = SyncEntityId("42"),
+            kind = SyncOperationKind.Patch, fields = mapOf("page" to "2", "futureCache" to "private sentinel"))
+        val localOnlySetting = excluded.copy(domainId = SyncDomainId("settings"),
+            entityId = SyncEntityId("appsettings.futureCache"))
+        var mutations = 0
+        val drafts = listOf(excluded, known, localOnlySetting)
+        fixture.recorder.recordBatch(drafts) { mutations++; assertEquals(1, it.size) }
+        fixture.recorder.recordCommand { mutations++; drafts }
+        assertEquals(2, mutations)
+        assertEquals(listOf(1L), fixture.store.pendingOperations().map { it.sequence.value })
+        assertTrue(fixture.store.pendingOperations().all { it.fields == mapOf("page" to "2") })
+        assertFalse(fixture.db.appSyncOperationQueries.getResolvedEntities().executeAsOne().encodedState.contains("sentinel"))
+    }
+
+    @Test
+    fun authorizedBatchCountsOnlyPortableEntities() {
+        val fixture = activeFixture()
+        val known = LocalSyncOperationDraft(SyncDomainId("settings"), SyncEntityId("appsettings.language"),
+            kind = SyncOperationKind.Delete, fields = emptyMap())
+        val excluded = known.copy(entityId = SyncEntityId("appsettings.futureCache"))
+        var mutations = 0
+        val recorded = fixture.recorder.recordAuthorizedDeleteBatch(listOf(known, excluded), "settings:test") {
+            mutations++
+        }.single()
+        assertEquals(1, mutations)
+        assertEquals("1", recorded.fields[AppSyncBulkDeleteProofFields.COUNT])
+        val authorization = fixture.db.appSyncOperationQueries
+            .getBulkDeleteAuthorization(requireNotNull(recorded.bulkDeleteAuthorizationId)).executeAsOne()
+        assertEquals(1L, authorization.operationCount)
+        assertEquals(known.entityId, recorded.entityId)
+    }
+
+    @Test
+    fun excludedOnlyPatchRemainsLocalWithoutAllocatingOperationOrProjection() {
+        val fixture = activeFixture()
+        val draft = LocalSyncOperationDraft(SyncDomainId("reading.thread"), SyncEntityId("42"),
+            kind = SyncOperationKind.Patch, fields = mapOf("futureCache" to "private"))
+        var mutations = 0
+        fixture.recorder.record("reading.thread", "42", draft.kind, draft.fields) { assertNull(it); mutations++ }
+        fixture.recorder.recordBatch(listOf(draft)) { assertTrue(it.isEmpty()); mutations++ }
+        fixture.recorder.recordCommand { mutations++; listOf(draft) }
+        assertEquals(3, mutations)
+        assertEquals(1L, fixture.store.installation()?.nextSequence)
+        assertTrue(fixture.store.pendingOperations().isEmpty())
+        assertTrue(fixture.db.appSyncOperationQueries.getResolvedEntities().executeAsList().isEmpty())
+    }
+
     @Test
     fun localMutationNeverLoadsTheFullResolvedState() = runBlocking {
         val db = inMemoryDatabase()

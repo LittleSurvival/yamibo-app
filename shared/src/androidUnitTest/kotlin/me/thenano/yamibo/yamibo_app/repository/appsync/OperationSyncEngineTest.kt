@@ -917,7 +917,7 @@ class OperationSyncEngineTest {
                 },
             ),
             DomainMutation("reading.thread", { "thread:$it" }) { index ->
-                mapOf("position" to index.toString())
+                mapOf("page" to index.toString())
             },
             DomainMutation("favorite.update-event", { "event:$it" }) { index ->
                 mapOf("readAt" to (1_000 + index).toString())

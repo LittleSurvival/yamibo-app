@@ -37,25 +37,26 @@ internal class AppSyncMutationRecorder(
         val canRecord = enabled &&
             account != null &&
             installation.state in RECORDABLE_STATES
-        if (!canRecord) {
+        if (!canRecord || !AppSyncPortabilityPolicy.isEntityPortable(domain, entityId)) {
             mutation(null)
             return null
         }
-        return store.appendLocalOperation(
+        val preparation = AppSyncMutationPreparation(domainState::entityState)
+        return store.appendLocalCommand(
             accountBinding = account,
-            domainId = SyncDomainId(domain),
-            entityId = SyncEntityId(entityId),
-            entityGeneration = entityGeneration,
-            kind = kind,
-            fields = portableAppSyncFields(domain, entityId, fields),
             causalContext = store.causalContext(),
             createdAtEpochMillis = nowMillis(),
             origin = SyncOperationOrigin.UserAction,
-            bulkDeleteAuthorizationId = bulkDeleteAuthorizationId,
-        ) { operation ->
-            mutation(operation)
-            domainState.recordLocal(operation)
-        }
+            localMutation = { portableDrafts(listOf(LocalSyncOperationDraft(
+                SyncDomainId(domain), SyncEntityId(entityId), entityGeneration, kind, fields,
+                bulkDeleteAuthorizationId,
+            ))) },
+            prepareOperationFields = preparation::prepareFields,
+            afterOperationsCreated = { operations ->
+                mutation(operations.singleOrNull())
+                operations.forEach(domainState::recordLocal)
+            },
+        ).singleOrNull()
     }
 
     fun recordBatch(
@@ -75,18 +76,19 @@ internal class AppSyncMutationRecorder(
             mutation(emptyList())
             return emptyList()
         }
-        return store.appendLocalOperations(
+        val preparation = AppSyncMutationPreparation(domainState::entityState)
+        return store.appendLocalCommand(
             accountBinding = account,
-            drafts = drafts.map { it.copy(fields = portableAppSyncFields(
-                it.domainId.value, it.entityId.value, it.fields,
-            )) },
             causalContext = store.causalContext(),
             createdAtEpochMillis = nowMillis(),
             origin = SyncOperationOrigin.UserAction,
-        ) { operations ->
-            mutation(operations)
-            operations.forEach(domainState::recordLocal)
-        }
+            localMutation = { portableDrafts(drafts) },
+            prepareOperationFields = preparation::prepareFields,
+            afterOperationsCreated = { operations ->
+                mutation(operations)
+                operations.forEach(domainState::recordLocal)
+            },
+        )
     }
 
     fun recordAuthorizedDeleteBatch(
@@ -109,6 +111,7 @@ internal class AppSyncMutationRecorder(
         }
         val createdAt = nowMillis()
         val authorizedDrafts = drafts
+            .filter { AppSyncPortabilityPolicy.isEntityPortable(it.domainId.value, it.entityId.value) }
             .groupBy { it.domainId }
             .values
             .flatMap { domainDrafts ->
@@ -153,19 +156,25 @@ internal class AppSyncMutationRecorder(
             mutation()
             return emptyList()
         }
+        val preparation = AppSyncMutationPreparation(domainState::entityState)
         return store.appendLocalCommand(
             accountBinding = account,
             causalContext = store.causalContext(),
             createdAtEpochMillis = nowMillis(),
             origin = SyncOperationOrigin.UserAction,
-            localMutation = { mutation().map { it.copy(fields = portableAppSyncFields(
-                it.domainId.value, it.entityId.value, it.fields,
-            )) } },
+            localMutation = { portableDrafts(mutation()) },
+            prepareOperationFields = preparation::prepareFields,
             afterOperationsCreated = { operations ->
                 operations.forEach(domainState::recordLocal)
             },
         )
     }
+
+    // Filter before constructing SyncOperation, whose field-name validator also rejects
+    // malformed unknown keys. Excluded data must not prevent the ordinary local mutation.
+    private fun portableDrafts(drafts: List<LocalSyncOperationDraft>) = drafts
+        .filter { AppSyncPortabilityPolicy.isEntityPortable(it.domainId.value, it.entityId.value) }
+        .map { it.copy(fields = portableAppSyncFields(it.domainId.value, it.entityId.value, it.fields)) }
 
     private companion object {
         const val BULK_DELETE_CONFIRMATION_WINDOW_MILLIS = 5 * 60 * 1_000L

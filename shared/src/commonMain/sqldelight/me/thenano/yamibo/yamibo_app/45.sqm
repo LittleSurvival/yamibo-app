@@ -1,0 +1,7 @@
+CREATE TABLE AppSyncCanonicalState (
+    singletonId INTEGER NOT NULL PRIMARY KEY CHECK (singletonId = 1),
+    accountBinding TEXT NOT NULL,
+    checkpointId TEXT NOT NULL,
+    canonicalPayload BLOB NOT NULL,
+    canonicalSha256 TEXT NOT NULL
+);

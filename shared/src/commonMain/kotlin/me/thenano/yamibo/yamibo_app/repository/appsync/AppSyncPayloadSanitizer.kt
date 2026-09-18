@@ -7,31 +7,30 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperation
 /** Also sanitize provenance: each winning operation can contain fields other than its winner. */
 internal fun ResolvedSyncEntity.withoutExcludedAppSyncPayloads(): ResolvedSyncEntity = copy(
     fields = fields.filterKeys {
-        AppSyncPortabilityPolicy.field(key.domainId.value, it).portability == AppSyncPortability.Portable
+        AppSyncPortabilityPolicy.isEntityPortable(key.domainId.value, key.entityId.value) &&
+            AppSyncPortabilityPolicy.field(key.domainId.value, it).portability == AppSyncPortability.Portable
     }.mapValues { (_, field) -> field.copy(operation = field.operation.withoutExcludedAppSyncPayloads()) },
     relationOperation = relationOperation?.withoutExcludedAppSyncPayloads(),
     tombstone = tombstone?.withoutExcludedAppSyncPayloads(),
 )
 
 internal fun SyncOperation.withoutExcludedAppSyncPayloads(): SyncOperation = copy(
-    fields = fields.filterKeys {
-        AppSyncPortabilityPolicy.field(domainId.value, it).portability == AppSyncPortability.Portable
-    },
+    fields = portableAppSyncFields(domainId.value, entityId.value, fields),
 )
 
 internal fun portableAppSyncFields(
     domain: String,
     entityId: String,
     fields: Map<String, String?>,
-): Map<String, String?> = if (domain == "settings" &&
-    !AppSyncPortabilityPolicy.isSettingPortable(entityId)
-) emptyMap() else fields.filterKeys {
+): Map<String, String?> = if (!AppSyncPortabilityPolicy.isEntityPortable(domain, entityId)) {
+    emptyMap()
+} else fields.filterKeys {
     AppSyncPortabilityPolicy.field(domain, it).portability == AppSyncPortability.Portable
 }
 
 internal fun Collection<ResolvedSyncEntity>.withoutExcludedAppSyncPayloads(): List<ResolvedSyncEntity> =
-    filterNot { it.key.domainId.value == "settings" &&
-        !AppSyncPortabilityPolicy.isSettingPortable(it.key.entityId.value)
+    filter {
+        AppSyncPortabilityPolicy.isEntityPortable(it.key.domainId.value, it.key.entityId.value)
     }.map { it.withoutExcludedAppSyncPayloads() }
 
 /**

@@ -62,21 +62,30 @@ class FavoriteUpdateSyncDomainTest {
     }
 
     @Test
-    fun malformedLifecycleAndLocalCategoryIdAreQuarantined() {
+    fun malformedLifecycleIsQuarantinedAndLocalCategoryIdCannotEnterProjection() {
         val put = eventPut("a", 1)
         val badPatch = operation(
             "a", 2, "favorite.update-event", put.entityId.value,
             SyncOperationKind.Patch, mapOf("readAt" to null),
         )
-        val badCategory = operation(
+        val categoryWithLocalMetadata = operation(
             "b", 1, "favorite.update-category-filter", "category:stable",
             SyncOperationKind.Put,
             mapOf("categorySyncId" to "stable", "categoryId" to "7", "enabled" to "true"),
         )
 
-        val result = OperationReducer().reduce(operations = listOf(put, badPatch, badCategory))
+        val missingStableCategory = operation(
+            "c", 1, "favorite.update-category-filter", "category:7", SyncOperationKind.Put,
+            mapOf("categoryId" to "7", "enabled" to "true"),
+        )
+        val result = OperationReducer().reduce(operations = listOf(put, badPatch, categoryWithLocalMetadata, missingStableCategory))
 
         assertEquals(2, result.quarantined.size)
+        assertEquals(setOf(badPatch.operationId, missingStableCategory.operationId),
+            result.quarantined.map { it.operation.operationId }.toSet())
+        val category = result.entities.values.single { it.key.domainId.value == "favorite.update-category-filter" }
+        assertEquals(setOf("categorySyncId", "enabled"), category.fields.keys)
+        assertTrue(category.fields.values.none { "categoryId" in it.operation.fields })
     }
 
     @Test

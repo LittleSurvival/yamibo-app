@@ -135,7 +135,7 @@ internal class SqlDelightSyncDomainStateAdapter(
     private fun SyncEntityKey.stableKey(): String =
         "${domainId.value}|${entityId.value}|$generation"
 
-    private companion object {
+    internal companion object {
         val MATERIALIZATION_ORDER = mapOf(
             "settings" to 0,
             "favorite.category" to 10,

@@ -1,5 +1,7 @@
 package me.thenano.yamibo.yamibo_app.repository.appsync
 
+import me.thenano.yamibo.yamibo_app.repository.appsync.schema.AppSyncCanonicalSettings
+
 /** Whether a value may leave the installation that produced it. */
 internal enum class AppSyncPortability {
     Portable,
@@ -62,25 +64,7 @@ internal object AppSyncPortabilityPolicy {
         local("signinlaunchreminderdismisstoday").copy(includeInLocalBackup = true),
     )
 
-    private val portableSettingKeys: Set<String> = buildSet {
-        fun declare(prefix: String, names: String) {
-            names.split(" ").filter(String::isNotBlank).forEach { add("$prefix.$it") }
-        }
-        declare("appsettings", "thememode themescheme language ismangamode clearcacheonapplaunch " +
-            "showhomeswiperimages messagenotificationenabled messagenotificationinterval " +
-            "messagenotificationdailylimit appfontid skipfavoriteremovalconfirm " +
-            "favoriteaddsyncpromptenabled favoriteadddownloadpromptenabled favoriteaddsyncdefault " +
-            "favoriteremovesyncpromptenabled favoriteremovesyncdefault favoritegridmode favoritesortmode " +
-            "favoritesortdescending favoriteupdateinterval favoriteupdateautodownload " +
-            "downloadedcontentrefreshautoupdate appupdatepreferredsourceindex appupdatelaunchcheckthreshold " +
-            "backupinterval backupmaxautofiles signinmode signinlaunchreminderenabled signinallowrepair " +
-            "signinreminderfrequency signindirectwebview")
-        declare("novelreadersettings", "fontsize linespacing readerfontid defaultbold defaultitalic " +
-            "contentwidthfraction keepsystembarsbackground chineseconversion threadreadermode " +
-            "threadtouchzone threadreversetouchzones scrollbuttondisplaymode scrollbuttondirectionthreshold " +
-            "scrollbuttonjumptarget showpageprogresshint")
-        declare("mangareadersettings", "readingmode touchzone reversetouchzones")
-    }
+    private val portableSettingKeys: Set<String> = AppSyncCanonicalSettings.entries.keys
 
     fun isSettingDeclared(key: String): Boolean = setting(key) != null ||
         key.lowercase() in portableSettingKeys
@@ -112,9 +96,15 @@ internal object AppSyncPortabilityPolicy {
             ?: AppSyncFieldPortability(
                 domain = domain,
                 field = field,
-                portability = AppSyncPortability.Portable,
+                portability = if (AppSyncLegacyFieldRegistry.permits(domain, field)) {
+                    AppSyncPortability.Portable
+                } else AppSyncPortability.DeviceLocal,
                 semanticLimitBytes = semanticLimitForDomain(domain),
             )
+
+    fun isEntityPortable(domain: String, entityId: String): Boolean =
+        domain in AppSyncLegacyFieldRegistry.fieldsByDomain &&
+            (domain != "settings" || isSettingPortable(entityId))
 
     fun isSettingPortable(key: String): Boolean =
         settingPortability(key) == AppSyncPortability.Portable

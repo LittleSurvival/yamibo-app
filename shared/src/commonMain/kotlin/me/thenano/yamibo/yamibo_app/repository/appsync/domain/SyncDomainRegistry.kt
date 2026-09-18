@@ -221,7 +221,11 @@ internal class SyncDomainRegistry(
                 SyncOperationKind.Patch,
                 SyncOperationKind.Delete,
             ),
-            requiredFieldsByKind = mapOf(SyncOperationKind.Put to putFields),
+            requiredFieldsByKind = mapOf(
+                SyncOperationKind.Put to putFields,
+                // Existing v2 readers validate these on both Put and Patch.
+                SyncOperationKind.Patch to setOf(identityField, "lastVisitTime"),
+            ),
             semanticValidator = { operation ->
                 runCatching {
                     if (operation.kind != SyncOperationKind.Delete) {

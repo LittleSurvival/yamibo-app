@@ -1,6 +1,5 @@
 package me.thenano.yamibo.yamibo_app.repository.appsync.remote
 
-import com.fleeksoft.ksoup.Ksoup
 import io.github.littlesurvival.dto.page.UserSpaceBlogPage
 import io.github.littlesurvival.dto.value.BlogClassId
 import io.github.littlesurvival.dto.value.BlogId
@@ -1768,11 +1767,7 @@ internal class YamiboAppSyncJournalRemote(
         }
     }
 
-    private fun readerText(html: String): String = try {
-        Ksoup.parseBodyFragment(html).body().text()
-    } catch (_: Throwable) {
-        html
-    }
+    private fun readerText(html: String): String = appSyncReaderText(html)
 
     private suspend fun updateIndexBestEffort(
         accountBinding: SyncAccountBinding,

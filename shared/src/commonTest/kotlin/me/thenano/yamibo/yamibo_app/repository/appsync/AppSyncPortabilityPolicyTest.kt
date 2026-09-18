@@ -60,8 +60,8 @@ class AppSyncPortabilityPolicyTest {
                 entityId = secretId,
                 fields = mapOf(
                     "content" to "x".repeat(100_000),
-                    "title" to "y".repeat(100_000),
-                    "summary" to "z".repeat(100_000),
+                    "targetType" to "y".repeat(100_000),
+                    "authorId" to "z".repeat(100_000),
                 ),
             ),
         )
@@ -71,14 +71,16 @@ class AppSyncPortabilityPolicyTest {
     }
 
     @Test
-    fun everyFieldReceivesPortableMetadataAndDomainSpecificLimit() {
+    fun declaredFieldsReceiveLimitsButUnknownFieldsAreNotPortable() {
         val note = AppSyncPortabilityPolicy.field("detail-note", "content")
-        val reading = AppSyncPortabilityPolicy.field("reading.image", "postTitle")
+        val reading = AppSyncPortabilityPolicy.field("reading.image", "pageIndex")
+        val unknown = AppSyncPortabilityPolicy.field("reading.image", "postTitle")
         val cover = AppSyncPortabilityPolicy.field("reading.thread", "threadCover")
 
         assertEquals(AppSyncPortability.Portable, note.portability)
         assertEquals(128 * 1024, note.semanticLimitBytes)
         assertEquals(32 * 1024, reading.semanticLimitBytes)
+        assertEquals(AppSyncPortability.DeviceLocal, unknown.portability)
         assertEquals(AppSyncPortability.Cache, cover.portability)
         assertNull(cover.semanticLimitBytes)
     }

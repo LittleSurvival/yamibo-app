@@ -52,6 +52,20 @@ internal class BulkDeleteGuard(
     fun evaluate(
         operations: List<SyncOperation>,
         domainEntityCount: (SyncDomainId) -> Int,
+    ): BulkDeleteGuardResult = evaluateInternal(operations, domainEntityCount, allowCoveredSubset = false)
+
+    /** Canonical import already validates one consistent proof and its total referenced count.
+     * A verified checkpoint may cover a prefix of the originally authorized batch.
+     */
+    fun evaluateCoveredSubset(
+        operations: List<SyncOperation>,
+        domainEntityCount: (SyncDomainId) -> Int,
+    ): BulkDeleteGuardResult = evaluateInternal(operations, domainEntityCount, allowCoveredSubset = true)
+
+    private fun evaluateInternal(
+        operations: List<SyncOperation>,
+        domainEntityCount: (SyncDomainId) -> Int,
+        allowCoveredSubset: Boolean,
     ): BulkDeleteGuardResult {
         val accepted = operations.toMutableList()
         val quarantined = mutableListOf<SyncQuarantinedOperation>()
@@ -69,7 +83,8 @@ internal class BulkDeleteGuard(
                 val authorization = authorizationIds.singleOrNull()?.let(authorizationLookup)
                 val storedAuthorizationValid = authorization != null &&
                     authorization.domainId == domainId.value &&
-                    authorization.operationCount == deletes.size.toLong() &&
+                    (authorization.operationCount == deletes.size.toLong() ||
+                        (allowCoveredSubset && authorization.operationCount >= deletes.size.toLong())) &&
                     deletes.all { it.createdAtEpochMillis <= authorization.expiresAtEpochMillis }
                 val embeddedAuthorizationValid =
                     authorizationIds.singleOrNull() != null &&
@@ -80,8 +95,8 @@ internal class BulkDeleteGuard(
                             !it.fields[AppSyncBulkDeleteProofFields.SCOPE].isNullOrBlank()
                         } &&
                         deletes.all {
-                            it.fields[AppSyncBulkDeleteProofFields.COUNT]?.toLongOrNull() ==
-                                deletes.size.toLong()
+                            val count = it.fields[AppSyncBulkDeleteProofFields.COUNT]?.toLongOrNull()
+                            count == deletes.size.toLong() || (allowCoveredSubset && count != null && count >= deletes.size.toLong())
                         } &&
                         deletes.all {
                             val expiresAt = it.fields[AppSyncBulkDeleteProofFields.EXPIRES_AT]

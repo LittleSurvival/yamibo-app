@@ -1,0 +1,60 @@
+package me.thenano.yamibo.yamibo_app.repository.appsync.schema
+
+internal data class AppSyncCanonicalSetting(val id: Int, val key: String, val type: AppSyncValueType)
+
+/** Portable settings only. IDs are permanent; local-only/cache preferences have no wire ID. */
+internal object AppSyncCanonicalSettings {
+    val entries: Map<String, AppSyncCanonicalSetting> = listOf(
+        AppSyncCanonicalSetting(1, "appsettings.thememode", AppSyncValueType.Enum),
+        AppSyncCanonicalSetting(2, "appsettings.themescheme", AppSyncValueType.Enum),
+        AppSyncCanonicalSetting(3, "appsettings.language", AppSyncValueType.Enum),
+        AppSyncCanonicalSetting(4, "appsettings.ismangamode", AppSyncValueType.Boolean),
+        AppSyncCanonicalSetting(5, "appsettings.clearcacheonapplaunch", AppSyncValueType.Boolean),
+        AppSyncCanonicalSetting(6, "appsettings.showhomeswiperimages", AppSyncValueType.Boolean),
+        AppSyncCanonicalSetting(7, "appsettings.messagenotificationenabled", AppSyncValueType.Boolean),
+        AppSyncCanonicalSetting(8, "appsettings.messagenotificationinterval", AppSyncValueType.Enum),
+        AppSyncCanonicalSetting(9, "appsettings.messagenotificationdailylimit", AppSyncValueType.Enum),
+        AppSyncCanonicalSetting(10, "appsettings.appfontid", AppSyncValueType.Text),
+        AppSyncCanonicalSetting(11, "appsettings.skipfavoriteremovalconfirm", AppSyncValueType.Boolean),
+        AppSyncCanonicalSetting(12, "appsettings.favoriteaddsyncpromptenabled", AppSyncValueType.Boolean),
+        AppSyncCanonicalSetting(13, "appsettings.favoriteadddownloadpromptenabled", AppSyncValueType.Boolean),
+        AppSyncCanonicalSetting(14, "appsettings.favoriteaddsyncdefault", AppSyncValueType.Boolean),
+        AppSyncCanonicalSetting(15, "appsettings.favoriteremovesyncpromptenabled", AppSyncValueType.Boolean),
+        AppSyncCanonicalSetting(16, "appsettings.favoriteremovesyncdefault", AppSyncValueType.Boolean),
+        AppSyncCanonicalSetting(17, "appsettings.favoritegridmode", AppSyncValueType.Enum),
+        AppSyncCanonicalSetting(18, "appsettings.favoritesortmode", AppSyncValueType.Enum),
+        AppSyncCanonicalSetting(19, "appsettings.favoritesortdescending", AppSyncValueType.Boolean),
+        AppSyncCanonicalSetting(20, "appsettings.favoriteupdateinterval", AppSyncValueType.Enum),
+        AppSyncCanonicalSetting(21, "appsettings.favoriteupdateautodownload", AppSyncValueType.Boolean),
+        AppSyncCanonicalSetting(22, "appsettings.downloadedcontentrefreshautoupdate", AppSyncValueType.Boolean),
+        AppSyncCanonicalSetting(23, "appsettings.appupdatepreferredsourceindex", AppSyncValueType.Integer),
+        AppSyncCanonicalSetting(24, "appsettings.appupdatelaunchcheckthreshold", AppSyncValueType.Enum),
+        AppSyncCanonicalSetting(25, "appsettings.backupinterval", AppSyncValueType.Enum),
+        AppSyncCanonicalSetting(26, "appsettings.backupmaxautofiles", AppSyncValueType.Integer),
+        AppSyncCanonicalSetting(27, "appsettings.signinmode", AppSyncValueType.Enum),
+        AppSyncCanonicalSetting(28, "appsettings.signinlaunchreminderenabled", AppSyncValueType.Boolean),
+        AppSyncCanonicalSetting(29, "appsettings.signinallowrepair", AppSyncValueType.Boolean),
+        AppSyncCanonicalSetting(30, "appsettings.signinreminderfrequency", AppSyncValueType.Enum),
+        AppSyncCanonicalSetting(31, "appsettings.signindirectwebview", AppSyncValueType.Boolean),
+        AppSyncCanonicalSetting(32, "novelreadersettings.fontsize", AppSyncValueType.Integer),
+        AppSyncCanonicalSetting(33, "novelreadersettings.linespacing", AppSyncValueType.Decimal),
+        AppSyncCanonicalSetting(34, "novelreadersettings.readerfontid", AppSyncValueType.Text),
+        AppSyncCanonicalSetting(35, "novelreadersettings.defaultbold", AppSyncValueType.Boolean),
+        AppSyncCanonicalSetting(36, "novelreadersettings.defaultitalic", AppSyncValueType.Boolean),
+        AppSyncCanonicalSetting(37, "novelreadersettings.contentwidthfraction", AppSyncValueType.Decimal),
+        AppSyncCanonicalSetting(38, "novelreadersettings.keepsystembarsbackground", AppSyncValueType.Boolean),
+        AppSyncCanonicalSetting(39, "novelreadersettings.chineseconversion", AppSyncValueType.Enum),
+        AppSyncCanonicalSetting(40, "novelreadersettings.threadreadermode", AppSyncValueType.Enum),
+        AppSyncCanonicalSetting(41, "novelreadersettings.threadtouchzone", AppSyncValueType.Enum),
+        AppSyncCanonicalSetting(42, "novelreadersettings.threadreversetouchzones", AppSyncValueType.Boolean),
+        AppSyncCanonicalSetting(43, "novelreadersettings.scrollbuttondisplaymode", AppSyncValueType.Enum),
+        AppSyncCanonicalSetting(44, "novelreadersettings.scrollbuttondirectionthreshold", AppSyncValueType.Integer),
+        AppSyncCanonicalSetting(45, "novelreadersettings.scrollbuttonjumptarget", AppSyncValueType.Enum),
+        AppSyncCanonicalSetting(46, "novelreadersettings.showpageprogresshint", AppSyncValueType.Boolean),
+        AppSyncCanonicalSetting(47, "mangareadersettings.readingmode", AppSyncValueType.Enum),
+        AppSyncCanonicalSetting(48, "mangareadersettings.touchzone", AppSyncValueType.Enum),
+        AppSyncCanonicalSetting(49, "mangareadersettings.reversetouchzones", AppSyncValueType.Boolean),
+    ).associateBy { it.key }
+    val byId = entries.values.associateBy { it.id }
+    init { check(entries.size == byId.size) }
+}

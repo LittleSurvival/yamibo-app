@@ -1,5 +1,7 @@
 package me.thenano.yamibo.yamibo_app.repository.appsync.engine
 
+import me.thenano.yamibo.yamibo_app.repository.appsync.schema.*
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.*
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.repository.appsync.isAppSyncLocalOnlySetting
 import me.thenano.yamibo.yamibo_app.repository.appsync.appSyncThreadCoverOrNull
@@ -11,6 +13,16 @@ internal class DatabaseSyncDomainMaterializer(
     private val settingsStore: SettingsStore,
     private val recordPortabilityEvidence: (AppSyncPortabilityEvidence) -> Unit = {},
 ) : SyncDomainMaterializer {
+    private data class Winner(val operationId: SyncOperationId, val createdAtEpochMillis: Long)
+    private data class MaterializedEntity(
+        val key: SyncEntityKey,
+        val localValues: Map<String, String?>,
+        val winners: Map<String, Winner>,
+        val relationPresent: Boolean?,
+        val relationCreatedAt: Long?,
+        val removed: Boolean,
+    )
+
     // Only survives the surrounding synchronous replacement transaction. Never persisted in
     // an AppSync table or transported; entries for deleted entities are deliberately not restored.
     private var replacementCovers: Map<Pair<String, String>, String>? = null
@@ -57,10 +69,59 @@ internal class DatabaseSyncDomainMaterializer(
         }
     }
 
-    private fun preservedCover(entity: ResolvedSyncEntity): String? =
+    private fun preservedCover(entity: MaterializedEntity): String? =
         replacementCovers?.get(entity.key.domainId.value to entity.key.entityId.value)
 
-    override fun apply(entity: ResolvedSyncEntity) {
+    override fun apply(entity: ResolvedSyncEntity) = apply(MaterializedEntity(
+        entity.key, entity.fields.mapValues { it.value.value },
+        entity.fields.mapValues { Winner(it.value.operation.operationId, it.value.operation.createdAtEpochMillis) },
+        entity.relationPresent, entity.relationOperation?.createdAtEpochMillis, entity.tombstone != null,
+    ))
+
+    /** Applies database projections atomically; canonical provenance remains owned by the caller.
+     * Does not activate a checkpoint, delete old journals, or update external settings preferences.
+     */
+    fun applyCanonicalProjections(expectedAccount: String, checkpoint: AppSyncCanonicalCheckpoint) {
+        require(checkpoint.accountBinding == expectedAccount) { "Canonical account mismatch" }
+        AppSyncCanonicalCheckpointCodec().encode(checkpoint) // Includes all provenance and coverage checks.
+        require(checkpoint.entities.map { it.domainId to it.entityId }.distinct().size == checkpoint.entities.size) {
+            "Multiple materialized generations"
+        }
+        val ordered = checkpoint.entities.sortedWith(compareBy(
+            { SqlDelightSyncDomainStateAdapter.MATERIALIZATION_ORDER.getValue(AppSyncCanonicalSchema.domainsById.getValue(it.domainId).name) },
+            { it.entityId },
+        ))
+        db.transaction {
+            ordered.forEach { projection ->
+                val domain = AppSyncCanonicalSchema.domainsById.getValue(projection.domainId)
+                val key = AppSyncCanonicalEntityKeys.parse(domain.id, projection.entityId)
+                val removed = projection.tombstone != null
+                val relationRemoved = projection.relation?.kind == SyncOperationKind.RelationRemove
+                val parent = if (!removed && domain.id in setOf(12, 13)) rssSubscription(projection.entityId)?.let {
+                    AppSyncCanonicalMaterializedFields.RssParent(it.title, it.query, it.forumId)
+                } else null
+                val values = if (removed || relationRemoved) key.derivedFields()
+                    else AppSyncCanonicalMaterializedFields.restore(projection, parent)
+                if (!removed && projection.relation?.kind == SyncOperationKind.RelationAdd) {
+                    requireNotNull(favoriteItem(values)) { "Canonical relation item is unavailable" }
+                    if (domain.id == 15) requireNotNull(db.localFavoriteCategoryQueries
+                        .getBySyncId(values.require("categorySyncId")).executeAsOneOrNull()) { "Canonical category is unavailable" }
+                    if (domain.id == 16) requireNotNull(db.localFavoriteCollectionQueries
+                        .getBySyncId(values.require("collectionSyncId")).executeAsOneOrNull()) { "Canonical collection is unavailable" }
+                }
+                val winners = projection.fields.mapKeys { domain.fieldsById.getValue(it.key).name }.mapValues {
+                    val op = it.value
+                    Winner(SyncOperation.idFor(SyncDeviceId(op.deviceId), SyncDeviceEpoch(op.deviceEpoch), SyncSequence(op.sequence)),
+                        op.createdAtEpochMillis)
+                }
+                apply(MaterializedEntity(SyncEntityKey(SyncDomainId(domain.name), SyncEntityId(projection.entityId), projection.generation),
+                    values, winners, projection.relation?.let { it.kind == SyncOperationKind.RelationAdd },
+                    projection.relation?.createdAtEpochMillis, removed))
+            }
+        }
+    }
+
+    private fun apply(entity: MaterializedEntity) {
         when (entity.key.domainId.value) {
             "settings" -> applySetting(entity)
             "favorite.category" -> applyFavoriteCategory(entity)
@@ -159,7 +220,7 @@ internal class DatabaseSyncDomainMaterializer(
         db.appSyncOperationQueries.clearSyncSettingValues()
     }
 
-    private fun applySetting(entity: ResolvedSyncEntity) {
+    private fun applySetting(entity: MaterializedEntity) {
         if (isAppSyncLocalOnlySetting(entity.key.entityId.value)) {
             recordPortabilityEvidence(
                 AppSyncPortabilityEvidence(
@@ -172,25 +233,25 @@ internal class DatabaseSyncDomainMaterializer(
             return
         }
         db.appSyncOperationQueries.recordKnownSyncSettingKey(entity.key.entityId.value)
-        if (entity.tombstone != null) {
+        if (entity.removed) {
             db.appSyncOperationQueries.deleteSyncSettingValue(entity.key.entityId.value)
             return
         }
-        val winner = entity.fields.values.maxByOrNull { it.operation.operationId } ?: return
+        val winner = entity.winners.values.maxByOrNull { it.operationId } ?: return
         val fields = entity.values()
         db.appSyncOperationQueries.upsertSyncSettingValue(
             settingKey = entity.key.entityId.value,
             type = fields.require("type"),
             value_ = fields["value"],
-            winnerOperationId = winner.operation.operationId.value,
-            updatedAtEpochMillis = winner.operation.createdAtEpochMillis,
+            winnerOperationId = winner.operationId.value,
+            updatedAtEpochMillis = winner.createdAtEpochMillis,
         )
     }
 
-    private fun applyFavoriteCategory(entity: ResolvedSyncEntity) {
+    private fun applyFavoriteCategory(entity: MaterializedEntity) {
         val queries = db.localFavoriteCategoryQueries
         val existing = queries.getBySyncId(entity.key.entityId.value).executeAsOneOrNull()
-        if (entity.tombstone != null) {
+        if (entity.removed) {
             existing?.let {
                 db.localFavoriteItemCategoryCrossRefQueries.deleteByCategoryId(it.id)
                 queries.deleteById(it.id)
@@ -214,10 +275,10 @@ internal class DatabaseSyncDomainMaterializer(
         queries.updateCategoryOrder(fields.long("sortOrder"), now, id)
     }
 
-    private fun applyFavoriteCollection(entity: ResolvedSyncEntity) {
+    private fun applyFavoriteCollection(entity: MaterializedEntity) {
         val queries = db.localFavoriteCollectionQueries
         val existing = queries.getBySyncId(entity.key.entityId.value).executeAsOneOrNull()
-        if (entity.tombstone != null) {
+        if (entity.removed) {
             existing?.let {
                 db.localFavoriteItemCollectionCrossRefQueries.deleteByCollectionId(it.id)
                 queries.deleteById(it.id)
@@ -247,7 +308,7 @@ internal class DatabaseSyncDomainMaterializer(
         queries.updateCollectionOrder(fields.long("sortOrder"), now, id)
     }
 
-    private fun applyFavoriteItem(entity: ResolvedSyncEntity) {
+    private fun applyFavoriteItem(entity: MaterializedEntity) {
         val queries = db.localFavoriteItemQueries
         val fields = entity.values()
         val identity = entity.key.entityId.value.parts(3)
@@ -255,7 +316,7 @@ internal class DatabaseSyncDomainMaterializer(
         val targetId = fields["targetId"]?.toLongOrNull() ?: identity[1].toLong()
         val authorId = fields["authorId"]?.toLongOrNull() ?: identity[2].toLong()
         val existing = queries.findByTarget(targetType, targetId, authorId).executeAsOneOrNull()
-        if (entity.tombstone != null) {
+        if (entity.removed) {
             existing?.let {
                 db.localFavoriteItemCategoryCrossRefQueries.deleteByItemId(it.id)
                 db.localFavoriteItemCollectionCrossRefQueries.deleteByItemId(it.id)
@@ -291,12 +352,12 @@ internal class DatabaseSyncDomainMaterializer(
         }
     }
 
-    private fun applyRssSearchSubscription(entity: ResolvedSyncEntity) {
+    private fun applyRssSearchSubscription(entity: MaterializedEntity) {
         val queries = db.rssSearchSubscriptionQueries
         val existing = queries.getAll().executeAsList().firstOrNull {
             rssSearchSubscriptionSyncId(it.query, it.forumId) == entity.key.entityId.value
         }
-        if (entity.tombstone != null) {
+        if (entity.removed) {
             existing?.let {
                 db.rssSearchPageCacheQueries.deleteBySubscription(it.id)
                 db.rssSearchSubscriptionResultQueries.deleteBySubscription(it.id)
@@ -336,7 +397,7 @@ internal class DatabaseSyncDomainMaterializer(
         }
     }
 
-    private fun applyItemCategory(entity: ResolvedSyncEntity) {
+    private fun applyItemCategory(entity: MaterializedEntity) {
         val fields = entity.values()
         val item = favoriteItem(fields) ?: return
         val category = db.localFavoriteCategoryQueries
@@ -347,14 +408,14 @@ internal class DatabaseSyncDomainMaterializer(
             db.localFavoriteItemCategoryCrossRefQueries.insertCrossRef(
                 item.id,
                 category.id,
-                fields["createdAt"]?.toLongOrNull() ?: entity.relationOperation?.createdAtEpochMillis ?: 0,
+                fields["createdAt"]?.toLongOrNull() ?: entity.relationCreatedAt ?: 0,
             )
         } else {
             db.localFavoriteItemCategoryCrossRefQueries.deleteByItemIdAndCategoryId(item.id, category.id)
         }
     }
 
-    private fun applyItemCollection(entity: ResolvedSyncEntity) {
+    private fun applyItemCollection(entity: MaterializedEntity) {
         val fields = entity.values()
         val item = favoriteItem(fields) ?: return
         val collection = db.localFavoriteCollectionQueries
@@ -365,7 +426,7 @@ internal class DatabaseSyncDomainMaterializer(
             db.localFavoriteItemCollectionCrossRefQueries.insertCrossRef(
                 item.id,
                 collection.id,
-                fields["createdAt"]?.toLongOrNull() ?: entity.relationOperation?.createdAtEpochMillis ?: 0,
+                fields["createdAt"]?.toLongOrNull() ?: entity.relationCreatedAt ?: 0,
             )
         } else {
             db.localFavoriteItemCollectionCrossRefQueries
@@ -373,8 +434,8 @@ internal class DatabaseSyncDomainMaterializer(
         }
     }
 
-    private fun applyDetailNote(entity: ResolvedSyncEntity) {
-        if (entity.tombstone != null) {
+    private fun applyDetailNote(entity: MaterializedEntity) {
+        if (entity.removed) {
             val identity = entity.key.entityId.value.parts(3)
             db.detailNoteQueries.deleteByTarget(identity[0], identity[1].toLong(), identity[2].toLong())
             return
@@ -390,8 +451,8 @@ internal class DatabaseSyncDomainMaterializer(
         )
     }
 
-    private fun applyBookmark(entity: ResolvedSyncEntity) {
-        if (entity.tombstone != null) {
+    private fun applyBookmark(entity: MaterializedEntity) {
+        if (entity.removed) {
             val identity = entity.key.entityId.value.parts(3)
             db.localBookMarkQueries.deleteByTarget(identity[0], identity[1].toLong(), identity[2].toLong())
             return
@@ -409,8 +470,8 @@ internal class DatabaseSyncDomainMaterializer(
         )
     }
 
-    private fun applyThreadHistory(entity: ResolvedSyncEntity) {
-        if (entity.tombstone != null) {
+    private fun applyThreadHistory(entity: MaterializedEntity) {
+        if (entity.removed) {
             val identity = entity.key.entityId.value.parts(4)
             db.readingHistoryQueries.deleteByThreadOrigin(
                 identity[0].toLong(),
@@ -462,8 +523,8 @@ internal class DatabaseSyncDomainMaterializer(
         )
     }
 
-    private fun applyImageHistory(entity: ResolvedSyncEntity) {
-        if (entity.tombstone != null) {
+    private fun applyImageHistory(entity: MaterializedEntity) {
+        if (entity.removed) {
             db.imageReadingHistoryQueries.deleteByPostId(entity.key.entityId.value.toLong())
             return
         }
@@ -479,8 +540,8 @@ internal class DatabaseSyncDomainMaterializer(
         )
     }
 
-    private fun applyTagHistory(entity: ResolvedSyncEntity) {
-        if (entity.tombstone != null) {
+    private fun applyTagHistory(entity: MaterializedEntity) {
+        if (entity.removed) {
             db.mangaTagReadingHistoryQueries.deleteByTagId(entity.key.entityId.value.toLong())
             return
         }
@@ -500,8 +561,8 @@ internal class DatabaseSyncDomainMaterializer(
         )
     }
 
-    private fun applyTagCatalogHistory(entity: ResolvedSyncEntity) {
-        if (entity.tombstone != null) {
+    private fun applyTagCatalogHistory(entity: MaterializedEntity) {
+        if (entity.removed) {
             db.tagCatalogReadingHistoryQueries.deleteByTagId(entity.key.entityId.value.toLong())
             return
         }
@@ -529,9 +590,9 @@ internal class DatabaseSyncDomainMaterializer(
         )
     }
 
-    private fun applyRssSearchHistory(entity: ResolvedSyncEntity) {
+    private fun applyRssSearchHistory(entity: MaterializedEntity) {
         val subscription = rssSubscription(entity.key.entityId.value)
-        if (entity.tombstone != null) {
+        if (entity.removed) {
             subscription?.let {
                 db.rssSearchReadingHistoryQueries.deleteBySubscriptionId(it.id)
             }
@@ -557,9 +618,9 @@ internal class DatabaseSyncDomainMaterializer(
         )
     }
 
-    private fun applyRssCatalogHistory(entity: ResolvedSyncEntity) {
+    private fun applyRssCatalogHistory(entity: MaterializedEntity) {
         val subscription = rssSubscription(entity.key.entityId.value)
-        if (entity.tombstone != null) {
+        if (entity.removed) {
             subscription?.let {
                 db.rssCatalogReadingHistoryQueries.deleteBySubscriptionId(it.id)
             }
@@ -601,10 +662,10 @@ internal class DatabaseSyncDomainMaterializer(
             ) == syncId
         }
 
-    private fun applyReadingTime(entity: ResolvedSyncEntity) {
+    private fun applyReadingTime(entity: MaterializedEntity) {
         val fields = entity.values()
         val dateKey = fields["dateKey"] ?: entity.key.entityId.value
-        if (entity.tombstone != null) {
+        if (entity.removed) {
             db.readingTimeStatQueries.deleteByDateKey(dateKey)
         } else {
             db.readingTimeStatQueries.upsert(
@@ -615,10 +676,10 @@ internal class DatabaseSyncDomainMaterializer(
         }
     }
 
-    private fun applyFavoriteUpdateEvent(entity: ResolvedSyncEntity) {
+    private fun applyFavoriteUpdateEvent(entity: MaterializedEntity) {
         val queries = db.favoriteUpdateEventQueries
         val syncId = entity.key.entityId.value
-        if (entity.tombstone != null) {
+        if (entity.removed) {
             queries.deleteBySyncId(syncId)
             return
         }
@@ -659,9 +720,9 @@ internal class DatabaseSyncDomainMaterializer(
         )
     }
 
-    private fun applyFavoriteUpdateFidChoice(entity: ResolvedSyncEntity) {
+    private fun applyFavoriteUpdateFidChoice(entity: MaterializedEntity) {
         val fields = entity.values()
-        val winner = entity.fields["enabled"]?.operation
+        val winner = entity.winners["enabled"]
         db.favoriteUpdateFidChoiceQueries.upsertChoice(
             fid = fields.long("fid"),
             enabled = fields.boolLong("enabled"),
@@ -670,9 +731,9 @@ internal class DatabaseSyncDomainMaterializer(
         )
     }
 
-    private fun applyFavoriteUpdateCategoryChoice(entity: ResolvedSyncEntity) {
+    private fun applyFavoriteUpdateCategoryChoice(entity: MaterializedEntity) {
         val fields = entity.values()
-        val winner = entity.fields["enabled"]?.operation
+        val winner = entity.winners["enabled"]
         db.favoriteUpdateCategoryChoiceQueries.upsertChoice(
             categorySyncId = fields.require("categorySyncId"),
             enabled = fields.boolLong("enabled"),
@@ -688,8 +749,7 @@ internal class DatabaseSyncDomainMaterializer(
             fields.long("authorId"),
         ).executeAsOneOrNull()
 
-    private fun ResolvedSyncEntity.values(): Map<String, String?> =
-        fields.mapValues { it.value.value }
+    private fun MaterializedEntity.values(): Map<String, String?> = localValues
 
     private fun Map<String, String?>.require(key: String): String =
         requireNotNull(this[key]) { "Missing materialized field: $key" }

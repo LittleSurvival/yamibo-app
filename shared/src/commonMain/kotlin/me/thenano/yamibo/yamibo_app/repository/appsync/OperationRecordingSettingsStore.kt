@@ -2,6 +2,7 @@ package me.thenano.yamibo.yamibo_app.repository.appsync
 
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationKind
+import me.thenano.yamibo.yamibo_app.repository.appsync.schema.equivalentAppSyncLegacyFieldValues
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 
 internal class OperationRecordingSettingsStore(
@@ -84,12 +85,19 @@ internal class OperationRecordingSettingsStore(
             kind = if (canonical(key) == null) SyncOperationKind.Put else SyncOperationKind.Patch,
             fields = mapOf("type" to type, "value" to value),
         ) { nullableOperation ->
+            val existing = db.appSyncOperationQueries.getSyncSettingValue(key).executeAsOneOrNull()
+            // An active no-op still executes the local callback. Preserve its known provenance
+            // instead of relabelling an already synchronized value as pending bootstrap migration.
+            val unchanged = nullableOperation == null && existing?.type == type &&
+                equivalentAppSyncLegacyFieldValues("settings", key, "value", existing.settingValue, value)
             db.appSyncOperationQueries.upsertSyncSettingValue(
                 settingKey = key,
                 type = type,
                 value_ = value,
-                winnerOperationId = nullableOperation?.operationId?.value ?: PENDING_SETTINGS_MIGRATION_WINNER,
-                updatedAtEpochMillis = nullableOperation?.createdAtEpochMillis ?: 0L,
+                winnerOperationId = nullableOperation?.operationId?.value
+                    ?: existing?.winnerOperationId?.takeIf { unchanged } ?: PENDING_SETTINGS_MIGRATION_WINNER,
+                updatedAtEpochMillis = nullableOperation?.createdAtEpochMillis
+                    ?: existing?.updatedAtEpochMillis?.takeIf { unchanged } ?: 0L,
             )
         }
         project()

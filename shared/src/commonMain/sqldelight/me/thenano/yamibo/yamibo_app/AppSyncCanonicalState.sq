@@ -1,0 +1,7 @@
+getState:
+SELECT * FROM AppSyncCanonicalState WHERE singletonId = 1;
+
+putState:
+INSERT OR REPLACE INTO AppSyncCanonicalState(
+    singletonId, accountBinding, checkpointId, canonicalPayload, canonicalSha256
+) VALUES (1, ?, ?, ?, ?);

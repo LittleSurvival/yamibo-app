@@ -44,6 +44,7 @@ internal object PortableDomainManifest {
         excluded("FavoriteUpdateRun", "Transient scan progress, log, warning, and error state"),
         excluded("DownloadQueueEntry", "Device-local download execution state"),
         excluded("AppSyncOperation", "Remote synchronization metadata"),
+        excluded("AppSyncCanonicalState", "Canonical synchronization provenance and coverage"),
         excluded("AppSyncInstallation", "Device and account binding metadata"),
         excluded("AppSyncRemoteBlog", "Remote transport cache"),
         excluded("authentication", "Credentials, cookies, and FormHash are device-local secrets"),

@@ -2,6 +2,7 @@ package me.thenano.yamibo.yamibo_app.repository.appsync.engine
 
 import kotlinx.serialization.Serializable
 import me.thenano.yamibo.yamibo_app.repository.appsync.withoutExcludedAppSyncPayloads
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncPortabilityPolicy
 import me.thenano.yamibo.yamibo_app.repository.appsync.domain.SyncConflictPolicy
 import me.thenano.yamibo.yamibo_app.repository.appsync.domain.SyncDomainRegistry
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncCausalRelation
@@ -11,6 +12,8 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperation
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationKind
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.compareCausally
+import me.thenano.yamibo.yamibo_app.repository.appsync.schema.AppSyncCanonicalCheckpoint
+import me.thenano.yamibo.yamibo_app.repository.appsync.schema.AppSyncCanonicalOperationBlock
 
 @Serializable
 internal data class SyncEntityKey(
@@ -64,24 +67,48 @@ internal class OperationReducer(
     fun reduce(
         current: Map<SyncEntityKey, ResolvedSyncEntity> = emptyMap(),
         operations: Iterable<SyncOperation>,
+    ): OperationReductionResult = reduceInternal(current, operations, canonical = false)
+
+    fun reduceCanonical(current: AppSyncCanonicalCheckpoint, operations: AppSyncCanonicalOperationBlock): AppSyncCanonicalReductionResult =
+        reduceCanonicalUsingSharedRules(current, operations) { state, incoming ->
+            reduceInternal(state, incoming, canonical = true)
+        }
+
+    private fun reduceInternal(
+        current: Map<SyncEntityKey, ResolvedSyncEntity>,
+        operations: Iterable<SyncOperation>,
+        canonical: Boolean,
     ): OperationReductionResult {
-        val entities = current.values.withoutExcludedAppSyncPayloads().associateBy { it.key }.toMutableMap()
+        val entities = (if (canonical) current.values else current.values.withoutExcludedAppSyncPayloads())
+            .associateBy { it.key }.toMutableMap()
         val conflicts = mutableListOf<SyncConflictRecord>()
         val quarantined = mutableListOf<SyncQuarantinedOperation>()
         val applied = linkedMapOf<SyncOperationId, SyncOperation>()
 
         operations
-            .map { it.withoutExcludedAppSyncPayloads() }
+            .map { if (canonical) it else it.withoutExcludedAppSyncPayloads() }
             .distinctBy { it.operationId }
             .sortedBy { it.operationId }
             .forEach { operation ->
                 val contract = registry.contractFor(operation.domainId)
-                val validationFailure = registry.validationFailure(operation)
+                // Canonical inputs passed strict codecs before reaching this private core;
+                // legacy required identity/cache fields do not belong in their value bodies.
+                val validationFailure = if (canonical) null else registry.validationFailure(operation)
                 if (contract == null || validationFailure != null) {
                     quarantined += SyncQuarantinedOperation(
                         operation,
                         validationFailure ?: "Missing domain contract",
                     )
+                    return@forEach
+                }
+                // A legacy patch may contain only excluded cache/unknown fields. Consume its
+                // identity without creating an empty entity that cannot be materialized.
+                // Local-only setting markers still visit the materializer's redacted diagnostic
+                // and sync-setting cleanup path; that path never applies the remote value.
+                val excludedSetting = operation.domainId.value == "settings" &&
+                    !AppSyncPortabilityPolicy.isSettingPortable(operation.entityId.value)
+                if (operation.kind == SyncOperationKind.Patch && operation.fields.isEmpty() && !excludedSetting) {
+                    applied[operation.operationId] = operation
                     return@forEach
                 }
                 val key = SyncEntityKey(

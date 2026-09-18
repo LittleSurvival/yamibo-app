@@ -97,6 +97,9 @@ internal interface AppSyncOperationStore {
         createdAtEpochMillis: Long,
         origin: SyncOperationOrigin,
         localMutation: () -> List<LocalSyncOperationDraft>,
+        // Called sequentially inside the transaction with the prospective, gap-free identity.
+        // Null omits an operation without consuming its sequence; only fields may be changed.
+        prepareOperationFields: (SyncOperation) -> Map<String, String?>? = { it.fields },
         afterOperationsCreated: (List<SyncOperation>) -> Unit = {},
     ): List<SyncOperation>
 

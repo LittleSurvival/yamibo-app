@@ -21,6 +21,17 @@ class OperationReducerTest {
     private val reducer = OperationReducer()
 
     @Test
+    fun excludedOnlyPatchIsConsumedWithoutCreatingAnEmptyEntity() {
+        val patch = operation("a", 1, domain = "reading.thread", entity = "42",
+            fields = mapOf("futureCache" to "private sentinel"))
+        val result = reducer.reduce(operations = listOf(patch))
+        assertTrue(result.quarantined.isEmpty())
+        assertTrue(result.entities.isEmpty())
+        assertEquals(listOf(patch.operationId), result.appliedOperations.map { it.operationId })
+        assertTrue(result.appliedOperations.single().fields.isEmpty())
+    }
+
+    @Test
     fun causalSuccessorWinsRegardlessOfWallClock() {
         val first = operation(
             device = "a",
@@ -60,13 +71,13 @@ class OperationReducerTest {
 
     @Test
     fun concurrentDifferentFieldsAreBothRetained() {
-        val title = operation(device = "a", sequence = 1, fields = mapOf("title" to "A"))
-        val note = operation(device = "b", sequence = 1, fields = mapOf("note" to "B"))
+        val title = operation(device = "a", sequence = 1, domain = "favorite.item", fields = mapOf("title" to "A"))
+        val forum = operation(device = "b", sequence = 1, domain = "favorite.item", fields = mapOf("forumName" to "B"))
 
-        val entity = reducer.reduce(operations = listOf(title, note)).entities.values.single()
+        val entity = reducer.reduce(operations = listOf(title, forum)).entities.values.single()
 
         assertEquals("A", entity.fields.getValue("title").value)
-        assertEquals("B", entity.fields.getValue("note").value)
+        assertEquals("B", entity.fields.getValue("forumName").value)
     }
 
     @Test
