@@ -1263,10 +1263,12 @@ internal class YamiboAppSyncJournalRemote(
             cachedCheckpoints[it.remoteKey] = it
         }
         var indexedReplicaKeys = emptySet<String>()
+        var verifiedIndex: IndexCandidateResult.Valid? = null
         val index = store.load(INDEX_REMOTE_KEY)
         if (index != null) {
-            when (val loadedIndex = preloadedIndex ?: loadIndex(index, accountBinding)) {
+            when (val loadedIndex = preloadedIndex?.takeIf { it.blogId == index.blogId } ?: loadIndex(index, accountBinding)) {
                 is IndexCandidateResult.Valid -> {
+                    verifiedIndex = loadedIndex
                     indexedReplicaKeys = loadedIndex.payload.journals
                         .mapTo(linkedSetOf()) { it.replicaKey }
                     loadedIndex.payload.journals.forEach { reference ->
@@ -1369,6 +1371,7 @@ internal class YamiboAppSyncJournalRemote(
             indexedReplicaKeys = indexedReplicaKeys,
             canonicalDocuments = canonicalDocuments,
             canonicalReadIssues = canonicalReadIssues.distinct(),
+            verifiedCanonicalCheckpoints = bindCanonicalCheckpoints(accountBinding, canonicalDocuments, verifiedIndex),
         )
     }
 
@@ -1468,6 +1471,7 @@ internal class YamiboAppSyncJournalRemote(
         val canonicalDocuments = mutableListOf<LoadedAppSyncCanonicalDocument>()
         val canonicalReadIssues = mutableListOf<String>()
         val indexedReplicaKeys = linkedSetOf<String>()
+        var verifiedIndex: IndexCandidateResult.Valid? = null
         val retirementDiscoveryIssues = mutableListOf<String>()
         val summaries = pages.flatMap { it.blogs }
         val latestIndexBlogId = summaries
@@ -1524,8 +1528,9 @@ internal class YamiboAppSyncJournalRemote(
                         validatedAtEpochMillis = 0,
                         contentUpdatedAtEpochMillis = timeInfo.epoch * 1_000L,
                     )
-                    when (val result = preloadedIndex ?: loadIndex(index, accountBinding)) {
+                    when (val result = preloadedIndex?.takeIf { it.blogId == index.blogId } ?: loadIndex(index, accountBinding)) {
                         is IndexCandidateResult.Valid -> {
+                            verifiedIndex = result
                             indexedReplicaKeys += result.payload.journals.map {
                                 it.replicaKey
                             }
@@ -1581,7 +1586,18 @@ internal class YamiboAppSyncJournalRemote(
             retirementDiscoveryIssues = retirementDiscoveryIssues.distinct(),
             canonicalDocuments = canonicalDocuments,
             canonicalReadIssues = canonicalReadIssues.distinct(),
+            verifiedCanonicalCheckpoints = bindCanonicalCheckpoints(accountBinding, canonicalDocuments, verifiedIndex),
         )
+    }
+
+    private fun bindCanonicalCheckpoints(account: SyncAccountBinding, documents: List<LoadedAppSyncCanonicalDocument>,
+        index: IndexCandidateResult.Valid?): List<AppSyncVerifiedCanonicalCheckpoint> {
+        if (index == null) return emptyList()
+        return documents.mapNotNull { loaded ->
+            val checkpoint = loaded.document as? AppSyncV3DocumentRead.Checkpoint ?: return@mapNotNull null
+            val blogId = loaded.remoteId.toLongOrNull() ?: return@mapNotNull null
+            AppSyncVerifiedCanonicalCheckpoint.verifyDocument(account.value, blogId, index.readerHtml, checkpoint)
+        }
     }
 
     private fun collectCanonical(candidate: StoredAppSyncRemoteBlog, document: AppSyncV3DocumentRead,
@@ -1751,7 +1767,7 @@ internal class YamiboAppSyncJournalRemote(
             -> return IndexCandidateResult.Retryable(result.describeForJournal())
             else -> return IndexCandidateResult.Terminal(result.describeForJournal())
         }
-        if (page.blogInfo.title != APP_SYNC_INDEX_TITLE) {
+        if (page.blogInfo.blogId != candidate.blogId || page.blogInfo.title != APP_SYNC_INDEX_TITLE) {
             return IndexCandidateResult.Terminal("Index reader title does not match")
         }
         return when (val validation = indexCodec.validateReaderHtml(page.rootBlog.contentHtml)) {
@@ -1767,6 +1783,8 @@ internal class YamiboAppSyncJournalRemote(
                     IndexCandidateResult.Valid(
                         validation.envelope.payload,
                         validation.envelope.fingerprint,
+                        candidate.blogId,
+                        page.rootBlog.contentHtml,
                     )
                 }
             }
@@ -2215,6 +2233,8 @@ internal class YamiboAppSyncJournalRemote(
         data class Valid(
             val payload: AppSyncIndexPayload,
             val fingerprint: String,
+            val blogId: BlogId,
+            val readerHtml: String,
         ) : IndexCandidateResult
         data object NotFound : IndexCandidateResult
         data class Retryable(val reason: String) : IndexCandidateResult

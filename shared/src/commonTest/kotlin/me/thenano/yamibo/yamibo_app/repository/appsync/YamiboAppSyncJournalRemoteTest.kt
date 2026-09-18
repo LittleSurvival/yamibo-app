@@ -61,6 +61,36 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3DocumentR
 import me.thenano.yamibo.yamibo_app.repository.appsync.schema.*
 
 class YamiboAppSyncJournalRemoteTest {
+    @Test fun indexedCanonicalCheckpointCarriesActivationEvidenceButUnindexedOneDoesNot() = runBlocking {
+        val cp = AppSyncCanonicalCheckpoint("canonical", ACCOUNT.value, 1, emptyMap(), emptyList())
+        val fingerprint = AppSyncCanonicalCheckpointCodec().encode(cp).sha256().hex()
+        val cpId = BlogId(77)
+        val indexId = BlogId(78)
+        val title = AppSyncJournalDefaults.CHECKPOINT_TITLE_PREFIX + "canonical"
+        val provider = FakeProvider().apply {
+            pages[PageKey(null, 1)] = success(classPage())
+            pages[PageKey(CLASS_ID, 1)] = success(UserSpaceBlogPage(blogs = listOf(
+                summary(cpId, title), summary(indexId, APP_SYNC_INDEX_TITLE))))
+            blogs[cpId] = success(page(cpId, title, AppSyncV3DocumentCodec().encodeCheckpoint(cp)))
+        }
+        val remote = remote(provider, FakeRemoteStore())
+        fun setIndex(include: Boolean) {
+            provider.blogs[indexId] = success(page(indexId, APP_SYNC_INDEX_TITLE, indexCodec.encode(AppSyncIndexPayload(ACCOUNT,
+                checkpoints = if (include) listOf(AppSyncIndexCheckpointReference(cp.checkpointId, cpId.value, fingerprint)) else emptyList(),
+                updatedAtEpochMillis = 2))))
+        }
+        setIndex(true)
+        val loaded = assertIs<AppSyncJournalLoadResult.Success>(remote.loadJournals(ACCOUNT, true))
+        assertEquals(cp, loaded.verifiedCanonicalCheckpoints.single().document)
+        assertEquals(fingerprint, loaded.verifiedCanonicalCheckpoints.single().fingerprint)
+        setIndex(false)
+        val removed = assertIs<AppSyncJournalLoadResult.Success>(remote.loadJournals(ACCOUNT, false))
+        assertTrue(removed.canonicalDocuments.isNotEmpty())
+        assertTrue(removed.verifiedCanonicalCheckpoints.isEmpty())
+        assertEquals(0, provider.submitCalls)
+        assertTrue(provider.deleteRequests.isEmpty())
+    }
+
     @Test fun canonicalCheckpointSurvivesDiscoveryAndCachedLoading() = runBlocking {
         val checkpoint = AppSyncCanonicalCheckpoint("canonical", ACCOUNT.value, 1, emptyMap(), emptyList())
         val id = BlogId(77)

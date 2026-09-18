@@ -79,39 +79,46 @@ internal class BulkDeleteGuard(
                 val exceedsFraction = total > 0 && deletes.size.toDouble() / total > threshold.fraction
                 if (!exceedsAbsolute || !exceedsFraction) return@forEach
 
-                val authorizationIds = deletes.map { it.bulkDeleteAuthorizationId }.distinct()
-                val authorization = authorizationIds.singleOrNull()?.let(authorizationLookup)
-                val storedAuthorizationValid = authorization != null &&
-                    authorization.domainId == domainId.value &&
-                    (authorization.operationCount == deletes.size.toLong() ||
-                        (allowCoveredSubset && authorization.operationCount >= deletes.size.toLong())) &&
-                    deletes.all { it.createdAtEpochMillis <= authorization.expiresAtEpochMillis }
-                val embeddedAuthorizationValid =
-                    authorizationIds.singleOrNull() != null &&
-                        deletes.mapNotNull {
-                            it.fields[AppSyncBulkDeleteProofFields.SCOPE]?.takeIf(String::isNotBlank)
-                        }.distinct().size == 1 &&
-                        deletes.all {
-                            !it.fields[AppSyncBulkDeleteProofFields.SCOPE].isNullOrBlank()
-                        } &&
-                        deletes.all {
-                            val count = it.fields[AppSyncBulkDeleteProofFields.COUNT]?.toLongOrNull()
-                            count == deletes.size.toLong() || (allowCoveredSubset && count != null && count >= deletes.size.toLong())
-                        } &&
-                        deletes.all {
-                            val expiresAt = it.fields[AppSyncBulkDeleteProofFields.EXPIRES_AT]
-                                ?.toLongOrNull()
-                                ?: return@all false
-                            it.createdAtEpochMillis <= expiresAt
+                // A canonical recovery can combine several independently authorized commands.
+                // Evaluate the domain threshold first, then require each represented batch's
+                // own proof. Splitting into small groups must not bypass the threshold.
+                val batches = if (allowCoveredSubset) deletes.groupBy { it.bulkDeleteAuthorizationId }.values
+                    else listOf(deletes)
+                batches.forEach { batch ->
+                    val authorizationIds = batch.map { it.bulkDeleteAuthorizationId }.distinct()
+                    val authorization = authorizationIds.singleOrNull()?.let(authorizationLookup)
+                    val storedAuthorizationValid = authorization != null &&
+                        authorization.domainId == domainId.value &&
+                        (authorization.operationCount == batch.size.toLong() ||
+                            (allowCoveredSubset && authorization.operationCount >= batch.size.toLong())) &&
+                        batch.all { it.createdAtEpochMillis <= authorization.expiresAtEpochMillis }
+                    val embeddedAuthorizationValid =
+                        authorizationIds.singleOrNull() != null &&
+                            batch.mapNotNull {
+                                it.fields[AppSyncBulkDeleteProofFields.SCOPE]?.takeIf(String::isNotBlank)
+                            }.distinct().size == 1 &&
+                            batch.all {
+                                !it.fields[AppSyncBulkDeleteProofFields.SCOPE].isNullOrBlank()
+                            } &&
+                            batch.all {
+                                val count = it.fields[AppSyncBulkDeleteProofFields.COUNT]?.toLongOrNull()
+                                count == batch.size.toLong() || (allowCoveredSubset && count != null && count >= batch.size.toLong())
+                            } &&
+                            batch.all {
+                                val expiresAt = it.fields[AppSyncBulkDeleteProofFields.EXPIRES_AT]
+                                    ?.toLongOrNull()
+                                    ?: return@all false
+                                it.createdAtEpochMillis <= expiresAt
+                            }
+                    val valid = storedAuthorizationValid || embeddedAuthorizationValid
+                    if (!valid) {
+                        batch.forEach { operation ->
+                            accepted.remove(operation)
+                            quarantined += SyncQuarantinedOperation(
+                                operation = operation,
+                                reason = "Suspicious bulk delete lacks matching authorization",
+                            )
                         }
-                val valid = storedAuthorizationValid || embeddedAuthorizationValid
-                if (!valid) {
-                    deletes.forEach { operation ->
-                        accepted.remove(operation)
-                        quarantined += SyncQuarantinedOperation(
-                            operation = operation,
-                            reason = "Suspicious bulk delete lacks matching authorization",
-                        )
                     }
                 }
             }

@@ -30,15 +30,40 @@ internal class AppSyncCanonicalPendingMerge(
     private val bulkDeleteGuard: BulkDeleteGuard = BulkDeleteGuard { null },
 ) {
     fun prepare(current: AppSyncCanonicalCheckpoint, sources: List<SyncOperation>,
-        checkpointId: String, createdAtEpochMillis: Long): AppSyncCanonicalPendingMergeResult {
+        checkpointId: String, createdAtEpochMillis: Long,
+        canonicalBlock: AppSyncCanonicalOperationBlock? = null): AppSyncCanonicalPendingMergeResult {
         fun attention(reason: AppSyncPendingMergeFailure) = AppSyncCanonicalPendingMergeResult.NeedsAttention(reason)
-        if (sources.size > 100_000) return attention(AppSyncPendingMergeFailure.SourceBudget)
+        if (sources.size.toLong() + (canonicalBlock?.operations?.size ?: 0) > 100_000) return attention(AppSyncPendingMergeFailure.SourceBudget)
+        if (canonicalBlock != null && canonicalBlock.accountBinding != current.accountBinding)
+            return attention(AppSyncPendingMergeFailure.AccountMismatch)
         if (sources.any { it.accountBinding.value != current.accountBinding }) return attention(AppSyncPendingMergeFailure.AccountMismatch)
         val unique = linkedMapOf<SyncOperationId, SyncOperation>()
         sources.forEach { source ->
             val old = unique.put(source.operationId, source)
             if (old != null && old != source) return attention(AppSyncPendingMergeFailure.IdentityCollision)
         }
+        val nativeImports = linkedMapOf<SyncOperationId, AppSyncCanonicalOperationImport.Accepted>()
+        if (canonicalBlock != null) {
+            try { AppSyncCanonicalOperationBlockCodec().encode(canonicalBlock) } catch (_: Exception) {
+                return attention(AppSyncPendingMergeFailure.InvalidCanonicalState)
+            }
+            val proofs = canonicalBlock.authorizations.associateBy { it.authorizationId }
+            canonicalBlock.operations.forEach { operation ->
+                val proof = operation.authorizationId?.let(proofs::get)
+                val view = operation.toLegacyOperationView(current.accountBinding, proof)
+                val native = AppSyncCanonicalOperationImport.Accepted(operation, proof, emptyList())
+                unique[view.operationId]?.let { legacy ->
+                    val imported = importer.import(current.accountBinding, legacy)
+                    if (imported !is AppSyncCanonicalOperationImport.Accepted ||
+                        imported.operation != operation || imported.proof != proof)
+                        return attention(AppSyncPendingMergeFailure.IdentityCollision)
+                }
+                nativeImports[view.operationId] = native
+                if (view.operationId !in unique) unique[view.operationId] = view
+            }
+        }
+        fun importSource(source: SyncOperation): AppSyncCanonicalOperationImport =
+            nativeImports[source.operationId] ?: importer.import(current.accountBinding, source)
         try { AppSyncCanonicalCheckpointCodec().encode(current) } catch (_: Exception) {
             return attention(AppSyncPendingMergeFailure.InvalidCanonicalState)
         }
@@ -48,7 +73,7 @@ internal class AppSyncCanonicalPendingMerge(
         val knownProofs = current.authorizations.associateBy { it.authorizationId }
         unique.values.forEach { source ->
             known[source.operationId]?.let { winner ->
-                val imported = importer.import(current.accountBinding, source)
+                val imported = importSource(source)
                 if (imported !is AppSyncCanonicalOperationImport.Accepted || imported.operation != winner ||
                     imported.proof != winner.authorizationId?.let(knownProofs::get))
                     return attention(AppSyncPendingMergeFailure.IdentityCollision)
@@ -71,7 +96,7 @@ internal class AppSyncCanonicalPendingMerge(
         var excluded = 0
         var noOp = 0
         for (source in uncovered) {
-            when (val imported = importer.import(current.accountBinding, source)) {
+            when (val imported = importSource(source)) {
                 is AppSyncCanonicalOperationImport.Accepted -> {
                     canonical += imported.operation
                     acceptedSources += source

@@ -12,6 +12,27 @@ import me.thenano.yamibo.yamibo_app.store.appsync.*
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 
 class AppSyncCanonicalCheckpointActivatorTest {
+    @Test fun laterNativeJournalAndPendingEditsCommitTogetherWithoutExpandingRemoteCheckpointCoverage() = fixture {
+        val pending = append()
+        val device = SyncDeviceId("remote-device")
+        val epoch = SyncDeviceEpoch("remote-epoch")
+        val remote = pending.copy(deviceId = device, deviceEpoch = epoch,
+            operationId = SyncOperation.idFor(device, epoch, pending.sequence),
+            fields = pending.fields + ("value" to "26"), createdAtEpochMillis = 100)
+        val imported = assertIs<AppSyncCanonicalOperationImport.Accepted>(AppSyncCanonicalOperationImporter().import(account.value, remote))
+        val block = AppSyncCanonicalOperationBlock(account.value, listOf(imported.operation))
+        assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(verified(), block))
+        assertEquals(26, preferences.values["novelreadersettings.fontsize"])
+        val local = assertNotNull(state.read(account.value))
+        assertEquals(mapOf(remote.replicaKey.stableKey to 1L, pending.replicaKey.stableKey to 1L), local.coverage)
+        assertEquals(local.coverage, store.causalContext().asStableMap())
+        assertTrue(store.isApplied(remote.operationId))
+        assertEquals(listOf(pending), store.pendingOperations())
+        assertTrue(store.verifiedCheckpoints().single().coverage.asStableMap().isEmpty())
+        assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(verified(), block))
+        assertEquals(local, state.read(account.value))
+    }
+
     private val account = SyncAccountBinding("account")
     private val checkpoint = AppSyncCanonicalCheckpoint("remote", account.value, 10, emptyMap(), emptyList())
     private fun verified(cp: AppSyncCanonicalCheckpoint = checkpoint): AppSyncVerifiedCanonicalCheckpoint {

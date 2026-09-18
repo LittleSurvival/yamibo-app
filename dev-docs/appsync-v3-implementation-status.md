@@ -155,7 +155,15 @@ failure preserving source evidence. Recorder routing and persistent failure hand
 integration; the current BLOB rewrite is not evidence of the device write-amplification gate.
 See appsync-v3-state.md.
 
-Latest checks (2026-09-18): all 618 shared tests and 15 CloudSyncUiState tests passed, with
+Remote load results now carry checkpoint activation evidence bound to the fetched index HTML;
+page identity and preloaded-index identity are checked. Mutated in-memory checkpoint content
+cannot reuse its old metadata. Mixed native/legacy/pending operations share one contiguous
+sequence and collision check, including cross-version deduplication and independent authorized
+delete batches. Activation records later journal receipts/coverage without expanding the remote
+checkpoint's coverage. Six additional tests cover index binding/removal, metadata mutation,
+mixed streams/collisions/proof and atomic activation. Engine selection/routing remains pending.
+
+Latest checks (2026-09-18): all 624 shared tests and 15 CloudSyncUiState tests passed, with
 zero failures, errors, or skipped tests. This includes canonical field/scalar tests, synthetic
 corpus replay, production setting default round trips, isolated SQLite storage accounting,
 and the existing recovery, production-producer, backup, and convergence suites. Eight additional

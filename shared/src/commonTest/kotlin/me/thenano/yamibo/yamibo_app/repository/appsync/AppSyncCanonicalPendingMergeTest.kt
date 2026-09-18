@@ -6,6 +6,65 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.*
 import me.thenano.yamibo.yamibo_app.repository.appsync.schema.*
 
 class AppSyncCanonicalPendingMergeTest {
+    private fun native(vararg operations: SyncOperation): AppSyncCanonicalOperationBlock {
+        val imports = operations.map { assertIs<AppSyncCanonicalOperationImport.Accepted>(AppSyncCanonicalOperationImporter().import(account, it)) }
+        return AppSyncCanonicalOperationBlock(account, imports.map { it.operation },
+            imports.mapNotNull { it.proof }.distinct())
+    }
+
+    @Test fun mixedNativeAndLegacySequencesAreMergedAsOneContiguousStream() {
+        val first = source("detail-note", 1)
+        val second = source("detail-note", 2).copy(kind = SyncOperationKind.Patch, fields = mapOf("content" to "new"),
+            causalContext = SyncCausalContext(mapOf(first.replicaKey.stableKey to 1)))
+        val baseline = ready(base(), listOf(first, second))
+        for ((legacy, canonical) in listOf(listOf(first) to native(second), listOf(second) to native(first),
+            listOf(first, second) to native(first, second))) {
+            val result = assertIs<AppSyncCanonicalPendingMergeResult.Ready>(planner.prepare(base(), legacy, "next", 2, canonical))
+            assertEquals(baseline.checkpoint, result.checkpoint)
+            assertEquals(baseline.representedSourceIds, result.representedSourceIds)
+        }
+    }
+
+    @Test fun mixedRepresentationIdentityCollisionAndNativeGapAreRejected() {
+        val first = source("detail-note", 1)
+        val block = native(first)
+        val changed = first.copy(fields = first.fields + ("content" to "changed"))
+        assertEquals(AppSyncPendingMergeFailure.IdentityCollision,
+            assertIs<AppSyncCanonicalPendingMergeResult.NeedsAttention>(planner.prepare(base(), listOf(changed), "next", 2, block)).reason)
+        assertEquals(AppSyncPendingMergeFailure.SequenceGap,
+            assertIs<AppSyncCanonicalPendingMergeResult.NeedsAttention>(planner.prepare(base(), emptyList(), "next", 2, native(source("detail-note", 2)))).reason)
+        val current = ready(base(), listOf(first)).checkpoint
+        assertEquals(AppSyncPendingMergeFailure.IdentityCollision,
+            assertIs<AppSyncCanonicalPendingMergeResult.NeedsAttention>(planner.prepare(current, emptyList(), "next", 2, native(changed))).reason)
+    }
+
+    @Test fun nativeBulkProofIsCheckedWithoutChangingCanonicalBodies() {
+        val deletes = (1L..51L).map { source("favorite.item", it).copy(entityId = SyncEntityId("ThreadNormal|$it|0"),
+            kind = SyncOperationKind.Delete, origin = SyncOperationOrigin.UserAction, fields = emptyMap()) }
+        assertEquals(AppSyncPendingMergeFailure.BulkDeleteAuthorization,
+            assertIs<AppSyncCanonicalPendingMergeResult.NeedsAttention>(planner.prepare(base(), emptyList(), "next", 2, native(*deletes.toTypedArray()))).reason)
+        val authorized = deletes.map { it.copy(bulkDeleteAuthorizationId = "batch", fields = mapOf(
+            AppSyncBulkDeleteProofFields.SCOPE to "selection", AppSyncBulkDeleteProofFields.COUNT to "100",
+            AppSyncBulkDeleteProofFields.EXPIRES_AT to Long.MAX_VALUE.toString())) }
+        val result = assertIs<AppSyncCanonicalPendingMergeResult.Ready>(planner.prepare(base(), emptyList(), "next", 2,
+            native(*authorized.toTypedArray())))
+        assertEquals(100L, result.checkpoint.authorizations.single().operationCount)
+        assertTrue(result.checkpoint.entities.all { it.tombstone?.fields?.isEmpty() == true })
+        assertEquals(51L, result.checkpoint.coverage[deletes.first().replicaKey.stableKey])
+        val multipleBatches = authorized.mapIndexed { index, operation ->
+            operation.copy(bulkDeleteAuthorizationId = "batch-${index % 2}")
+        }
+        val multiple = assertIs<AppSyncCanonicalPendingMergeResult.Ready>(planner.prepare(base(), emptyList(), "next", 2,
+            native(*multipleBatches.toTypedArray())))
+        assertEquals(2, multiple.checkpoint.authorizations.size)
+        val missing = multipleBatches.mapIndexed { index, operation ->
+            if (index == 0) operation.copy(bulkDeleteAuthorizationId = null, fields = emptyMap()) else operation
+        }
+        assertEquals(AppSyncPendingMergeFailure.BulkDeleteAuthorization,
+            assertIs<AppSyncCanonicalPendingMergeResult.NeedsAttention>(planner.prepare(base(), emptyList(), "next", 2,
+                native(*missing.toTypedArray()))).reason)
+    }
+
     private val corpus by lazy { AppSyncSyntheticCorpus.create() }
     private val account get() = corpus.journal.accountBinding.value
     private val planner = AppSyncCanonicalPendingMerge()

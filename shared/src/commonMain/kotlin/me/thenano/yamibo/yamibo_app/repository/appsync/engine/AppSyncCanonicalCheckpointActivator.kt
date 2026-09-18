@@ -2,8 +2,10 @@ package me.thenano.yamibo.yamibo_app.repository.appsync.engine
 
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncCausalContext
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperation
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncVerifiedCanonicalCheckpoint
 import me.thenano.yamibo.yamibo_app.repository.appsync.schema.AppSyncCanonicalCheckpointCodec
+import me.thenano.yamibo.yamibo_app.repository.appsync.schema.AppSyncCanonicalOperationBlock
 import me.thenano.yamibo.yamibo_app.store.appsync.AppSyncOperationStore
 
 internal sealed interface AppSyncCanonicalActivationResult {
@@ -24,7 +26,9 @@ internal class AppSyncCanonicalCheckpointActivator(
     private val nowMillis: () -> Long,
     private val merger: AppSyncCanonicalPendingMerge = AppSyncCanonicalPendingMerge(),
 ) {
-    fun activate(verified: AppSyncVerifiedCanonicalCheckpoint): AppSyncCanonicalActivationResult {
+    fun activate(verified: AppSyncVerifiedCanonicalCheckpoint,
+        remoteOperations: AppSyncCanonicalOperationBlock? = null,
+        legacyRemoteOperations: List<SyncOperation> = emptyList()): AppSyncCanonicalActivationResult {
         var prepared: AppSyncCanonicalPendingMergeResult.Ready? = null
         var failed: AppSyncCanonicalActivationResult.NeedsAttention? = null
         var pendingCount = 0
@@ -37,9 +41,10 @@ internal class AppSyncCanonicalCheckpointActivator(
                 }
                 // Read inside the same transaction as activation so concurrent local appends
                 // cannot fall between snapshot preparation and projection replacement.
-                val sources = operations.allOutboxOperations().map { it.first }
+                val sources = operations.allOutboxOperations().map { it.first } + legacyRemoteOperations
                 pendingCount = operations.pendingOperations().size
-                val merged = merger.prepare(checkpoint, sources, checkpoint.checkpointId, checkpoint.createdAtEpochMillis)
+                val merged = merger.prepare(checkpoint, sources, checkpoint.checkpointId, checkpoint.createdAtEpochMillis,
+                    remoteOperations)
                 if (merged is AppSyncCanonicalPendingMergeResult.NeedsAttention) {
                     failed = AppSyncCanonicalActivationResult.NeedsAttention("Canonical pending merge needs attention", merged.reason)
                     return@transaction
@@ -47,12 +52,16 @@ internal class AppSyncCanonicalCheckpointActivator(
                 val ready = merged as AppSyncCanonicalPendingMergeResult.Ready
                 // A local overlay has a separate identity; it must never masquerade as the
                 // indexed remote artifact when another local edit arrives during a retry.
-                val localId = "local:" + AppSyncCanonicalCheckpointCodec().encode(ready.checkpoint).sha256().hex()
+                val localId = "local:" + AppSyncCanonicalCheckpointCodec().encode(ready.checkpoint.copy(checkpointId = "local")).sha256().hex()
                 val local = ready.checkpoint.copy(checkpointId = localId)
+                val proofs = remoteOperations?.authorizations.orEmpty().associateBy { it.authorizationId }
+                val receipts = (sources + remoteOperations?.operations.orEmpty().map {
+                    it.toLegacyOperationView(checkpoint.accountBinding, it.authorizationId?.let(proofs::get))
+                }).distinctBy { it.operationId }
                 operations.adoptCheckpoint(checkpoint.checkpointId, verified.blogId,
                     SyncCausalContext(checkpoint.coverage), verified.fingerprint,
                     checkpoint.createdAtEpochMillis, nowMillis(),
-                    OperationReductionResult(emptyMap(), ready.conflicts, emptyList(), sources),
+                    OperationReductionResult(emptyMap(), ready.conflicts, emptyList(), receipts),
                 ) { state.replace(checkpoint.accountBinding, local) }
                 prepared = ready
             }

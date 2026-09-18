@@ -6,6 +6,20 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.remote.*
 import me.thenano.yamibo.yamibo_app.repository.appsync.schema.*
 
 class AppSyncVerifiedCanonicalCheckpointTest {
+    @Test fun loadedDocumentEvidenceChecksOriginalIndexAndCannotReuseMetadataAfterMutation() {
+        val read = assertIs<AppSyncV3DocumentRead.Checkpoint>(AppSyncV3DocumentCodec().readCheckpoint(body, "account", "checkpoint"))
+        val html = "<pre>${index()}</pre>"
+        val verified = assertNotNull(AppSyncVerifiedCanonicalCheckpoint.verifyDocument("account", 123, html, read))
+        assertEquals(checkpoint, verified.document)
+        assertNull(AppSyncVerifiedCanonicalCheckpoint.verifyDocument("account", 123, html,
+            read.copy(document = checkpoint.copy(createdAtEpochMillis = 999))))
+        assertNull(AppSyncVerifiedCanonicalCheckpoint.verifyDocument("account", 123, html,
+            read.copy(metadata = read.metadata.copy(uncompressedLength = 0))))
+        assertNull(AppSyncVerifiedCanonicalCheckpoint.verifyDocument("account", 123, html,
+            read.copy(metadata = read.metadata.copy(codecVersion = 9))))
+        assertNull(AppSyncVerifiedCanonicalCheckpoint.verifyDocument("account", 124, html, read))
+    }
+
     private val checkpoint = AppSyncCanonicalCheckpoint("checkpoint", "account", 1, emptyMap(), emptyList())
     private val body = AppSyncV3DocumentCodec().encodeCheckpoint(checkpoint)
     private val fingerprint = AppSyncCanonicalCheckpointCodec().encode(checkpoint).sha256().hex()
