@@ -63,6 +63,8 @@ internal class AppSyncSegmentPublisher(
     ): AppSyncSegmentPublishResult {
         val session = recoveryStore.session(sessionId)
             ?: return AppSyncSegmentPublishResult.Terminal("Recovery session is missing")
+        if (recoveryStore.usesNativeTransport(sessionId))
+            return AppSyncSegmentPublishResult.Terminal("Native recovery requires the native publisher")
         if (session.phase !in setOf(
                 AppSyncRecoveryPhase.PublishingSegments,
                 AppSyncRecoveryPhase.PublishingRoot,

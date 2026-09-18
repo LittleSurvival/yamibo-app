@@ -528,7 +528,10 @@ internal class SqlDelightAppSyncRecoveryStore(
     }
 
     fun usesNativeTransport(sessionId: String): Boolean =
-        queries.getRecoveryPayload(sessionId).executeAsOneOrNull()?.transportVersion == 3L
+        payloadTransportVersion(sessionId) == 3L
+
+    fun payloadTransportVersion(sessionId: String): Long? =
+        queries.getRecoveryPayload(sessionId).executeAsOneOrNull()?.transportVersion
 
     fun nativeIndexIntent(sessionId: String): NativeRecoveryIndexIntent? {
         val row = queries.getRecoveryPayload(sessionId).executeAsOneOrNull() ?: return null

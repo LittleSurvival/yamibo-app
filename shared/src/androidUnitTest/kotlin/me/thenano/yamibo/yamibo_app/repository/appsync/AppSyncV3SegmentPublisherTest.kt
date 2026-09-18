@@ -363,6 +363,47 @@ class AppSyncV3SegmentPublisherTest {
         assertEquals(posts, provider.posts.size)
     }
 
+    @Test fun legacyPublisherAndCoordinatorCannotAdvanceOrChargeNativeRecovery() = fixture {
+        val (id, frozen, identity) = prepareJournal()
+        recovery.startSegmentedJournal(id, 3)
+        recovery.pinPayload(id, "Journal", identity, 3) { frozen }
+        val oldPublisher = AppSyncSegmentPublisher(provider, recovery, nowMillis = { 20 })
+        val oldCommitter = AppSyncSegmentIndexCommitter(provider, SqlDelightAppSyncRemoteBlogStore(db), recovery, nowMillis = { 20 })
+        val oldCoordinator = AppSyncSegmentedJournalCommitCoordinator(oldPublisher, oldCommitter, recovery, { 20 })
+        val selection = AppSyncBlogClassSelection.Existing(BlogClassId(7))
+        val form = FormHash("test")
+        val before = recovery.session(id)
+        assertIs<AppSyncSegmentPublishResult.Terminal>(oldPublisher.publish(id, frozen, AppSyncSegmentPayloadKind.Journal, identity, selection, form))
+        assertIs<AppSyncSegmentedJournalCommitResult.Terminal>(oldCoordinator.commit(id, frozen, identity, selection, form))
+        assertEquals(before, recovery.session(id))
+        assertTrue(provider.posts.isEmpty())
+        assertEquals(0, provider.listReads)
+        assertIs<AppSyncSegmentIndexCommitResult.Verified>(committer().commit(id, frozen, AppSyncV3PayloadKind.Journal, identity, selection, form))
+        val committed = recovery.session(id)
+        val count = provider.posts.size
+        assertIs<AppSyncSegmentedJournalCommitResult.Terminal>(oldCoordinator.commit(id, frozen, identity, selection, form))
+        assertEquals(committed, recovery.session(id))
+        assertEquals(AppSyncRecoveryPhase.ActivatingLocal, recovery.session(id)?.phase)
+        assertEquals(count, provider.posts.size)
+        assertEquals(listOf(pending), operations.pendingOperations())
+    }
+
+    @Test fun nativeCoordinatorCannotChargeOrReplaceFrozenLegacyPayload() = fixture {
+        val (id, frozen, identity) = prepareJournal()
+        recovery.startSegmentedJournal(id, 3)
+        recovery.pinPayload(id, "Journal", identity) { "legacy-frozen-body" }
+        val before = recovery.session(id)
+        val result = AppSyncV3CommitCoordinator(committer(), recovery, { 100 }, canRun = { true }).commit(
+            id, frozen, identity, AppSyncBlogClassSelection.Existing(BlogClassId(7)), FormHash("test"))
+        assertIs<AppSyncSegmentedJournalCommitResult.Terminal>(result)
+        assertEquals(before, recovery.session(id))
+        assertEquals(2L, recovery.payloadTransportVersion(id))
+        assertEquals("legacy-frozen-body", recovery.pinPayload(id, "Journal", identity) { error("Must retain frozen source") })
+        assertTrue(provider.posts.isEmpty())
+        assertEquals(0, provider.listReads)
+        assertEquals(listOf(pending), operations.pendingOperations())
+    }
+
     @Test fun nativeCoordinatorRespectsDurableRetryDeadlineAndStopsAtThirdFailure() = fixture {
         val (id, frozen, identity) = prepareJournal()
         var now = 100L

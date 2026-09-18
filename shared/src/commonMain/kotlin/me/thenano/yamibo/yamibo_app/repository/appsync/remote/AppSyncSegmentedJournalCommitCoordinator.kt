@@ -35,6 +35,8 @@ internal class AppSyncSegmentedJournalCommitCoordinator(
     ): AppSyncSegmentedJournalCommitResult {
         val session = recoveryStore.session(sessionId)
             ?: return AppSyncSegmentedJournalCommitResult.Terminal("Recovery session is missing")
+        if (recoveryStore.usesNativeTransport(sessionId))
+            return AppSyncSegmentedJournalCommitResult.Terminal("Native recovery requires the native coordinator")
         if (session.phase == AppSyncRecoveryPhase.NeedsAttention) {
             return AppSyncSegmentedJournalCommitResult.Terminal("Recovery requires attention")
         }

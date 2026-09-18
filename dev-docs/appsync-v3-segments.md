@@ -57,3 +57,7 @@ Native checkpoint 已提供專用 `AppSyncCanonicalCheckpointActivator.activateR
 `AppSyncV3CommitCoordinator` 提供預設停用的單次執行協調：由 Classifying／Staging 開始，接續分段、index 與本機 activation，只有資料庫確實 Completed 且 indexCommitted 才回傳 Verified。journal 回報本 session 已確認來源；checkpoint 必須注入 canonical activator，且不回報 outbox 確認。取消向上傳播，登入中斷不消耗重試預算；其餘結果沿用 `AppSyncRecoveryAttempts` 保存不可變 retry identity／期限及第三次失敗停止規則。期限未到不執行遠端操作，也不增加失敗計數。
 
 此 coordinator 不建立背景工作；呼叫端必須另外成功排入 durable worker，才可在 UI 宣稱等待已排程的重試。正式 service／worker 接線、重開機驗收仍未完成。測試涵蓋從 staging 到 journal activation 的完整 fake-provider／SQLite 執行，以及重新建立 coordinator 後的期限、第三次停止、來源保留與明確恢復。
+
+v2 segment publisher 與 v2 coordinator 在入口即拒絕 transport 3，包括已經進入 ActivatingLocal 的 session；不得跳過 native coordinator 直接啟用，也不得把錯誤分流計入 native retry budget。回歸測試確認發布前及 index 提交後均保持 session、pending 與遠端寫入數不變。
+
+反向亦相同：native coordinator 若發現 frozen payload 的 transport 不是 3，會在任何 phase／retry 更新前拒絕；尚未凍結的 native session 則可正常起始。測試確認 v2 frozen body、來源及 retry state 原樣保留，沒有 discovery 或 POST。
