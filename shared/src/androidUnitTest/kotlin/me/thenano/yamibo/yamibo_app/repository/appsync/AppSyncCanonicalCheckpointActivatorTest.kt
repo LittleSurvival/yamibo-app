@@ -15,6 +15,67 @@ import me.thenano.yamibo.yamibo_app.store.appsync.*
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 
 class AppSyncCanonicalCheckpointActivatorTest {
+    @Test fun replacingCompletedJournalPreservesFrozenEvidenceOutsideTheActiveSessionSlot() = fixture {
+        val first = append()
+        val (recovery, id) = stageNativeJournal(first)
+        val cloud = AppSyncCanonicalCloudPlan.Ready(verified(), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
+        activator().activateJournalRecovery(recovery, id, cloud)
+        val frozen = db.appSyncOperationQueries.getRecoveryPayload(id).executeAsOne()
+        val later = append("22")
+        val next = recovery.createOrResumeSegmentedJournal(account, setOf(later.operationId.value), "next-publication", now)
+        assertNotEquals(id, next.sessionId)
+        assertNull(recovery.session(id))
+        val retained = db.appSyncRetainedJournalQueries.getBySession(id).executeAsOne()
+        assertEquals(frozen.canonicalEnvelope, retained.canonicalEnvelope)
+        assertEquals(frozen.indexIntentBody, retained.indexIntentBody)
+        assertEquals(frozen.verifiedIndexFingerprint, retained.verifiedIndexFingerprint)
+        assertEquals(frozen.envelopeFingerprint, retained.envelopeFingerprint)
+        assertEquals(300L, retained.rootBlogId)
+        assertEquals(listOf(id), db.appSyncRetainedJournalQueries.getForAccount(account.value).executeAsList())
+        assertTrue(db.appSyncRetainedJournalQueries.getForAccount("other-account").executeAsList().isEmpty())
+        recovery.expireCompletedRecoveryMetadata(now + 60L * 24 * 60 * 60 * 1000)
+        assertEquals(retained, db.appSyncRetainedJournalQueries.getBySession(id).executeAsOne())
+        assertEquals(listOf(later), store.pendingOperations())
+        assertEquals(next, SqlDelightAppSyncRecoveryStore(db).recoverySession(account))
+    }
+
+    @Test fun interruptedSessionReplacementRollsBackPreservationAndOldSessionRemoval() = fixture {
+        val first = append()
+        val (recovery, id) = stageNativeJournal(first)
+        activator().activateJournalRecovery(recovery, id,
+            AppSyncCanonicalCloudPlan.Ready(verified(), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList()))
+        val frozen = recovery.nativePayload(id)
+        assertFailsWith<IllegalStateException> {
+            db.transaction {
+                recovery.createOrResumeSegmentedJournal(account, emptySet(), "next-publication", now)
+                assertNotNull(db.appSyncRetainedJournalQueries.getBySession(id).executeAsOneOrNull())
+                error("interrupted before new payload is pinned")
+            }
+        }
+        assertEquals(AppSyncRecoveryPhase.Completed, recovery.session(id)?.phase)
+        assertEquals(frozen, recovery.nativePayload(id))
+        assertNull(db.appSyncRetainedJournalQueries.getBySession(id).executeAsOneOrNull())
+    }
+
+    @Test fun invalidCompletedJournalEvidenceCannotBeDiscardedByNextSession() = fixture {
+        val first = append()
+        val (recovery, id) = stageNativeJournal(first)
+        activator().activateJournalRecovery(recovery, id,
+            AppSyncCanonicalCloudPlan.Ready(verified(), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList()))
+        db.appSyncOperationQueries.markNativeRecoveryIndexVerified(400, "corrupt", 7, id)
+        assertFailsWith<IllegalArgumentException> { recovery.createOrResumeSegmentedJournal(account, emptySet(), "next", now) }
+        assertEquals(AppSyncRecoveryPhase.Completed, recovery.session(id)?.phase)
+        assertNotNull(db.appSyncOperationQueries.getRecoveryPayload(id).executeAsOneOrNull())
+        assertNull(db.appSyncRetainedJournalQueries.getBySession(id).executeAsOneOrNull())
+    }
+
+    @Test fun retainedJournalMigrationStartsWithoutInventedEvidence() {
+        JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).use { driver ->
+            Database.Schema.migrate(driver, oldVersion = 55, newVersion = 56)
+            assertTrue(Database(driver).appSyncRetainedJournalQueries.getForAccount(account.value).executeAsList().isEmpty())
+        }
+    }
+
     @Test fun corruptCompletedJournalIndexEvidenceRollsBackAllPayloadDeletion() = fixture {
         val first = append()
         val (recovery, id) = stageNativeJournal(first)

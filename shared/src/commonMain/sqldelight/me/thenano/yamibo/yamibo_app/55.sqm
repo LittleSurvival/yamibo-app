@@ -1,0 +1,17 @@
+CREATE TABLE AppSyncRetainedJournal (
+    sessionId TEXT NOT NULL PRIMARY KEY,
+    accountBinding TEXT NOT NULL,
+    generationId TEXT NOT NULL,
+    payloadIdentity TEXT NOT NULL,
+    canonicalEnvelope TEXT NOT NULL,
+    envelopeFingerprint TEXT NOT NULL,
+    rootBlogId INTEGER NOT NULL,
+    rootFingerprint TEXT NOT NULL,
+    indexIntentBody TEXT NOT NULL,
+    indexIntentSha256 TEXT NOT NULL,
+    verifiedIndexBlogId INTEGER NOT NULL,
+    verifiedIndexFingerprint TEXT NOT NULL,
+    indexVerifiedAtEpochMillis INTEGER NOT NULL,
+    completedAtEpochMillis INTEGER NOT NULL
+);
+CREATE INDEX AppSyncRetainedJournal_account ON AppSyncRetainedJournal(accountBinding, completedAtEpochMillis);

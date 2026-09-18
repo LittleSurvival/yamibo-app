@@ -44,3 +44,11 @@ Migration 54（schema version 55）新增 `AppSyncNativeCompletion`。最後一�
 刪除前重驗 checkpoint 身分與保存狀態、canonical head／設定，以及原 journal 的凍結封套、root 與 index intent/readback 證據。來源若仍為 pending、存在 shadow operation 或證據不一致，拒絕清理。原 index 的重驗在 Completed 階段只比對已保存證據，不重新發布或倒退階段。
 
 移除封套、index body、segment intents 與 work ledger，連同完成收據寫入與同批 covered-outbox 刪除都在同一 SQL 交易內。收據沿用原 session 完成時間，checkpoint 欄位記錄授權清理的替代 checkpoint，root/index 欄位記錄原 journal 的已驗證發布；無須新增 schema。已清理 session 可重播辨識 transport 3，收據和 session 於既有 30 天到期流程移除。移除位元組包含凍結封套與 index body，仍屬邏輯量測，不代表實體資料庫縮小。
+
+## 新 session 取代舊 session 時保存未覆蓋 journal
+
+Migration 55（schema version 56）新增裝置端 `AppSyncRetainedJournal`。原 recovery session 每個帳號只有一個位置；過去開始下一個 session 時會直接刪除 completed session 的 payload。現在尚未取得清理收據的 completed native journal，會先重驗 frozen index readback，再於移除舊 session 的同一交易保存 journal 封套、index intent、摘要、root/index Blog ID 與完成時間。此資料表不以舊 session 為外鍵，因此取代 session 不會連帶刪除尚未覆蓋的主體。
+
+若同 session ID 已有保留資料，所有保存的身分、主體與證據都必須一致；不接受覆寫。交易中斷會同時還原舊 session 與保留副本變更。證據損壞時拒絕取代，保留原 session 與 payload。已經取得完成收據、主體已合法清理的 session 不會重建副本。
+
+此資料排除於 AppSync 與可攜備份，也不參與單靠時間的 30 天收據到期刪除。保留副本後續仍須接上完整 checkpoint coverage 驗證與有界清理；在此接線完成前會繼續占用本機空間，不能宣稱整體 reclamation 已完成。

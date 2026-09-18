@@ -101,6 +101,7 @@ internal class SqlDelightAppSyncRecoveryStore(
         recoverySession(accountBinding)?.let { existing ->
             if (existing.phase == AppSyncRecoveryPhase.Completed) {
                 db.transaction {
+                    preserveCompletedNativeJournal(existing.sessionId)
                     queries.deleteRecoverySegmentWrites(existing.sessionId)
                     queries.deleteRecoveryShadowOperations(existing.sessionId)
                     queries.deleteRecoveryPayload(existing.sessionId)
@@ -576,6 +577,30 @@ internal class SqlDelightAppSyncRecoveryStore(
             receipt.rootBlogId == session.rootBlogId && receipt.rootFingerprint == session.rootFingerprint &&
             receipt.completedAtEpochMillis == session.completedAtEpochMillis)
         return true
+    }
+
+    /** Moving a completed session out of the single-account slot must not discard its last
+     * frozen evidence before a replacement checkpoint authorizes payload reclamation.
+     */
+    private fun preserveCompletedNativeJournal(sessionId: String) {
+        val session = requireSession(sessionId)
+        if (session.mode != AppSyncRecoveryMode.SegmentedJournal || !usesNativeTransport(sessionId) ||
+            hasNativeCompletionReceipt(sessionId)) return
+        require(session.phase == AppSyncRecoveryPhase.Completed && shadowOperations(sessionId).isEmpty())
+        val payload = queries.getRecoveryPayload(sessionId).executeAsOne()
+        val intent = requireNotNull(nativeIndexIntent(sessionId))
+        markNativeIndexCommitted(sessionId, requireNotNull(payload.verifiedIndexBlogId), intent.body,
+            requireNotNull(payload.indexVerifiedAtEpochMillis))
+        val retained = db.appSyncRetainedJournalQueries
+        if (retained.getBySession(sessionId).executeAsOneOrNull() == null) retained.preserveCompleted(sessionId)
+        val saved = retained.getBySession(sessionId).executeAsOne()
+        require(saved.accountBinding == session.accountBinding.value && saved.generationId == session.generationId &&
+            saved.payloadIdentity == payload.payloadIdentity && saved.canonicalEnvelope == payload.canonicalEnvelope &&
+            saved.envelopeFingerprint == payload.envelopeFingerprint && saved.rootBlogId == session.rootBlogId &&
+            saved.rootFingerprint == session.rootFingerprint && saved.indexIntentBody == intent.body &&
+            saved.indexIntentSha256 == payload.indexIntentSha256 && saved.verifiedIndexBlogId == payload.verifiedIndexBlogId &&
+            saved.verifiedIndexFingerprint == payload.verifiedIndexFingerprint &&
+            saved.indexVerifiedAtEpochMillis == payload.indexVerifiedAtEpochMillis && saved.completedAtEpochMillis == session.completedAtEpochMillis)
     }
 
     /** Called within the final proven local cleanup transaction, before reporting completion. */
