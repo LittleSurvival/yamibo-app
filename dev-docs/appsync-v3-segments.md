@@ -35,3 +35,11 @@ Index 的讀寫 codec 已共用參照衝突檢查：同一 journal replica、che
 Migration 49 在 recovery payload 保存 verifiedIndexBlogId、verifiedIndexFingerprint、indexVerifiedAtEpochMillis，既有列均為 null，不臆造成功證據。舊 `markIndexCommitted` 拒絕 transport 3；專用 `markNativeIndexCommitted` 重新驗證凍結封套、帳號、root intent／已確認 root 與 index 內的 canonical 摘要。journal 另核對 session writer／replica，checkpoint 核對 identity。index 證據與 ActivatingLocal 階段在同一 SQLite 交易寫入；相同回讀證據重試不改寫第一次時間，不同 index 不能覆蓋既有成功證據。此 API 假設呼叫端已 GET 並核對 index 實體 ID／標題，尚須由 native committer 接線；不會確認 outbox、建立可清理 coverage 或進行刪除。
 
 舊版 `AppSyncSegmentIndexCommitter` 在任何 discovery／POST 前拒絕 native transport，避免先寫入舊摘要才於本機提交時失敗。SQLite／fake-provider 測試涵蓋 journal 與 checkpoint 的 canonical 參照、帳號／identity／root 不符、封套摘要誤用、外層交易回滾、重建 store 後重試、第一次時間保留、不同 index 拒絕、舊入口無遠端寫入，以及 pending／coverage 不變。
+
+Migration 50 凍結 native index 的完整 body／SHA-256、更新目標 ID 與更新前正規化 index SHA-256。重試不可替換意圖；提交證據必須與完整凍結內容相符。`AppSyncV3IndexCommitter` 預設停用，使用已知同步分類與呼叫端 lease／gate，先呼叫分段發布器重新回讀 root／chain，再完整掃描 index 候選。多份 index、帳號不符或無法驗證的文件不能作為更新基礎；掃描／回讀中斷不等於不存在。
+
+建立意圖時保留其他 journal、checkpoint 與 retirement 參照，只更新本次 identity。更新前再次完整掃描：遠端等於預期內容就直接確認；遠端仍等於原基礎才允許 POST；其他版本回報衝突。提交後不信任 acknowledgement／candidate ID，一律重新掃描並 GET 核對實體 ID、標題、帳號與完整正規化內容；逾時亦走相同確認。單次呼叫不重複 POST。成功只推進 ActivatingLocal，仍不確認來源或清理。
+
+Provider 不支援 compare-and-swap，因此更新前檢查與 POST 間仍有跨裝置競爭窗口；此元件尚未接入正式服務，也未宣告並行 writer／worker／清理驗收完成。呼叫端仍須完成 writer/cohort 驗證、durable retry 排程及後續本機 activation。缺少固定傳輸設定與完整裝置驗收，v3 rollout 保持關閉。
+
+五項新增 SQLite／fake-provider 測試涵蓋 root 後建立 index、pending 保留、遺失回應後重建 committer 且不重送、保留其他參照、前置版本變動、預設及提交前 gate、完整掃描中斷、虛假成功回應、重複候選與登入中斷。Migration 測試確認新欄位預設為 null；既有 store 提交測試改為先保存 immutable intent。

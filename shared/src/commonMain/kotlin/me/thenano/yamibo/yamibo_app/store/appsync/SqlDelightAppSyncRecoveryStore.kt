@@ -25,6 +25,9 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncIndexValida
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3DocumentCodec
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3DocumentRead
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3PayloadKind
+import okio.ByteString.Companion.encodeUtf8
+
+internal data class NativeRecoveryIndexIntent(val body: String, val targetBlogId: Long?, val baseSha256: String?)
 
 internal class SqlDelightAppSyncRecoveryStore(
     private val db: Database,
@@ -526,6 +529,32 @@ internal class SqlDelightAppSyncRecoveryStore(
     fun usesNativeTransport(sessionId: String): Boolean =
         queries.getRecoveryPayload(sessionId).executeAsOneOrNull()?.transportVersion == 3L
 
+    fun nativeIndexIntent(sessionId: String): NativeRecoveryIndexIntent? {
+        val row = queries.getRecoveryPayload(sessionId).executeAsOneOrNull() ?: return null
+        val body = row.indexIntentBody ?: return null
+        require(row.transportVersion == 3L && body.encodeUtf8().sha256().hex() == row.indexIntentSha256)
+        return NativeRecoveryIndexIntent(body, row.indexTargetBlogId, row.indexBaseSha256)
+    }
+
+    fun pinNativeIndexIntent(sessionId: String, intent: NativeRecoveryIndexIntent): NativeRecoveryIndexIntent = db.transactionWithResult {
+        require(requireSession(sessionId).phase == AppSyncRecoveryPhase.CommittingIndex)
+        require(usesNativeTransport(sessionId))
+        val previous = nativeIndexIntent(sessionId)
+        if (previous != null) {
+            require(previous == intent) { "Native index intent changed" }
+            previous
+        } else {
+            require((intent.targetBlogId == null && intent.baseSha256 == null) ||
+                (intent.targetBlogId != null && intent.targetBlogId in 1..Int.MAX_VALUE.toLong() &&
+                    intent.baseSha256?.matches(Regex("[0-9a-f]{64}")) == true))
+            val index = (AppSyncIndexEnvelopeCodec().validate(intent.body) as? AppSyncIndexValidation.Valid)?.envelope
+            require(index?.payload?.accountBinding == requireSession(sessionId).accountBinding)
+            queries.pinNativeRecoveryIndexIntent(intent.body, intent.body.encodeUtf8().sha256().hex(),
+                intent.targetBlogId, intent.baseSha256, sessionId)
+            requireNotNull(nativeIndexIntent(sessionId))
+        }
+    }
+
     /** Called only with a fetched Index body after the publisher verifies its physical ID/title.
      * Binds the canonical reference to the frozen payload and confirmed root, atomically with
      * the phase transition. This does not acknowledge operations or authorize cleanup.
@@ -544,6 +573,9 @@ internal class SqlDelightAppSyncRecoveryStore(
         val index = (AppSyncIndexEnvelopeCodec().validateReaderHtml(indexReaderHtml) as? AppSyncIndexValidation.Valid)?.envelope
         requireNotNull(index) { "Native index readback is invalid" }
         require(index.payload.accountBinding == session.accountBinding)
+        val intent = requireNotNull(nativeIndexIntent(sessionId)) { "Native index intent is missing" }
+        require(intent.targetBlogId == null || intent.targetBlogId == indexBlogId)
+        require(AppSyncIndexEnvelopeCodec().encode(index.payload) == intent.body) { "Native index differs from frozen intent" }
         val kind = AppSyncV3PayloadKind.valueOf(payload.payloadKind)
         val document = AppSyncV3DocumentCodec().discover(payload.canonicalEnvelope, session.accountBinding.value, kind)
         when (document) {

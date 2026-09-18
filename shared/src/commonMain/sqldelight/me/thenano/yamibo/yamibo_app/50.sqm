@@ -1,0 +1,4 @@
+ALTER TABLE AppSyncRecoveryPayload ADD COLUMN indexIntentBody TEXT;
+ALTER TABLE AppSyncRecoveryPayload ADD COLUMN indexIntentSha256 TEXT;
+ALTER TABLE AppSyncRecoveryPayload ADD COLUMN indexTargetBlogId INTEGER;
+ALTER TABLE AppSyncRecoveryPayload ADD COLUMN indexBaseSha256 TEXT;

@@ -37,6 +37,9 @@ class AppSyncV3SegmentPublisherTest {
         val provider = Provider()
         fun publisher(gate: suspend () -> Boolean = { true }, discovery: suspend (String, String) -> AppSyncV3ArtifactDiscovery = AppSyncV3ArtifactReconciler(provider, BlogClassId(7))::discover) =
             AppSyncV3SegmentPublisher(provider, SqlDelightAppSyncRecoveryStore(db), { 10 }, codec, gate, discovery)
+        fun committer() = AppSyncV3IndexCommitter(provider, SqlDelightAppSyncRecoveryStore(db), publisher(), { 20 }, { true })
+        suspend fun commit() = committer().commit(session.sessionId, envelope, kind, "checkpoint",
+            AppSyncBlogClassSelection.Existing(BlogClassId(7)), FormHash("test"))
         suspend fun publish(publisher: AppSyncV3SegmentPublisher = publisher(), source: String = envelope) = publisher.publish(
             session.sessionId, source, kind, "checkpoint", AppSyncBlogClassSelection.Existing(BlogClassId(7)), FormHash("test"))
     }
@@ -148,6 +151,7 @@ class AppSyncV3SegmentPublisherTest {
         assertEquals(0, provider.listReads)
         val index = AppSyncIndexPayload(account, checkpoints = listOf(reference), updatedAtEpochMillis = 20)
         fun body(value: AppSyncIndexPayload = index) = AppSyncIndexEnvelopeCodec().encode(value).replace("\n", "<br>")
+        recovery.pinNativeIndexIntent(session.sessionId, NativeRecoveryIndexIntent(AppSyncIndexEnvelopeCodec().encode(index), null, null))
         assertFailsWith<IllegalArgumentException> { recovery.markIndexCommitted(session.sessionId, 20) }
         for (bad in listOf(index.copy(accountBinding = SyncAccountBinding("other")),
             index.copy(checkpoints = emptyList()),
@@ -192,6 +196,7 @@ class AppSyncV3SegmentPublisherTest {
         val ref = AppSyncIndexJournalReference(identity, root.rootBlogId.value, root.root.metadata.canonicalFingerprint)
         fun index(reference: AppSyncIndexJournalReference) = AppSyncIndexEnvelopeCodec().encode(
             AppSyncIndexPayload(account, journals = listOf(reference), updatedAtEpochMillis = 20))
+        recovery.pinNativeIndexIntent(journalSession.sessionId, NativeRecoveryIndexIntent(index(ref), null, null))
         for (bad in listOf(ref.copy(replicaKey = "other"), ref.copy(fingerprint = null), ref.copy(fingerprint = root.root.envelopeSha256))) {
             assertFailsWith<IllegalArgumentException> { recovery.markNativeIndexCommitted(journalSession.sessionId, 900, index(bad), 20) }
         }
@@ -199,6 +204,107 @@ class AppSyncV3SegmentPublisherTest {
         recovery.markNativeIndexCommitted(journalSession.sessionId, 900, index(ref), 21)
         assertEquals(AppSyncRecoveryPhase.ActivatingLocal, recovery.session(journalSession.sessionId)?.phase)
         assertEquals(listOf(pending), operations.pendingOperations())
+    }
+
+    @Test fun nativeCommitCreatesIndexOnlyAfterRootAndPreservesPendingSources() = fixture {
+        assertIs<AppSyncSegmentIndexCommitResult.Verified>(commit())
+        assertEquals(APP_SYNC_INDEX_TITLE, provider.posts.last().title)
+        val index = assertIs<AppSyncIndexValidation.Valid>(AppSyncIndexEnvelopeCodec().validate(provider.posts.last().message)).envelope.payload
+        assertEquals(recovery.session(session.sessionId)?.rootBlogId, index.checkpoints.single().blogId.toLong())
+        val row = db.appSyncOperationQueries.getRecoveryPayload(session.sessionId).executeAsOne()
+        assertNotNull(row.verifiedIndexBlogId)
+        assertNotNull(row.indexIntentSha256)
+        assertEquals(provider.posts.last().message, recovery.nativeIndexIntent(session.sessionId)?.body)
+        val count = provider.posts.size
+        assertIs<AppSyncSegmentIndexCommitResult.Verified>(commit())
+        assertEquals(count, provider.posts.size)
+        assertEquals(listOf(pending), operations.pendingOperations())
+        assertTrue(operations.verifiedCheckpoints().isEmpty())
+    }
+
+    @Test fun nativeCommitReconcilesLostIndexResponseAfterRestartWithoutSecondPost() = fixture {
+        assertIs<AppSyncV3SegmentPublishResult.ReadyToCommitIndex>(publish())
+        provider.timeoutAt = provider.posts.size + 1
+        provider.storeTimedOut = true
+        provider.failIndexRead = true
+        assertIs<AppSyncSegmentIndexCommitResult.Retryable>(commit())
+        assertEquals(false, recovery.session(session.sessionId)?.indexCommitted)
+        val intent = assertNotNull(recovery.nativeIndexIntent(session.sessionId))
+        val count = provider.posts.size
+        provider.failIndexRead = false
+        assertIs<AppSyncSegmentIndexCommitResult.Verified>(commit())
+        assertEquals(count, provider.posts.size)
+        assertEquals(intent, recovery.nativeIndexIntent(session.sessionId))
+        assertEquals(listOf(pending), operations.pendingOperations())
+    }
+
+    @Test fun nativeIndexUpdateKeepsOtherReferencesAndRejectsConcurrentBaseChange() = fixture {
+        assertIs<AppSyncV3SegmentPublishResult.ReadyToCommitIndex>(publish())
+        val base = AppSyncIndexPayload(account, journals = listOf(AppSyncIndexJournalReference("other", 700, "other-sha")),
+            checkpoints = listOf(AppSyncIndexCheckpointReference("old", 701, "old-sha")), updatedAtEpochMillis = 5)
+        fun request(value: AppSyncIndexPayload) = AppSyncBlogWriteRequest(BlogId(800), APP_SYNC_INDEX_TITLE,
+            AppSyncIndexEnvelopeCodec().encode(value), AppSyncBlogClassSelection.Existing(BlogClassId(7)), FormHash("test"))
+        provider.artifacts[800] = request(base)
+        provider.onList = { call -> if (call == 2) provider.artifacts[800] = request(base.copy(updatedAtEpochMillis = 6)) }
+        val count = provider.posts.size
+        assertIs<AppSyncSegmentIndexCommitResult.Conflict>(commit())
+        assertEquals(count, provider.posts.size)
+        val intent = assertNotNull(recovery.nativeIndexIntent(session.sessionId))
+        assertEquals(800L, intent.targetBlogId)
+        provider.onList = {}
+        assertIs<AppSyncSegmentIndexCommitResult.Conflict>(commit())
+        assertEquals(count, provider.posts.size)
+        // Restore exactly the observed base; the immutable intent is now safe to retry.
+        provider.artifacts[800] = request(base)
+        assertIs<AppSyncSegmentIndexCommitResult.Verified>(commit())
+        assertEquals(BlogId(800), provider.posts.last().blogId)
+        val merged = assertIs<AppSyncIndexValidation.Valid>(AppSyncIndexEnvelopeCodec().validate(provider.posts.last().message)).envelope.payload
+        assertEquals(base.journals, merged.journals)
+        assertTrue(base.checkpoints.single() in merged.checkpoints)
+        assertEquals(2, merged.checkpoints.size)
+    }
+
+    @Test fun nativeIndexGateAndIncompleteDiscoveryCannotCreateOrCommit() = fixture {
+        val disabled = AppSyncV3IndexCommitter(provider, recovery, publisher(), { 20 })
+        assertIs<AppSyncSegmentIndexCommitResult.Terminal>(disabled.commit(session.sessionId, envelope, kind, "checkpoint",
+            AppSyncBlogClassSelection.Existing(BlogClassId(7)), FormHash("test")))
+        assertTrue(provider.posts.isEmpty())
+        assertIs<AppSyncV3SegmentPublishResult.ReadyToCommitIndex>(publish())
+        val count = provider.posts.size
+        provider.listFailureAt = 1
+        assertIs<AppSyncSegmentIndexCommitResult.Retryable>(commit())
+        assertNull(recovery.nativeIndexIntent(session.sessionId))
+        provider.listFailureAt = null
+        var checks = 0
+        val gated = AppSyncV3IndexCommitter(provider, recovery, publisher(), { 20 }, { ++checks == 1 })
+        assertIs<AppSyncSegmentIndexCommitResult.Terminal>(gated.commit(session.sessionId, envelope, kind, "checkpoint",
+            AppSyncBlogClassSelection.Existing(BlogClassId(7)), FormHash("test")))
+        assertNotNull(recovery.nativeIndexIntent(session.sessionId))
+        assertEquals(count, provider.posts.size)
+        assertEquals(false, recovery.session(session.sessionId)?.indexCommitted)
+    }
+
+    @Test fun indexAcknowledgementAloneAndDuplicateCandidatesNeverGrantCommit() = fixture {
+        assertIs<AppSyncV3SegmentPublishResult.ReadyToCommitIndex>(publish())
+        provider.skipStoreAt = provider.posts.size + 1
+        assertIs<AppSyncSegmentIndexCommitResult.Retryable>(commit())
+        assertEquals(false, recovery.session(session.sessionId)?.indexCommitted)
+        val intent = assertNotNull(recovery.nativeIndexIntent(session.sessionId))
+        val indexRequest = provider.posts.last()
+        provider.artifacts[800] = indexRequest
+        provider.artifacts[801] = indexRequest
+        val count = provider.posts.size
+        assertIs<AppSyncSegmentIndexCommitResult.Conflict>(commit())
+        assertEquals(count, provider.posts.size)
+        assertEquals(intent, recovery.nativeIndexIntent(session.sessionId))
+        assertEquals(false, recovery.session(session.sessionId)?.indexCommitted)
+        provider.artifacts.remove(801)
+        provider.authOnRead = true
+        assertIs<AppSyncSegmentIndexCommitResult.FormExpired>(commit())
+        assertEquals(count, provider.posts.size)
+        provider.authOnRead = false
+        assertIs<AppSyncSegmentIndexCommitResult.Verified>(commit())
+        assertEquals(count, provider.posts.size)
     }
 
     @Test fun discoveryRejectsDuplicateMatchesAndUnreadableCandidates() = fixture {
@@ -226,6 +332,7 @@ class AppSyncV3SegmentPublisherTest {
         val artifacts = linkedMapOf<Int, AppSyncBlogWriteRequest>()
         var timeoutAt: Int? = null
         var storeTimedOut = false
+        var skipStoreAt: Int? = null
         var authOnRead = false
         var wrongRead = false
         var reads = 0
@@ -235,6 +342,8 @@ class AppSyncV3SegmentPublisherTest {
         var repeatPage = false
         var missingRead = false
         var wrongClass = false
+        var failIndexRead = false
+        var onList: (Int) -> Unit = {}
         fun discover(title: String, sha: String): AppSyncV3ArtifactDiscovery {
             val ids = artifacts.filterValues { it.title == title && it.message.encodeUtf8().sha256().hex() == sha }.keys
             return when (ids.size) {
@@ -245,6 +354,7 @@ class AppSyncV3SegmentPublisherTest {
         }
         override suspend fun fetchMyBlogs(blogClassId: BlogClassId?, page: Int): AppSyncCloudResult<UserSpaceBlogPage> {
             listReads++
+            onList(listReads)
             if (page == listFailureAt) return AppSyncCloudResult.Timeout("list interrupted")
             val total = maxOf(1, (artifacts.size + pageSize - 1) / pageSize)
             val rows = artifacts.entries.drop((if (repeatPage) 0 else page - 1) * pageSize).take(pageSize)
@@ -257,8 +367,8 @@ class AppSyncV3SegmentPublisherTest {
         }
         override suspend fun submitBlog(request: AppSyncBlogWriteRequest): AppSyncCloudResult<AppSyncPostAcknowledgement> {
             posts += request
-            val id = 100 + posts.size
-            if (posts.size != timeoutAt || storeTimedOut) artifacts[id] = request
+            val id = request.blogId?.value ?: (100 + posts.size)
+            if (posts.size != skipStoreAt && (posts.size != timeoutAt || storeTimedOut)) artifacts[id] = request
             return if (posts.size == timeoutAt) AppSyncCloudResult.Timeout("lost response")
                 else AppSyncCloudResult.VerifiedSuccess(AppSyncPostAcknowledgement(null, listOf(BlogId(id))))
         }
@@ -267,6 +377,7 @@ class AppSyncV3SegmentPublisherTest {
             if (authOnRead) return AppSyncCloudResult.NotLoggedIn
             if (missingRead) return AppSyncCloudResult.NotFound
             val artifact = artifacts[blogId.value] ?: return AppSyncCloudResult.NotFound
+            if (failIndexRead && artifact.title == APP_SYNC_INDEX_TITLE) return AppSyncCloudResult.Timeout("index read interrupted")
             return AppSyncCloudResult.VerifiedSuccess(BlogPage(BlogInfo(blogId, artifact.title),
                 BlogComment(author = User(UserId(1), "test", null), contentHtml = if (wrongRead) "wrong" else artifact.message.replace("\n", "<br>"),
                     timeInfo = TimeInfo("test", epoch = 1)), emptyList()))

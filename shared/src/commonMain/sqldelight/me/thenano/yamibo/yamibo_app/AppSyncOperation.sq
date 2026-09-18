@@ -493,6 +493,11 @@ UPDATE AppSyncRecoveryPayload
 SET verifiedIndexBlogId = ?, verifiedIndexFingerprint = ?, indexVerifiedAtEpochMillis = ?
 WHERE sessionId = ? AND transportVersion = 3;
 
+pinNativeRecoveryIndexIntent:
+UPDATE AppSyncRecoveryPayload
+SET indexIntentBody = ?, indexIntentSha256 = ?, indexTargetBlogId = ?, indexBaseSha256 = ?
+WHERE sessionId = ? AND transportVersion = 3 AND indexIntentBody IS NULL;
+
 deleteRecoveryPayload:
 DELETE FROM AppSyncRecoveryPayload WHERE sessionId = ?;
 
