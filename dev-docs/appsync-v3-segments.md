@@ -32,7 +32,7 @@ Migration 48 為 frozen recovery payload 增加 transportVersion 與 native root
 
 Index 的讀寫 codec 已共用參照衝突檢查：同一 journal replica、checkpoint identity 或 retirement replica 對應不同內容，以及同一類型的實體 Blog ID 對應不同身分，均拒絕；journal 與 checkpoint 不能共用一個 Blog ID。完全相同的重複項目仍相容，編碼時折疊；journal 的舊版 null fingerprint 仍保留。空身分、非正整數 ID 與空白 fingerprint 不可成為新 index 證據。這避免原先 distinctBy 在發布時靜默選第一筆衝突參照，也拒絕外層 checksum 正確的衝突輸入。此驗證不等於 durable index 提交已完成。
 
-Migration 49 在 recovery payload 保存 verifiedIndexBlogId、verifiedIndexFingerprint、indexVerifiedAtEpochMillis，既有列均為 null，不臆造成功證據。舊 `markIndexCommitted` 拒絕 transport 3；專用 `markNativeIndexCommitted` 重新驗證凍結封套、帳號、root intent／已確認 root 與 index 內的 canonical 摘要。journal 另核對 session writer／replica，checkpoint 核對 identity。index 證據與 ActivatingLocal 階段在同一 SQLite 交易寫入；相同回讀證據重試不改寫第一次時間，不同 index 不能覆蓋既有成功證據。此 API 假設呼叫端已 GET 並核對 index 實體 ID／標題，尚須由 native committer 接線；不會確認 outbox、建立可清理 coverage 或進行刪除。
+Migration 49 在 recovery payload 保存 verifiedIndexBlogId、verifiedIndexFingerprint、indexVerifiedAtEpochMillis，既有列均為 null，不臆造成功證據。舊 `markIndexCommitted` 拒絕 transport 3；專用 `markNativeIndexCommitted` 重新驗證凍結封套、帳號、root intent／已確認 root 與 index 內的 canonical 摘要。journal 另核對 session writer／replica，checkpoint 核對 identity。index 證據與 ActivatingLocal 階段在同一 SQLite 交易寫入；相同回讀證據重試不改寫第一次時間，不同 index 不能覆蓋既有成功證據。此 API 假設呼叫端已 GET 並核對 index 實體 ID／標題，由下述 native committer 提供；不會確認 outbox、建立可清理 coverage 或進行刪除。
 
 舊版 `AppSyncSegmentIndexCommitter` 在任何 discovery／POST 前拒絕 native transport，避免先寫入舊摘要才於本機提交時失敗。SQLite／fake-provider 測試涵蓋 journal 與 checkpoint 的 canonical 參照、帳號／identity／root 不符、封套摘要誤用、外層交易回滾、重建 store 後重試、第一次時間保留、不同 index 拒絕、舊入口無遠端寫入，以及 pending／coverage 不變。
 
@@ -40,12 +40,16 @@ Migration 50 凍結 native index 的完整 body／SHA-256、更新目標 ID 與�
 
 建立意圖時保留其他 journal、checkpoint 與 retirement 參照，只更新本次 identity。更新前再次完整掃描：遠端等於預期內容就直接確認；遠端仍等於原基礎才允許 POST；其他版本回報衝突。提交後不信任 acknowledgement／candidate ID，一律重新掃描並 GET 核對實體 ID、標題、帳號與完整正規化內容；逾時亦走相同確認。單次呼叫不重複 POST。成功只推進 ActivatingLocal，仍不確認來源或清理。
 
-Provider 不支援 compare-and-swap，因此更新前檢查與 POST 間仍有跨裝置競爭窗口；此元件尚未接入正式服務，也未宣告並行 writer／worker／清理驗收完成。呼叫端仍須完成 writer/cohort 驗證、durable retry 排程及後續本機 activation。缺少固定傳輸設定與完整裝置驗收，v3 rollout 保持關閉。
+Provider 不支援 compare-and-swap，因此更新前檢查與 POST 間仍有跨裝置競爭窗口；此元件尚未接入正式服務，也未宣告並行 writer／worker／清理驗收完成。呼叫端仍須完成 writer/cohort 驗證、durable retry 排程及後續本機 activation 協調。缺少固定傳輸設定與完整裝置驗收，v3 rollout 保持關閉。
 
 五項新增 SQLite／fake-provider 測試涵蓋 root 後建立 index、pending 保留、遺失回應後重建 committer 且不重送、保留其他參照、前置版本變動、預設及提交前 gate、完整掃描中斷、虛假成功回應、重複候選與登入中斷。Migration 測試確認新欄位預設為 null；既有 store 提交測試改為先保存 immutable intent。
 
 Native journal 的本機 activation 現在由 `activateCommittedSession` 分流，不能沿用舊版僅根據 source IDs 確認的路徑。交易內重驗 index intent／已保存證據、凍結 journal、安裝帳號／device／epoch／writer／Active 狀態。每筆 session 來源須存在、屬於可確認生命週期，且經 canonical importer 後操作與共享刪除 proof 均完整存在於已發布 journal；Excluded／NoOp／無法轉接或缺少操作時拒絕全部 activation。
 
-通過後只確認該 session 的來源，保存 canonical fingerprint 的 root 連結，更新 heartbeat 並進入 Completed；sequence counter 與後來新增的 pending 操作保持原值。全部 SQL 在同一交易，外層回滾會一起回復；Completed 重試不再改寫時間或提交遠端。不建立 checkpoint coverage，也不刪除來源。Native checkpoint 暫時拒絕 generic activation，仍需接上 canonical projection／pending overlay 的專用流程，不能只標記完成。
+通過後只確認該 session 的來源，保存 canonical fingerprint 的 root 連結，更新 heartbeat 並進入 Completed；sequence counter 與後來新增的 pending 操作保持原值。全部 SQL 在同一交易，外層回滾會一起回復；Completed 重試不再改寫時間或提交遠端。不建立 checkpoint coverage，也不刪除來源。Native checkpoint 拒絕 generic activation，改由下述 canonical projection／pending overlay 專用流程處理，不能只標記完成。
 
 來源驗證依 session source ID 使用 outbox 主鍵逐筆查詢，不載入或解碼整個 outbox。這避免 activation 記憶體隨無關歷史資料增加，也避免無關損壞資料阻擋本次已驗證發布。整合測試在 index 提交後新增 pending 列並暫時損壞其 JSON，確認 activation 不讀取、不確認、不改寫該列；本次來源仍通過完整 canonical 比對。
+
+Native checkpoint 已提供專用 `AppSyncCanonicalCheckpointActivator.activateRecovery`。它從持久化 index intent／回讀證據與凍結 checkpoint 重建驗證物件，核對帳號及目前 writer，並在 projection 交易內再次核對 recovery 證據。既有 canonical activator 合併最新 outbox overlay、還原 projection、保存原遠端 coverage；不把 overlay 的 coverage 冒充為遠端已提交內容，也不確認 outbox。
+
+設定仍在 SQLite 交易外還原。設定還原失敗時，projection 保留且 session 維持 ActivatingLocal；重試重新合併最新編輯。只有 canonical head 的設定待處理旗標清除，且 adopted checkpoint 的 ID／Blog ID／摘要與驗證物件一致，才在交易內保存 root 連結並進入 Completed。完成重試不重套舊 projection 或設定。通用舊 activation 入口仍拒絕 native checkpoint，正式 service／worker 協調尚待接線。

@@ -25,6 +25,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncIndexValida
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3DocumentCodec
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3DocumentRead
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3PayloadKind
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncVerifiedCanonicalCheckpoint
 import okio.ByteString.Companion.encodeUtf8
 
 internal data class NativeRecoveryIndexIntent(val body: String, val targetBlogId: Long?, val baseSha256: String?)
@@ -695,6 +696,35 @@ internal class SqlDelightAppSyncRecoveryStore(
             AppSyncRecoveryMode.SegmentedCheckpoint ->
                 activateCommittedSegmentedCheckpoint(sessionId, activatedAtEpochMillis)
         }
+    }
+
+    fun nativeCheckpointForActivation(sessionId: String): AppSyncVerifiedCanonicalCheckpoint = db.transactionWithResult {
+        val session = requireSession(sessionId)
+        require(session.mode == AppSyncRecoveryMode.SegmentedCheckpoint && session.indexCommitted &&
+            session.phase == AppSyncRecoveryPhase.ActivatingLocal)
+        val installation = requireNotNull(SqlDelightAppSyncOperationStore(db, json).installation())
+        require(installation.accountBinding == session.accountBinding && installation.deviceId == session.sourceDeviceId &&
+            installation.deviceEpoch == session.sourceDeviceEpoch && installation.writerNonce == session.targetWriterNonce &&
+            installation.state == AppSyncInstallationState.Active)
+        val payload = requireNotNull(queries.getRecoveryPayload(sessionId).executeAsOneOrNull())
+        val intent = requireNotNull(nativeIndexIntent(sessionId))
+        markNativeIndexCommitted(sessionId, requireNotNull(payload.verifiedIndexBlogId), intent.body,
+            requireNotNull(payload.indexVerifiedAtEpochMillis))
+        requireNotNull(AppSyncVerifiedCanonicalCheckpoint.verify(session.accountBinding.value, requireNotNull(session.rootBlogId),
+            intent.body, payload.canonicalEnvelope))
+    }
+
+    fun completeNativeCheckpointActivation(sessionId: String, completedAtEpochMillis: Long) = db.transaction {
+        val verified = nativeCheckpointForActivation(sessionId)
+        val head = requireNotNull(db.appSyncCanonicalStateQueries.getState().executeAsOneOrNull())
+        require(head.accountBinding == verified.document.accountBinding && head.settingsReconciliationPending == 0L)
+        val adopted = requireNotNull(queries.getCheckpoint(verified.document.checkpointId).executeAsOneOrNull())
+        require(adopted.blogId == verified.blogId && adopted.payloadFingerprint == verified.fingerprint && adopted.state == "VERIFIED")
+        require(completedAtEpochMillis >= 0)
+        queries.upsertRemoteBlog("checkpoint-root:${requireSession(sessionId).generationId}",
+            AppSyncRemoteBlogKind.CheckpointRoot.name.uppercase(), verified.blogId, null, verified.fingerprint,
+            completedAtEpochMillis, completedAtEpochMillis)
+        transition(sessionId, AppSyncRecoveryPhase.ActivatingLocal, AppSyncRecoveryPhase.Completed, completedAtEpochMillis)
     }
 
     private fun activateNativeJournal(sessionId: String, activatedAtEpochMillis: Long) = db.transaction {

@@ -8,6 +8,9 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncVerifiedCan
 import me.thenano.yamibo.yamibo_app.repository.appsync.schema.AppSyncCanonicalCheckpointCodec
 import me.thenano.yamibo.yamibo_app.repository.appsync.schema.AppSyncCanonicalOperationBlock
 import me.thenano.yamibo.yamibo_app.store.appsync.AppSyncOperationStore
+import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncRecoveryStore
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryMode
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase
 
 internal sealed interface AppSyncCanonicalActivationResult {
     data class Applied(val pendingOperationCount: Int, val excludedCount: Int, val noOpCount: Int,
@@ -27,14 +30,38 @@ internal class AppSyncCanonicalCheckpointActivator(
     private val nowMillis: () -> Long,
     private val merger: AppSyncCanonicalPendingMerge = AppSyncCanonicalPendingMerge(),
 ) {
+    /** Recovery remains ActivatingLocal until both the SQL projection and external settings
+     * are installed. Re-entry rebuilds the overlay from current pending edits after a crash.
+     */
+    fun activateRecovery(recovery: SqlDelightAppSyncRecoveryStore, sessionId: String): AppSyncCanonicalActivationResult = try {
+        val session = requireNotNull(recovery.session(sessionId))
+        require(session.mode == AppSyncRecoveryMode.SegmentedCheckpoint && recovery.usesNativeTransport(sessionId))
+        require(operations.installation()?.accountBinding == session.accountBinding)
+        if (session.phase == AppSyncRecoveryPhase.Completed && session.indexCommitted) {
+            AppSyncCanonicalActivationResult.Applied(operations.pendingOperations().count { it.accountBinding == session.accountBinding }, 0, 0, true)
+        } else {
+            val verified = recovery.nativeCheckpointForActivation(sessionId)
+            val result = activate(verified, beforeDatabaseActivation = {
+                val current = recovery.nativeCheckpointForActivation(sessionId)
+                require(current.blogId == verified.blogId && current.fingerprint == verified.fingerprint &&
+                    current.indexFingerprint == verified.indexFingerprint)
+            })
+            if (result is AppSyncCanonicalActivationResult.Applied && result.settingsReconciled)
+                recovery.completeNativeCheckpointActivation(sessionId, nowMillis())
+            result
+        }
+    } catch (_: Exception) { AppSyncCanonicalActivationResult.NeedsAttention("Native checkpoint activation could not complete") }
+
     fun activate(verified: AppSyncVerifiedCanonicalCheckpoint,
         remoteOperations: AppSyncCanonicalOperationBlock? = null,
-        legacyRemoteOperations: List<SyncOperation> = emptyList()): AppSyncCanonicalActivationResult {
+        legacyRemoteOperations: List<SyncOperation> = emptyList(),
+        beforeDatabaseActivation: () -> Unit = {}): AppSyncCanonicalActivationResult {
         var prepared: AppSyncCanonicalPendingMergeResult.Ready? = null
         var failed: AppSyncCanonicalActivationResult.NeedsAttention? = null
         var pendingCount = 0
         try {
             db.transaction {
+                beforeDatabaseActivation()
                 val checkpoint = verified.document
                 if (operations.installation()?.accountBinding?.value != checkpoint.accountBinding) {
                     failed = AppSyncCanonicalActivationResult.NeedsAttention("Canonical activation account mismatch")

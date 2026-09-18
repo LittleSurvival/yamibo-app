@@ -6,6 +6,7 @@ import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.*
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncOperationLifecycle
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncInstallationState
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.*
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.*
 import me.thenano.yamibo.yamibo_app.repository.appsync.schema.*
@@ -13,6 +14,57 @@ import me.thenano.yamibo.yamibo_app.store.appsync.*
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 
 class AppSyncCanonicalCheckpointActivatorTest {
+    @Test fun nativeRecoveryWaitsForPreferencesAndPreservesEditsAddedDuringRetry() = fixture {
+        val pending = append()
+        val (recovery, id) = stageNativeCheckpoint()
+        preferences.fail = true
+        val first = assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activateRecovery(recovery, id))
+        assertFalse(first.settingsReconciled)
+        assertEquals(AppSyncRecoveryPhase.ActivatingLocal, recovery.session(id)?.phase)
+        assertNotNull(state.read(account.value))
+        assertEquals(listOf(pending), store.pendingOperations())
+        val later = append("22")
+        assertIs<AppSyncCanonicalLocalUpdate.Recorded>(state.recordLocalBatch(account.value, listOf(later)))
+        preferences.fail = false
+        val restarted = SqlDelightAppSyncRecoveryStore(db)
+        assertTrue(assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activateRecovery(restarted, id)).settingsReconciled)
+        assertEquals(AppSyncRecoveryPhase.Completed, restarted.session(id)?.phase)
+        assertEquals(22, preferences.values["novelreadersettings.fontsize"])
+        assertEquals(listOf(pending, later), store.pendingOperations())
+        assertEquals(checkpoint.coverage, store.verifiedCheckpoints().single().coverage.asStableMap())
+        val head = db.appSyncCanonicalStateQueries.getState().executeAsOne()
+        preferences.values["novelreadersettings.fontsize"] = 26
+        assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activateRecovery(restarted, id))
+        assertEquals(26, preferences.values["novelreadersettings.fontsize"])
+        val replayed = db.appSyncCanonicalStateQueries.getState().executeAsOne()
+        assertEquals(head.checkpointId, replayed.checkpointId)
+        assertEquals(head.canonicalSha256, replayed.canonicalSha256)
+        assertContentEquals(head.canonicalPayload, replayed.canonicalPayload)
+    }
+
+    @Test fun nativeRecoveryRequiresCommittedIndexAndUnchangedInstallationBeforeProjection() = fixture {
+        append()
+        val (recovery, id) = stageNativeCheckpoint(committed = false)
+        assertIs<AppSyncCanonicalActivationResult.NeedsAttention>(activator().activateRecovery(recovery, id))
+        assertNull(state.read(account.value))
+        assertTrue(store.verifiedCheckpoints().isEmpty())
+        recovery.markNativeIndexCommitted(id, 400, assertNotNull(recovery.nativeIndexIntent(id)).body, 12)
+        assertFailsWith<IllegalArgumentException> { recovery.completeNativeCheckpointActivation(id, 20) }
+        store.rotateDeviceEpoch(account, AppSyncInstallationState.Active)
+        assertIs<AppSyncCanonicalActivationResult.NeedsAttention>(activator().activateRecovery(recovery, id))
+        assertNull(state.read(account.value))
+        assertEquals(AppSyncRecoveryPhase.ActivatingLocal, recovery.session(id)?.phase)
+    }
+
+    @Test fun activationGuardFailureCannotWriteProjectionOrCheckpointEvidence() = fixture {
+        val pending = append()
+        assertIs<AppSyncCanonicalActivationResult.NeedsAttention>(activator().activate(verified(), beforeDatabaseActivation = {
+            error("Recovery changed before transaction")
+        }))
+        assertNull(state.read(account.value))
+        assertTrue(store.verifiedCheckpoints().isEmpty())
+        assertEquals(listOf(pending), store.pendingOperations())
+    }
     @Test fun preferenceReconciliationRetainsReferencedDeletionProofs() = fixture {
         val delete = AppSyncCanonicalOperation("remote-device", "remote-epoch", 1, 1,
             "novelreadersettings.fontsize", 1, SyncOperationKind.Delete, 15,
@@ -173,6 +225,25 @@ class AppSyncCanonicalCheckpointActivatorTest {
         val preferences = Preferences()
         val materializer = DatabaseSyncDomainMaterializer(db, preferences)
         val state = SqlDelightCanonicalCheckpointState(db, materializer)
+        fun stageNativeCheckpoint(committed: Boolean = true): Pair<SqlDelightAppSyncRecoveryStore, String> {
+            val recovery = SqlDelightAppSyncRecoveryStore(db)
+            val session = recovery.createOrResumeSegmentedCheckpoint(account, checkpoint.checkpointId, "source", 1)
+            recovery.pinPayload(session.sessionId, "Checkpoint", checkpoint.checkpointId, 3) {
+                AppSyncV3DocumentCodec().encodeCheckpoint(checkpoint)
+            }
+            recovery.startSegmentedJournal(session.sessionId, 2)
+            recovery.saveSegmentIntent(session.sessionId, 0, 1, "segment", null)
+            recovery.markSegmentVerified(session.sessionId, 0, "segment", 200, 3)
+            recovery.transition(session.sessionId, AppSyncRecoveryPhase.PublishingSegments, AppSyncRecoveryPhase.PublishingRoot, 4)
+            recovery.pinNativeRootIntent(session.sessionId, "a".repeat(64))
+            recovery.markRootVerified(session.sessionId, 300, "a".repeat(64), 5)
+            val index = AppSyncIndexEnvelopeCodec().encode(AppSyncIndexPayload(account,
+                checkpoints = listOf(AppSyncIndexCheckpointReference(checkpoint.checkpointId, 300,
+                    AppSyncCanonicalCheckpointCodec().encode(checkpoint).sha256().hex())), updatedAtEpochMillis = 6))
+            recovery.pinNativeIndexIntent(session.sessionId, NativeRecoveryIndexIntent(index, null, null))
+            if (committed) recovery.markNativeIndexCommitted(session.sessionId, 400, index, 7)
+            return recovery to session.sessionId
+        }
         fun synchronize(cloud: AppSyncJournalLoadResult.Success): OperationSyncResult = kotlinx.coroutines.runBlocking {
             val remote = object : AppSyncJournalRemote {
                 override suspend fun loadJournals(accountBinding: SyncAccountBinding, forceDiscovery: Boolean) = cloud
