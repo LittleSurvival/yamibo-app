@@ -64,6 +64,36 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCanonicalJo
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCanonicalJournalPublishResult
 
 class YamiboAppSyncJournalRemoteTest {
+    @Test fun indexPublicationDoesNotAdvertisePhysicalEvidenceAliases() = runBlocking {
+        for (checkpointKind in listOf(AppSyncRemoteBlogKind.Checkpoint, AppSyncRemoteBlogKind.CheckpointRoot)) {
+            val journal = storedJournal(payload(), BlogId(42))
+            val journalEvidence = journal.copy(remoteKey = "candidate:43", blogId = BlogId(43))
+            val checkpoint = journal.copy(remoteKey = "checkpoint:real", kind = checkpointKind,
+                blogId = BlogId(70), fingerprint = "checkpoint-fingerprint")
+            val checkpointEvidence = checkpoint.copy(remoteKey = "checkpoint-candidate:71", blogId = BlogId(71))
+            val store = FakeRemoteStore(journal, journalEvidence, checkpoint, checkpointEvidence)
+            val requests = mutableListOf<AppSyncBlogWriteRequest>()
+            val provider = FakeProvider().apply {
+                pages[PageKey(null, 1)] = success(classPage())
+                blogs[journal.blogId] = success(journalPage(journal.blogId, payload()))
+                submitHandler = { request ->
+                    requests += request
+                    success(AppSyncPostAcknowledgement(null, listOf(request.blogId ?: BlogId(90))))
+                }
+            }
+            assertIs<AppSyncJournalPublishResult.Verified>(remote(provider, store)
+                .publishOwnJournal(payload(heartbeat = 200), null, FORM_HASH))
+            val index = assertIs<me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncIndexValidation.Valid>(
+                indexCodec.validate(requests.single { it.title == APP_SYNC_INDEX_TITLE }.message)).envelope.payload
+            assertEquals(listOf("device:epoch"), index.journals.map { it.replicaKey })
+            assertEquals(listOf(42), index.journals.map { it.blogId })
+            assertEquals(listOf("real"), index.checkpoints.map { it.checkpointId })
+            assertEquals(listOf(70), index.checkpoints.map { it.blogId })
+            assertEquals(journalEvidence, store.load(journalEvidence.remoteKey))
+            assertEquals(checkpointEvidence, store.load(checkpointEvidence.remoteKey))
+        }
+    }
+
     @Test fun indexedCanonicalCheckpointCarriesActivationEvidenceButUnindexedOneDoesNot() = runBlocking {
         val cp = AppSyncCanonicalCheckpoint("canonical", ACCOUNT.value, 1, emptyMap(), emptyList())
         val fingerprint = AppSyncCanonicalCheckpointCodec().encode(cp).sha256().hex()

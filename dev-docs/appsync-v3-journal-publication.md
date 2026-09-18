@@ -19,3 +19,5 @@ published-through 必須與 canonical 本機 coverage 的自身 replica 一致�
 發布器沒有改寫 index、outbox、ack lifecycle 或清理資料；不會把 root 標題當成可原地更新的 inline journal。超過 inline 預算回傳 StoragePressure，分段路徑待接線。Fake provider 回歸涵蓋 gate、模糊 acknowledgement、假成功、候選歧義、更新逾時回讀、相同 body 重試、摘要衝突與 gate 在 preflight 期間關閉。這不構成完整 durable publish／retry 或 cohort gate 驗收。
 
 回讀過程的 NotLoggedIn／FormExpired 會直接回報 FormExpired，包括 preflight 與 submit 後 reader；不將明確的登入失效混入一般未知重試。重放準備時也改用已建立的 sequence map 查找既有序號，避免每個重放來源再掃描完整 journal。
+
+既有 best-effort index 發布路徑現在排除 `candidate:` journal 與 `checkpoint-candidate:` checkpoint 實體快取別名。這些列仍保留供 discovery／衝突判定使用，不能作為 replica key 或 checkpoint ID 發布。回歸測試同時涵蓋一般 checkpoint 與 checkpoint root，並確認發布後實體證據仍在本機。

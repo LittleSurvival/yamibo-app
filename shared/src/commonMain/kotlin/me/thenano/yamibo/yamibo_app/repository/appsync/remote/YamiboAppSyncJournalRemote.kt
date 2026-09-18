@@ -1858,8 +1858,11 @@ internal class YamiboAppSyncJournalRemote(
         classSelection: AppSyncBlogClassSelection,
         formHash: FormHash,
     ) {
-        val journals = store.loadKind(AppSyncRemoteBlogKind.Journal) +
-            store.loadKind(AppSyncRemoteBlogKind.JournalRoot)
+        // Physical discovery aliases preserve conflicting documents for reconciliation;
+        // they are not replica identities that may be advertised in the index.
+        val journals = (store.loadKind(AppSyncRemoteBlogKind.Journal) +
+            store.loadKind(AppSyncRemoteBlogKind.JournalRoot))
+            .filterNot { it.remoteKey.startsWith("candidate:") }
         if (journals.isEmpty()) return
         val existing = store.load(INDEX_REMOTE_KEY)
         val existingPayload = existing?.let { stored ->
@@ -1886,6 +1889,7 @@ internal class YamiboAppSyncJournalRemote(
                 store.loadKind(AppSyncRemoteBlogKind.Checkpoint) +
                     store.loadKind(AppSyncRemoteBlogKind.CheckpointRoot)
                 ).mapNotNull {
+                if (!it.remoteKey.startsWith(CHECKPOINT_REMOTE_KEY_PREFIX)) return@mapNotNull null
                 val checkpointId = checkpointId(it.remoteKey)
                 val fingerprint = it.fingerprint ?: return@mapNotNull null
                 AppSyncIndexCheckpointReference(
