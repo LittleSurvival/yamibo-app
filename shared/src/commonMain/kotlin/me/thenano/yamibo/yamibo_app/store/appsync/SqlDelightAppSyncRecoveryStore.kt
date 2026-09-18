@@ -571,7 +571,7 @@ internal class SqlDelightAppSyncRecoveryStore(
         val receipt = db.appSyncNativeCompletionQueries.getForSession(sessionId).executeAsOneOrNull() ?: return false
         val session = requireSession(sessionId)
         require(session.phase == AppSyncRecoveryPhase.Completed && session.indexCommitted &&
-            session.mode == AppSyncRecoveryMode.SegmentedCheckpoint &&
+            session.mode in setOf(AppSyncRecoveryMode.SegmentedCheckpoint, AppSyncRecoveryMode.SegmentedJournal) &&
             receipt.accountBinding == session.accountBinding.value && receipt.generationId == session.generationId &&
             receipt.rootBlogId == session.rootBlogId && receipt.rootFingerprint == session.rootFingerprint &&
             receipt.completedAtEpochMillis == session.completedAtEpochMillis)
@@ -595,6 +595,57 @@ internal class SqlDelightAppSyncRecoveryStore(
             db.appSyncLocalPruneQueries.getCandidates(session.accountBinding.value, replica, sequence, 1).executeAsList().isNotEmpty()
         }) { "Covered payload cleanup is incomplete" }
         require(shadowOperations(sessionId).isEmpty()) { "Native checkpoint cannot discard unverified shadow operations" }
+        val bytes = discardNativePayload(session, verified, now)
+        transition(sessionId, AppSyncRecoveryPhase.Cleaning, AppSyncRecoveryPhase.Completed, now,
+            retryCount = 0, retryIdentity = null)
+        bytes
+    }
+
+    /** A completed journal is reclaimable only after a later indexed checkpoint covers its
+     * whole history, including observed dependencies. This never deletes pending source rows.
+     */
+    fun pruneCompletedNativeJournal(verified: AppSyncVerifiedCanonicalCheckpoint): Long = db.transactionWithResult {
+        val session = recoverySession(SyncAccountBinding(verified.document.accountBinding)) ?: return@transactionWithResult 0L
+        if (session.phase != AppSyncRecoveryPhase.Completed || session.mode != AppSyncRecoveryMode.SegmentedJournal ||
+            !usesNativeTransport(session.sessionId) || hasNativeCompletionReceipt(session.sessionId)) return@transactionWithResult 0L
+        val checkpoint = verified.document
+        require(me.thenano.yamibo.yamibo_app.repository.appsync.schema.AppSyncCanonicalCheckpointCodec()
+            .encode(checkpoint).sha256().hex() == verified.fingerprint)
+        require(queries.getInstallation().executeAsOneOrNull()?.accountBinding == checkpoint.accountBinding)
+        val saved = requireNotNull(queries.getCheckpoint(checkpoint.checkpointId).executeAsOneOrNull())
+        require(saved.state == "VERIFIED" && saved.blogId == verified.blogId && saved.payloadFingerprint == verified.fingerprint)
+        val head = requireNotNull(db.appSyncCanonicalStateQueries.getState().executeAsOneOrNull())
+        require(head.accountBinding == checkpoint.accountBinding && head.settingsReconciliationPending == 0L)
+        val bytes = head.canonicalPayload.toByteString()
+        require(bytes.sha256().hex() == head.canonicalSha256)
+        val local = me.thenano.yamibo.yamibo_app.repository.appsync.schema.AppSyncCanonicalCheckpointCodec()
+            .decode(head.accountBinding, head.checkpointId, bytes)
+        require(checkpoint.coverage.all { (replica, sequence) -> (local.coverage[replica] ?: 0L) >= sequence })
+        val payload = queries.getRecoveryPayload(session.sessionId).executeAsOne()
+        val intent = requireNotNull(nativeIndexIntent(session.sessionId))
+        markNativeIndexCommitted(session.sessionId, requireNotNull(payload.verifiedIndexBlogId), intent.body,
+            requireNotNull(payload.indexVerifiedAtEpochMillis))
+        val journal = (AppSyncV3DocumentCodec().discover(payload.canonicalEnvelope, checkpoint.accountBinding,
+            AppSyncV3PayloadKind.Journal) as AppSyncV3DocumentRead.Journal).document
+        val own = "${journal.deviceId}:${journal.deviceEpoch}"
+        val required = journal.observed.toMutableMap()
+        required[own] = maxOf(required[own] ?: 0L, journal.lastSequence, journal.publishedThroughSequence ?: 0L)
+        for (coverage in journal.acknowledgements.map { it.coverage } + journal.block.operations.map { it.causalContext }) {
+            coverage.forEach { (replica, sequence) -> required[replica] = maxOf(required[replica] ?: 0L, sequence) }
+        }
+        if (required.any { (replica, sequence) -> (checkpoint.coverage[replica] ?: 0L) < sequence }) return@transactionWithResult 0L
+        val operations = SqlDelightAppSyncOperationStore(db, json)
+        require(session.sourceOperationIds.all { id -> operations.outboxOperation(id)?.second.let {
+            it == null || it in setOf(AppSyncOperationLifecycle.Acknowledged, AppSyncOperationLifecycle.Compacted,
+                AppSyncOperationLifecycle.SupersededByRecovery)
+        } })
+        require(shadowOperations(session.sessionId).isEmpty())
+        discardNativePayload(session, verified, requireNotNull(session.completedAtEpochMillis))
+    }
+
+    private fun discardNativePayload(session: AppSyncRecoverySession, verified: AppSyncVerifiedCanonicalCheckpoint,
+        completedAt: Long): Long {
+        val sessionId = session.sessionId
         val payload = queries.getRecoveryPayload(sessionId).executeAsOne()
         val receipts = db.appSyncNativeCompletionQueries
         val bytes = receipts.getPayloadBytes(sessionId).executeAsOne()
@@ -602,14 +653,12 @@ internal class SqlDelightAppSyncRecoveryStore(
         receipts.insertReceipt(sessionId, session.accountBinding.value, session.generationId,
             verified.document.checkpointId, verified.fingerprint, requireNotNull(session.rootBlogId),
             requireNotNull(session.rootFingerprint), requireNotNull(payload.verifiedIndexBlogId),
-            requireNotNull(payload.verifiedIndexFingerprint), bytes, segments, now)
+            requireNotNull(payload.verifiedIndexFingerprint), bytes, segments, completedAt)
         queries.deleteRecoverySegmentWrites(sessionId)
         queries.deleteRecoveryShadowOperations(sessionId)
         queries.deleteRecoveryPayload(sessionId)
         receipts.deleteWork(sessionId)
-        transition(sessionId, AppSyncRecoveryPhase.Cleaning, AppSyncRecoveryPhase.Completed, now,
-            retryCount = 0, retryIdentity = null)
-        bytes
+        return bytes
     }
 
     /** Bounded metadata maintenance. Only receipts whose native payload was already purged qualify. */
@@ -680,7 +729,8 @@ internal class SqlDelightAppSyncRecoveryStore(
         verifiedAtEpochMillis: Long) = db.transaction {
         val session = requireSession(sessionId)
         require(session.phase == AppSyncRecoveryPhase.CommittingIndex ||
-            (session.phase in setOf(AppSyncRecoveryPhase.ActivatingLocal, AppSyncRecoveryPhase.Cleaning) && session.indexCommitted))
+            (session.phase in setOf(AppSyncRecoveryPhase.ActivatingLocal, AppSyncRecoveryPhase.Cleaning,
+                AppSyncRecoveryPhase.Completed) && session.indexCommitted))
         require(indexBlogId in 1..Int.MAX_VALUE.toLong() && verifiedAtEpochMillis >= 0)
         val payload = requireNotNull(queries.getRecoveryPayload(sessionId).executeAsOneOrNull())
         require(payload.transportVersion == 3L && payload.rootIntentFingerprint != null &&

@@ -8,7 +8,7 @@
 
 Migration 53（schema version 54）新增裝置端 `AppSyncLocalPruneAudit`，只保存 account binding、checkpoint fingerprint、累計列數／payload bytes 及建立／更新時間，不保存 entity ID、operation ID 或 payload。此 domain 排除於 AppSync 與可攜備份。下一次符合證據要求的清理會移除已建立 30 天的 audit；持續追加計數不延長舊 audit 的保存期限。同步入口現在也會清除已到期 audit；未執行同步時的獨立到期排程仍待接線。
 
-Native checkpoint 的 recovery payload 與 segment intents 現依下述完成收據流程移除；legacy／journal 的相關主體與 applied receipts 仍保留，不執行 SQLite VACUUM，也不刪除雲端文件。Native checkpoint 的批次接續如下；journal recovery、一般 reader 清理的全部批次排程、UI 累計統計、30 天到期維護及實體頁面回收仍待完成。不能將這個有上限的邏輯主體清理，視為完整 storage-reclamation 規格或整體 recovery 已完成。
+Native checkpoint 與已有後續 checkpoint 完整覆蓋的 native journal，現依下述完成收據流程移除凍結 payload 與 segment intents；legacy 的相關主體與 applied receipts 仍保留，不執行 SQLite VACUUM，也不刪除雲端文件。一般 reader 清理的全部批次排程、UI 累計統計、獨立到期維護及實體頁面回收仍待完成。不能將這個有上限的邏輯主體清理，視為完整 storage-reclamation 規格或整體 recovery 已完成。
 
 測試涵蓋合成大型 cache 主體在 canonical rebuild 後刪除、仍 pending 的後續編輯保留、checkpoint／設定證據不足、active recovery 保護、每批上限、交易回滾與重新執行、損壞的 canonical head、錯誤 checkpoint、audit 到期與 migration 初始狀態。
 
@@ -33,6 +33,14 @@ Migration 54（schema version 55）新增 `AppSyncNativeCompletion`。最後一�
 
 已清理的 native session 透過收據辨識 transport 3，重播直接保留完成結果；`pinPayload` 拒絕重建已丟棄主體。一般同步入口執行到期維護，每次最多移除 128 筆已完成且主體早已清掉的 30 天收據及 session，並清除到期的本機清理統計。新 recovery 取代舊 completed session 時也一併移除收據。維護不刪除當前 canonical head、普通本機資料、pending 操作或雲端文件。
 
-尚未執行同步的裝置不會準時觸發到期維護；獨立排程與 legacy／journal 主體的相同生命週期仍待完成。這些剩餘事項不因 native checkpoint 收據流程通過測試而視為已驗收。
+尚未執行同步的裝置不會準時觸發到期維護；獨立排程與 legacy 主體的相同生命週期仍待完成。這些剩餘事項不因 native checkpoint 收據流程通過測試而視為已驗收。
 
 2026-09-19：完成主體移除、完成重播、交易回滾、到期邊界與 migration 回歸通過；758 項 shared 與 15 項 CloudSyncUiState 全數通過，零失敗、錯誤或略過。
+
+## 完整 checkpoint 覆蓋後清理 native journal 凍結副本
+
+一般 canonical 清理會檢查帳號目前的 completed native journal session。成功發布本身不授權此清理；後續 index-verified checkpoint 必須涵蓋 journal 的完整 published-through、observed、acknowledgement coverage 與操作因果相依。只覆蓋自身 writer、尚未覆蓋其他 replica 相依時仍保留凍結副本。
+
+刪除前重驗 checkpoint 身分與保存狀態、canonical head／設定，以及原 journal 的凍結封套、root 與 index intent/readback 證據。來源若仍為 pending、存在 shadow operation 或證據不一致，拒絕清理。原 index 的重驗在 Completed 階段只比對已保存證據，不重新發布或倒退階段。
+
+移除封套、index body、segment intents 與 work ledger，連同完成收據寫入與同批 covered-outbox 刪除都在同一 SQL 交易內。收據沿用原 session 完成時間，checkpoint 欄位記錄授權清理的替代 checkpoint，root/index 欄位記錄原 journal 的已驗證發布；無須新增 schema。已清理 session 可重播辨識 transport 3，收據和 session 於既有 30 天到期流程移除。移除位元組包含凍結封套與 index body，仍屬邏輯量測，不代表實體資料庫縮小。

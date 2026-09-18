@@ -15,6 +15,97 @@ import me.thenano.yamibo.yamibo_app.store.appsync.*
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 
 class AppSyncCanonicalCheckpointActivatorTest {
+    @Test fun corruptCompletedJournalIndexEvidenceRollsBackAllPayloadDeletion() = fixture {
+        val first = append()
+        val (recovery, id) = stageNativeJournal(first)
+        val cloud = AppSyncCanonicalCloudPlan.Ready(verified(), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
+        assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activateJournalRecovery(recovery, id, cloud))
+        val frozen = db.appSyncOperationQueries.getRecoveryPayload(id).executeAsOne()
+        val cp = assertIs<AppSyncCanonicalPendingMergeResult.Ready>(AppSyncCanonicalPendingMerge()
+            .prepare(checkpoint, listOf(first), "covered", 10)).checkpoint
+        db.appSyncOperationQueries.markNativeRecoveryIndexVerified(requireNotNull(frozen.verifiedIndexBlogId), "corrupt",
+            requireNotNull(frozen.indexVerifiedAtEpochMillis), id)
+        assertIs<AppSyncCanonicalActivationResult.NeedsAttention>(activator().activate(verified(cp)))
+        assertNotNull(db.appSyncOperationQueries.getRecoveryPayload(id).executeAsOneOrNull())
+        assertNotNull(store.outboxOperation(first.operationId.value))
+        assertNull(db.appSyncNativeCompletionQueries.getForSession(id).executeAsOneOrNull())
+        db.appSyncOperationQueries.markNativeRecoveryIndexVerified(requireNotNull(frozen.verifiedIndexBlogId),
+            requireNotNull(frozen.verifiedIndexFingerprint), requireNotNull(frozen.indexVerifiedAtEpochMillis), id)
+        assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(verified(cp)))
+        assertNull(db.appSyncOperationQueries.getRecoveryPayload(id).executeAsOneOrNull())
+    }
+
+    @Test fun completedJournalPayloadWaitsForCheckpointCoverageThenExpiresItsReceipt() = fixture {
+        val first = append()
+        val (recovery, id) = stageNativeJournal(first)
+        val baseCloud = AppSyncCanonicalCloudPlan.Ready(verified(), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
+        assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activateJournalRecovery(recovery, id, baseCloud))
+        val frozenBytes = db.appSyncNativeCompletionQueries.getPayloadBytes(id).executeAsOne()
+        assertTrue(frozenBytes > 0)
+        assertEquals(0L, recovery.pruneCompletedNativeJournal(verified()))
+        assertNotNull(db.appSyncOperationQueries.getRecoveryPayload(id).executeAsOneOrNull())
+        val covered = assertIs<AppSyncCanonicalPendingMergeResult.Ready>(AppSyncCanonicalPendingMerge()
+            .prepare(checkpoint, listOf(first), "covered-journal", 10)).checkpoint
+        val later = append("22")
+        val applied = assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(verified(covered)))
+        assertEquals(1, applied.removedLocalRows)
+        assertTrue(applied.removedLocalPayloadBytes > frozenBytes)
+        assertNull(db.appSyncOperationQueries.getRecoveryPayload(id).executeAsOneOrNull())
+        assertTrue(recovery.segmentWrites(id).isEmpty())
+        val receipt = db.appSyncNativeCompletionQueries.getForSession(id).executeAsOne()
+        assertEquals(covered.checkpointId, receipt.checkpointId)
+        assertEquals(frozenBytes, receipt.payloadBytesRemoved)
+        assertTrue(SqlDelightAppSyncRecoveryStore(db).usesNativeTransport(id))
+        assertEquals(0L, recovery.pruneCompletedNativeJournal(verified(covered)))
+        assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activateJournalRecovery(recovery, id, baseCloud))
+        assertEquals(listOf(later), store.pendingOperations())
+        recovery.expireCompletedRecoveryMetadata(now + 30L * 24 * 60 * 60 * 1000)
+        assertNull(recovery.session(id))
+        assertEquals(listOf(later), store.pendingOperations())
+    }
+
+    @Test fun journalReclamationRequiresCoverageOfObservedRemoteDependencies() = fixture {
+        val first = append()
+        val remoteDevice = SyncDeviceId("remote-device")
+        val remote = first.copy(deviceId = remoteDevice, operationId = SyncOperation.idFor(remoteDevice, first.deviceEpoch, first.sequence))
+        val imported = assertIs<AppSyncCanonicalOperationImport.Accepted>(AppSyncCanonicalOperationImporter().import(account.value, remote))
+        val block = AppSyncCanonicalOperationBlock(account.value, listOf(imported.operation))
+        val (recovery, id) = stageNativeJournal(first, mapOf(remote.replicaKey.stableKey to 1L))
+        val cloud = AppSyncCanonicalCloudPlan.Ready(verified(), block, emptyList())
+        assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activateJournalRecovery(recovery, id, cloud))
+        val ownOnly = assertIs<AppSyncCanonicalPendingMergeResult.Ready>(AppSyncCanonicalPendingMerge()
+            .prepare(checkpoint, listOf(first), "own-only", 10)).checkpoint
+        assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(verified(ownOnly), block))
+        assertNotNull(db.appSyncOperationQueries.getRecoveryPayload(id).executeAsOneOrNull())
+        assertNull(db.appSyncNativeCompletionQueries.getForSession(id).executeAsOneOrNull())
+        val all = assertNotNull(state.read(account.value)).copy(checkpointId = "all-history")
+        assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(verified(all)))
+        assertNull(db.appSyncOperationQueries.getRecoveryPayload(id).executeAsOneOrNull())
+        assertNotNull(db.appSyncNativeCompletionQueries.getForSession(id).executeAsOneOrNull())
+    }
+
+    @Test fun journalPayloadReclamationRollsBackWithItsReceiptAndCoveredSourceDeletion() = fixture {
+        val first = append()
+        val (recovery, id) = stageNativeJournal(first)
+        val cloud = AppSyncCanonicalCloudPlan.Ready(verified(), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
+        activator().activateJournalRecovery(recovery, id, cloud)
+        val frozen = recovery.nativePayload(id)
+        val cp = assertIs<AppSyncCanonicalPendingMergeResult.Ready>(AppSyncCanonicalPendingMerge()
+            .prepare(checkpoint, listOf(first), "covered", 10)).checkpoint
+        assertFailsWith<IllegalStateException> {
+            db.transaction {
+                assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(verified(cp)))
+                assertNull(db.appSyncOperationQueries.getRecoveryPayload(id).executeAsOneOrNull())
+                error("interrupted cleanup")
+            }
+        }
+        assertEquals(frozen, recovery.nativePayload(id))
+        assertNotNull(store.outboxOperation(first.operationId.value))
+        assertNull(db.appSyncNativeCompletionQueries.getForSession(id).executeAsOneOrNull())
+        assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(verified(cp)))
+        assertTrue(recovery.usesNativeTransport(id))
+    }
+
     @Test fun nativeContinuationStartsPublishesAndActivatesWhilePreservingALaterEdit() = fixture {
         val first = append()
         val recovery = SqlDelightAppSyncRecoveryStore(db)

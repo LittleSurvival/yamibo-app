@@ -71,7 +71,9 @@ internal class AppSyncCanonicalLocalPruner(private val db: Database,
             val hasMore = verified.document.coverage.any { (replica, sequence) ->
                 queries.getCandidates(account, replica, sequence, 1).executeAsList().isNotEmpty()
             }
-            AppSyncLocalPruneResult(removed, bytes, hasMore)
+            val frozenBytes = if (cleaningSessionId == null)
+                SqlDelightAppSyncRecoveryStore(db).pruneCompletedNativeJournal(verified) else 0L
+            AppSyncLocalPruneResult(removed, bytes + frozenBytes, hasMore)
         }
 
     companion object { const val RETENTION_MILLIS = 30L * 24 * 60 * 60 * 1000 }
