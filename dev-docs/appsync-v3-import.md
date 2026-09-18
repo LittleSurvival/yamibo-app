@@ -39,4 +39,10 @@ materializer 的內部輸入將本機值與勝出操作 ID／時間分開；還�
 
 來源經既有 operation importer 與 canonical registry 正規化。未知 domain／setting 明確排除但仍核對其 account 與 coverage；derived/cache 欄位不進入 canonical field references。刪除維持 tombstone，關聯移除不攜帶舊欄位主體，刪除 proof 依身分合併並只保留仍被引用的證據。最後經 checkpoint codec 往返與共用 canonical reducer 的空輸入驗證，輸出確定性 canonical projection。
 
-限制為 100,000 個實體／不同來源、250,000 個 provenance references、64 MiB 來源欄位資料，另受既有 canonical codec 預算約束。此轉換器尚未宣告 legacy checkpoint 的遠端可信度，不比對 encoded snapshot，也不授權發布、ack 或清理；legacy index 綁定、snapshot 與 resolved state 一致性及正式 migration 接線仍須完成。既有 canonical cloud 的 activation／pending merge／外部設定重整已另行接入 service，不代表純 legacy migration 已驗收。
+限制為 100,000 個實體／不同來源、250,000 個 provenance references、64 MiB 來源欄位資料，另受既有 canonical codec 預算約束。此轉換器本身不宣告 legacy checkpoint 的遠端可信度，不比對 encoded snapshot，也不授權發布、ack 或清理；legacy index 綁定與 snapshot 一致性由下述驗證器處理，正式 migration 接線仍須完成。既有 canonical cloud 的 activation／pending merge／外部設定重整已另行接入 service，不代表純 legacy migration 已驗收。
+
+`AppSyncVerifiedLegacyCheckpoint` 現提供獨立的 legacy index 綁定：驗證 account、實體 Blog ID、唯一 checkpoint ID 與 legacy payload fingerprint。它保存原始不可變封套，每次讀取重新解析，避免呼叫端修改已解析集合後仍沿用舊 index 證據。此型別不等同 `AppSyncVerifiedCanonicalCheckpoint`，不能傳入 canonical 清理入口。
+
+`AppSyncLegacyCheckpointMigration` 從此 legacy 證據建立候選資料，先轉換 resolved field winners，再將 encoded snapshot 經既有 snapshot planner 與 canonical normalizer 轉換，雙向核對可攜 live entity 集合與欄位值。只容許 schema 明定 nullable 的缺值/null 等價，以及省略的顯示文字與空字串等價；其他不一致、重複實體、孤立 RSS 歷史及沒有對應 resolved 刪除來源的 tombstone 均回報 NeedsAttention。已刪除實體及移除關聯不要求出現在 live snapshot。
+
+輸出保留 legacy source/index fingerprint 供後續發布意圖綁定，但仍是未發布的 candidate；正式 migration 必須合併完整 cloud journal 與當下 pending，再建立新 v3 identity、發布及回讀驗證，才能套用／清理。Snapshot-only 舊資料沒有足夠 resolved provenance 時會拒絕，不會憑 snapshot 內容假造勝出來源；此相容路徑及正式 bootstrap 接線仍待完成。
