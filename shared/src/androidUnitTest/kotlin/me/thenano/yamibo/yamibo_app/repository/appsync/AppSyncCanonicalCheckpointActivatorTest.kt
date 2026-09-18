@@ -14,6 +14,37 @@ import me.thenano.yamibo.yamibo_app.store.appsync.*
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 
 class AppSyncCanonicalCheckpointActivatorTest {
+    @Test fun nativeCoordinatorRetriesCheckpointSettingsWithoutRepeatingRemotePublication() = fixture {
+        val pending = append()
+        val (recovery, id) = stageNativeCheckpoint()
+        var now = 100L
+        val provider = object : AppSyncBlogProvider {
+            override suspend fun fetchMyBlogs(blogClassId: io.github.littlesurvival.dto.value.BlogClassId?, page: Int): Nothing = error("No remote scan during activation")
+            override suspend fun fetchBlog(blogId: io.github.littlesurvival.dto.value.BlogId): Nothing = error("No remote read during activation")
+            override suspend fun submitBlog(request: AppSyncBlogWriteRequest): Nothing = error("No remote write during activation")
+            override suspend fun deleteBlog(request: AppSyncBlogDeleteRequest): Nothing = error("No cleanup during activation")
+        }
+        val publisher = AppSyncV3SegmentPublisher(provider, recovery, { now })
+        val committer = AppSyncV3IndexCommitter(provider, recovery, publisher, { now })
+        fun run() = kotlinx.coroutines.runBlocking {
+            AppSyncV3CommitCoordinator(committer, recovery, { now },
+                AppSyncCanonicalCheckpointActivator(db, store, state, materializer, { now }), { true })
+                .commit(id, "unused after verified index", checkpoint.checkpointId,
+                    AppSyncBlogClassSelection.Existing(io.github.littlesurvival.dto.value.BlogClassId(7)),
+                    io.github.littlesurvival.dto.value.FormHash("test"))
+        }
+        preferences.fail = true
+        assertIs<AppSyncSegmentedJournalCommitResult.Retryable>(run())
+        assertEquals(AppSyncRecoveryPhase.ActivatingLocal, recovery.session(id)?.phase)
+        assertEquals(1L, recovery.session(id)?.retryCount)
+        now = assertNotNull(recovery.session(id)?.nextRetryAtEpochMillis)
+        preferences.fail = false
+        val result = assertIs<AppSyncSegmentedJournalCommitResult.Verified>(run())
+        assertTrue(result.acknowledgedOperationIds.isEmpty())
+        assertEquals(AppSyncRecoveryPhase.Completed, recovery.session(id)?.phase)
+        assertEquals(listOf(pending), store.pendingOperations())
+        assertEquals(18, preferences.values["novelreadersettings.fontsize"])
+    }
     @Test fun nativeRecoveryWaitsForPreferencesAndPreservesEditsAddedDuringRetry() = fixture {
         val pending = append()
         val (recovery, id) = stageNativeCheckpoint()

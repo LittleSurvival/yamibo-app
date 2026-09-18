@@ -40,6 +40,16 @@ class AppSyncV3SegmentPublisherTest {
         fun committer() = AppSyncV3IndexCommitter(provider, SqlDelightAppSyncRecoveryStore(db), publisher(), { 20 }, { true })
         suspend fun commit() = committer().commit(session.sessionId, envelope, kind, "checkpoint",
             AppSyncBlogClassSelection.Existing(BlogClassId(7)), FormHash("test"))
+        fun prepareJournal(): Triple<String, String, String> {
+            recovery.rollbackPreCommit(session.sessionId)
+            val staged = recovery.createOrResumeSegmentedJournal(account, setOf(pending.operationId.value), "journal", 2)
+            val imported = assertIs<AppSyncCanonicalOperationImport.Accepted>(AppSyncCanonicalOperationImporter().import(account.value, pending))
+            val identity = "${staged.targetDeviceId.value}:${staged.targetDeviceEpoch.value}"
+            val journal = AppSyncCanonicalJournal(AppSyncCanonicalOperationBlock(account.value, listOf(imported.operation)),
+                staged.targetDeviceId.value, staged.targetDeviceEpoch.value, staged.targetWriterNonce.value,
+                pending.sequence.value, pending.sequence.value, emptyMap(), emptyList(), 1, 3, 3, "test", pending.sequence.value)
+            return Triple(staged.sessionId, AppSyncV3DocumentCodec().encodeJournal(identity, journal), identity)
+        }
         suspend fun publish(publisher: AppSyncV3SegmentPublisher = publisher(), source: String = envelope) = publisher.publish(
             session.sessionId, source, kind, "checkpoint", AppSyncBlogClassSelection.Existing(BlogClassId(7)), FormHash("test"))
     }
@@ -337,6 +347,50 @@ class AppSyncV3SegmentPublisherTest {
         assertNotNull(recovery.nativeIndexIntent(session.sessionId))
         assertEquals(count, provider.posts.size)
         assertEquals(false, recovery.session(session.sessionId)?.indexCommitted)
+    }
+
+    @Test fun nativeCoordinatorContinuesFromStagingThroughVerifiedActivationInOneRun() = fixture {
+        val (id, frozen, identity) = prepareJournal()
+        val coordinator = AppSyncV3CommitCoordinator(committer(), recovery, { 100 }, canRun = { true })
+        suspend fun run() = coordinator.commit(id, frozen, identity, AppSyncBlogClassSelection.Existing(BlogClassId(7)), FormHash("test"))
+        val result = assertIs<AppSyncSegmentedJournalCommitResult.Verified>(run())
+        assertEquals(setOf(pending.operationId.value), result.acknowledgedOperationIds)
+        assertEquals(AppSyncRecoveryPhase.Completed, recovery.session(id)?.phase)
+        assertTrue(operations.pendingOperations().isEmpty())
+        assertEquals(pending, operations.allOutboxOperations().single().first)
+        val posts = provider.posts.size
+        assertEquals(result, run())
+        assertEquals(posts, provider.posts.size)
+    }
+
+    @Test fun nativeCoordinatorRespectsDurableRetryDeadlineAndStopsAtThirdFailure() = fixture {
+        val (id, frozen, identity) = prepareJournal()
+        var now = 100L
+        suspend fun run() = AppSyncV3CommitCoordinator(committer(), SqlDelightAppSyncRecoveryStore(db), { now }, canRun = { true })
+            .commit(id, frozen, identity, AppSyncBlogClassSelection.Existing(BlogClassId(7)), FormHash("test"))
+        provider.timeoutAt = 1
+        assertIs<AppSyncSegmentedJournalCommitResult.Retryable>(run())
+        assertEquals(1L, recovery.session(id)?.retryCount)
+        assertIs<AppSyncSegmentedJournalCommitResult.Retryable>(run())
+        assertEquals(1, provider.posts.size)
+        assertEquals(1L, recovery.session(id)?.retryCount)
+        now = assertNotNull(recovery.session(id)?.nextRetryAtEpochMillis)
+        provider.timeoutAt = 2
+        assertIs<AppSyncSegmentedJournalCommitResult.Retryable>(run())
+        assertEquals(2L, recovery.session(id)?.retryCount)
+        now = assertNotNull(recovery.session(id)?.nextRetryAtEpochMillis)
+        provider.timeoutAt = 3
+        assertIs<AppSyncSegmentedJournalCommitResult.Terminal>(run())
+        assertEquals(AppSyncRecoveryPhase.NeedsAttention, recovery.session(id)?.phase)
+        assertEquals(3L, recovery.session(id)?.retryCount)
+        assertIs<AppSyncSegmentedJournalCommitResult.Terminal>(run())
+        assertEquals(3, provider.posts.size)
+        assertEquals(listOf(pending), operations.pendingOperations())
+        assertNotNull(recovery.resumeRetryExhaustedRecovery(account, now + 1))
+        provider.timeoutAt = null
+        now++
+        assertIs<AppSyncSegmentedJournalCommitResult.Verified>(run())
+        assertTrue(operations.pendingOperations().isEmpty())
     }
 
     @Test fun indexAcknowledgementAloneAndDuplicateCandidatesNeverGrantCommit() = fixture {

@@ -53,3 +53,7 @@ Native journal 的本機 activation 現在由 `activateCommittedSession` 分流�
 Native checkpoint 已提供專用 `AppSyncCanonicalCheckpointActivator.activateRecovery`。它從持久化 index intent／回讀證據與凍結 checkpoint 重建驗證物件，核對帳號及目前 writer，並在 projection 交易內再次核對 recovery 證據。既有 canonical activator 合併最新 outbox overlay、還原 projection、保存原遠端 coverage；不把 overlay 的 coverage 冒充為遠端已提交內容，也不確認 outbox。
 
 設定仍在 SQLite 交易外還原。設定還原失敗時，projection 保留且 session 維持 ActivatingLocal；重試重新合併最新編輯。只有 canonical head 的設定待處理旗標清除，且 adopted checkpoint 的 ID／Blog ID／摘要與驗證物件一致，才在交易內保存 root 連結並進入 Completed。完成重試不重套舊 projection 或設定。通用舊 activation 入口仍拒絕 native checkpoint，正式 service／worker 協調尚待接線。
+
+`AppSyncV3CommitCoordinator` 提供預設停用的單次執行協調：由 Classifying／Staging 開始，接續分段、index 與本機 activation，只有資料庫確實 Completed 且 indexCommitted 才回傳 Verified。journal 回報本 session 已確認來源；checkpoint 必須注入 canonical activator，且不回報 outbox 確認。取消向上傳播，登入中斷不消耗重試預算；其餘結果沿用 `AppSyncRecoveryAttempts` 保存不可變 retry identity／期限及第三次失敗停止規則。期限未到不執行遠端操作，也不增加失敗計數。
+
+此 coordinator 不建立背景工作；呼叫端必須另外成功排入 durable worker，才可在 UI 宣稱等待已排程的重試。正式 service／worker 接線、重開機驗收仍未完成。測試涵蓋從 staging 到 journal activation 的完整 fake-provider／SQLite 執行，以及重新建立 coordinator 後的期限、第三次停止、來源保留與明確恢復。
