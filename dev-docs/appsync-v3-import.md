@@ -118,3 +118,11 @@ Migration 58→59 新增 `AppSyncV2FallbackPayload`，以 recovery session 為�
 成功僅進入 CommittingIndex，不提交索引、不確認 outbox、不啟動清理。正式 index readback、canonical activation 與 service dispatch 仍待接線；原 v3 文件保持原狀。
 
 共用 reader-text 還原也保留 v2 segment／root 的換行，避免 Discuz `<br>` 呈現使完整 body 核對或 SHA-256 探索誤判。既有 v1/v2 journal 的讀取方式沒有因此改成 v3 解碼。
+
+## 回退索引確認
+
+`AppSyncSanitizedV2IndexCommitter` 必須收到已驗證的 canonical checkpoint，且該 checkpoint ID／coverage 必須已存在於固定 journal 的 acknowledgements。發布分段前及取得 root 後，都重新探索索引並核對該 checkpoint 的 Blog ID／fingerprint；缺少原始基底時不開始新的分段寫入。索引保留目前所有 checkpoint 與其他 replica journal，只替換自己的 journal reference。
+
+索引 body、原索引 SHA-256 及目標 Blog ID 在 POST 前固定，再次探索確認基底未變及 reader gate 通過才送出。回應遺失以完整索引探索與實際讀回確認，已出現相同固定 body 時不重送。Provider 沒有 compare-and-swap，最後讀取與 POST 間的競態限制仍存在，不能宣稱伺服器端原子交換。
+
+`markSanitizedV2IndexCommitted` 與 native 入口分開，核對完整固定 intent、實體 root ID、v2 root fingerprint、canonical→v2 payload 及至少一個已確認 checkpoint 後，才原子記錄 index evidence 並進入 ActivatingLocal。Native 入口拒絕帶 v2 companion 的 session；以 canonical document fingerprint 冒充 v2 root fingerprint 或移除已確認 checkpoint 均拒絕。這一步不確認 pending operations、不改寫本機投影、不執行清理；後續 canonical activation 與 service dispatch 仍待完成。

@@ -19,6 +19,92 @@ import okio.ByteString.Companion.encodeUtf8
 import me.thenano.yamibo.yamibo_app.repository.appsync.domain.stableAppSyncFingerprint
 
 class AppSyncV3SegmentPublisherTest {
+    private fun Fixture.prepareFallbackIndex(): Pair<String, AppSyncVerifiedCanonicalCheckpoint> {
+        val (id, original, identity) = prepareJournal()
+        val cp = AppSyncCanonicalCheckpoint("retained-base", account.value, 1, emptyMap(), emptyList())
+        val checkpointBody = AppSyncV3DocumentCodec().encodeCheckpoint(cp)
+        val reference = AppSyncIndexCheckpointReference(cp.checkpointId, 700, AppSyncCanonicalCheckpointCodec().encode(cp).sha256().hex())
+        val old = assertIs<AppSyncV3DocumentRead.Journal>(AppSyncV3DocumentCodec().discover(original, account.value, AppSyncV3PayloadKind.Journal))
+        val index = AppSyncIndexEnvelopeCodec().encode(AppSyncIndexPayload(account,
+            journals = listOf(AppSyncIndexJournalReference(identity, 701, old.metadata.canonicalFingerprint),
+                AppSyncIndexJournalReference("other:epoch", 702, "other-fingerprint")),
+            checkpoints = listOf(reference), updatedAtEpochMillis = 1))
+        val selection = AppSyncBlogClassSelection.Existing(BlogClassId(7))
+        provider.artifacts[700] = AppSyncBlogWriteRequest(BlogId(700), AppSyncJournalDefaults.checkpointTitle(cp.checkpointId), checkpointBody, selection, FormHash("test"))
+        provider.artifacts[701] = AppSyncBlogWriteRequest(BlogId(701), "original-native-journal", original, selection, FormHash("test"))
+        provider.artifacts[800] = AppSyncBlogWriteRequest(BlogId(800), APP_SYNC_INDEX_TITLE, index, selection, FormHash("test"))
+        val frozen = AppSyncV3DocumentCodec().encodeJournal(identity, old.document.copy(
+            acknowledgements = listOf(AppSyncCanonicalAcknowledgement(cp.checkpointId, cp.coverage))))
+        recovery.pinPayload(id, "Journal", identity, 3) { frozen }
+        recovery.pinSanitizedV2Payload(id) { true }
+        recovery.startSegmentedJournal(id, 3)
+        return id to assertNotNull(AppSyncVerifiedCanonicalCheckpoint.verify(account.value, 700, index, checkpointBody))
+    }
+
+    private fun Fixture.fallbackCommitter() = AppSyncSanitizedV2IndexCommitter(provider,
+        SqlDelightAppSyncRecoveryStore(db), fallbackPublisher(), { 20 }, { true })
+
+    @Test fun fallbackIndexLostResponseReconcilesWithoutAnotherPostAndPreservesNativeArtifacts() = fixture {
+        val (id, checkpoint) = prepareFallbackIndex()
+        val original = provider.artifacts.getValue(701)
+        provider.timeoutAt = 3
+        provider.storeTimedOut = true
+        provider.onList = { if (provider.posts.size == 3) provider.failIndexRead = true }
+        val selection = AppSyncBlogClassSelection.Existing(BlogClassId(7))
+        assertIs<AppSyncSegmentIndexCommitResult.Retryable>(fallbackCommitter().commit(id, selection, FormHash("test"), checkpoint))
+        assertEquals(3, provider.posts.size)
+        assertFalse(recovery.session(id)!!.indexCommitted)
+        provider.failIndexRead = false
+        provider.onList = {}
+        assertIs<AppSyncSegmentIndexCommitResult.Verified>(fallbackCommitter().commit(id, selection, FormHash("test"), checkpoint))
+        assertEquals(3, provider.posts.size)
+        assertEquals(AppSyncRecoveryPhase.ActivatingLocal, recovery.session(id)?.phase)
+        assertEquals(listOf(pending), operations.pendingOperations())
+        assertEquals(original, provider.artifacts[701])
+        val index = assertIs<AppSyncIndexValidation.Valid>(AppSyncIndexEnvelopeCodec().validate(provider.artifacts.getValue(800).message)).envelope.payload
+        assertEquals(checkpoint.fingerprint, index.checkpoints.single().fingerprint)
+        assertEquals(702, index.journals.single { it.replicaKey == "other:epoch" }.blogId)
+        assertEquals(recovery.session(id)?.rootFingerprint, index.journals.single { it.replicaKey != "other:epoch" }.fingerprint)
+        assertFailsWith<IllegalArgumentException> { recovery.markNativeIndexCommitted(id, 800, provider.artifacts.getValue(800).message, 20) }
+    }
+
+    @Test fun fallbackIndexRejectsMissingBaseBeforeStagingAndConcurrentIndexChangesBeforePost() = fixture {
+        val (id, checkpoint) = prepareFallbackIndex()
+        val index = provider.artifacts.getValue(800)
+        val parsed = assertIs<AppSyncIndexValidation.Valid>(AppSyncIndexEnvelopeCodec().validate(index.message)).envelope.payload
+        provider.artifacts[800] = index.copy(message = AppSyncIndexEnvelopeCodec().encode(parsed.copy(checkpoints = emptyList())))
+        val selection = AppSyncBlogClassSelection.Existing(BlogClassId(7))
+        assertIs<AppSyncSegmentIndexCommitResult.Conflict>(fallbackCommitter().commit(id, selection, FormHash("test"), checkpoint))
+        assertTrue(provider.posts.isEmpty())
+        provider.artifacts[800] = index
+        provider.onList = {
+            if (recovery.nativeIndexIntent(id) != null) provider.artifacts[800] = index.copy(
+                message = AppSyncIndexEnvelopeCodec().encode(parsed.copy(updatedAtEpochMillis = 99)))
+        }
+        assertIs<AppSyncSegmentIndexCommitResult.Conflict>(fallbackCommitter().commit(id, selection, FormHash("test"), checkpoint))
+        assertEquals(2, provider.posts.size)
+        assertFalse(recovery.session(id)!!.indexCommitted)
+    }
+
+    @Test fun fallbackIndexReadbackCannotOmitAcknowledgedCheckpointOrUseCanonicalFingerprintForV2Root() {
+        for (omitCheckpoint in listOf(false, true)) fixture {
+            val (id, checkpoint) = prepareFallbackIndex()
+            val selection = AppSyncBlogClassSelection.Existing(BlogClassId(7))
+            val root = assertIs<AppSyncSegmentPublishResult.ReadyToCommitIndex>(fallbackPublisher().publish(id, selection, FormHash("test")))
+            val native = recovery.nativePayload(id)
+            val doc = assertIs<AppSyncV3DocumentRead.Journal>(AppSyncV3DocumentCodec().discover(native.body, account.value, AppSyncV3PayloadKind.Journal))
+            val bad = AppSyncIndexEnvelopeCodec().encode(AppSyncIndexPayload(account,
+                journals = listOf(AppSyncIndexJournalReference(native.identity, root.rootBlogId.toInt(),
+                    if (omitCheckpoint) root.rootFingerprint else doc.metadata.canonicalFingerprint)),
+                checkpoints = if (omitCheckpoint) emptyList() else listOf(AppSyncIndexCheckpointReference(
+                    checkpoint.document.checkpointId, 700, checkpoint.fingerprint)), updatedAtEpochMillis = 20))
+            recovery.pinNativeIndexIntent(id, NativeRecoveryIndexIntent(bad, 800, provider.artifacts.getValue(800).message.encodeUtf8().sha256().hex()))
+            assertFailsWith<IllegalArgumentException> { recovery.markSanitizedV2IndexCommitted(id, 800, bad, 20) }
+            assertFalse(recovery.session(id)!!.indexCommitted)
+            assertEquals(listOf(pending), operations.pendingOperations())
+        }
+    }
+
     private fun Fixture.prepareFallback(): String {
         val (id, body, identity) = prepareJournal()
         recovery.pinPayload(id, "Journal", identity, 3) { body }

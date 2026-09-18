@@ -833,7 +833,14 @@ internal class SqlDelightAppSyncRecoveryStore(
      * the phase transition. This does not acknowledge operations or authorize cleanup.
      */
     fun markNativeIndexCommitted(sessionId: String, indexBlogId: Long, indexReaderHtml: String,
-        verifiedAtEpochMillis: Long) = db.transaction {
+        verifiedAtEpochMillis: Long) = markCanonicalIndexCommitted(sessionId, indexBlogId, indexReaderHtml, verifiedAtEpochMillis, false)
+
+    fun markSanitizedV2IndexCommitted(sessionId: String, indexBlogId: Long, indexReaderHtml: String,
+        verifiedAtEpochMillis: Long) = markCanonicalIndexCommitted(sessionId, indexBlogId, indexReaderHtml, verifiedAtEpochMillis, true)
+
+    private fun markCanonicalIndexCommitted(sessionId: String, indexBlogId: Long, indexReaderHtml: String,
+        verifiedAtEpochMillis: Long, sanitizedV2: Boolean) = db.transaction {
+        require(hasSanitizedV2Payload(sessionId) == sanitizedV2) { "Index verification protocol mismatch" }
         val session = requireSession(sessionId)
         require(session.phase == AppSyncRecoveryPhase.CommittingIndex ||
             (session.phase in setOf(AppSyncRecoveryPhase.ActivatingLocal, AppSyncRecoveryPhase.Cleaning,
@@ -856,6 +863,7 @@ internal class SqlDelightAppSyncRecoveryStore(
             }) { "Native migration index must retain the frozen legacy source" }
         }
         val kind = AppSyncV3PayloadKind.valueOf(payload.payloadKind)
+        require(!sanitizedV2 || kind == AppSyncV3PayloadKind.Journal)
         val document = AppSyncV3DocumentCodec().discover(payload.canonicalEnvelope, session.accountBinding.value, kind)
         when (document) {
             is AppSyncV3DocumentRead.Checkpoint -> {
@@ -871,8 +879,15 @@ internal class SqlDelightAppSyncRecoveryStore(
                 val key = SyncReplicaKey(session.targetDeviceId, session.targetDeviceEpoch).stableKey
                 require(key == payload.payloadIdentity)
                 val reference = index.payload.journals.distinct().singleOrNull { it.replicaKey == key }
+                val fingerprint = if (sanitizedV2) {
+                    sanitizedV2Payload(sessionId)
+                    require(index.payload.checkpoints.any { reference ->
+                        document.document.acknowledgements.any { it.checkpointId == reference.checkpointId }
+                    }) { "Fallback index must retain an acknowledged checkpoint" }
+                    session.rootFingerprint
+                } else document.metadata.canonicalFingerprint
                 require(reference?.blogId?.toLong() == session.rootBlogId &&
-                    reference.fingerprint == document.metadata.canonicalFingerprint)
+                    reference.fingerprint == fingerprint)
             }
             else -> error("Frozen native payload is invalid")
         }
