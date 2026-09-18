@@ -20,7 +20,7 @@ import okio.ByteString.Companion.encodeUtf8
 class AppSyncV3SegmentPublisherTest {
     private val account = SyncAccountBinding("account")
     private val kind = AppSyncV3PayloadKind.Checkpoint
-    private inner class Fixture(val db: Database) {
+    private inner class Fixture(val db: Database, val driver: JdbcSqliteDriver) {
         val operations = SqlDelightAppSyncOperationStore(db).also {
             it.initialize("database"); it.bindAccount(account, AppSyncInstallationState.Active)
         }
@@ -44,7 +44,7 @@ class AppSyncV3SegmentPublisherTest {
             session.sessionId, source, kind, "checkpoint", AppSyncBlogClassSelection.Existing(BlogClassId(7)), FormHash("test"))
     }
     private fun fixture(block: suspend Fixture.() -> Unit): Unit = runBlocking {
-        JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).use { Database.Schema.create(it); Fixture(Database(it)).block() }
+        JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).use { Database.Schema.create(it); Fixture(Database(it), it).block() }
     }
 
     @Test fun everyArtifactIsReadBackAndRestartReusesFrozenGenerationWithoutAcknowledgement() = fixture {
@@ -252,7 +252,18 @@ class AppSyncV3SegmentPublisherTest {
         assertEquals(before, operations.installation())
         assertEquals(listOf(pending, later), operations.pendingOperations())
         assertEquals(AppSyncRecoveryPhase.ActivatingLocal, recovery.session(journalSession.sessionId)?.phase)
+        val laterFields = db.appSyncOperationQueries.getOutboxOperation(later.operationId.value).executeAsOne().fieldsJson
+        // An unrelated damaged row must neither be decoded nor acknowledged by this session.
+        driver.execute(null, "UPDATE AppSyncOutbox SET fieldsJson = ? WHERE operationId = ?", 2) {
+            bindString(0, "invalid-json"); bindString(1, later.operationId.value)
+        }
         SqlDelightAppSyncRecoveryStore(db).activateCommittedSession(journalSession.sessionId, 32)
+        val untouched = db.appSyncOperationQueries.getOutboxOperation(later.operationId.value).executeAsOne()
+        assertEquals("invalid-json", untouched.fieldsJson)
+        assertEquals("PENDING_LOCAL", untouched.lifecycle)
+        driver.execute(null, "UPDATE AppSyncOutbox SET fieldsJson = ? WHERE operationId = ?", 2) {
+            bindString(0, laterFields); bindString(1, later.operationId.value)
+        }
         assertEquals(listOf(later), operations.pendingOperations())
         assertEquals(AppSyncOperationLifecycle.Acknowledged, operations.allOutboxOperations().single { it.first == pending }.second)
         assertEquals(AppSyncRecoveryPhase.Completed, recovery.session(journalSession.sessionId)?.phase)

@@ -715,12 +715,11 @@ internal class SqlDelightAppSyncRecoveryStore(
         require(installation.accountBinding == session.accountBinding && installation.deviceId == session.sourceDeviceId &&
             installation.deviceEpoch == session.sourceDeviceEpoch && installation.writerNonce == session.targetWriterNonce &&
             installation.state == AppSyncInstallationState.Active)
-        val sources = operations.allOutboxOperations().associateBy { it.first.operationId.value }
         val published = journal.document.block.operations.associateBy { Triple(it.deviceId, it.deviceEpoch, it.sequence) }
         val proofs = journal.document.block.authorizations.associateBy { it.authorizationId }
         val importer = me.thenano.yamibo.yamibo_app.repository.appsync.schema.AppSyncCanonicalOperationImporter()
         for (id in session.sourceOperationIds) {
-            val (source, lifecycle) = requireNotNull(sources[id]) { "Native publication source is missing" }
+            val (source, lifecycle) = requireNotNull(operations.outboxOperation(id)) { "Native publication source is missing" }
             require(lifecycle in setOf(AppSyncOperationLifecycle.PendingLocal, AppSyncOperationLifecycle.PublishedUnverified,
                 AppSyncOperationLifecycle.Acknowledged))
             require(source.deviceId == session.sourceDeviceId && source.deviceEpoch == session.sourceDeviceEpoch)

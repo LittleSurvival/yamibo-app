@@ -47,3 +47,5 @@ Provider 不支援 compare-and-swap，因此更新前檢查與 POST 間仍有跨
 Native journal 的本機 activation 現在由 `activateCommittedSession` 分流，不能沿用舊版僅根據 source IDs 確認的路徑。交易內重驗 index intent／已保存證據、凍結 journal、安裝帳號／device／epoch／writer／Active 狀態。每筆 session 來源須存在、屬於可確認生命週期，且經 canonical importer 後操作與共享刪除 proof 均完整存在於已發布 journal；Excluded／NoOp／無法轉接或缺少操作時拒絕全部 activation。
 
 通過後只確認該 session 的來源，保存 canonical fingerprint 的 root 連結，更新 heartbeat 並進入 Completed；sequence counter 與後來新增的 pending 操作保持原值。全部 SQL 在同一交易，外層回滾會一起回復；Completed 重試不再改寫時間或提交遠端。不建立 checkpoint coverage，也不刪除來源。Native checkpoint 暫時拒絕 generic activation，仍需接上 canonical projection／pending overlay 的專用流程，不能只標記完成。
+
+來源驗證依 session source ID 使用 outbox 主鍵逐筆查詢，不載入或解碼整個 outbox。這避免 activation 記憶體隨無關歷史資料增加，也避免無關損壞資料阻擋本次已驗證發布。整合測試在 index 提交後新增 pending 列並暫時損壞其 JSON，確認 activation 不讀取、不確認、不改寫該列；本次來源仍通過完整 canonical 比對。

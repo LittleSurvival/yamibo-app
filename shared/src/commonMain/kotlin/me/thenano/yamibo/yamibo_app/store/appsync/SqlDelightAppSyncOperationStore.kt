@@ -476,6 +476,11 @@ internal class SqlDelightAppSyncOperationStore(
             decodeOperation(row) to AppSyncOperationLifecycle.fromDb(row.lifecycle)
         }
 
+    internal fun outboxOperation(operationId: String): Pair<SyncOperation, AppSyncOperationLifecycle>? =
+        queries.getOutboxOperation(operationId).executeAsOneOrNull()?.let { row ->
+            decodeOperation(row) to AppSyncOperationLifecycle.fromDb(row.lifecycle)
+        }
+
     override fun markPublishedUnverified(operationIds: Set<SyncOperationId>) {
         if (operationIds.isNotEmpty()) {
             queries.markOperationsPublishedUnverified(operationIds.map { it.value })
