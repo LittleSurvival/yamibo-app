@@ -4,6 +4,7 @@ import io.github.littlesurvival.dto.value.FormHash
 import kotlinx.coroutines.CancellationException
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncCanonicalActivationResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncCanonicalCheckpointActivator
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncCanonicalCloudPlan
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncRecoveryAttempts
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncRecoveryFailureCategory
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryMode
@@ -21,7 +22,8 @@ internal class AppSyncV3CommitCoordinator(
     private val canRun: suspend () -> Boolean = { false },
 ) {
     suspend fun commit(sessionId: String, envelope: String, identity: String,
-        selection: AppSyncBlogClassSelection.Existing, formHash: FormHash): AppSyncSegmentedJournalCommitResult {
+        selection: AppSyncBlogClassSelection.Existing, formHash: FormHash,
+        cloud: AppSyncCanonicalCloudPlan.Ready? = null): AppSyncSegmentedJournalCommitResult {
         if (!canRun()) return AppSyncSegmentedJournalCommitResult.Terminal("Native recovery is disabled")
         val session = recovery.session(sessionId) ?: return AppSyncSegmentedJournalCommitResult.Terminal("Native session is missing")
         if (recovery.payloadTransportVersion(sessionId)?.let { it != 3L } == true)
@@ -31,7 +33,7 @@ internal class AppSyncV3CommitCoordinator(
         if ((session.nextRetryAtEpochMillis ?: 0) > nowMillis())
             return AppSyncSegmentedJournalCommitResult.Retryable("Persisted retry deadline has not arrived")
         val result = try {
-            advance(sessionId, envelope, identity, selection, formHash)
+            advance(sessionId, envelope, identity, selection, formHash, cloud)
         } catch (cancelled: CancellationException) { throw cancelled
         } catch (_: IllegalArgumentException) { AppSyncSegmentedJournalCommitResult.Conflict("Native recovery evidence changed")
         } catch (_: Exception) { AppSyncSegmentedJournalCommitResult.Retryable("Native recovery interrupted") }
@@ -47,7 +49,8 @@ internal class AppSyncV3CommitCoordinator(
     }
 
     private suspend fun advance(sessionId: String, envelope: String, identity: String,
-        selection: AppSyncBlogClassSelection.Existing, formHash: FormHash): AppSyncSegmentedJournalCommitResult {
+        selection: AppSyncBlogClassSelection.Existing, formHash: FormHash,
+        cloud: AppSyncCanonicalCloudPlan.Ready?): AppSyncSegmentedJournalCommitResult {
         var session = requireNotNull(recovery.session(sessionId))
         val checkpoint = session.mode == AppSyncRecoveryMode.SegmentedCheckpoint
         if (checkpoint && checkpointActivator == null)
@@ -68,7 +71,7 @@ internal class AppSyncV3CommitCoordinator(
         }
         require(recovery.usesNativeTransport(sessionId))
         if (checkpoint) {
-            when (val result = requireNotNull(checkpointActivator).activateRecovery(recovery, sessionId)) {
+            when (val result = requireNotNull(checkpointActivator).activateRecovery(recovery, sessionId, cloud)) {
                 is AppSyncCanonicalActivationResult.Applied -> if (!result.settingsReconciled)
                     return AppSyncSegmentedJournalCommitResult.Retryable("Native settings reconciliation is pending")
                 is AppSyncCanonicalActivationResult.NeedsAttention ->

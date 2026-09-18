@@ -63,3 +63,7 @@ v2 segment publisher 與 v2 coordinator 在入口即拒絕 transport 3，包括�
 反向亦相同：native coordinator 若發現 frozen payload 的 transport 不是 3，會在任何 phase／retry 更新前拒絕；尚未凍結的 native session 則可正常起始。測試確認 v2 frozen body、來源及 retry state 原樣保留，沒有 discovery 或 POST。
 
 `OperationSyncEngine.resumeCanonicalRecovery` 是 service 接線用的可選接點，預設回傳 null，保留既有 reader 行為。它在同步 mutex／database lease 內、reader cohort observation 與 canonical cloud planner 驗證成功後執行，且早於一般 canonical activation。writer 衝突與無效 cloud 不會呼叫接點。非 null 結果直接交回 service；null 則照常啟用 reader projection。測試核對呼叫時 lease 存在、返回後釋放，以及無效 cloud／pending 保留與預設相容性。此接點尚未由正式 service 綁定 native writer；仍需整合最新 cloud plan、cohort gate 與 worker 排程。
+
+Native checkpoint coordinator 現可接收本次驗證完成的 cloud plan。`AppSyncCanonicalRecoveryPlanner` 比較凍結 checkpoint 與最新雲端 base，保留兩者各自的 index 驗證證據，允許 index 版本不同；不把已壓縮的 winner 操作冒充為完整 journal。先檢查帳號、checkpoint ID／摘要、跨 checkpoint 的操作及 proof 衝突，再分別用雲端 journals 補齊候選。只有結果覆蓋凍結 checkpoint 與完整 cloud plan，且所有合格候選產生相同 canonical 內容，才選擇啟用 base。覆蓋不完整或內容矛盾時保留 session 與本機資料。
+
+啟用交易仍合併當下 outbox，並拒絕降低既有 canonical head 的任何 replica coverage。若選用較新的遠端 base，交易另外保存凍結 checkpoint 的原始 verified evidence，讓 recovery completion 可核對真正發布的 root；兩份證據都不擴張為本機 overlay coverage。設定失敗後仍以最新 cloud plan 重試，不重做已完成的遠端發布。此介面尚待 service 傳入最新 plan，writer 預設仍停用；本機 coverage 防退檢查本身不代表完成所有並行一致性或裝置驗收。

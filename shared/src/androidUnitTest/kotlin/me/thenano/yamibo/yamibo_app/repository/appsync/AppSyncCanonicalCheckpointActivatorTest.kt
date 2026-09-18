@@ -50,6 +50,8 @@ class AppSyncCanonicalCheckpointActivatorTest {
     }
     @Test fun nativeCoordinatorRetriesCheckpointSettingsWithoutRepeatingRemotePublication() = fixture {
         val pending = append()
+        val latest = remoteCheckpoint(pending)
+        val cloud = AppSyncCanonicalCloudPlan.Ready(verified(latest), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
         val (recovery, id) = stageNativeCheckpoint()
         var now = 100L
         val provider = object : AppSyncBlogProvider {
@@ -65,7 +67,7 @@ class AppSyncCanonicalCheckpointActivatorTest {
                 AppSyncCanonicalCheckpointActivator(db, store, state, materializer, { now }), { true })
                 .commit(id, "unused after verified index", checkpoint.checkpointId,
                     AppSyncBlogClassSelection.Existing(io.github.littlesurvival.dto.value.BlogClassId(7)),
-                    io.github.littlesurvival.dto.value.FormHash("test"))
+                    io.github.littlesurvival.dto.value.FormHash("test"), cloud)
         }
         preferences.fail = true
         assertIs<AppSyncSegmentedJournalCommitResult.Retryable>(run())
@@ -77,7 +79,28 @@ class AppSyncCanonicalCheckpointActivatorTest {
         assertTrue(result.acknowledgedOperationIds.isEmpty())
         assertEquals(AppSyncRecoveryPhase.Completed, recovery.session(id)?.phase)
         assertEquals(listOf(pending), store.pendingOperations())
-        assertEquals(18, preferences.values["novelreadersettings.fontsize"])
+        assertEquals(26, preferences.values["novelreadersettings.fontsize"])
+        assertEquals(setOf(checkpoint.checkpointId, latest.checkpointId), store.verifiedCheckpoints().map { it.checkpointId }.toSet())
+        assertEquals(latest.coverage, store.verifiedCheckpoints().single { it.checkpointId == latest.checkpointId }.coverage.asStableMap())
+    }
+
+    @Test fun staleRecoveryCannotReplaceAnAlreadyActivatedRemoteHeadWithoutLatestCloudEvidence() = fixture {
+        val pending = append()
+        val latest = remoteCheckpoint(pending)
+        assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(verified(latest)))
+        val (recovery, id) = stageNativeCheckpoint()
+        val before = state.read(account.value)
+        val evidence = store.verifiedCheckpoints()
+        assertIs<AppSyncCanonicalActivationResult.NeedsAttention>(activator().activateRecovery(recovery, id))
+        assertEquals(before, state.read(account.value))
+        assertEquals(evidence, store.verifiedCheckpoints())
+        assertEquals(26, preferences.values["novelreadersettings.fontsize"])
+        assertEquals(AppSyncRecoveryPhase.ActivatingLocal, recovery.session(id)?.phase)
+        val cloud = AppSyncCanonicalCloudPlan.Ready(verified(latest), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
+        assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activateRecovery(recovery, id, cloud))
+        assertEquals(AppSyncRecoveryPhase.Completed, recovery.session(id)?.phase)
+        assertEquals(before?.coverage, state.read(account.value)?.coverage)
+        assertEquals(listOf(pending), store.pendingOperations())
     }
     @Test fun nativeRecoveryWaitsForPreferencesAndPreservesEditsAddedDuringRetry() = fixture {
         val pending = append()
@@ -290,6 +313,14 @@ class AppSyncCanonicalCheckpointActivatorTest {
         val preferences = Preferences()
         val materializer = DatabaseSyncDomainMaterializer(db, preferences)
         val state = SqlDelightCanonicalCheckpointState(db, materializer)
+        fun remoteCheckpoint(source: SyncOperation): AppSyncCanonicalCheckpoint {
+            val device = SyncDeviceId("new-remote"); val epoch = SyncDeviceEpoch("remote-epoch")
+            val remote = source.copy(deviceId = device, deviceEpoch = epoch,
+                operationId = SyncOperation.idFor(device, epoch, source.sequence),
+                fields = source.fields + ("value" to "26"), createdAtEpochMillis = 100)
+            return assertIs<AppSyncCanonicalPendingMergeResult.Ready>(AppSyncCanonicalPendingMerge().prepare(
+                checkpoint, listOf(remote), "latest-remote", 101)).checkpoint
+        }
         fun stageNativeCheckpoint(committed: Boolean = true): Pair<SqlDelightAppSyncRecoveryStore, String> {
             val recovery = SqlDelightAppSyncRecoveryStore(db)
             val session = recovery.createOrResumeSegmentedCheckpoint(account, checkpoint.checkpointId, "source", 1)
