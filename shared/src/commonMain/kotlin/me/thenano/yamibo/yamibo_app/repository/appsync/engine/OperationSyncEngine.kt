@@ -21,6 +21,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncProtocolCap
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointAcknowledgement
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.ParsedAppSyncCheckpointEnvelope
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3DocumentRead
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncVerifiedLegacyCheckpoint
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncVerifiedCanonicalCheckpoint
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.resolvedPublishedThroughSequence
 import me.thenano.yamibo.yamibo_app.store.appsync.AppSyncOperationStore
@@ -49,6 +50,7 @@ internal sealed interface AppSyncJournalLoadResult {
         val canonicalReadIssues: List<String> = emptyList(),
         val verifiedCanonicalCheckpoints: List<AppSyncVerifiedCanonicalCheckpoint> = emptyList(),
         val authoritativeDiscovery: Boolean = false,
+        val verifiedLegacyCheckpoints: List<AppSyncVerifiedLegacyCheckpoint> = emptyList(),
     ) : AppSyncJournalLoadResult {
         // Removed once every consuming coordinator can process canonical state. Until then,
         // a readable v3 account must never become an empty-cloud push or legacy cleanup.

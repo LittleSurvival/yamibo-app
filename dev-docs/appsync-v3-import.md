@@ -46,3 +46,5 @@ materializer 的內部輸入將本機值與勝出操作 ID／時間分開；還�
 `AppSyncLegacyCheckpointMigration` 從此 legacy 證據建立候選資料，先轉換 resolved field winners，再將 encoded snapshot 經既有 snapshot planner 與 canonical normalizer 轉換，雙向核對可攜 live entity 集合與欄位值。只容許 schema 明定 nullable 的缺值/null 等價，以及省略的顯示文字與空字串等價；其他不一致、重複實體、孤立 RSS 歷史及沒有對應 resolved 刪除來源的 tombstone 均回報 NeedsAttention。已刪除實體及移除關聯不要求出現在 live snapshot。
 
 輸出保留 legacy source/index fingerprint 供後續發布意圖綁定，但仍是未發布的 candidate；正式 migration 必須合併完整 cloud journal 與當下 pending，再建立新 v3 identity、發布及回讀驗證，才能套用／清理。Snapshot-only 舊資料沒有足夠 resolved provenance 時會拒絕，不會憑 snapshot 內容假造勝出來源；此相容路徑及正式 bootstrap 接線仍待完成。
+
+正式 `YamiboAppSyncJournalRemote` 載入結果現在另附 `verifiedLegacyCheckpoints`。只有同一次載入實際取得的 checkpoint 邏輯 envelope（包含分段重組結果）與已讀回 index，經帳號、實體 blog ID、checkpoint ID 及 fingerprint 綁定成功後才加入。全量 discovery 中未被 index 引用或指紋不符的 checkpoint 仍可供 legacy reader 使用，但沒有遷移證據；記憶體解析快取命中也不重建此證據。此欄位不觸發 canonical processing，也不授權清理。正式 bootstrap 的選擇、合併及發布仍待接線。

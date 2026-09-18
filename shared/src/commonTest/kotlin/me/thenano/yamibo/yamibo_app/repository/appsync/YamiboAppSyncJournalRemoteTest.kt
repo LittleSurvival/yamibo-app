@@ -556,6 +556,45 @@ class YamiboAppSyncJournalRemoteTest {
     }
 
     @Test
+    fun legacyMigrationEvidenceRequiresFreshBodyAndMatchingIndexMembership() = runBlocking {
+        val checkpoint = checkpointCodec.createPayload(
+            checkpointId = "legacy-source", accountBinding = ACCOUNT,
+            coverage = SyncCausalContext(),
+            snapshot = YamiboBackupFile(appVersionCode = 1, createdAt = 100),
+            tombstones = emptyList(), createdAtEpochMillis = 100,
+        )
+        val body = checkpointCodec.encode(checkpoint)
+        val parsed = assertIs<me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointValidation.Valid>(
+            checkpointCodec.validate(body)).envelope
+        val id = BlogId(70)
+        val indexId = BlogId(71)
+        val title = AppSyncJournalDefaults.checkpointTitle(checkpoint.checkpointId)
+        for (mode in listOf("matching", "unindexed", "wrong-fingerprint", "wrong-blog")) {
+            val provider = FakeProvider().apply {
+                pages[PageKey(CLASS_ID, 1)] = success(UserSpaceBlogPage(blogs = listOf(
+                    summary(id, title, epoch = 1), summary(indexId, APP_SYNC_INDEX_TITLE, epoch = 2))))
+                blogs[id] = success(page(id, title, body))
+                blogs[indexId] = success(page(indexId, APP_SYNC_INDEX_TITLE, indexCodec.encode(
+                    AppSyncIndexPayload(ACCOUNT, checkpoints = if (mode == "unindexed") emptyList() else listOf(
+                        AppSyncIndexCheckpointReference(checkpoint.checkpointId,
+                            if (mode == "wrong-blog") 72 else id.value,
+                            if (mode == "wrong-fingerprint") "incorrect" else parsed.fingerprint)),
+                        updatedAtEpochMillis = 100))))
+            }
+            val store = FakeRemoteStore().apply { saveClassId(ACCOUNT, CLASS_ID) }
+            val loaded = assertIs<AppSyncJournalLoadResult.Success>(remote(provider, store).loadJournals(ACCOUNT, forceDiscovery = true))
+            assertEquals(1, loaded.checkpoints.size, mode)
+            assertTrue(loaded.verifiedCanonicalCheckpoints.isEmpty())
+            if (mode == "matching") {
+                val evidence = loaded.verifiedLegacyCheckpoints.single()
+                assertEquals(id.value.toLong(), evidence.blogId)
+                assertEquals(parsed.fingerprint, evidence.fingerprint)
+                assertEquals(checkpoint, evidence.read().payload)
+            } else assertTrue(loaded.verifiedLegacyCheckpoints.isEmpty(), mode)
+        }
+    }
+
+    @Test
     fun validCachedIndexLoadsCheckpointWithoutDiscovery() = runBlocking {
         val journal = payload()
         val journalBlogId = BlogId(14)
@@ -651,6 +690,7 @@ class YamiboAppSyncJournalRemoteTest {
             journalRemote.loadJournals(ACCOUNT, forceDiscovery = false),
         )
 
+        assertEquals(checkpointFingerprint, result.verifiedLegacyCheckpoints.single().fingerprint)
         assertEquals(listOf(journal), result.journals.map { it.payload })
         assertEquals(listOf(checkpoint.checkpointId), result.checkpoints.map {
             it.envelope.payload.checkpointId
@@ -659,9 +699,10 @@ class YamiboAppSyncJournalRemoteTest {
         assertEquals(0, provider.fetchBlogListCalls)
         assertEquals(3, provider.fetchBlogCalls)
 
-        assertIs<AppSyncJournalLoadResult.Success>(
+        val cached = assertIs<AppSyncJournalLoadResult.Success>(
             journalRemote.loadJournals(ACCOUNT, forceDiscovery = false),
         )
+        assertTrue(cached.verifiedLegacyCheckpoints.isEmpty(), "Parsed cache is not fresh migration evidence")
 
         assertEquals(0, provider.fetchBlogListCalls)
         assertEquals(

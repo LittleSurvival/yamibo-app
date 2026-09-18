@@ -1305,6 +1305,7 @@ internal class YamiboAppSyncJournalRemote(
         val loadedJournals = mutableListOf<LoadedAppSyncJournal>()
         val canonicalDocuments = mutableListOf<LoadedAppSyncCanonicalDocument>()
         val canonicalReadIssues = mutableListOf<String>()
+        val freshLegacyCheckpoints = mutableListOf<CheckpointCandidateResult.Valid>()
         for (candidate in cachedJournals.values) {
             val cachedPayload = verifiedJournalCache[candidate.remoteKey]
                 ?.takeIf {
@@ -1347,6 +1348,7 @@ internal class YamiboAppSyncJournalRemote(
             when (val result = loadCheckpoint(candidate, accountBinding)) {
                 is CheckpointCandidateResult.Canonical -> collectCanonical(candidate.copy(kind = result.kind), result.document, canonicalDocuments, canonicalReadIssues)
                 is CheckpointCandidateResult.Valid -> {
+                    freshLegacyCheckpoints += result
                     saveCheckpoint(candidate.copy(kind = result.kind), result.checkpoint)
                     loadedCheckpoints += result.checkpoint
                 }
@@ -1372,6 +1374,7 @@ internal class YamiboAppSyncJournalRemote(
             canonicalDocuments = canonicalDocuments,
             canonicalReadIssues = canonicalReadIssues.distinct(),
             verifiedCanonicalCheckpoints = bindCanonicalCheckpoints(accountBinding, canonicalDocuments, verifiedIndex),
+            verifiedLegacyCheckpoints = bindLegacyCheckpoints(accountBinding, freshLegacyCheckpoints, verifiedIndex),
         )
     }
 
@@ -1470,6 +1473,7 @@ internal class YamiboAppSyncJournalRemote(
         val checkpoints = mutableListOf<LoadedAppSyncCheckpoint>()
         val canonicalDocuments = mutableListOf<LoadedAppSyncCanonicalDocument>()
         val canonicalReadIssues = mutableListOf<String>()
+        val freshLegacyCheckpoints = mutableListOf<CheckpointCandidateResult.Valid>()
         val indexedReplicaKeys = linkedSetOf<String>()
         var verifiedIndex: IndexCandidateResult.Valid? = null
         val retirementDiscoveryIssues = mutableListOf<String>()
@@ -1562,6 +1566,7 @@ internal class YamiboAppSyncJournalRemote(
                     when (val result = loadCheckpoint(candidate, accountBinding)) {
                         is CheckpointCandidateResult.Canonical -> collectCanonical(candidate.copy(kind = result.kind), result.document, canonicalDocuments, canonicalReadIssues)
                         is CheckpointCandidateResult.Valid -> {
+                            freshLegacyCheckpoints += result
                             saveCheckpoint(candidate.copy(kind = result.kind), result.checkpoint)
                             checkpoints += result.checkpoint
                         }
@@ -1588,7 +1593,20 @@ internal class YamiboAppSyncJournalRemote(
             canonicalDocuments = canonicalDocuments,
             canonicalReadIssues = canonicalReadIssues.distinct(),
             verifiedCanonicalCheckpoints = bindCanonicalCheckpoints(accountBinding, canonicalDocuments, verifiedIndex),
+            verifiedLegacyCheckpoints = bindLegacyCheckpoints(accountBinding, freshLegacyCheckpoints, verifiedIndex),
         )
+    }
+
+    // Only bodies fetched during this load may authorize a migration. Parsed memory caches
+    // and discovered links remain useful to legacy readers but are not source evidence.
+    private fun bindLegacyCheckpoints(account: SyncAccountBinding,
+        checkpoints: List<CheckpointCandidateResult.Valid>, index: IndexCandidateResult.Valid?
+    ): List<AppSyncVerifiedLegacyCheckpoint> {
+        if (index == null) return emptyList()
+        return checkpoints.mapNotNull { loaded ->
+            val blogId = loaded.checkpoint.remoteId.toLongOrNull() ?: return@mapNotNull null
+            AppSyncVerifiedLegacyCheckpoint.verify(account.value, blogId, index.readerHtml, loaded.sourceEnvelope)
+        }.distinctBy { it.blogId to it.fingerprint }
     }
 
     private fun bindCanonicalCheckpoints(account: SyncAccountBinding, documents: List<LoadedAppSyncCanonicalDocument>,
@@ -1681,6 +1699,7 @@ internal class YamiboAppSyncJournalRemote(
                             remoteId = candidate.blogId.value.toString(),
                             envelope = validation.envelope,
                         ),
+                        canonical,
                         kind,
                     )
                 }
@@ -2304,6 +2323,7 @@ internal class YamiboAppSyncJournalRemote(
         data class Canonical(val document: AppSyncV3DocumentRead, val kind: AppSyncRemoteBlogKind) : CheckpointCandidateResult
         data class Valid(
             val checkpoint: LoadedAppSyncCheckpoint,
+            val sourceEnvelope: String,
             val kind: AppSyncRemoteBlogKind = AppSyncRemoteBlogKind.Checkpoint,
         ) : CheckpointCandidateResult
         data object NotFound : CheckpointCandidateResult
