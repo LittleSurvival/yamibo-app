@@ -41,3 +41,7 @@ Migration 47 新增帳號隔離的 reader cohort 證據表。engine 每次取得
 已被該 indexed checkpoint 覆蓋的 pending 前綴可在上述交易中確認，其餘 source ID 留在 session，直到分段、root、index 回讀及 canonical activation 完成才確認。設定套用失敗或 rollout 在準備途中關閉均不建立新 session；交易失敗會回滾封套、session 與前綴確認。此接線仍使用預設關閉的 writer、reader-ready、benchmark 三個條件，且要求新鮮 cohort；不代表首份 canonical checkpoint/bootstrap、reader v3 宣告或跨平台效能驗收已完成。
 
 回歸情境包含：新 session 凍結後再新增操作不改變封套；checkpoint 覆蓋前綴與未覆蓋來源分開確認；凍結後確認來源時發生例外會整筆回滾；設定重整失敗／第三次 gate 檢查關閉不留下 session。Fake-provider 整合從零 session 開始，故意遺失第一個已成功寫入分段的回應，經 authoritative discovery 找回後接續 root、index 與 activation；期間新增的本機設定仍保留 pending。此測試使用正式 SQLite store、codec、publisher、committer 與 activator，尚不等同真實 provider／WorkManager 裝置端驗收。
+
+同一 starter 現在也負責已有 canonical cloud 的 checkpoint 壓縮週期。沿用既有 coordinator 的 64 筆門檻：本機沒有 pending 操作，且至少 64 筆 acknowledged 來源尚未被目前 indexed checkpoint 覆蓋時，凍結 canonical head 作為新 v3 checkpoint；否則仍準備 journal。門檻不計入已覆蓋歷史，也不把本機 pending 直接當成可清除來源。
+
+checkpoint identity 由固定暫定 ID、當次時間與完整 canonical 內容的 SHA-256 產生，再透過正式 checkpoint/document codec 編碼與往返驗證。session、checkpoint identity、摘要與 transport 3 封套同一交易保存，發布仍由既有 segment/root/index coordinator 與 rollout/cohort gate 控制。完成 index 回讀後，canonical activation 保留期間新增的 pending 編輯，再依 checkpoint coverage 清理已確認來源、保留 journal 與本次凍結 payload。這條路徑要求既有 index-verified canonical checkpoint；從純 legacy cloud 建立第一份 v3 checkpoint 的 bootstrap／遷移尚待完成。

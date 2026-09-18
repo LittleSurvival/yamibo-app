@@ -3,7 +3,10 @@ package me.thenano.yamibo.yamibo_app.repository.appsync.engine
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncInstallationState
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncOperationLifecycle
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncAccountBinding
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.*
+import me.thenano.yamibo.yamibo_app.repository.appsync.schema.AppSyncCanonicalCheckpointCodec
 import me.thenano.yamibo.yamibo_app.store.appsync.AppSyncOperationStore
 import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncRecoveryStore
 
@@ -36,9 +39,31 @@ internal class AppSyncNativeJournalStarter(
             val row = requireNotNull(db.appSyncCanonicalStateQueries.getState().executeAsOneOrNull())
             require(row.settingsReconciliationPending == 0L)
             val local = requireNotNull(state.read(account.value))
-            val baseline = AppSyncCanonicalJournalBaseline.prepare(installation, cloud).getOrThrow()
             val pending = operations.pendingOperations().filter { it.accountBinding == account }
             require(pending.all { it.deviceId == installation.deviceId && it.deviceEpoch == installation.deviceEpoch })
+            // Match the existing checkpoint cadence: compact at least 64 acknowledged sources
+            // only when no local publication is pending. Already covered history does not count.
+            val acknowledgedTail = if (pending.isEmpty()) operations.allOutboxOperations().count { (source, lifecycle) ->
+                source.accountBinding == account && lifecycle == AppSyncOperationLifecycle.Acknowledged &&
+                    source.sequence.value > (cloud.checkpoint.document.coverage[source.replicaKey.stableKey] ?: 0L)
+            } else 0
+            if (acknowledgedTail >= 64) {
+                val timestamp = nowMillis()
+                val codec = AppSyncCanonicalCheckpointCodec()
+                val identity = codec.encode(local.copy(checkpointId = "candidate", createdAtEpochMillis = timestamp)).sha256().hex()
+                val checkpoint = local.copy(checkpointId = "v3-$identity", createdAtEpochMillis = timestamp)
+                val documentCodec = AppSyncV3DocumentCodec()
+                val envelope = documentCodec.encodeCheckpoint(checkpoint)
+                val read = documentCodec.discover(envelope, account.value, AppSyncV3PayloadKind.Checkpoint)
+                    as? AppSyncV3DocumentRead.Checkpoint
+                require(read?.document == checkpoint)
+                check(canWrite()) { "Native writer rollout changed during checkpoint preparation" }
+                val session = recovery.createOrResumeSegmentedCheckpoint(account, checkpoint.checkpointId,
+                    requireNotNull(read).metadata.canonicalFingerprint, timestamp)
+                recovery.pinPayload(session.sessionId, "Checkpoint", checkpoint.checkpointId, 3) { envelope }
+                return@transactionWithResult session.sessionId
+            }
+            val baseline = AppSyncCanonicalJournalBaseline.prepare(installation, cloud).getOrThrow()
             // Only the indexed checkpoint, never local overlay coverage, authorizes this acknowledgement.
             val (covered, uncovered) = pending.partition {
                 it.sequence.value <= (cloud.checkpoint.document.coverage[it.replicaKey.stableKey] ?: 0L)

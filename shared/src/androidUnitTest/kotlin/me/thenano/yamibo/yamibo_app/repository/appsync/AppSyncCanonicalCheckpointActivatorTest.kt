@@ -15,6 +15,57 @@ import me.thenano.yamibo.yamibo_app.store.appsync.*
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 
 class AppSyncCanonicalCheckpointActivatorTest {
+    @Test fun nativeCheckpointCadencePublishesVerifiedReplacementAndCleansCoveredHistory() {
+        for (count in listOf(63, 64)) fixture {
+            val sources = List(count) { append() }
+            val (provider, continuation) = nativePublishingEnvironment()
+            val recovery = SqlDelightAppSyncRecoveryStore(db)
+            val form = io.github.littlesurvival.dto.value.FormHash("test")
+            val baseCloud = AppSyncCanonicalCloudPlan.Ready(verified(), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
+            val first = kotlinx.coroutines.runBlocking { continuation.resume(account, form, baseCloud) }
+            assertEquals(count, assertIs<OperationSyncResult.Converged>(first).acknowledgedLocalCount)
+            val previous = assertNotNull(recovery.recoverySession(account))
+            assertEquals(me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryMode.SegmentedJournal, previous.mode)
+            val payload = recovery.nativePayload(previous.sessionId)
+            val journal = assertIs<AppSyncV3DocumentRead.Journal>(AppSyncV3DocumentCodec().discover(payload.body, account.value, AppSyncV3PayloadKind.Journal))
+            val cloud = baseCloud.copy(canonicalOperations = journal.document.block, nativeJournals = listOf(journal))
+            now++
+            var later: SyncOperation? = null
+            if (count == 64) {
+                provider.timeoutAt = provider.posts.size + 1
+                provider.storeTimedOut = true
+                provider.onList = {
+                    if (later == null) {
+                        later = append("22")
+                        state.recordLocalBatch(account.value, listOf(requireNotNull(later)))
+                        preferences.values["novelreadersettings.fontsize"] = 22
+                    }
+                }
+            }
+            val second = kotlinx.coroutines.runBlocking { continuation.resume(account, form, cloud) }
+            assertIs<OperationSyncResult.Converged>(second)
+            val session = assertNotNull(recovery.recoverySession(account))
+            assertEquals(AppSyncRecoveryPhase.Completed, session.phase)
+            if (count == 63) {
+                assertEquals(me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryMode.SegmentedJournal, session.mode)
+                assertEquals(63, store.allOutboxOperations().size)
+                assertNull(db.appSyncNativeCompletionQueries.getForSession(session.sessionId).executeAsOneOrNull())
+            } else {
+                assertEquals(me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryMode.SegmentedCheckpoint, session.mode)
+                val receipt = db.appSyncNativeCompletionQueries.getForSession(session.sessionId).executeAsOne()
+                val checkpoint = store.verifiedCheckpoints().single { it.checkpointId == receipt.checkpointId }
+                assertEquals(64L, checkpoint.coverage.asStableMap()[sources.first().replicaKey.stableKey])
+                assertEquals(listOf(assertNotNull(later)), store.pendingOperations())
+                assertEquals(1, store.allOutboxOperations().size)
+                assertEquals(22, preferences.values["novelreadersettings.fontsize"])
+                assertNull(db.appSyncOperationQueries.getRecoveryPayload(session.sessionId).executeAsOneOrNull())
+                assertTrue(db.appSyncRetainedJournalQueries.getForAccount(account.value).executeAsList().isEmpty())
+                assertTrue(receipt.payloadBytesRemoved > 0)
+                assertEquals(6, provider.posts.size)
+            }
+        }
+    }
+
     private fun AppSyncNativeJournalStarter.startBlocking(account: SyncAccountBinding, cloud: AppSyncCanonicalCloudPlan.Ready) =
         kotlinx.coroutines.runBlocking { start(account, cloud) }
 
@@ -1062,6 +1113,20 @@ class AppSyncCanonicalCheckpointActivatorTest {
     }
 
     private inner class Fixture(val db: Database, val driver: JdbcSqliteDriver) {
+        fun nativePublishingEnvironment(): Pair<AppSyncV3SegmentPublisherTest.Provider, AppSyncNativeRecoveryContinuation> {
+            val provider = AppSyncV3SegmentPublisherTest.Provider()
+            val selection = AppSyncBlogClassSelection.Existing(io.github.littlesurvival.dto.value.BlogClassId(7))
+            val form = io.github.littlesurvival.dto.value.FormHash("test")
+            val index = AppSyncIndexEnvelopeCodec().encode(AppSyncIndexPayload(account,
+                checkpoints = listOf(AppSyncIndexCheckpointReference(checkpoint.checkpointId, 123, verified().fingerprint)), updatedAtEpochMillis = 11))
+            provider.artifacts[124] = AppSyncBlogWriteRequest(io.github.littlesurvival.dto.value.BlogId(124), APP_SYNC_INDEX_TITLE, index, selection, form)
+            provider.artifacts[123] = AppSyncBlogWriteRequest(io.github.littlesurvival.dto.value.BlogId(123),
+                AppSyncJournalDefaults.checkpointTitle(checkpoint.checkpointId), AppSyncV3DocumentCodec().encodeCheckpoint(checkpoint), selection, form)
+            val recovery = SqlDelightAppSyncRecoveryStore(db)
+            val blogs = SqlDelightAppSyncRemoteBlogStore(db).also { it.saveClassId(account, selection.classId) }
+            val starter = AppSyncNativeJournalStarter(db, store, recovery, state, activator(), { now }, { true })
+            return provider to AppSyncNativeRecoveryContinuation(provider, store, recovery, blogs, activator(), { now }, { true }, starter)
+        }
         fun retainJournalHistory(count: Int): List<String> {
             val recovery = SqlDelightAppSyncRecoveryStore(db)
             val cloud = AppSyncCanonicalCloudPlan.Ready(verified(), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
