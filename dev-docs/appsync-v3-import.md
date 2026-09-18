@@ -269,3 +269,15 @@ SQLite／記憶體 provider 整合回歸涵蓋 ambiguous event 的凍結、分�
 canonical operation 與 delete proof 完全相等才去重；保留原始第一筆來源供既有 receipts 流程
 使用。不同 portable value、時間、身分、因果或刪除授權仍是 IdentityCollision；不同的
 Excluded／NoOp 來源不因同樣沒有 materialized 值而獲准合併。
+
+
+## 回退 checkpoint 的欄位來源轉換
+
+`AppSyncSanitizedV2ProjectionExporter` 將 canonical checkpoint 的每個欄位 winner、relation
+和 tombstone 對應回 sanitized v2 resolved entity。它先驗證整份 checkpoint，再轉換唯一來源
+操作，直接重建原欄位來源關係，不重播 compacted winners，也不將它們誤當連續 journal。
+轉換結果重新通過 canonical projection importer，canonical bytes 必須與輸入完全相等，
+因此 coverage、operation identity、因果、欄位勝出關係及 delete proof 都不能遺失。
+
+這是純轉換；尚未接入回退 checkpoint 的 snapshot、封套、持久化 session、發布與啟用流程。
+回退模式目前仍跳過 checkpoint cadence，後續需完成上述路徑才能宣稱歷史保留可收斂。
