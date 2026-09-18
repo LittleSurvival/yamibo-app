@@ -225,3 +225,17 @@ retirementDiscoveryIssues，使 canonical planner 與 reader cohort gate 拒絕�
 
 回歸覆蓋清單漏列但仍可直接讀取的 root/checkpoint、最新 root 真正遺失但舊 native journal
 尚存、v2 root fingerprint 不符，以及有效基底之外還存在缺失 checkpoint 的情況。
+
+
+## 多段回退恢復驗證
+
+新增含 300 個歷史 replica coverage 的資料，使用 4096 字元的最終 provider body 預算，並明確
+要求至少產生三段。第二段寫入已成功但回應遺失，隨後探索失敗；此時只有已讀回的一段算完成，
+session 保持 PublishingSegments，來源仍 pending。重新建立 store／publisher／coordinator 並
+到達持久化 deadline 後，探索找回已存在的段，沿用原 4096 設定（即使新物件傳入 8192）。
+逐段發布順序必須由尾至首，每段只 POST 一次，再發布 root 與 index；後續本機編輯仍 pending。
+
+正式 remote loader 完整讀回的 journal 必須與 frozen payload 相同。移除中間段回傳 Retryable；
+修改 chunk 並使該段指紋自洽，仍會因整體 envelope 驗證不符而拒絕，不能產生部分 journal。
+還原後重新探索可讀回原內容。此測試使用記憶體 provider 與 SQLite、模擬元件重建；不代表
+Android process death、重開機、實際網路或跨平台驗收已完成。

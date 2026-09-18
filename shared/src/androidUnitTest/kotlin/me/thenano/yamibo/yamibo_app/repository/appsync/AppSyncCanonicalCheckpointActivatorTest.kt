@@ -277,10 +277,12 @@ class AppSyncCanonicalCheckpointActivatorTest {
 
     private fun Fixture.runFallback(provider: AppSyncV3SegmentPublisherTest.Provider, id: String,
         canWrite: Boolean = true, cloud: AppSyncCanonicalCloudPlan.Ready = AppSyncCanonicalCloudPlan.Ready(
-            verified(), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())) = kotlinx.coroutines.runBlocking {
+            verified(), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList()),
+        target: Int = AppSyncPayloadBudget.DEFAULT_TARGET_CHARS) = kotlinx.coroutines.runBlocking {
         val recovery = SqlDelightAppSyncRecoveryStore(db)
         val selection = AppSyncBlogClassSelection.Existing(io.github.littlesurvival.dto.value.BlogClassId(7))
-        val publisher = AppSyncSanitizedV2SegmentPublisher(provider, recovery, { now }, canWrite = { canWrite },
+        val publisher = AppSyncSanitizedV2SegmentPublisher(provider, recovery, { now },
+            codec = AppSyncSegmentEnvelopeCodec(AppSyncPayloadBudget(target)), canWrite = { canWrite },
             discover = AppSyncV3ArtifactReconciler(provider, selection.classId)::discover)
         val committer = AppSyncSanitizedV2IndexCommitter(provider, recovery, publisher, { now }, { canWrite })
         AppSyncSanitizedV2CommitCoordinator(committer, recovery, activator(), { now }, { canWrite })
@@ -292,6 +294,76 @@ class AppSyncCanonicalCheckpointActivatorTest {
         val cloud = AppSyncCanonicalCloudPlan.Ready(verified(), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
         val starter = AppSyncNativeJournalStarter(db, store, recovery, state, activator(), { now }, { true }, sanitizedV2Fallback = true)
         return recovery to starter.startBlocking(account, cloud).getOrThrow()
+    }
+
+    @Test fun multiSegmentFallbackRecoversLostMiddleResponseAndRejectsMissingOrCorruptLinks() = fixture {
+        val first = append("20")
+        val base = checkpoint.copy(checkpointId = "large-history-base", coverage = (1..300).associate {
+            ("history-$it".encodeUtf8().sha256().hex() + ":epoch") to it.toLong()
+        })
+        val proof = verified(base)
+        val cloud = AppSyncCanonicalCloudPlan.Ready(proof, AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
+        val recovery = SqlDelightAppSyncRecoveryStore(db)
+        val starter = AppSyncNativeJournalStarter(db, store, recovery, state, activator(), { now }, { true }, sanitizedV2Fallback = true)
+        val id = starter.startBlocking(account, cloud).getOrThrow()
+        val frozen = recovery.sanitizedV2Payload(id)
+        val session = assertNotNull(recovery.session(id))
+        val codec = AppSyncSegmentEnvelopeCodec(AppSyncPayloadBudget(4096))
+        val count = codec.split(frozen, account.value, AppSyncSegmentPayloadKind.Journal,
+            recovery.nativePayload(id).identity, session.generationId).size
+        assertTrue(count >= 3, "Fixture must cross multiple segment boundaries")
+        val provider = nativePublishingEnvironment().first
+        provider.artifacts[123] = assertNotNull(provider.artifacts[123]).copy(
+            title = AppSyncJournalDefaults.checkpointTitle(base.checkpointId), message = AppSyncV3DocumentCodec().encodeCheckpoint(base))
+        provider.artifacts[124] = assertNotNull(provider.artifacts[124]).copy(message = AppSyncIndexEnvelopeCodec().encode(
+            AppSyncIndexPayload(account, checkpoints = listOf(AppSyncIndexCheckpointReference(base.checkpointId, 123, proof.fingerprint)),
+                updatedAtEpochMillis = now)))
+        val originalCheckpoint = provider.artifacts[123]
+        provider.timeoutAt = 2
+        provider.storeTimedOut = true
+        provider.onList = { if (provider.posts.size == 2) provider.listFailureAt = 1 }
+        assertIs<AppSyncSegmentedJournalCommitResult.Retryable>(runFallback(provider, id, cloud = cloud, target = 4096))
+        assertEquals(2, provider.posts.size)
+        assertEquals(1, recovery.segmentWrites(id).count { it.verifiedFingerprint != null })
+        assertEquals(AppSyncRecoveryPhase.PublishingSegments, recovery.session(id)?.phase)
+        assertFalse(assertNotNull(recovery.session(id)).indexCommitted)
+        assertEquals(listOf(first), store.pendingOperations())
+        val later = append("22")
+        provider.onList = {}
+        provider.listFailureAt = null
+        provider.timeoutAt = null
+        now = assertNotNull(recovery.session(id)?.nextRetryAtEpochMillis)
+        assertIs<AppSyncSegmentedJournalCommitResult.Verified>(runFallback(provider, id, cloud = cloud, target = 8192))
+        assertEquals(4096, recovery.nativeSegmentConfiguration(id)?.targetChars)
+        assertEquals(count + 2, provider.posts.size)
+        val segments = provider.posts.filter { it.title.startsWith(AppSyncJournalDefaults.SEGMENT_TITLE_PREFIX) }
+        assertEquals((count - 1 downTo 0).toList(), segments.map { codec.decodeSegment(it.message).getOrThrow().index })
+        assertTrue(segments.all { it.message.length <= 4096 })
+        assertEquals(frozen, recovery.sanitizedV2Payload(id))
+        assertEquals(listOf(later), store.pendingOperations())
+        assertEquals(22, preferences.values["novelreadersettings.fontsize"])
+        assertEquals(originalCheckpoint, provider.artifacts[123])
+        val remote = YamiboAppSyncJournalRemote(provider, SqlDelightAppSyncRemoteBlogStore(db), nowMillis = { now })
+        fun load() = kotlinx.coroutines.runBlocking { remote.loadJournals(account, true) }
+        val loaded = assertIs<AppSyncJournalLoadResult.Success>(load())
+        assertTrue(loaded.retirementDiscoveryIssues.isEmpty())
+        val expected = assertIs<AppSyncJournalValidation.Valid>(AppSyncJournalEnvelopeCodec().validate(frozen)).envelope.payload
+        assertEquals(expected, loaded.journals.single().payload)
+        assertIs<AppSyncCanonicalCloudPlan.Ready>(AppSyncCanonicalCloudPlanner().prepare(account, assertNotNull(store.installation()), loaded))
+        val middleId = assertNotNull(recovery.segmentWrites(id).single { it.segmentIndex == count / 2 }.blogId).toInt()
+        val middle = assertNotNull(provider.artifacts.remove(middleId))
+        assertIs<AppSyncJournalLoadResult.RetryableFailure>(load())
+        val segment = codec.decodeSegment(middle.message).getOrThrow()
+        val changedChunk = (if (segment.chunk.first() == 'A') "B" else "A") + segment.chunk.drop(1)
+        provider.artifacts[middleId] = middle.copy(message = codec.encodeSegment(segment.copy(chunk = changedChunk,
+            chunkFingerprint = me.thenano.yamibo.yamibo_app.repository.appsync.domain.stableAppSyncFingerprint(changedChunk))))
+        val corrupted = assertIs<AppSyncJournalLoadResult.Success>(load())
+        assertTrue(corrupted.retirementDiscoveryIssues.isNotEmpty())
+        assertTrue(corrupted.journals.isEmpty())
+        assertIs<AppSyncCanonicalCloudPlan.NeedsAttention>(AppSyncCanonicalCloudPlanner().prepare(account, assertNotNull(store.installation()), corrupted))
+        provider.artifacts[middleId] = middle
+        assertEquals(expected, assertIs<AppSyncJournalLoadResult.Success>(load()).journals.single().payload)
+        assertEquals(listOf(later), store.pendingOperations())
     }
 
     @Test fun fallbackCoordinatorCompletesPublicationActivationAndReceiptRetryWithoutSecondTrigger() = fixture {
