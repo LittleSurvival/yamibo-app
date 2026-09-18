@@ -21,3 +21,9 @@ published-through 必須與 canonical 本機 coverage 的自身 replica 一致�
 回讀過程的 NotLoggedIn／FormExpired 會直接回報 FormExpired，包括 preflight 與 submit 後 reader；不將明確的登入失效混入一般未知重試。重放準備時也改用已建立的 sequence map 查找既有序號，避免每個重放來源再掃描完整 journal。
 
 既有 best-effort index 發布路徑現在排除 `candidate:` journal 與 `checkpoint-candidate:` checkpoint 實體快取別名。這些列仍保留供 discovery／衝突判定使用，不能作為 replica key 或 checkpoint ID 發布。回歸測試同時涵蓋一般 checkpoint 與 checkpoint root，並確認發布後實體證據仍在本機。
+
+Production engine 現在把完整 cloud planner 通過的 indexed canonical checkpoint、native journal 操作及 legacy 操作交給交易式 activator。套用時重讀本機 outbox，保留尚未發布的編輯，不把本機 overlay 當成遠端 coverage，也不提前 acknowledged。此階段成功仍明確呈現「已套用 canonical 資料，v3 發布尚未啟用」，不宣告 Converged；既有 checkpoint／retirement 維護只在 Converged 執行。已有 canonical head 卻只讀到空白／legacy cloud 時，也不進入舊版 reduction、compaction 或空雲端 force push。
+
+同步前的 snapshot 安全稽核使用 canonical typed 值比較，不以已移除的 legacy provenance 判斷資料缺漏。只補存在於本機的 live rows，不從缺少本機列推導刪除；修復操作與 canonical head 在同一交易中保存。Essential 值無法正規化時，保留資料並回報稽核失敗。
+
+Migration 46 在 canonical head 增加外部設定待重整標記。完整套用設為待重整，local command 保存 head 時保留標記。偏好設定重整失敗或程序中斷後，snapshot 稽核前先從最新 head 重建設定 mirror 並重試；成功才清除標記，避免把未套用的舊偏好值寫成新操作。重整已完成時不重放舊 mirror，以保留後續使用者編輯。

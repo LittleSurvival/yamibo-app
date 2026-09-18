@@ -3,8 +3,14 @@ SELECT * FROM AppSyncCanonicalState WHERE singletonId = 1;
 
 putState:
 INSERT OR REPLACE INTO AppSyncCanonicalState(
-    singletonId, accountBinding, checkpointId, canonicalPayload, canonicalSha256
-) VALUES (1, ?, ?, ?, ?);
+    singletonId, accountBinding, checkpointId, canonicalPayload, canonicalSha256, settingsReconciliationPending
+) VALUES (1, ?, ?, ?, ?, COALESCE((SELECT settingsReconciliationPending FROM AppSyncCanonicalState WHERE singletonId = 1), 1));
+
+markSettingsPending:
+UPDATE AppSyncCanonicalState SET settingsReconciliationPending = 1 WHERE singletonId = 1;
+
+markSettingsReconciled:
+UPDATE AppSyncCanonicalState SET settingsReconciliationPending = 0 WHERE singletonId = 1;
 
 clearState:
 DELETE FROM AppSyncCanonicalState;

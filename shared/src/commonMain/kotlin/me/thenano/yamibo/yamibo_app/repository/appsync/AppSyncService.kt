@@ -342,6 +342,9 @@ class AppSyncService(
     private val canonicalState = me.thenano.yamibo.yamibo_app.repository.appsync.engine.SqlDelightCanonicalCheckpointState(
         db, DatabaseSyncDomainMaterializer(db, settingsStore),
     )
+    private val canonicalActivator = me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncCanonicalCheckpointActivator(
+        db, store, canonicalState, DatabaseSyncDomainMaterializer(db, settingsStore), nowMillis,
+    )
     private val domainState = SqlDelightSyncDomainStateAdapter(
         db = db,
         materializer = DatabaseSyncDomainMaterializer(db, settingsStore),
@@ -404,6 +407,10 @@ class AppSyncService(
         domainState = domainState,
         nowMillis = nowMillis,
         ownerId = { SyncIdentityGenerator.writerNonce().value },
+        activateCanonical = { plan ->
+            canonicalActivator.activate(plan.checkpoint, plan.canonicalOperations, plan.legacyOperations)
+        },
+        hasCanonicalState = { db.appSyncCanonicalStateQueries.getState().executeAsOneOrNull() != null },
     )
     private val manualOverride = ManualSyncOverrideCoordinator(
         store = store,
@@ -1189,6 +1196,32 @@ class AppSyncService(
                 "Local data safety audit is unavailable because the snapshot source is not configured",
             )
         return try {
+            // Canonical activation removes legacy provenance. Audit against the canonical
+            // head and save repairs with that head atomically, or every row looks missing.
+            if (db.appSyncCanonicalStateQueries.getState().executeAsOneOrNull() != null) {
+                check(canonicalState.reconcileSettings(binding.value)) {
+                    "Canonical settings reconciliation requires retry before local audit"
+                }
+                return db.transactionWithResult {
+                    val head = requireNotNull(canonicalState.read(binding.value))
+                    val snapshot = source.createAppSyncSnapshot()
+                    val drafts = migrationPlanner.plan(snapshot)
+                    val repairs = localProjectionRepairPlanner.plan(drafts, head)
+                    if (repairs.isNotEmpty()) {
+                        store.appendLocalOperations(binding, repairs, store.causalContext(), nowMillis(),
+                            SyncOperationOrigin.Migration) { operations ->
+                            check(canonicalState.recordLocalBatch(binding.value, operations) is
+                                me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncCanonicalLocalUpdate.Recorded) {
+                                "Canonical local projection repair needs attention"
+                            }
+                        }
+                    }
+                    check(localProjectionRepairPlanner.plan(drafts, requireNotNull(canonicalState.read(binding.value))).isEmpty()) {
+                        "Canonical local projection still differs after safe repair"
+                    }
+                    LocalProjectionRepairResult.Ready(snapshot, repairs.size)
+                }
+            }
             val captured = db.transactionWithResult {
                 val snapshot = source.createAppSyncSnapshot()
                 Triple(snapshot, migrationPlanner.plan(snapshot), domainState.currentState())

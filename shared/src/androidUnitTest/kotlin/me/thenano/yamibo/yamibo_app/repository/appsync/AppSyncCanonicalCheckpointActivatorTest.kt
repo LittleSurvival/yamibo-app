@@ -13,6 +13,112 @@ import me.thenano.yamibo.yamibo_app.store.appsync.*
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 
 class AppSyncCanonicalCheckpointActivatorTest {
+    @Test fun preferenceReconciliationRetainsReferencedDeletionProofs() = fixture {
+        val delete = AppSyncCanonicalOperation("remote-device", "remote-epoch", 1, 1,
+            "novelreadersettings.fontsize", 1, SyncOperationKind.Delete, 15,
+            SyncOperationOrigin.UserAction, "proof", emptyMap(), emptyMap())
+        val head = checkpoint.copy(coverage = mapOf("remote-device:remote-epoch" to 1L),
+            entities = listOf(AppSyncCanonicalProjection(1, delete.entityId, 1, tombstone = delete)),
+            authorizations = listOf(AppSyncCanonicalDeleteProof("proof", 1, "settings", 1, 100)))
+        preferences.values[delete.entityId] = 18
+        state.replace(account.value, head)
+        assertTrue(state.reconcileSettings(account.value))
+        assertFalse(delete.entityId in preferences.values)
+        assertEquals(0L, db.appSyncCanonicalStateQueries.getState().executeAsOne().settingsReconciliationPending)
+    }
+
+    @Test fun failedPreferenceReconciliationSurvivesLocalEditsAndResumesFromLatestHead() = fixture {
+        append()
+        preferences.fail = true
+        assertFalse(assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(verified())).settingsReconciled)
+        assertEquals(1L, db.appSyncCanonicalStateQueries.getState().executeAsOne().settingsReconciliationPending)
+        val edit = append("22")
+        assertIs<AppSyncCanonicalLocalUpdate.Recorded>(state.recordLocalBatch(account.value, listOf(edit)))
+        assertEquals(1L, db.appSyncCanonicalStateQueries.getState().executeAsOne().settingsReconciliationPending)
+        preferences.fail = false
+        val restarted = SqlDelightCanonicalCheckpointState(db, DatabaseSyncDomainMaterializer(db, preferences))
+        assertTrue(restarted.reconcileSettings(account.value))
+        assertEquals(22, preferences.values["novelreadersettings.fontsize"])
+        assertEquals(0L, db.appSyncCanonicalStateQueries.getState().executeAsOne().settingsReconciliationPending)
+        // Once reconciled, a later ordinary preference edit must not replay an old mirror.
+        preferences.values["novelreadersettings.fontsize"] = 26
+        assertTrue(restarted.reconcileSettings(account.value))
+        assertEquals(26, preferences.values["novelreadersettings.fontsize"])
+    }
+
+    @Test fun canonicalSnapshotAuditUsesTypedFieldsAndRepairsOnlyActualChanges() = fixture {
+        val pending = append()
+        activator().activate(verified())
+        val planner = LocalProjectionRepairPlanner()
+        val draft = LocalSyncOperationDraft(pending.domainId, pending.entityId, kind = SyncOperationKind.Put,
+            fields = pending.fields + mapOf("value" to "018", "cache" to "local-only"))
+        assertTrue(planner.plan(listOf(draft), assertNotNull(state.read(account.value))).isEmpty())
+        val edited = draft.copy(fields = draft.fields + ("value" to "22"))
+        val repairs = planner.plan(listOf(edited), assertNotNull(state.read(account.value)))
+        assertEquals(1, repairs.size)
+        store.appendLocalOperations(account, repairs, store.causalContext(), 25, SyncOperationOrigin.Migration) {
+            assertIs<AppSyncCanonicalLocalUpdate.Recorded>(state.recordLocalBatch(account.value, it))
+        }
+        assertTrue(planner.plan(listOf(edited), assertNotNull(state.read(account.value))).isEmpty())
+        assertEquals(2, store.pendingOperations().size)
+        assertTrue(db.appSyncOperationQueries.getResolvedEntities().executeAsList().isEmpty())
+    }
+
+    @Test fun canonicalSnapshotAuditRejectsInvalidEssentialValuesAndDoesNotInferMissingRowDeletes() = fixture {
+        val pending = append()
+        activator().activate(verified())
+        val planner = LocalProjectionRepairPlanner()
+        val head = assertNotNull(state.read(account.value))
+        val invalid = LocalSyncOperationDraft(pending.domainId, pending.entityId, kind = SyncOperationKind.Put,
+            fields = pending.fields + ("value" to "not-an-integer"))
+        assertFailsWith<IllegalArgumentException> { planner.plan(listOf(invalid), head) }
+        assertTrue(planner.plan(emptyList(), head).isEmpty())
+        assertEquals(head, state.read(account.value))
+        assertEquals(listOf(pending), store.pendingOperations())
+    }
+
+    @Test fun engineActivatesVerifiedCanonicalCloudAndPreservesPendingEdits() = fixture {
+        val pending = append()
+        val cloud = AppSyncJournalLoadResult.Success(emptyList(), verifiedCanonicalCheckpoints = listOf(verified()))
+        val result = synchronize(cloud)
+        assertIs<OperationSyncResult.PausedProvider>(result)
+        assertTrue(result.reason.contains("Canonical state applied"))
+        assertNotNull(state.read(account.value))
+        assertEquals(18, preferences.values["novelreadersettings.fontsize"])
+        assertEquals(listOf(pending), store.pendingOperations())
+        assertTrue(store.verifiedCheckpoints().single().coverage.asStableMap().isEmpty())
+    }
+
+    @Test fun engineCannotFallBackToLegacyOrEmptyCloudAfterCanonicalActivation() = fixture {
+        append()
+        assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(verified()))
+        val before = state.read(account.value)
+        val outbox = store.allOutboxOperations()
+        val result = assertIs<OperationSyncResult.PausedProvider>(synchronize(AppSyncJournalLoadResult.Success(emptyList())))
+        assertTrue(result.reason.contains("verified v3 cloud base"))
+        assertEquals(before, state.read(account.value))
+        assertEquals(outbox, store.allOutboxOperations())
+    }
+
+    @Test fun engineDoesNotActivateInvalidCloudOrReportFailedSettingsAsApplied() = fixture {
+        val pending = append()
+        val invalid = AppSyncJournalLoadResult.Success(emptyList(), verifiedCanonicalCheckpoints = listOf(verified()),
+            canonicalReadIssues = listOf("corrupt journal"))
+        assertTrue(assertIs<OperationSyncResult.PausedProvider>(synchronize(invalid)).reason.contains("validation"))
+        assertNull(state.read(account.value))
+        assertTrue(store.verifiedCheckpoints().isEmpty())
+        store.updateState(AppSyncInstallationState.Active)
+        preferences.fail = true
+        val valid = invalid.copy(canonicalReadIssues = emptyList())
+        assertTrue(assertIs<OperationSyncResult.PausedProvider>(synchronize(valid)).reason.contains("settings reconciliation"))
+        assertNotNull(state.read(account.value))
+        assertEquals(listOf(pending), store.pendingOperations())
+        store.updateState(AppSyncInstallationState.Active)
+        preferences.fail = false
+        assertTrue(assertIs<OperationSyncResult.PausedProvider>(synchronize(valid)).reason.contains("Canonical state applied"))
+        assertEquals(18, preferences.values["novelreadersettings.fontsize"])
+    }
+
     @Test fun laterNativeJournalAndPendingEditsCommitTogetherWithoutExpandingRemoteCheckpointCoverage() = fixture {
         val pending = append()
         val device = SyncDeviceId("remote-device")
@@ -67,6 +173,22 @@ class AppSyncCanonicalCheckpointActivatorTest {
         val preferences = Preferences()
         val materializer = DatabaseSyncDomainMaterializer(db, preferences)
         val state = SqlDelightCanonicalCheckpointState(db, materializer)
+        fun synchronize(cloud: AppSyncJournalLoadResult.Success): OperationSyncResult = kotlinx.coroutines.runBlocking {
+            val remote = object : AppSyncJournalRemote {
+                override suspend fun loadJournals(accountBinding: SyncAccountBinding, forceDiscovery: Boolean) = cloud
+                override suspend fun publishOwnJournal(payload: AppSyncJournalPayload, expectedFingerprint: String?,
+                    formHash: io.github.littlesurvival.dto.value.FormHash): AppSyncJournalPublishResult =
+                    error("Canonical reader must not publish a legacy journal")
+            }
+            val legacy = object : SyncDomainStateAdapter {
+                override fun currentState(): Map<SyncEntityKey, ResolvedSyncEntity> = error("Legacy state read")
+                override fun apply(result: OperationReductionResult) = error("Legacy state write")
+            }
+            OperationSyncEngine(store, remote, legacy, nowMillis = { 20 }, ownerId = { "canonical-reader-test" },
+                activateCanonical = { activator().activate(it.checkpoint, it.canonicalOperations, it.legacyOperations) },
+                hasCanonicalState = { db.appSyncCanonicalStateQueries.getState().executeAsOneOrNull() != null })
+                .synchronize(account, io.github.littlesurvival.dto.value.FormHash("test"), detectEmptyCloud = true)
+        }
         fun activator(operations: AppSyncOperationStore = store) =
             AppSyncCanonicalCheckpointActivator(db, operations, state, materializer, { 20 })
         fun append(value: String = "18") = store.appendLocalOperation(account,

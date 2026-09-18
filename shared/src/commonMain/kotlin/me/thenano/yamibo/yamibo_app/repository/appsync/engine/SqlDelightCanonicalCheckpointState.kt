@@ -58,6 +58,27 @@ internal class SqlDelightCanonicalCheckpointState(
         return codec.decode(expectedAccount, row.checkpointId, bytes)
     }
 
+    /** Resume external preference reconciliation from the latest head before snapshot audit.
+     * Keep the marker across local edits and process death; never replay a stale settings mirror.
+     */
+    fun reconcileSettings(expectedAccount: String): Boolean = try {
+        db.transactionWithResult {
+            val row = db.appSyncCanonicalStateQueries.getState().executeAsOneOrNull()
+                ?: return@transactionWithResult true
+            require(row.accountBinding == expectedAccount) { "Canonical settings account mismatch" }
+            if (row.settingsReconciliationPending == 0L) return@transactionWithResult true
+            val current = requireNotNull(read(expectedAccount))
+            val settings = current.entities.filter { it.domainId == 1 }
+            val proofIds = settings.flatMap { it.fields.values + listOfNotNull(it.relation, it.tombstone) }
+                .mapNotNullTo(hashSetOf()) { it.authorizationId }
+            materializer.applyCanonicalProjections(expectedAccount,
+                current.copy(entities = settings, authorizations = current.authorizations.filter { it.authorizationId in proofIds }))
+            materializer.reconcileProjections()
+            db.appSyncCanonicalStateQueries.markSettingsReconciled()
+            true
+        }
+    } catch (_: Exception) { false }
+
     /** Replaces local materialized data and provenance in one SQLite transaction.
      * External preferences must be reconciled after the enclosing engine transaction commits.
      * Returns false for an identical already-applied checkpoint without touching local edits.
@@ -84,6 +105,7 @@ internal class SqlDelightCanonicalCheckpointState(
                 materializer.applyCanonicalProjections(expectedAccount, checkpoint)
                 db.appSyncCanonicalStateQueries.putState(expectedAccount, checkpoint.checkpointId,
                     bytes.toByteArray(), bytes.sha256().hex())
+                db.appSyncCanonicalStateQueries.markSettingsPending()
             }
             changed = true
         }

@@ -269,6 +269,8 @@ internal class OperationSyncEngine(
         authorizationLookup = store::loadBulkDeleteAuthorization,
     ),
     private val legacyClassifier: AppSyncLegacyOperationClassifier = AppSyncLegacyOperationClassifier(),
+    private val activateCanonical: ((AppSyncCanonicalCloudPlan.Ready) -> AppSyncCanonicalActivationResult)? = null,
+    private val hasCanonicalState: () -> Boolean = { false },
 ) {
     private val processMutex = Mutex()
     private val compaction = CompactionCoordinator(store, nowMillis, inactiveAfterMillis)
@@ -399,9 +401,25 @@ internal class OperationSyncEngine(
                     store.rotateDeviceEpoch(accountBinding, AppSyncInstallationState.RebootstrapRequired)
                     return OperationSyncResult.RebootstrapRequired("The device journal is owned by another restored installation")
                 }
+                val reason = when (plan) {
+                    is AppSyncCanonicalCloudPlan.NeedsAttention -> "Canonical cloud validation: ${plan.reason}"
+                    is AppSyncCanonicalCloudPlan.Ready -> when (val activation = activateCanonical?.invoke(plan)) {
+                        null -> "Canonical cloud state requires v3 activation"
+                        is AppSyncCanonicalActivationResult.NeedsAttention ->
+                            "Canonical activation: ${activation.reason} (${activation.mergeFailure})"
+                        is AppSyncCanonicalActivationResult.Applied -> if (!activation.settingsReconciled)
+                            "Canonical state committed; settings reconciliation requires retry"
+                        else "Canonical state applied; v3 publication is not yet enabled"
+                    }
+                }
                 store.updateState(AppSyncInstallationState.PausedProvider)
-                return OperationSyncResult.PausedProvider(if (plan is AppSyncCanonicalCloudPlan.NeedsAttention)
-                    "Canonical cloud validation: ${plan.reason}" else "Canonical cloud state requires v3 activation")
+                return OperationSyncResult.PausedProvider(reason)
+            }
+            // A later partial discovery or removed v3 artifact must not send the canonical
+            // installation through legacy reduction, compaction or an empty-cloud force push.
+            if (hasCanonicalState()) {
+                store.updateState(AppSyncInstallationState.PausedProvider)
+                return OperationSyncResult.PausedProvider("Canonical state requires a verified v3 cloud base")
             }
             if (
                 detectEmptyCloud &&

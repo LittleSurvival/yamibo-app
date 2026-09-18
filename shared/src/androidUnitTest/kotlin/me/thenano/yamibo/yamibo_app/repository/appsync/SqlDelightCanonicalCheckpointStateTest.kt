@@ -44,7 +44,10 @@ class SqlDelightCanonicalCheckpointStateTest {
             driver.execute(null, "CREATE TABLE retained (value TEXT NOT NULL)", 0)
             driver.execute(null, "INSERT INTO retained VALUES ('sentinel')", 0)
             Database.Schema.migrate(driver, 45, 46)
-            assertNull(Database(driver).appSyncCanonicalStateQueries.getState().executeAsOneOrNull())
+            val count = driver.executeQuery(null, "SELECT COUNT(*) FROM AppSyncCanonicalState", { cursor ->
+                cursor.next(); app.cash.sqldelight.db.QueryResult.Value(cursor.getLong(0))
+            }, 0).value
+            assertEquals(0L, count)
             val result = driver.executeQuery(null, "SELECT value FROM retained", { cursor ->
                 cursor.next(); app.cash.sqldelight.db.QueryResult.Value(cursor.getString(0))
             }, 0).value
@@ -109,6 +112,27 @@ class SqlDelightCanonicalCheckpointStateTest {
         assertFailsWith<IllegalArgumentException> { store.read(checkpoint.accountBinding) }
         assertFailsWith<IllegalArgumentException> { store.replace(checkpoint.accountBinding, checkpoint.copy(checkpointId = "next")) }
         assertTrue(db.localFavoriteItemQueries.getAll().executeAsList().isNotEmpty())
+    }
+
+    @Test fun migration46PreservesCanonicalEvidenceAndRequiresPreferenceReconciliation() {
+        JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).use { driver ->
+            Database.Schema.migrate(driver, 45, 46)
+            driver.execute(null, "INSERT INTO AppSyncCanonicalState VALUES (1, 'account', 'checkpoint', X'010203', 'digest')", 0)
+            Database.Schema.migrate(driver, 46, 47)
+            val queries = Database(driver).appSyncCanonicalStateQueries
+            val row = queries.getState().executeAsOne()
+            assertEquals("account", row.accountBinding)
+            assertEquals("checkpoint", row.checkpointId)
+            assertContentEquals(byteArrayOf(1, 2, 3), row.canonicalPayload)
+            assertEquals("digest", row.canonicalSha256)
+            assertEquals(1L, row.settingsReconciliationPending)
+            queries.markSettingsReconciled()
+            queries.putState(row.accountBinding, "next", row.canonicalPayload, row.canonicalSha256)
+            assertEquals(0L, queries.getState().executeAsOne().settingsReconciliationPending)
+            queries.markSettingsPending()
+            queries.putState(row.accountBinding, "another", row.canonicalPayload, row.canonicalSha256)
+            assertEquals(1L, queries.getState().executeAsOne().settingsReconciliationPending)
+        }
     }
 
     @Test fun enclosingEngineTransactionRollbackAlsoRestoresCanonicalState() = database { db, store ->

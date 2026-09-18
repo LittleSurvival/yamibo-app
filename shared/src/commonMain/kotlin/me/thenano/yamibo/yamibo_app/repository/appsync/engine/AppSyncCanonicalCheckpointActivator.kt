@@ -80,7 +80,7 @@ internal class AppSyncCanonicalCheckpointActivator(
         val ready = requireNotNull(prepared)
         // Preferences are external to SQLite. A failure here must not be reported as rollback;
         // replay will reconcile again after finding the already committed canonical state.
-        val reconciled = try { materializer.reconcileProjections(); true } catch (_: Exception) { false }
+        val reconciled = state.reconcileSettings(verified.document.accountBinding)
         return AppSyncCanonicalActivationResult.Applied(pendingCount, ready.excludedCount, ready.noOpCount, reconciled)
     }
 }
