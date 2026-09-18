@@ -53,8 +53,8 @@ internal class AppSyncV3CommitCoordinator(
         cloud: AppSyncCanonicalCloudPlan.Ready?): AppSyncSegmentedJournalCommitResult {
         var session = requireNotNull(recovery.session(sessionId))
         val checkpoint = session.mode == AppSyncRecoveryMode.SegmentedCheckpoint
-        if (checkpoint && checkpointActivator == null)
-            return AppSyncSegmentedJournalCommitResult.Terminal("Native checkpoint activation is not configured")
+        if ((checkpoint || cloud != null) && checkpointActivator == null)
+            return AppSyncSegmentedJournalCommitResult.Terminal("Native canonical activation is not configured")
         if (session.phase in setOf(AppSyncRecoveryPhase.Classifying, AppSyncRecoveryPhase.Staging)) {
             recovery.startSegmentedJournal(sessionId, nowMillis())
             session = requireNotNull(recovery.session(sessionId))
@@ -70,8 +70,10 @@ internal class AppSyncV3CommitCoordinator(
             }
         }
         require(recovery.usesNativeTransport(sessionId))
-        if (checkpoint) {
-            when (val result = requireNotNull(checkpointActivator).activateRecovery(recovery, sessionId, cloud)) {
+        if (checkpoint || cloud != null) {
+            val activation = if (checkpoint) requireNotNull(checkpointActivator).activateRecovery(recovery, sessionId, cloud)
+                else requireNotNull(checkpointActivator).activateJournalRecovery(recovery, sessionId, requireNotNull(cloud))
+            when (val result = activation) {
                 is AppSyncCanonicalActivationResult.Applied -> if (!result.settingsReconciled)
                     return AppSyncSegmentedJournalCommitResult.Retryable("Native settings reconciliation is pending")
                 is AppSyncCanonicalActivationResult.NeedsAttention ->

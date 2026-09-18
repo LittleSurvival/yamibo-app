@@ -67,3 +67,7 @@ v2 segment publisher 與 v2 coordinator 在入口即拒絕 transport 3，包括�
 Native checkpoint coordinator 現可接收本次驗證完成的 cloud plan。`AppSyncCanonicalRecoveryPlanner` 比較凍結 checkpoint 與最新雲端 base，保留兩者各自的 index 驗證證據，允許 index 版本不同；不把已壓縮的 winner 操作冒充為完整 journal。先檢查帳號、checkpoint ID／摘要、跨 checkpoint 的操作及 proof 衝突，再分別用雲端 journals 補齊候選。只有結果覆蓋凍結 checkpoint 與完整 cloud plan，且所有合格候選產生相同 canonical 內容，才選擇啟用 base。覆蓋不完整或內容矛盾時保留 session 與本機資料。
 
 啟用交易仍合併當下 outbox，並拒絕降低既有 canonical head 的任何 replica coverage。若選用較新的遠端 base，交易另外保存凍結 checkpoint 的原始 verified evidence，讓 recovery completion 可核對真正發布的 root；兩份證據都不擴張為本機 overlay coverage。設定失敗後仍以最新 cloud plan 重試，不重做已完成的遠端發布。此介面尚待 service 傳入最新 plan，writer 預設仍停用；本機 coverage 防退檢查本身不代表完成所有並行一致性或裝置驗收。
+
+Journal recovery 在 coordinator 收到 cloud plan 時，亦透過 canonical activator 執行。它先從持久化 index／frozen payload 重驗 writer 及來源，合併當次 cloud operations 與 frozen journal，拒絕同一操作 ID 或 proof ID 的不同內容，並在啟用交易內再次檢查 recovery 證據。雲端 checkpoint 的原始 coverage 仍單獨保存；本機 overlay 可包含後續編輯。設定尚未還原時不確認任何來源、不完成 session；成功後在另一筆交易重驗來源、canonical head 的完整性／coverage 與設定旗標，才只確認凍結來源並完成。已完成重試不重套設定。未提供 cloud plan 的低階 publication-only 呼叫仍保留既有行為；正式 service 必須傳入已驗證 plan 及 canonical activator，不能把 publication-only 確認當作完整同步。
+
+啟用前的必要 coverage 同時納入 frozen journal 的 observed、published-through、acknowledgement 及操作 causal context，避免只補齊 journal 自身 sequence 就遺漏已觀察的其他裝置歷史。缺少任何必要歷史時，projection、checkpoint evidence 與 outbox 確認均不變。回歸也確認重試間新增、且已觀察到雲端更新的本機編輯依因果順序勝出；它仍保持 pending，不會被先前 journal 的成功確認順帶標記。

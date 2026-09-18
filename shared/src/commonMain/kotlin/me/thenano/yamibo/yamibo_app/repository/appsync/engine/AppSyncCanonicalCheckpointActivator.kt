@@ -20,8 +20,9 @@ internal sealed interface AppSyncCanonicalActivationResult {
         val mergeFailure: AppSyncPendingMergeFailure? = null) : AppSyncCanonicalActivationResult
 }
 
-/** Atomically installs index-verified remote state plus still-local edits. Never acknowledges
- * local operations or claims their added coverage exists in the verified remote checkpoint.
+/** Atomically installs index-verified remote state plus still-local edits. Generic activation
+ * never acknowledges sources; journal recovery acknowledges only after settings reconciliation.
+ * Local overlay coverage is never attributed to the verified remote checkpoint.
  */
 internal class AppSyncCanonicalCheckpointActivator(
     private val db: Database,
@@ -31,6 +32,50 @@ internal class AppSyncCanonicalCheckpointActivator(
     private val nowMillis: () -> Long,
     private val merger: AppSyncCanonicalPendingMerge = AppSyncCanonicalPendingMerge(),
 ) {
+    /** Install the current cloud plus the frozen, index-verified journal before acknowledging
+     * its sources. External settings failure leaves the session resumable and unacknowledged.
+     */
+    fun activateJournalRecovery(recovery: SqlDelightAppSyncRecoveryStore, sessionId: String,
+        cloud: AppSyncCanonicalCloudPlan.Ready): AppSyncCanonicalActivationResult = try {
+        val session = requireNotNull(recovery.session(sessionId))
+        require(session.mode == AppSyncRecoveryMode.SegmentedJournal && recovery.usesNativeTransport(sessionId))
+        require(operations.installation()?.accountBinding == session.accountBinding)
+        if (session.phase == AppSyncRecoveryPhase.Completed && session.indexCommitted) {
+            AppSyncCanonicalActivationResult.Applied(operations.pendingOperations().count { it.accountBinding == session.accountBinding }, 0, 0, true)
+        } else {
+            val frozen = recovery.nativeJournalForActivation(sessionId)
+            require(cloud.checkpoint.document.accountBinding == session.accountBinding.value &&
+                cloud.canonicalOperations.accountBinding == session.accountBinding.value)
+            val allOperations = cloud.canonicalOperations.operations + frozen.document.block.operations
+            require(allOperations.groupBy { Triple(it.deviceId, it.deviceEpoch, it.sequence) }.values.all { it.distinct().size == 1 })
+            val allProofs = cloud.canonicalOperations.authorizations + frozen.document.block.authorizations
+            require(allProofs.groupBy { it.authorizationId }.values.all { it.distinct().size == 1 })
+            val block = AppSyncCanonicalOperationBlock(session.accountBinding.value, allOperations.distinct(), allProofs.distinct())
+            val required = frozen.document.observed.toMutableMap()
+            val ownReplica = "${frozen.document.deviceId}:${frozen.document.deviceEpoch}"
+            required[ownReplica] = maxOf(required[ownReplica] ?: 0L, frozen.document.lastSequence,
+                frozen.document.publishedThroughSequence ?: 0L)
+            for (coverage in frozen.document.acknowledgements.map { it.coverage } +
+                frozen.document.block.operations.map { it.causalContext }) {
+                for ((replica, sequence) in coverage) required[replica] = maxOf(required[replica] ?: 0L, sequence)
+            }
+            val result = activate(cloud.checkpoint, block, cloud.legacyOperations, requiredCoverage = required, beforeDatabaseActivation = {
+                require(recovery.nativeJournalForActivation(sessionId) == frozen)
+            })
+            if (result is AppSyncCanonicalActivationResult.Applied && result.settingsReconciled) {
+                db.transaction {
+                    require(recovery.nativeJournalForActivation(sessionId) == frozen)
+                    val row = requireNotNull(db.appSyncCanonicalStateQueries.getState().executeAsOneOrNull())
+                    require(row.settingsReconciliationPending == 0L)
+                    val head = requireNotNull(state.read(session.accountBinding.value))
+                    require(required.all { (replica, sequence) -> (head.coverage[replica] ?: 0L) >= sequence })
+                    recovery.activateCommittedSession(sessionId, nowMillis())
+                }
+            }
+            result
+        }
+    } catch (_: Exception) { AppSyncCanonicalActivationResult.NeedsAttention("Native journal activation could not complete") }
+
     /** Recovery remains ActivatingLocal until both the SQL projection and external settings
      * are installed. Re-entry rebuilds the overlay from current pending edits after a crash.
      */
@@ -62,6 +107,7 @@ internal class AppSyncCanonicalCheckpointActivator(
         remoteOperations: AppSyncCanonicalOperationBlock? = null,
         legacyRemoteOperations: List<SyncOperation> = emptyList(),
         additionalVerifiedCheckpoint: AppSyncVerifiedCanonicalCheckpoint? = null,
+        requiredCoverage: Map<String, Long> = emptyMap(),
         beforeDatabaseActivation: () -> Unit = {}): AppSyncCanonicalActivationResult {
         var prepared: AppSyncCanonicalPendingMergeResult.Ready? = null
         var failed: AppSyncCanonicalActivationResult.NeedsAttention? = null
@@ -92,6 +138,10 @@ internal class AppSyncCanonicalCheckpointActivator(
                     return@transaction
                 }
                 val ready = merged as AppSyncCanonicalPendingMergeResult.Ready
+                if (requiredCoverage.any { (replica, sequence) -> (ready.checkpoint.coverage[replica] ?: 0L) < sequence }) {
+                    failed = AppSyncCanonicalActivationResult.NeedsAttention("Canonical activation is missing required published history")
+                    return@transaction
+                }
                 val previous = state.read(checkpoint.accountBinding)
                 if (previous != null && previous.coverage.any { (replica, sequence) ->
                         (ready.checkpoint.coverage[replica] ?: 0L) < sequence }) {

@@ -14,6 +14,59 @@ import me.thenano.yamibo.yamibo_app.store.appsync.*
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 
 class AppSyncCanonicalCheckpointActivatorTest {
+    @Test fun journalRecoveryMergesOtherDeviceStateAndWaitsForSettingsBeforeAcknowledgingOnlyFrozenSources() = fixture {
+        val published = append()
+        val (recovery, id) = stageNativeJournal(published)
+        val latest = remoteCheckpoint(published)
+        val cloud = AppSyncCanonicalCloudPlan.Ready(verified(latest), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
+        preferences.fail = true
+        assertIs<AppSyncSegmentedJournalCommitResult.Retryable>(commitNative(recovery, id, cloud, 100))
+        assertEquals(AppSyncRecoveryPhase.ActivatingLocal, recovery.session(id)?.phase)
+        assertEquals(listOf(published), store.pendingOperations())
+        assertEquals(latest.entities, state.read(account.value)?.entities)
+        val later = append("22")
+        preferences.fail = false
+        val completed = assertIs<AppSyncSegmentedJournalCommitResult.Verified>(commitNative(
+            SqlDelightAppSyncRecoveryStore(db), id, cloud, assertNotNull(recovery.session(id)?.nextRetryAtEpochMillis)))
+        assertEquals(setOf(published.operationId.value), completed.acknowledgedOperationIds)
+        assertEquals(AppSyncRecoveryPhase.Completed, recovery.session(id)?.phase)
+        assertEquals(listOf(later), store.pendingOperations())
+        assertEquals(AppSyncOperationLifecycle.Acknowledged, store.allOutboxOperations().single { it.first == published }.second)
+        assertEquals(22, preferences.values["novelreadersettings.fontsize"])
+        assertEquals(latest.coverage, store.verifiedCheckpoints().single().coverage.asStableMap())
+        assertEquals(2L, state.read(account.value)?.coverage?.get(published.replicaKey.stableKey))
+        preferences.values["novelreadersettings.fontsize"] = 30
+        assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activateJournalRecovery(recovery, id, cloud))
+        assertEquals(30, preferences.values["novelreadersettings.fontsize"])
+    }
+
+    @Test fun conflictingJournalRecoveryEvidenceCannotWriteProjectionOrAcknowledge() = fixture {
+        val published = append()
+        val (recovery, id) = stageNativeJournal(published)
+        val original = recovery.nativeJournalForActivation(id).document.block.operations.single()
+        val conflicting = assertIs<AppSyncCanonicalOperationImport.Accepted>(AppSyncCanonicalOperationImporter().import(
+            account.value, published.copy(fields = published.fields + ("value" to "30")))).operation
+        assertNotEquals(original, conflicting)
+        val cloud = AppSyncCanonicalCloudPlan.Ready(verified(), AppSyncCanonicalOperationBlock(account.value, listOf(conflicting)), emptyList())
+        assertIs<AppSyncCanonicalActivationResult.NeedsAttention>(activator().activateJournalRecovery(recovery, id, cloud))
+        assertNull(state.read(account.value))
+        assertTrue(preferences.values.isEmpty())
+        assertTrue(store.verifiedCheckpoints().isEmpty())
+        assertEquals(listOf(published), store.pendingOperations())
+        assertEquals(AppSyncRecoveryPhase.ActivatingLocal, recovery.session(id)?.phase)
+    }
+
+    @Test fun journalObservedHistoryMustBePresentBeforeAnyProjectionOrAcknowledgement() = fixture {
+        val published = append()
+        val (recovery, id) = stageNativeJournal(published, observed = mapOf("missing:epoch" to 7L))
+        val cloud = AppSyncCanonicalCloudPlan.Ready(verified(), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
+        assertIs<AppSyncCanonicalActivationResult.NeedsAttention>(activator().activateJournalRecovery(recovery, id, cloud))
+        assertNull(state.read(account.value))
+        assertTrue(store.verifiedCheckpoints().isEmpty())
+        assertEquals(listOf(published), store.pendingOperations())
+        assertEquals(AppSyncRecoveryPhase.ActivatingLocal, recovery.session(id)?.phase)
+    }
+
     @Test fun engineRecoveryHookRunsUnderLeaseBeforeGenericActivationAndReleasesOnReturn() = fixture {
         val pending = append()
         var calls = 0
@@ -313,6 +366,42 @@ class AppSyncCanonicalCheckpointActivatorTest {
         val preferences = Preferences()
         val materializer = DatabaseSyncDomainMaterializer(db, preferences)
         val state = SqlDelightCanonicalCheckpointState(db, materializer)
+        fun commitNative(recovery: SqlDelightAppSyncRecoveryStore, id: String, cloud: AppSyncCanonicalCloudPlan.Ready,
+            now: Long) = kotlinx.coroutines.runBlocking {
+            val provider = object : AppSyncBlogProvider {
+                override suspend fun fetchMyBlogs(blogClassId: io.github.littlesurvival.dto.value.BlogClassId?, page: Int): Nothing = error("No remote scan during activation")
+                override suspend fun fetchBlog(blogId: io.github.littlesurvival.dto.value.BlogId): Nothing = error("No remote read during activation")
+                override suspend fun submitBlog(request: AppSyncBlogWriteRequest): Nothing = error("No remote write during activation")
+                override suspend fun deleteBlog(request: AppSyncBlogDeleteRequest): Nothing = error("No cleanup during activation")
+            }
+            val publisher = AppSyncV3SegmentPublisher(provider, recovery, { now })
+            val committer = AppSyncV3IndexCommitter(provider, recovery, publisher, { now })
+            AppSyncV3CommitCoordinator(committer, recovery, { now }, activator(), { true }).commit(id, "frozen", "identity",
+                AppSyncBlogClassSelection.Existing(io.github.littlesurvival.dto.value.BlogClassId(7)),
+                io.github.littlesurvival.dto.value.FormHash("test"), cloud)
+        }
+        fun stageNativeJournal(source: SyncOperation, observed: Map<String, Long> = emptyMap()): Pair<SqlDelightAppSyncRecoveryStore, String> {
+            val recovery = SqlDelightAppSyncRecoveryStore(db)
+            val session = recovery.createOrResumeSegmentedJournal(account, setOf(source.operationId.value), "journal-source", 1)
+            val imported = assertIs<AppSyncCanonicalOperationImport.Accepted>(AppSyncCanonicalOperationImporter().import(account.value, source))
+            val identity = source.replicaKey.stableKey
+            val journal = AppSyncCanonicalJournal(AppSyncCanonicalOperationBlock(account.value, listOf(imported.operation)),
+                source.deviceId.value, source.deviceEpoch.value, session.targetWriterNonce.value,
+                source.sequence.value, source.sequence.value, observed, emptyList(), 1, 3, 3, "test", source.sequence.value)
+            recovery.pinPayload(session.sessionId, "Journal", identity, 3) { AppSyncV3DocumentCodec().encodeJournal(identity, journal) }
+            recovery.startSegmentedJournal(session.sessionId, 2)
+            recovery.saveSegmentIntent(session.sessionId, 0, 1, "segment", null)
+            recovery.markSegmentVerified(session.sessionId, 0, "segment", 200, 3)
+            recovery.transition(session.sessionId, AppSyncRecoveryPhase.PublishingSegments, AppSyncRecoveryPhase.PublishingRoot, 4)
+            recovery.pinNativeRootIntent(session.sessionId, "b".repeat(64))
+            recovery.markRootVerified(session.sessionId, 300, "b".repeat(64), 5)
+            val index = AppSyncIndexEnvelopeCodec().encode(AppSyncIndexPayload(account,
+                journals = listOf(AppSyncIndexJournalReference(identity, 300,
+                    AppSyncCanonicalJournalCodec().encode(journal).sha256().hex())), updatedAtEpochMillis = 6))
+            recovery.pinNativeIndexIntent(session.sessionId, NativeRecoveryIndexIntent(index, null, null))
+            recovery.markNativeIndexCommitted(session.sessionId, 400, index, 7)
+            return recovery to session.sessionId
+        }
         fun remoteCheckpoint(source: SyncOperation): AppSyncCanonicalCheckpoint {
             val device = SyncDeviceId("new-remote"); val epoch = SyncDeviceEpoch("remote-epoch")
             val remote = source.copy(deviceId = device, deviceEpoch = epoch,

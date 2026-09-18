@@ -730,11 +730,10 @@ internal class SqlDelightAppSyncRecoveryStore(
         transition(sessionId, AppSyncRecoveryPhase.ActivatingLocal, AppSyncRecoveryPhase.Completed, completedAtEpochMillis)
     }
 
-    private fun activateNativeJournal(sessionId: String, activatedAtEpochMillis: Long) = db.transaction {
+    fun nativeJournalForActivation(sessionId: String): AppSyncV3DocumentRead.Journal = db.transactionWithResult {
         val session = requireSession(sessionId)
         require(session.mode == AppSyncRecoveryMode.SegmentedJournal && session.indexCommitted)
-        if (session.phase == AppSyncRecoveryPhase.Completed) return@transaction
-        require(session.phase == AppSyncRecoveryPhase.ActivatingLocal && activatedAtEpochMillis >= 0)
+        require(session.phase == AppSyncRecoveryPhase.ActivatingLocal)
         val payload = requireNotNull(queries.getRecoveryPayload(sessionId).executeAsOneOrNull())
         require(payload.transportVersion == 3L)
         val intent = requireNotNull(nativeIndexIntent(sessionId))
@@ -763,6 +762,15 @@ internal class SqlDelightAppSyncRecoveryStore(
             require(published[Triple(operation.deviceId, operation.deviceEpoch, operation.sequence)] == operation)
             require(imported.proof == operation.authorizationId?.let(proofs::get))
         }
+        journal
+    }
+
+    private fun activateNativeJournal(sessionId: String, activatedAtEpochMillis: Long) = db.transaction {
+        val session = requireSession(sessionId)
+        require(session.mode == AppSyncRecoveryMode.SegmentedJournal && session.indexCommitted)
+        if (session.phase == AppSyncRecoveryPhase.Completed) return@transaction
+        require(activatedAtEpochMillis >= 0)
+        val journal = nativeJournalForActivation(sessionId)
         if (session.sourceOperationIds.isNotEmpty()) queries.markOperationsAcknowledged(activatedAtEpochMillis, session.sourceOperationIds.toList())
         queries.upsertRemoteBlog("journal-root:${session.generationId}", AppSyncRemoteBlogKind.JournalRoot.name.uppercase(),
             requireNotNull(session.rootBlogId), null, journal.metadata.canonicalFingerprint, activatedAtEpochMillis, activatedAtEpochMillis)
