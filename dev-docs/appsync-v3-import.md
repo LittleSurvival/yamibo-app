@@ -84,3 +84,5 @@ Native checkpoint activation 在 settings reconciliation 成功後，於同一�
 只有 ambiguous、沒有 immutable detail IDs、來源 ID 核對成功的 legacy discriminator 可轉換。新版 identity helper 辨識此表示、驗證 scope 及格式後保留原事件 ID；canonical reducer／materializer 因而可還原且再匯入。普通 detail/custom discriminator 與未轉換的本機生成規則保持原行為。原 legacy 操作仍保留原文，轉換不就地修改來源。
 
 舊版 v2 reader 不理解此 discriminator 表示；v3 writer 仍必須等所有相關 reader 能力與 rollout gate 通過。停用 v3 writer 後的 sanitized v2 回退需要另外核對可讀能力，不能把此表示宣稱為任意舊客戶端都可讀。完整回退流程與能力公告仍待完成。
+
+Legacy publication 現在有共用相容性檢查：journal 操作、checkpoint 的各欄位 provenance／relation／tombstone 來源及 snapshot event 若包含新版 portable discriminator，v1/v2 codec 拒絕編碼；正式單篇／分段 journal、checkpoint 與 legacy shadow recovery 在 provider 請求或工作建立前回報明確相容性原因。讀取驗證沒有改成拒絕新版識別。這是避免錯誤降版的保護，並不代表 sanitized v2 回退轉換已完成；後續 adapter 必須取得可驗證原始 legacy 證據，或使用另行核對的新 reader 相容策略。

@@ -104,6 +104,7 @@ internal class AppSyncCheckpointEnvelopeCodec(
             "Checkpoint contains excluded AppSync projection fields"
         }
         val snapshot = backupCodec.decode(payload.encodedSnapshot).getOrThrow()
+        require(!AppSyncLegacyReaderCompatibility.requiresV3(payload, snapshot)) { AppSyncLegacyReaderCompatibility.REASON }
         require(snapshot == snapshot.withPortableAppSyncPayloads()) {
             "Checkpoint contains excluded AppSync snapshot fields"
         }

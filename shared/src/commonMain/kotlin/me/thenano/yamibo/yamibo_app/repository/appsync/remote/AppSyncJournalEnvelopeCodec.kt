@@ -99,6 +99,7 @@ internal class AppSyncJournalEnvelopeCodec(
     },
 ) {
     fun encode(payload: AppSyncJournalPayload): String {
+        require(!AppSyncLegacyReaderCompatibility.requiresV3(payload)) { AppSyncLegacyReaderCompatibility.REASON }
         validatePayload(payload)?.let { throw IllegalArgumentException(it) }
         // Older v2 reducers require these keys on Put even when no cover exists. Keep only
         // the nullable wire shape; canonical storage/projections must not carry cover fields.

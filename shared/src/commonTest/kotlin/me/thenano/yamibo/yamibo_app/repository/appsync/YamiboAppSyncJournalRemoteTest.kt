@@ -13,6 +13,7 @@ import io.github.littlesurvival.dto.value.BlogId
 import io.github.littlesurvival.dto.value.FormHash
 import io.github.littlesurvival.dto.value.UserId
 import kotlinx.coroutines.runBlocking
+import kotlin.test.assertFailsWith
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -64,6 +65,54 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCanonicalJo
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCanonicalJournalPublishResult
 
 class YamiboAppSyncJournalRemoteTest {
+    @Test fun legacyPublicationRejectsPortableEventEvidenceBeforeAnyProviderRequest(): Unit = runBlocking {
+        val provider = FakeProvider()
+        val remote = remote(provider, FakeRemoteStore())
+        val original = AppSyncSyntheticCorpus.create().journal.operations.first { it.domainId.value == "favorite.update-event" }
+        val fields = original.fields
+        val identity = me.thenano.yamibo.yamibo_app.repository.backup.favoriteUpdateEventIdentity(
+            fields.getValue("targetType")!!, fields.getValue("targetId")!!.toLong(), fields.getValue("authorId")!!.toLong(),
+            fields.getValue("mode")!!, emptyList(), true, fields.getValue("detectedAt")!!.toLong(), fields.getValue("summary")!!,
+            fields.getValue("title")!!)
+        val evidence = me.thenano.yamibo.yamibo_app.repository.backup.portableLegacyFavoriteUpdateDiscriminator(
+            fields.getValue("targetType")!!, fields.getValue("targetId")!!.toLong(), fields.getValue("authorId")!!.toLong(),
+            fields.getValue("mode")!!, identity.sourceDiscriminator)
+        val source = original.copy(accountBinding = ACCOUNT, entityId = me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncEntityId(identity.syncId),
+            fields = fields + mapOf("sourceDiscriminator" to evidence, "sourceFingerprint" to identity.sourceFingerprint,
+                "detailIds" to "", "ambiguous" to "true"))
+        assertIs<me.thenano.yamibo.yamibo_app.repository.appsync.schema.AppSyncCanonicalOperationImport.Accepted>(
+            me.thenano.yamibo.yamibo_app.repository.appsync.schema.AppSyncCanonicalOperationImporter().import(ACCOUNT.value, source))
+        val journal = payload().copy(deviceId = source.deviceId, deviceEpoch = source.deviceEpoch,
+            firstSequence = source.sequence.value, lastSequence = source.sequence.value, operations = listOf(source),
+            observed = SyncCausalContext().advance(source.replicaKey, source.sequence), publishedThroughSequence = source.sequence.value)
+        val result = assertIs<AppSyncJournalPublishResult.TerminalFailure>(remote.publishOwnJournal(journal, null, FormHash("test")))
+        assertEquals(me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncLegacyReaderCompatibility.REASON, result.reason)
+        assertIs<AppSyncJournalPublishResult.TerminalFailure>(remote.publishOwnJournalSegmented(journal,
+            setOf(source.operationId), emptyList(), FormHash("test")))
+        val corpus = AppSyncSyntheticCorpus.create()
+        val event = corpus.snapshot.favoriteUpdates.events.first().copy(syncId = identity.syncId, sourceFingerprint = identity.sourceFingerprint,
+            sourceDiscriminator = evidence, detailIds = emptyList(), ambiguous = true)
+        val checkpoint = checkpointCodec.createPayload("blocked", ACCOUNT, journal.observed,
+            YamiboBackupFile(appVersionCode = 1, createdAt = 1,
+                favoriteUpdates = me.thenano.yamibo.yamibo_app.repository.backup.BackupFavoriteUpdates(events = listOf(event))),
+            me.thenano.yamibo.yamibo_app.repository.appsync.engine.OperationReducer().reduce(operations = listOf(source)).entities.values,
+            emptyList(), 1)
+        // Reader support remains available even though the legacy writer refuses this format.
+        val json = kotlinx.serialization.json.Json { encodeDefaults = true }.encodeToString(
+            me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointPayload.serializer(), checkpoint)
+        val marker = AppSyncJournalDefaults.CHECKPOINT_MARKER
+        val raw = "[$marker:BEGIN]\nschema=1\nfingerprint=" +
+            me.thenano.yamibo.yamibo_app.repository.appsync.domain.stableAppSyncFingerprint(json) + "\npayload=$json\n[$marker:END]"
+        assertIs<me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointValidation.Valid>(checkpointCodec.validate(raw))
+        assertIs<me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncCheckpointPublishResult.TerminalFailure>(
+            remote.publishCheckpoint(checkpoint, FormHash("test")))
+        assertEquals(0, provider.submitCalls)
+        assertEquals(0, provider.fetchBlogCalls)
+        assertEquals(0, provider.fetchBlogListCalls)
+        assertFailsWith<IllegalArgumentException> { journalCodec.encode(journal) }
+        assertFailsWith<IllegalArgumentException> { checkpointCodec.encode(checkpoint) }
+    }
+
     @Test fun nativeJournalRootCannotBeOverwrittenByLegacyPublication() = runBlocking {
         val codec = me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3SegmentCodec()
         val kind = me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3PayloadKind.Journal

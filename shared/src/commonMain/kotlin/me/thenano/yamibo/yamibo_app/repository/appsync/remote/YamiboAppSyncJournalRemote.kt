@@ -354,6 +354,8 @@ internal class YamiboAppSyncJournalRemote(
         expectedFingerprint: String?,
         formHash: FormHash,
     ): AppSyncJournalPublishResult {
+        if (AppSyncLegacyReaderCompatibility.requiresV3(payload))
+            return AppSyncJournalPublishResult.TerminalFailure(AppSyncLegacyReaderCompatibility.REASON)
         val remoteKey = payload.replicaKey()
         val cached = store.load(remoteKey)
         // Never edit an indexed immutable root in place, even if the next journal is small.
@@ -469,6 +471,8 @@ internal class YamiboAppSyncJournalRemote(
         activeJournals: List<LoadedAppSyncJournal>,
         formHash: FormHash,
     ): AppSyncJournalPublishResult {
+        if (AppSyncLegacyReaderCompatibility.requiresV3(payload))
+            return AppSyncJournalPublishResult.TerminalFailure(AppSyncLegacyReaderCompatibility.REASON)
         if (!capacityFlags.v2WritesEnabled) {
             return AppSyncJournalPublishResult.StoragePressure(
                 journalCodec.encode(payload).length,
@@ -581,6 +585,8 @@ internal class YamiboAppSyncJournalRemote(
         activeJournals: List<LoadedAppSyncJournal>,
         formHash: FormHash,
     ): AppSyncLegacyRecoveryResult {
+        if (classifications.any { AppSyncLegacyReaderCompatibility.requiresV3(it.operation) })
+            return AppSyncLegacyRecoveryResult.NeedsAttention(AppSyncLegacyReaderCompatibility.REASON)
         if (!capacityFlags.automaticLegacyRecoveryEnabled &&
             classifications.any { it.requiresRecovery }
         ) {
@@ -888,6 +894,8 @@ internal class YamiboAppSyncJournalRemote(
         payload: AppSyncCheckpointPayload,
         formHash: FormHash,
     ): AppSyncCheckpointPublishResult {
+        if (AppSyncLegacyReaderCompatibility.requiresV3(payload))
+            return AppSyncCheckpointPublishResult.TerminalFailure(AppSyncLegacyReaderCompatibility.REASON)
         val classSelection = when (val resolved = resolveClassSelection(payload.accountBinding)) {
             is ClassSelectionResult.Success -> resolved.selection
             is ClassSelectionResult.Retryable ->
