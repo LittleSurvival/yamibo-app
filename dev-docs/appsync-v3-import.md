@@ -48,3 +48,9 @@ materializer 的內部輸入將本機值與勝出操作 ID／時間分開；還�
 輸出保留 legacy source/index fingerprint 供後續發布意圖綁定，但仍是未發布的 candidate；正式 migration 必須合併完整 cloud journal 與當下 pending，再建立新 v3 identity、發布及回讀驗證，才能套用／清理。Snapshot-only 舊資料沒有足夠 resolved provenance 時會拒絕，不會憑 snapshot 內容假造勝出來源；此相容路徑及正式 bootstrap 接線仍待完成。
 
 正式 `YamiboAppSyncJournalRemote` 載入結果現在另附 `verifiedLegacyCheckpoints`。只有同一次載入實際取得的 checkpoint 邏輯 envelope（包含分段重組結果）與已讀回 index，經帳號、實體 blog ID、checkpoint ID 及 fingerprint 綁定成功後才加入。全量 discovery 中未被 index 引用或指紋不符的 checkpoint 仍可供 legacy reader 使用，但沒有遷移證據；記憶體解析快取命中也不重建此證據。此欄位不觸發 canonical processing，也不授權清理。正式 bootstrap 的選擇、合併及發布仍待接線。
+
+## 首次遷移的雲端與 pending 合併
+
+`AppSyncLegacyCloudMigration` 為純規劃器，要求完整 authoritative discovery、同一 index 的 legacy checkpoint 證據、完整 indexed journal、帳號及 writer nonce 一致，並限制 checkpoint／journal／來源操作總數。它核對所有已讀 checkpoint coverage，以及 journal published、observed、acknowledged 與 causal history；各可完成的 checkpoint 經 journal 補齊後必須產生相同 canonical 狀態。只有雲端完整性成立後才合併目前 installation 的 pending，避免 pending 掩蓋雲端缺漏。
+
+輸出新 identity 的未發布候選、原始 legacy 證據及已涵蓋 pending IDs；不產生 canonical verification，不寫 DB、不確認來源、不清除資料。正式呼叫端仍須在凍結發布的交易內取得 pending，接入原有 native recovery 的發布／index 回讀／activation，並處理 snapshot-only 舊 checkpoint 與無 checkpoint 帳號。reader/writer rollout gate 仍維持關閉。
