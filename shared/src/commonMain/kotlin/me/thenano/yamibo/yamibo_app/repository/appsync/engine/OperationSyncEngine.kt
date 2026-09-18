@@ -414,20 +414,20 @@ internal class OperationSyncEngine(
                 return OperationSyncResult.EmptyCloud
             }
             val loaded = cloud.journals
-            reconcileVerifiedCheckpoint(cloud.checkpoints, loaded)
-
             val installation = requireNotNull(store.installation())
-            val compactedCoverage = compaction.compactIfSafe(loaded)
-            val ownJournal = loaded.singleOrNull {
+            val ownJournals = loaded.filter {
                 it.payload.deviceId == installation.deviceId &&
                     it.payload.deviceEpoch == installation.deviceEpoch
             }
-            if (ownJournal != null && ownJournal.payload.writerNonce != installation.writerNonce) {
+            if (ownJournals.any { it.payload.writerNonce != installation.writerNonce }) {
                 store.rotateDeviceEpoch(accountBinding, AppSyncInstallationState.RebootstrapRequired)
                 return OperationSyncResult.RebootstrapRequired(
                     "The device journal is owned by another restored installation",
                 )
             }
+            reconcileVerifiedCheckpoint(cloud.checkpoints, loaded)
+            val compactedCoverage = compaction.compactIfSafe(loaded)
+            val ownJournal = ownJournals.singleOrNull()
 
             val localOutboxIds = store.allOutboxOperations()
                 .mapTo(hashSetOf()) { it.first.operationId }

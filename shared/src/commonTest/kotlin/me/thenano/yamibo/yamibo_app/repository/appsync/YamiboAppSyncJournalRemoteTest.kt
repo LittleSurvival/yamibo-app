@@ -150,6 +150,36 @@ class YamiboAppSyncJournalRemoteTest {
         assertTrue(provider.deleteRequests.isEmpty())
     }
 
+    @Test fun duplicateReplicaEvidenceSurvivesDiscoveryIndexCacheAndRestart() = runBlocking {
+        val first = payload()
+        val second = payload(nonce = SyncWriterNonce("restored-writer"))
+        val indexId = BlogId(80)
+        val provider = FakeProvider().apply {
+            pages[PageKey(null, 1)] = success(classPage())
+            pages[PageKey(CLASS_ID, 1)] = success(UserSpaceBlogPage(blogs = listOf(
+                summary(BlogId(70), AppSyncJournalDefaults.journalTitle(first.deviceId, first.deviceEpoch)),
+                summary(BlogId(71), AppSyncJournalDefaults.journalTitle(second.deviceId, second.deviceEpoch)),
+                summary(indexId, APP_SYNC_INDEX_TITLE))))
+            blogs[BlogId(70)] = success(journalPage(BlogId(70), first))
+            blogs[BlogId(71)] = success(journalPage(BlogId(71), second))
+            blogs[indexId] = success(page(indexId, APP_SYNC_INDEX_TITLE, indexCodec.encode(
+                AppSyncIndexPayload(ACCOUNT, journals = listOf(AppSyncIndexJournalReference(
+                    first.replicaKey(), 70, stableAppSyncFingerprint(journalCodec.encode(first)))), updatedAtEpochMillis = 1))))
+        }
+        val store = FakeRemoteStore()
+        val remote = remote(provider, store)
+        fun checkEvidence(result: AppSyncJournalLoadResult) {
+            val loaded = assertIs<AppSyncJournalLoadResult.Success>(result)
+            assertEquals(setOf("70", "71"), loaded.journals.map { it.remoteId }.toSet())
+            assertEquals(setOf("writer", "restored-writer"), loaded.journals.map { it.payload.writerNonce.value }.toSet())
+        }
+        checkEvidence(remote.loadJournals(ACCOUNT, true))
+        checkEvidence(remote.loadJournals(ACCOUNT, false))
+        checkEvidence(remote(provider, store).loadJournals(ACCOUNT, false))
+        assertEquals(0, provider.submitCalls)
+        assertTrue(provider.deleteRequests.isEmpty())
+    }
+
     private val journalCodec = AppSyncJournalEnvelopeCodec()
     private val indexCodec = AppSyncIndexEnvelopeCodec()
     private val checkpointCodec = AppSyncCheckpointEnvelopeCodec()
@@ -243,7 +273,7 @@ class YamiboAppSyncJournalRemoteTest {
     }
 
     @Test
-    fun currentIndexReplacesPreviouslyCachedJournalLink() = runBlocking {
+    fun currentIndexPreservesPreviouslyCachedPhysicalJournalEvidence() = runBlocking {
         val stale = payload(heartbeat = 10)
         val current = payload(heartbeat = 20)
         val staleBlogId = BlogId(10)
@@ -280,9 +310,9 @@ class YamiboAppSyncJournalRemoteTest {
             remote(provider, store).loadJournals(ACCOUNT, forceDiscovery = false),
         )
 
-        assertEquals(listOf(current), result.journals.map { it.payload })
+        assertEquals(listOf(stale, current), result.journals.map { it.payload })
         assertEquals(1, provider.fetchBlogListCalls)
-        assertEquals(2, provider.fetchBlogCalls)
+        assertEquals(3, provider.fetchBlogCalls)
         assertEquals(currentBlogId, store.load(current.replicaKey())?.blogId)
     }
 

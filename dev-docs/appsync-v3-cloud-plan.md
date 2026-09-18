@@ -11,3 +11,5 @@
 成功計畫只攜帶基底、canonical 操作區塊與 legacy 操作，不寫資料。Activation 必須在自己的 SQLite transaction 重新讀取 pending 操作並合併。Planner 不把本機 pending 當成雲端已發布證據，也不建立清理權限。
 
 正式 `OperationSyncEngine` 已呼叫此驗證器。自己的 device／epoch 出現不同 writer nonce 時，沿用 restored-installation 處理，旋轉 epoch 並要求重新 bootstrap；其他錯誤保留原因並暫停。有效計畫目前仍等待 canonical activation 與本機 recorder 完整接線，沒有宣告 Converged 或開啟 v3 writer。只有 journal、沒有 indexed canonical checkpoint 的 bootstrap 路徑仍待實作。
+
+遠端載入現在保留同一 replica 的各份 legacy 實體 journal，包含索引指向另一篇時仍可讀取的舊篇。快取以實體 blog ID 合併索引來源，邏輯鍵被另一篇取代前會保留原篇的 candidate 連結；重建 remote 物件後仍能重讀兩份證據。舊版引擎也逐份檢查自己的 writer nonce，並在 checkpoint 採用及 compaction 前處理還原裝置衝突。這不代表所有 duplicate checkpoint／canonical journal 快取及其他 replica 的舊版衝突處理均已完成。

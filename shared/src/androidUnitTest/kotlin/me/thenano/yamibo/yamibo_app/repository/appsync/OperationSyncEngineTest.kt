@@ -62,6 +62,24 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.engine.LoadedAppSyncCanon
 import me.thenano.yamibo.yamibo_app.repository.appsync.schema.*
 
 class OperationSyncEngineTest {
+    @Test fun duplicateOwnJournalsCannotHideRestoredWriterConflict() = runBlocking {
+        val fixture = fixture()
+        activate(fixture)
+        val before = requireNotNull(fixture.store.installation())
+        val own = AppSyncJournalPayload(accountBinding = account, deviceId = before.deviceId,
+            deviceEpoch = before.deviceEpoch, writerNonce = before.writerNonce,
+            firstSequence = 0, lastSequence = 0, operations = emptyList(),
+            observed = SyncCausalContext(), heartbeatAtEpochMillis = 1)
+        fixture.remote.loadFailure = AppSyncJournalLoadResult.Success(listOf(
+            LoadedAppSyncJournal("70", "first", own),
+            LoadedAppSyncJournal("71", "second", own.copy(writerNonce =
+                me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncWriterNonce("restored")))))
+        assertIs<OperationSyncResult.RebootstrapRequired>(fixture.engine.synchronize(account, formHash))
+        assertNotEquals(before.deviceEpoch, fixture.store.installation()?.deviceEpoch)
+        assertEquals(0, fixture.remote.publishCount)
+        assertTrue(fixture.store.verifiedCheckpoints().isEmpty())
+    }
+
     @Test fun canonicalRestoredWriterConflictRotatesEpochWithoutApplyingOrPublishing() = runBlocking {
         val fixture = fixture()
         activate(fixture)
