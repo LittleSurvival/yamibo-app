@@ -144,7 +144,14 @@ preference reconciliation retry, import failure and account rejection. Three ind
 exact binding, ambiguous references and corrupt/unsupported documents. Production engine and
 incremental local mutation routing remain incomplete. See appsync-v3-activation.md.
 
-Latest checks (2026-09-18): all 605 shared tests and 15 CloudSyncUiState tests passed, with
+Canonical state now supports one provenance/coverage update per local command without replaying
+materialized data or external preferences. Six SQLite tests cover outbox rollback, replay,
+batch-independent identities, explicit excluded sequence coverage, account checks and import
+failure preserving source evidence. Recorder routing and persistent failure handling still need
+integration; the current BLOB rewrite is not evidence of the device write-amplification gate.
+See appsync-v3-state.md.
+
+Latest checks (2026-09-18): all 611 shared tests and 15 CloudSyncUiState tests passed, with
 zero failures, errors, or skipped tests. This includes canonical field/scalar tests, synthetic
 corpus replay, production setting default round trips, isolated SQLite storage accounting,
 and the existing recovery, production-producer, backup, and convergence suites. Eight additional

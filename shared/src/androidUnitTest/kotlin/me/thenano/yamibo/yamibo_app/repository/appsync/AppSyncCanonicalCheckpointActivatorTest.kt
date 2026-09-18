@@ -136,4 +136,102 @@ class AppSyncCanonicalCheckpointActivatorTest {
         assertNull(db.appSyncCanonicalStateQueries.getState().executeAsOneOrNull())
         assertTrue(store.verifiedCheckpoints().isEmpty())
     }
+
+    @Test fun localBatchRecordsProvenanceWithoutReplayingMaterializedValuesOrAcknowledgingSources() = fixture {
+        append()
+        assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(verified()))
+        val remote = store.verifiedCheckpoints()
+        val materialized = db.appSyncOperationQueries.getSyncSettingValues().executeAsList()
+        preferences.values["novelreadersettings.fontsize"] = 99
+        val created = store.appendLocalCommand(account, store.causalContext(), 30, SyncOperationOrigin.UserAction,
+            localMutation = { listOf(LocalSyncOperationDraft(SyncDomainId("settings"),
+                SyncEntityId("novelreadersettings.fontsize"), kind = SyncOperationKind.Patch,
+                fields = mapOf("type" to "int", "value" to "22"))) },
+            afterOperationsCreated = {
+                assertTrue(assertIs<AppSyncCanonicalLocalUpdate.Recorded>(state.recordLocalBatch(account.value, it)).changed)
+            })
+        val local = assertNotNull(state.read(account.value))
+        assertTrue(local.entities.single().values().values.any { it.legacyValue() == "22" })
+        assertEquals(2L, local.coverage[created.single().replicaKey.stableKey])
+        assertEquals(materialized, db.appSyncOperationQueries.getSyncSettingValues().executeAsList())
+        assertEquals(99, preferences.values["novelreadersettings.fontsize"])
+        assertEquals(remote, store.verifiedCheckpoints())
+        assertEquals(2, store.pendingOperations().size)
+        assertFalse(assertIs<AppSyncCanonicalLocalUpdate.Recorded>(state.recordLocalBatch(account.value, created)).changed)
+        assertEquals(local, state.read(account.value))
+    }
+
+    @Test fun localBatchAndOutboxRollbackTogetherAfterCanonicalWrite() = fixture {
+        append()
+        activator().activate(verified())
+        val previous = state.read(account.value)
+        val before = store.allOutboxOperations()
+        val nextSequence = store.installation()?.nextSequence
+        assertFailsWith<IllegalStateException> {
+            store.appendLocalCommand(account, store.causalContext(), 30, SyncOperationOrigin.UserAction,
+                localMutation = { listOf(LocalSyncOperationDraft(SyncDomainId("settings"),
+                    SyncEntityId("novelreadersettings.fontsize"), kind = SyncOperationKind.Patch,
+                    fields = mapOf("type" to "int", "value" to "24"))) },
+                afterOperationsCreated = {
+                    assertIs<AppSyncCanonicalLocalUpdate.Recorded>(state.recordLocalBatch(account.value, it))
+                    error("injected after canonical write")
+                })
+        }
+        assertEquals(previous, state.read(account.value))
+        assertEquals(before, store.allOutboxOperations())
+        assertEquals(nextSequence, store.installation()?.nextSequence)
+    }
+
+    @Test fun localImportFailureKeepsOriginalOutboxAndLastCanonicalState() = fixture {
+        append()
+        activator().activate(verified())
+        val previous = state.read(account.value)
+        val invalid = append("invalid")
+        val sources = store.allOutboxOperations()
+        val result = assertIs<AppSyncCanonicalLocalUpdate.NeedsAttention>(state.recordLocalBatch(account.value, listOf(invalid)))
+        assertEquals(AppSyncPendingMergeFailure.ImportFailure, result.failure.reason)
+        assertEquals(previous, state.read(account.value))
+        assertEquals(sources, store.allOutboxOperations())
+        assertEquals(2, store.pendingOperations().size)
+    }
+
+    @Test fun localRecordingRequiresActivationAndCorrectInstallationAccount() = fixture {
+        val operation = append()
+        assertIs<AppSyncCanonicalLocalUpdate.NotActivated>(state.recordLocalBatch(account.value, listOf(operation)))
+        activator().activate(verified())
+        val previous = state.read(account.value)
+        store.bindAccount(SyncAccountBinding("other"), AppSyncInstallationState.Active)
+        assertFailsWith<IllegalArgumentException> { state.recordLocalBatch(account.value, emptyList()) }
+        assertEquals(previous, state.read(account.value))
+    }
+
+    @Test fun commandBatchingDoesNotChangeCanonicalIdentity() {
+        fixture {
+            activator().activate(verified())
+            val first = append("18")
+            val second = append("22")
+            assertIs<AppSyncCanonicalLocalUpdate.Recorded>(state.recordLocalBatch(account.value, listOf(first, second)))
+            val batched = assertNotNull(state.read(account.value))
+            fixture {
+                activator().activate(verified())
+                assertIs<AppSyncCanonicalLocalUpdate.Recorded>(state.recordLocalBatch(account.value, listOf(first)))
+                assertIs<AppSyncCanonicalLocalUpdate.Recorded>(state.recordLocalBatch(account.value, listOf(second)))
+                assertEquals(batched, state.read(account.value))
+            }
+        }
+    }
+
+    @Test fun excludedLocalSequenceAdvancesCoverageWithoutCreatingAnEntity() = fixture {
+        activator().activate(verified())
+        val operation = store.appendLocalOperation(account, SyncDomainId("settings"), SyncEntityId("future.secret"), 1,
+            SyncOperationKind.Put, mapOf("type" to "string", "value" to "private"), store.causalContext(),
+            15, SyncOperationOrigin.UserAction)
+        val result = assertIs<AppSyncCanonicalLocalUpdate.Recorded>(state.recordLocalBatch(account.value, listOf(operation)))
+        assertEquals(1, result.excludedCount)
+        val local = assertNotNull(state.read(account.value))
+        assertEquals(1L, local.coverage[operation.replicaKey.stableKey])
+        assertTrue(local.entities.isEmpty())
+        assertEquals(listOf(operation), store.pendingOperations())
+        assertTrue(store.verifiedCheckpoints().single().coverage.asStableMap().isEmpty())
+    }
 }
