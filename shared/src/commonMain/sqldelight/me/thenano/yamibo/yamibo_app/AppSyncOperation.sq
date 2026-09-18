@@ -488,6 +488,11 @@ pinNativeRootIntent:
 UPDATE AppSyncRecoveryPayload SET rootIntentFingerprint = ?
 WHERE sessionId = ? AND transportVersion = 3 AND rootIntentFingerprint IS NULL;
 
+pinNativeSegmentConfiguration:
+UPDATE AppSyncRecoveryPayload
+SET segmentPlanVersion = ?, segmentTargetChars = ?, segmentMaximumCount = ?, segmentMaximumEnvelopeChars = ?
+WHERE sessionId = ? AND transportVersion = 3 AND segmentPlanVersion IS NULL;
+
 markNativeRecoveryIndexVerified:
 UPDATE AppSyncRecoveryPayload
 SET verifiedIndexBlogId = ?, verifiedIndexFingerprint = ?, indexVerifiedAtEpochMillis = ?

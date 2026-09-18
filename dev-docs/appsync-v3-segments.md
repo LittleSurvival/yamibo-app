@@ -22,7 +22,7 @@ Migration 48 為 frozen recovery payload 增加 transportVersion 與 native root
 
 尚未確認的舊 intent 必須先呼叫注入的 authoritative discovery。找到原文件就回讀；只有完整掃描確認不存在才允許新 POST。未知結果、掃描失敗或歧義不能推定不存在。單次呼叫內，即使 POST 逾時後掃描回報不存在，也只回報可重試，不立即重送。驗證失敗、登入失效與 rollout gate 關閉分別保留可辨識結果；每次 POST 前重新檢查 gate。
 
-呼叫端仍須提供帳號/session lease、正式完整掃描及新鮮 reader-cohort gate。傳輸預算尚未另存於 session；不同設定造成的計畫變更會在任何 POST 前拒絕，而非改寫既有 generation。正式啟用前仍需完成固定傳輸設定、index 回讀提交、worker 重試及完整故障驗收。五項 SQLite／fake-provider 回歸涵蓋 frozen bytes、重啟、分段與 root 遺失回應、完整不存在證據、gate／登入／回讀錯誤、計畫變更及 pending 保留。
+呼叫端仍須提供帳號/session lease、正式完整掃描及新鮮 reader-cohort gate。分段設定現由下述 migration 52 保存，重試不受執行時預設值變更影響。正式啟用前仍需完成整體 worker 與故障驗收。五項 SQLite／fake-provider 回歸涵蓋 frozen bytes、重啟、分段與 root 遺失回應、完整不存在證據、gate／登入／回讀錯誤、計畫變更及 pending 保留。
 
 `AppSyncV3ArtifactReconciler` 提供基於 provider 的完整分類掃描，限制最多 100 頁、10,000 個實體 ID，使用正式同步分類名稱核對每頁分類。分頁必須連續、current／total 一致，不接受重複 ID、無法解析的 next URL 或超限；只有全部頁面完成後才讀取所有同名候選。逐一核對實體 ID、標題與 reader 文字 SHA-256；唯一精確符合回傳 Found、多份符合回傳 Conflict，完整掃描無符合才回傳 Absent。同名舊 generation 不算本次寫入成功。任何未完成掃描、候選遺失／無法讀取、分類或分頁異常均回傳 Unknown；登入中斷另回傳 FormExpired，取消則向呼叫端傳播。
 
@@ -40,7 +40,7 @@ Migration 50 凍結 native index 的完整 body／SHA-256、更新目標 ID 與�
 
 建立意圖時保留其他 journal、checkpoint 與 retirement 參照，只更新本次 identity。更新前再次完整掃描：遠端等於預期內容就直接確認；遠端仍等於原基礎才允許 POST；其他版本回報衝突。提交後不信任 acknowledgement／candidate ID，一律重新掃描並 GET 核對實體 ID、標題、帳號與完整正規化內容；逾時亦走相同確認。單次呼叫不重複 POST。成功只推進 ActivatingLocal，仍不確認來源或清理。
 
-Provider 不支援 compare-and-swap，因此更新前檢查與 POST 間仍有跨裝置競爭窗口；此元件尚未接入正式服務，也未宣告並行 writer／worker／清理驗收完成。呼叫端仍須完成 writer/cohort 驗證、durable retry 排程及後續本機 activation 協調。缺少固定傳輸設定與完整裝置驗收，v3 rollout 保持關閉。
+Provider 不支援 compare-and-swap，因此更新前檢查與 POST 間仍有跨裝置競爭窗口；此元件尚未接入正式服務，也未宣告並行 writer／worker／清理驗收完成。呼叫端仍須完成 writer/cohort 驗證、durable retry 排程及後續本機 activation 協調。固定傳輸設定已由 migration 52 補齊；完整裝置驗收尚未完成，v3 rollout 保持關閉。
 
 五項新增 SQLite／fake-provider 測試涵蓋 root 後建立 index、pending 保留、遺失回應後重建 committer 且不重送、保留其他參照、前置版本變動、預設及提交前 gate、完整掃描中斷、虛假成功回應、重複候選與登入中斷。Migration 測試確認新欄位預設為 null；既有 store 提交測試改為先保存 immutable intent。
 
@@ -74,6 +74,15 @@ Journal recovery 在 coordinator 收到 cloud plan 時，亦透過 canonical act
 
 正式 `AppSyncService` 現綁定 `AppSyncNativeRecoveryContinuation`，只接續已存在且已凍結的 transport 3 session，傳入完整 cloud plan 與 canonical activator；尚不建立新的 v3 發佈或初次 migration。native session 強制完整 discovery，preflight 在 lease 內檢查 NeedsAttention／持久化重試期限；讀取失敗使用同一 phase／payload 的重試預算，無有效 canonical base 時禁止落入 legacy writer。設定旗標 `appSyncV3WriterEnabled`、`appSyncV3ReaderReady`、`appSyncV3BenchmarksApproved` 全數預設 false；遠端寫入還必須通過當次 reader cohort gate。已確認 index 的本機 activation 可在 writer flag 關閉時繼續，不再 POST。
 
-缺少相容性或無效雲端／凍結證據會留下 NeedsAttention，避免 worker 不斷接續；只有明確手動恢復會重設這些可恢復分類並重新檢查條件。成功後 service 偵測 canonical head，跳過 legacy checkpoint／journal retirement。coordinator 的 persisted deadline 仍須由 Android worker 成功排入下一個工作；排程證據與 UI／重開機驗收尚未完成。native transport budget 持久化、初次 checkpoint 建立及一般新 journal 寫入也仍是獨立待辦。
+缺少相容性或無效雲端／凍結證據會留下 NeedsAttention，避免 worker 不斷接續；只有明確手動恢復會重設這些可恢復分類並重新檢查條件。成功後 service 偵測 canonical head，跳過 legacy checkpoint／journal retirement。coordinator 的 persisted deadline 仍須由 Android worker 成功排入下一個工作；排程證據與 UI／重開機驗收尚未完成。native transport budget 持久化已由 migration 52 補齊；初次 checkpoint 建立及一般新 journal 寫入仍是獨立待辦。
 
 Service continuation 將本次 cloud plan 的 checkpoint 驗證物件一路傳至 native index committer。凍結 index intent 前，最新權威 index 必須仍保有同一 checkpoint ID、實體 Blog ID 與 canonical 摘要；缺少 index 或 reference 已變更時不凍結 intent、不送出 index POST。之後仍使用兩次 base 比對與精確 readback，保留既有不能原子 CAS 的限制。同步接收計數排除本 installation 的 writer 操作，避免把本機確認同時計成遠端接收。
+
+
+## 分段設定持久化
+
+Migration 52（schema version 53）在 recovery payload 保存分段演算法版本、target chars、maximum segments 與 maximum envelope chars。發布器先凍結內容、載入既有設定並驗證所有 segment intents，再於第一個遠端 POST 前保存設定。重試及程序重建使用保存的設定，即使新版預設大小、最大段數與封套上限全數改變，仍重建相同段數、內容及指紋，保留已確認的實體 Blog ID。
+
+演算法目前為 version 1；未來若改變切段規則必須提供版本分流，不能只改預設實作。未知版本、部分 null、超出 Int 範圍或無效界限均停止發布，不能以預設值覆蓋。舊 schema 資料的新增欄位全部為 null；只有所有現存 intent 已與候選計畫吻合時才補存設定。若舊資料需要不同歷史設定，會保留證據並要求處理，不猜測或重寫既有 generation。
+
+回歸覆蓋全部執行時預設值改變後接續、已確認分段不重建、拒絕覆蓋設定、舊資料匹配後補存、不匹配時不 POST、不完整與不支援設定，以及 migration 不改寫既有封套。這些設定是裝置端復原證據，並未改變 wire envelope 或擴大 cleanup 權限。

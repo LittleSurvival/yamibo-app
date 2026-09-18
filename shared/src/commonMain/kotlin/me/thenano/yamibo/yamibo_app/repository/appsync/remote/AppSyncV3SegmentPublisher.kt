@@ -43,7 +43,8 @@ internal class AppSyncV3SegmentPublisher(private val provider: AppSyncBlogProvid
         require(session.phase in setOf(AppSyncRecoveryPhase.PublishingSegments, AppSyncRecoveryPhase.PublishingRoot,
             AppSyncRecoveryPhase.CommittingIndex)) { "Native recovery is not in a publishing phase" }
         val frozen = recovery.pinPayload(sessionId, kind.name, identity, 3) { envelope }
-        val plan = codec.plan(frozen, session.accountBinding.value, kind)
+        val publicationCodec = recovery.nativeSegmentConfiguration(sessionId)?.let(codec::withConfiguration) ?: codec
+        val plan = publicationCodec.plan(frozen, session.accountBinding.value, kind)
         val intents = recovery.segmentWrites(sessionId).associateBy { it.segmentIndex }
         // Validate every persisted link before any POST, including intents not yet confirmed.
         for ((index, intent) in intents) {
@@ -54,15 +55,16 @@ internal class AppSyncV3SegmentPublisher(private val provider: AppSyncBlogProvid
                 require(successor.verifiedFingerprint == successor.expectedFingerprint)
                 AppSyncV3SegmentReference(it.toInt(), successor.expectedFingerprint)
             }
-            val expected = codec.encodeSegment(plan.drafts[index], next)
+            val expected = publicationCodec.encodeSegment(plan.drafts[index], next)
             require(intent.expectedFingerprint == sha(expected) && intent.nextBlogId == next?.blogId?.toLong())
             require((intent.blogId == null && intent.verifiedFingerprint == null) ||
                 (intent.blogId != null && intent.blogId in 1..Int.MAX_VALUE.toLong() && intent.verifiedFingerprint == intent.expectedFingerprint))
         }
         if (session.phase != AppSyncRecoveryPhase.PublishingSegments) require(intents.size == plan.drafts.size && intents.values.all { it.blogId != null })
+        recovery.pinNativeSegmentConfiguration(sessionId, publicationCodec.configuration)
         var next: AppSyncV3SegmentReference? = null
         for (draft in plan.drafts.reversed()) {
-            val body = codec.encodeSegment(draft, next)
+            val body = publicationCodec.encodeSegment(draft, next)
             val fingerprint = sha(body)
             val prior = intents[draft.index]
             recovery.saveSegmentIntent(sessionId, draft.index, draft.count, fingerprint, next?.blogId?.toLong())
@@ -75,8 +77,8 @@ internal class AppSyncV3SegmentPublisher(private val provider: AppSyncBlogProvid
         }
         if (recovery.session(sessionId)?.phase == AppSyncRecoveryPhase.PublishingSegments)
             recovery.transition(sessionId, AppSyncRecoveryPhase.PublishingSegments, AppSyncRecoveryPhase.PublishingRoot, nowMillis())
-        val root = codec.root(plan, requireNotNull(next))
-        val rootBody = codec.encodeRoot(root)
+        val root = publicationCodec.root(plan, requireNotNull(next))
+        val rootBody = publicationCodec.encodeRoot(root)
         val fingerprint = sha(rootBody)
         val firstIntent = recovery.pinNativeRootIntent(sessionId, fingerprint)
         val current = requireNotNull(recovery.session(sessionId))

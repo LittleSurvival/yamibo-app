@@ -122,14 +122,69 @@ class AppSyncV3SegmentPublisherTest {
         assertEquals(1, provider.posts.size)
     }
 
-    @Test fun changedPlanAndAmbiguousDiscoveryCannotAppendToExistingGeneration() = fixture {
+    @Test fun restartKeepsFrozenPlanEvenWhenAllRuntimePlanningDefaultsChange() = fixture {
         provider.timeoutAt = 2
         assertIs<AppSyncV3SegmentPublishResult.Retryable>(publish(publisher(discovery = { _, _ -> AppSyncV3ArtifactDiscovery.Unknown })))
-        val changed = AppSyncV3SegmentPublisher(provider, recovery, { 10 }, AppSyncV3SegmentCodec(AppSyncPayloadBudget(8192)), { true }, provider::discover)
-        assertIs<AppSyncV3SegmentPublishResult.NeedsAttention>(publish(changed))
-        assertEquals(2, provider.posts.size)
+        assertEquals(codec.configuration, recovery.nativeSegmentConfiguration(session.sessionId))
         assertIs<AppSyncV3SegmentPublishResult.NeedsAttention>(publish(publisher(discovery = { _, _ -> AppSyncV3ArtifactDiscovery.Conflict })))
         assertEquals(2, provider.posts.size)
+        val verified = recovery.segmentWrites(session.sessionId).single { it.blogId != null }
+        provider.timeoutAt = null
+        val changed = AppSyncV3SegmentPublisher(provider, SqlDelightAppSyncRecoveryStore(db), { 10 },
+            AppSyncV3SegmentCodec(AppSyncPayloadBudget(8192), maximumSegments = 2, maximumEnvelopeChars = 100),
+            { true }, provider::discover)
+        val resumed = assertIs<AppSyncV3SegmentPublishResult.ReadyToCommitIndex>(publish(changed))
+        assertEquals(codec.plan(envelope, account.value, kind).drafts.size, resumed.root.count)
+        assertEquals(verified, recovery.segmentWrites(session.sessionId).single { it.segmentIndex == verified.segmentIndex })
+        assertEquals(codec.configuration, recovery.nativeSegmentConfiguration(session.sessionId))
+        assertFailsWith<IllegalArgumentException> {
+            recovery.pinNativeSegmentConfiguration(session.sessionId, codec.configuration.copy(targetChars = 8192))
+        }
+    }
+
+    @Test fun migratedUnconfiguredPlanIsPinnedOnlyAfterEveryExistingIntentMatches() = fixture {
+        provider.timeoutAt = 2
+        assertIs<AppSyncV3SegmentPublishResult.Retryable>(publish(publisher(discovery = { _, _ -> AppSyncV3ArtifactDiscovery.Unknown })))
+        driver.execute(null, "UPDATE AppSyncRecoveryPayload SET segmentPlanVersion=NULL, segmentTargetChars=NULL, " +
+            "segmentMaximumCount=NULL, segmentMaximumEnvelopeChars=NULL", 0)
+        val changed = AppSyncV3SegmentPublisher(provider, recovery, { 10 }, AppSyncV3SegmentCodec(AppSyncPayloadBudget(8192)),
+            { true }, provider::discover)
+        assertIs<AppSyncV3SegmentPublishResult.NeedsAttention>(publish(changed))
+        assertNull(recovery.nativeSegmentConfiguration(session.sessionId))
+        assertEquals(2, provider.posts.size)
+        provider.timeoutAt = null
+        assertIs<AppSyncV3SegmentPublishResult.ReadyToCommitIndex>(publish())
+        assertEquals(codec.configuration, recovery.nativeSegmentConfiguration(session.sessionId))
+    }
+
+    @Test fun corruptOrUnsupportedConfigurationCannotProduceRemoteSideEffects() = fixture {
+        provider.timeoutAt = 2
+        assertIs<AppSyncV3SegmentPublishResult.Retryable>(publish(publisher(discovery = { _, _ -> AppSyncV3ArtifactDiscovery.Unknown })))
+        val rows = recovery.segmentWrites(session.sessionId)
+        for (assignment in listOf("segmentPlanVersion=2", "segmentTargetChars=NULL", "segmentMaximumCount=1",
+            "segmentMaximumEnvelopeChars=4294967396")) {
+            driver.execute(null, "UPDATE AppSyncRecoveryPayload SET $assignment", 0)
+            assertIs<AppSyncV3SegmentPublishResult.NeedsAttention>(publish())
+            assertEquals(2, provider.posts.size)
+            assertEquals(rows, recovery.segmentWrites(session.sessionId))
+            driver.execute(null, "UPDATE AppSyncRecoveryPayload SET segmentPlanVersion=1, segmentTargetChars=4096, " +
+                "segmentMaximumCount=4096, segmentMaximumEnvelopeChars=16781312", 0)
+        }
+    }
+
+    @Test fun migrationPreservesLegacyPayloadAndDoesNotInventPlanningEvidence() {
+        JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).use { driver ->
+            driver.execute(null, "CREATE TABLE AppSyncRecoveryPayload(sessionId TEXT PRIMARY KEY, canonicalEnvelope TEXT)", 0)
+            driver.execute(null, "INSERT INTO AppSyncRecoveryPayload VALUES ('old', 'frozen-body')", 0)
+            Database.Schema.migrate(driver, oldVersion = 52, newVersion = 53)
+            driver.executeQuery(null, "SELECT canonicalEnvelope, segmentPlanVersion, segmentTargetChars, " +
+                "segmentMaximumCount, segmentMaximumEnvelopeChars FROM AppSyncRecoveryPayload WHERE sessionId='old'", { cursor ->
+                assertTrue(cursor.next().value)
+                assertEquals("frozen-body", cursor.getString(0))
+                for (column in 1..4) assertNull(cursor.getLong(column))
+                app.cash.sqldelight.db.QueryResult.Value(Unit)
+            }, 0)
+        }
     }
 
     @Test fun discoveryCompletesPaginationBeforeClaimingFoundOrAbsent() = fixture {

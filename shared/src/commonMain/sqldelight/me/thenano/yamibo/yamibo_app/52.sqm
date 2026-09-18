@@ -1,0 +1,4 @@
+ALTER TABLE AppSyncRecoveryPayload ADD COLUMN segmentPlanVersion INTEGER;
+ALTER TABLE AppSyncRecoveryPayload ADD COLUMN segmentTargetChars INTEGER;
+ALTER TABLE AppSyncRecoveryPayload ADD COLUMN segmentMaximumCount INTEGER;
+ALTER TABLE AppSyncRecoveryPayload ADD COLUMN segmentMaximumEnvelopeChars INTEGER;

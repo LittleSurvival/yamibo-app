@@ -21,6 +21,17 @@ internal data class AppSyncV3SegmentRoot(val metadata: AppSyncV3EnvelopeMetadata
 internal data class AppSyncV3SegmentPlan(val metadata: AppSyncV3EnvelopeMetadata,
     val envelopeSha256: String, val envelopeChars: Int, val drafts: List<AppSyncV3Segment>)
 
+/** Immutable planning inputs. Increment the version before changing the segmentation algorithm. */
+internal data class AppSyncV3SegmentConfiguration(
+    val version: Int, val targetChars: Int, val maximumSegments: Int, val maximumEnvelopeChars: Int,
+) {
+    init {
+        require(version == 1) { "Unsupported native segment plan version" }
+        AppSyncPayloadBudget(targetChars)
+        require(maximumSegments in 2..4096 && maximumEnvelopeChars > 0)
+    }
+}
+
 internal sealed interface AppSyncV3SegmentRead {
     data class Verified(val envelope: String, val document: AppSyncV3DocumentRead) : AppSyncV3SegmentRead
     data class Invalid(val reason: String) : AppSyncV3SegmentRead
@@ -35,6 +46,13 @@ internal class AppSyncV3SegmentCodec(private val budget: AppSyncPayloadBudget = 
     private val documents: AppSyncV3DocumentCodec = AppSyncV3DocumentCodec()) {
     private val json = Json { encodeDefaults = true; ignoreUnknownKeys = false }
     init { require(maximumSegments in 2..4096 && maximumEnvelopeChars > 0) }
+
+    val configuration get() = AppSyncV3SegmentConfiguration(1, budget.targetChars, maximumSegments, maximumEnvelopeChars)
+
+    fun withConfiguration(configuration: AppSyncV3SegmentConfiguration) = AppSyncV3SegmentCodec(
+        AppSyncPayloadBudget(configuration.targetChars), configuration.maximumSegments,
+        configuration.maximumEnvelopeChars, documents,
+    )
 
     fun plan(envelope: String, account: String, kind: AppSyncV3PayloadKind): AppSyncV3SegmentPlan {
         require(envelope.length in 1..maximumEnvelopeChars) { "V3 envelope exceeds segmentation bounds" }

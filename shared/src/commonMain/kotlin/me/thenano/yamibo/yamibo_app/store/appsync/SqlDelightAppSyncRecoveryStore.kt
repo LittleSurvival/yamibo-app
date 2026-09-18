@@ -25,6 +25,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncIndexValida
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3DocumentCodec
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3DocumentRead
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3PayloadKind
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3SegmentConfiguration
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncVerifiedCanonicalCheckpoint
 import okio.ByteString.Companion.encodeUtf8
 
@@ -208,6 +209,31 @@ internal class SqlDelightAppSyncRecoveryStore(
                 transportVersion.toLong(),
             )
             encoded
+        }
+    }
+
+    fun nativeSegmentConfiguration(sessionId: String): AppSyncV3SegmentConfiguration? {
+        val row = requireNotNull(queries.getRecoveryPayload(sessionId).executeAsOneOrNull())
+        require(row.transportVersion == 3L)
+        val values = listOf(row.segmentPlanVersion, row.segmentTargetChars,
+            row.segmentMaximumCount, row.segmentMaximumEnvelopeChars)
+        if (values.all { it == null }) return null
+        require(values.all { it != null && it in 1..Int.MAX_VALUE.toLong() }) { "Invalid persisted segment configuration" }
+        return AppSyncV3SegmentConfiguration(values[0]!!.toInt(), values[1]!!.toInt(),
+            values[2]!!.toInt(), values[3]!!.toInt())
+    }
+
+    /** Caller must validate all existing segment intents against this plan before pinning
+     * configuration on a migrated payload that predates configuration persistence.
+     */
+    fun pinNativeSegmentConfiguration(sessionId: String, configuration: AppSyncV3SegmentConfiguration) = db.transaction {
+        val existing = nativeSegmentConfiguration(sessionId)
+        if (existing != null) {
+            require(existing == configuration) { "Native segment configuration cannot change" }
+        } else {
+            queries.pinNativeSegmentConfiguration(configuration.version.toLong(), configuration.targetChars.toLong(),
+                configuration.maximumSegments.toLong(), configuration.maximumEnvelopeChars.toLong(), sessionId)
+            check(nativeSegmentConfiguration(sessionId) == configuration)
         }
     }
 
