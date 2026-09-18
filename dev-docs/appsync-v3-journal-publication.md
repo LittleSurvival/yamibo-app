@@ -11,3 +11,11 @@ published-through 必須與 canonical 本機 coverage 的自身 replica 一致�
 尚待完成：持久化 reader-cohort gate、native v3 遠端 compare/write/readback、分段、模糊寫入重試、ack transaction、sanitized v2 fallback 及完整 engine 接線。此類別存在不表示已啟用 v3 writer。
 
 補充邊界：若既有文件沒有明確 published-through，沿用已發布文件的自身 observed／retained range 下限。已被 metadata-only／裁切前綴取代的序號不能再從待送來源插回；本機 nextSequence 若落後於既有發布進度則拒絕。出站操作也經 canonical reducer 做語意驗證，批次刪除 proof 在 operation block 只保存一次。測試涵蓋追加與重放、metadata 竄改、writer／operation／proof 衝突、缺號、coverage、ack 授權、預算與 metadata-only journal。
+
+`AppSyncCanonicalJournalPublisher` 現提供 inline compare／write／readback。預設 canWrite 回傳 false；未來 caller 必須注入新鮮的持久化 rollout/cohort 判定、已解析的 class 與持久化 attempt／discovery 選擇。目前尚未接到 production service。寫入前及 preflight 後各檢查一次 gate，避免等待讀取期間 rollback 卻仍送出。
+
+更新既有目標時，重新 GET 核對 blog ID、完整標題、account、replica、writer nonce 與 expected canonical fingerprint；若上一輪模糊寫入已留下相同文件，直接回報回讀確認，不再 POST。任何 submit 成功回應都不足以回報 Verified，必須再次 GET 並核對完整 decoded document 與 metadata。已知目標更新逾時可透過相同回讀完成確認；create 回應沒有唯一候選時回傳 Unknown 及候選 IDs，不自行挑選或重建另一篇。
+
+發布器沒有改寫 index、outbox、ack lifecycle 或清理資料；不會把 root 標題當成可原地更新的 inline journal。超過 inline 預算回傳 StoragePressure，分段路徑待接線。Fake provider 回歸涵蓋 gate、模糊 acknowledgement、假成功、候選歧義、更新逾時回讀、相同 body 重試、摘要衝突與 gate 在 preflight 期間關閉。這不構成完整 durable publish／retry 或 cohort gate 驗收。
+
+回讀過程的 NotLoggedIn／FormExpired 會直接回報 FormExpired，包括 preflight 與 submit 後 reader；不將明確的登入失效混入一般未知重試。重放準備時也改用已建立的 sequence map 查找既有序號，避免每個重放來源再掃描完整 journal。

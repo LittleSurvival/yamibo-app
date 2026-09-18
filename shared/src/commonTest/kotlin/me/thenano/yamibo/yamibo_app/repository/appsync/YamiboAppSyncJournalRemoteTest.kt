@@ -59,6 +59,9 @@ import me.thenano.yamibo.yamibo_app.store.appsync.StoredAppSyncRemoteBlog
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3DocumentCodec
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3DocumentRead
 import me.thenano.yamibo.yamibo_app.repository.appsync.schema.*
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncCanonicalJournalPreparationResult
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCanonicalJournalPublisher
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCanonicalJournalPublishResult
 
 class YamiboAppSyncJournalRemoteTest {
     @Test fun indexedCanonicalCheckpointCarriesActivationEvidenceButUnindexedOneDoesNot() = runBlocking {
@@ -216,6 +219,105 @@ class YamiboAppSyncJournalRemoteTest {
         checkEvidence(remote(provider, store).loadJournals(ACCOUNT, false))
         assertEquals(0, provider.submitCalls)
         assertTrue(provider.deleteRequests.isEmpty())
+    }
+
+    private fun canonicalPublication(heartbeat: Long = 2): AppSyncCanonicalJournalPreparationResult.Ready {
+        val journal = AppSyncCanonicalJournal(AppSyncCanonicalOperationBlock(ACCOUNT.value, emptyList()),
+            "device", "epoch", "writer", 0, 0, emptyMap(), emptyList(), heartbeat, 3, 3, "test", 0)
+        val codec = AppSyncV3DocumentCodec()
+        val body = codec.encodeJournal("device:epoch", journal)
+        val read = assertIs<AppSyncV3DocumentRead.Journal>(codec.discover(body, ACCOUNT.value,
+            me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3PayloadKind.Journal))
+        return AppSyncCanonicalJournalPreparationResult.Ready(read.document, body, read.metadata.canonicalFingerprint, emptySet())
+    }
+
+    @Test fun nativePublicationRequiresGateAndAuthoritativeReaderEvenAfterAcknowledgement() = runBlocking {
+        val ready = canonicalPublication()
+        val id = BlogId(42)
+        val provider = FakeProvider()
+        val selection = me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncBlogClassSelection.Existing(CLASS_ID)
+        assertIs<AppSyncCanonicalJournalPublishResult.Disabled>(AppSyncCanonicalJournalPublisher(provider)
+            .publish(ready, null, null, selection, FORM_HASH))
+        assertEquals(0, provider.submitCalls)
+        provider.submitHandler = { request ->
+            provider.blogs[id] = success(page(id, request.title, request.message))
+            AppSyncCloudResult.AcknowledgedButUnverified(null, "uncertain", id)
+        }
+        val result = assertIs<AppSyncCanonicalJournalPublishResult.Verified>(AppSyncCanonicalJournalPublisher(provider) { true }
+            .publish(ready, null, null, selection, FORM_HASH))
+        assertEquals("42", result.journal.remoteId)
+        assertEquals(ready.journal, assertIs<AppSyncV3DocumentRead.Journal>(result.journal.document).document)
+        assertEquals(1, provider.fetchBlogCalls)
+        assertEquals(1, provider.submitCalls)
+    }
+
+    @Test fun nativePublicationDoesNotTrustSuccessfulSubmitOrAmbiguousCreateIds() = runBlocking {
+        val ready = canonicalPublication()
+        val provider = FakeProvider().apply { submitResult = success(AppSyncPostAcknowledgement(null, listOf(BlogId(42)))) }
+        val publisher = AppSyncCanonicalJournalPublisher(provider) { true }
+        val selection = me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncBlogClassSelection.Existing(CLASS_ID)
+        assertEquals(listOf(BlogId(42)), assertIs<AppSyncCanonicalJournalPublishResult.Unknown>(
+            publisher.publish(ready, null, null, selection, FORM_HASH)).candidateBlogIds)
+        provider.submitResult = success(AppSyncPostAcknowledgement(null, listOf(BlogId(42), BlogId(43))))
+        val before = provider.fetchBlogCalls
+        assertEquals(listOf(BlogId(42), BlogId(43)), assertIs<AppSyncCanonicalJournalPublishResult.Unknown>(
+            publisher.publish(ready, null, null, selection, FORM_HASH)).candidateBlogIds)
+        assertEquals(before, provider.fetchBlogCalls)
+    }
+
+    @Test fun nativeUpdateReconcilesTimeoutAndRetryWithoutDuplicateWrite() = runBlocking {
+        val old = canonicalPublication(1)
+        val ready = canonicalPublication(2)
+        val id = BlogId(42)
+        val title = AppSyncJournalDefaults.journalTitle(SyncDeviceId("device"), SyncDeviceEpoch("epoch"))
+        val provider = FakeProvider().apply { blogs[id] = success(page(id, title, old.envelope)) }
+        val publisher = AppSyncCanonicalJournalPublisher(provider) { true }
+        val selection = me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncBlogClassSelection.Existing(CLASS_ID)
+        assertIs<AppSyncCanonicalJournalPublishResult.Conflict>(publisher.publish(ready, id, "wrong", selection, FORM_HASH))
+        assertEquals(0, provider.submitCalls)
+        provider.submitHandler = { request ->
+            provider.blogs[id] = success(page(id, request.title, request.message))
+            AppSyncCloudResult.Timeout("ambiguous")
+        }
+        assertIs<AppSyncCanonicalJournalPublishResult.Verified>(publisher.publish(ready, id, old.fingerprint, selection, FORM_HASH))
+        assertIs<AppSyncCanonicalJournalPublishResult.Verified>(publisher.publish(ready, id, old.fingerprint, selection, FORM_HASH))
+        assertEquals(1, provider.submitCalls)
+    }
+
+    @Test fun nativeWriteRechecksGateAndRejectsPreparedBodyTampering() = runBlocking {
+        val old = canonicalPublication(1)
+        val ready = canonicalPublication(2)
+        val id = BlogId(42)
+        val title = AppSyncJournalDefaults.journalTitle(SyncDeviceId("device"), SyncDeviceEpoch("epoch"))
+        val provider = FakeProvider().apply { blogs[id] = success(page(id, title, old.envelope)) }
+        val selection = me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncBlogClassSelection.Existing(CLASS_ID)
+        var gates = 0
+        assertIs<AppSyncCanonicalJournalPublishResult.Disabled>(AppSyncCanonicalJournalPublisher(provider) { ++gates == 1 }
+            .publish(ready, id, old.fingerprint, selection, FORM_HASH))
+        assertEquals(1, provider.fetchBlogCalls)
+        assertEquals(0, provider.submitCalls)
+        assertIs<AppSyncCanonicalJournalPublishResult.InvalidDocument>(AppSyncCanonicalJournalPublisher(provider) { true }
+            .publish(ready.copy(fingerprint = "changed"), null, null, selection, FORM_HASH))
+        assertEquals(0, provider.submitCalls)
+    }
+
+    @Test fun nativeReaderAuthExpiryDoesNotBecomeAnUnknownRetry() = runBlocking {
+        val ready = canonicalPublication(2)
+        val old = canonicalPublication(1)
+        val id = BlogId(42)
+        val title = AppSyncJournalDefaults.journalTitle(SyncDeviceId("device"), SyncDeviceEpoch("epoch"))
+        val provider = FakeProvider().apply { blogs[id] = AppSyncCloudResult.NotLoggedIn }
+        val publisher = AppSyncCanonicalJournalPublisher(provider) { true }
+        val selection = me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncBlogClassSelection.Existing(CLASS_ID)
+        assertIs<AppSyncCanonicalJournalPublishResult.FormExpired>(publisher.publish(ready, id, old.fingerprint, selection, FORM_HASH))
+        assertEquals(0, provider.submitCalls)
+        provider.blogs[id] = success(page(id, title, old.envelope))
+        provider.submitHandler = {
+            provider.blogs[id] = AppSyncCloudResult.FormExpired(null)
+            success(AppSyncPostAcknowledgement(null, listOf(id)))
+        }
+        assertIs<AppSyncCanonicalJournalPublishResult.FormExpired>(publisher.publish(ready, id, old.fingerprint, selection, FORM_HASH))
+        assertEquals(1, provider.submitCalls)
     }
 
     private val journalCodec = AppSyncJournalEnvelopeCodec()
@@ -1044,6 +1146,7 @@ class YamiboAppSyncJournalRemoteTest {
         var fetchBlogCalls = 0
         var fetchBlogListCalls = 0
         var submitCalls = 0
+        var submitHandler: (suspend (AppSyncBlogWriteRequest) -> AppSyncCloudResult<AppSyncPostAcknowledgement>)? = null
 
         override suspend fun fetchMyBlogs(
             blogClassId: BlogClassId?,
@@ -1062,7 +1165,7 @@ class YamiboAppSyncJournalRemoteTest {
             request: AppSyncBlogWriteRequest,
         ): AppSyncCloudResult<AppSyncPostAcknowledgement> {
             submitCalls += 1
-            return submitResult
+            return submitHandler?.invoke(request) ?: submitResult
         }
 
         override suspend fun deleteBlog(

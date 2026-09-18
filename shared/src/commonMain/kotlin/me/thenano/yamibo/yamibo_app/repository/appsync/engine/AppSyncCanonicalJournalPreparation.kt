@@ -54,7 +54,7 @@ internal class AppSyncCanonicalJournalPreparation {
         for (source in sources) {
             if (source.deviceId.value != device || source.deviceEpoch.value != epoch || source.sequence.value >= installation.nextSequence)
                 return fail(AppSyncCanonicalJournalFailure.Writer)
-            if (source.sequence.value <= oldPublished && prior?.block?.operations?.none { it.sequence == source.sequence.value } == true)
+            if (source.sequence.value <= oldPublished && !operations.containsKey(source.sequence.value))
                 return fail(AppSyncCanonicalJournalFailure.SequenceGap)
             val imported = AppSyncCanonicalOperationImporter().import(account, source)
             // Skipping an excluded/no-op legacy source would punch a hole in the writer stream.
