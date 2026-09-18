@@ -394,8 +394,14 @@ internal class OperationSyncEngine(
                 }
             }
             if (cloud.requiresCanonicalProcessing) {
+                val plan = AppSyncCanonicalCloudPlanner().prepare(accountBinding, requireNotNull(store.installation()), cloud)
+                if (plan is AppSyncCanonicalCloudPlan.NeedsAttention && plan.reason == AppSyncCanonicalCloudFailure.OwnWriterConflict) {
+                    store.rotateDeviceEpoch(accountBinding, AppSyncInstallationState.RebootstrapRequired)
+                    return OperationSyncResult.RebootstrapRequired("The device journal is owned by another restored installation")
+                }
                 store.updateState(AppSyncInstallationState.PausedProvider)
-                return OperationSyncResult.PausedProvider("Canonical cloud state requires v3 processing")
+                return OperationSyncResult.PausedProvider(if (plan is AppSyncCanonicalCloudPlan.NeedsAttention)
+                    "Canonical cloud validation: ${plan.reason}" else "Canonical cloud state requires v3 activation")
             }
             if (
                 detectEmptyCloud &&

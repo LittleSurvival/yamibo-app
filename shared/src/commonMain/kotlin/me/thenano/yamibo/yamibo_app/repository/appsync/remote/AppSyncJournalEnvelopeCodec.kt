@@ -176,7 +176,7 @@ internal class AppSyncJournalEnvelopeCodec(
         )
     }
 
-    private fun validatePayload(payload: AppSyncJournalPayload): String? {
+    internal fun validatePayload(payload: AppSyncJournalPayload): String? {
         val ownObserved = payload.observed[
             SyncReplicaKey(payload.deviceId, payload.deviceEpoch)
         ]

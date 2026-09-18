@@ -52,8 +52,39 @@ import me.thenano.yamibo.yamibo_app.repository.backup.YamiboBackupFile
 import me.thenano.yamibo.yamibo_app.repository.rss.rssSearchSubscriptionSyncId
 import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncOperationStore
 import me.thenano.yamibo.yamibo_app.store.appsync.LocalSyncOperationDraft
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3DocumentCodec
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncVerifiedCanonicalCheckpoint
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncIndexEnvelopeCodec
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncIndexPayload
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncIndexCheckpointReference
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3PayloadKind
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.LoadedAppSyncCanonicalDocument
+import me.thenano.yamibo.yamibo_app.repository.appsync.schema.*
 
 class OperationSyncEngineTest {
+    @Test fun canonicalRestoredWriterConflictRotatesEpochWithoutApplyingOrPublishing() = runBlocking {
+        val fixture = fixture()
+        activate(fixture)
+        val before = requireNotNull(fixture.store.installation())
+        val checkpoint = AppSyncCanonicalCheckpoint("canonical", account.value, 1, emptyMap(), emptyList())
+        val codec = AppSyncV3DocumentCodec()
+        val index = AppSyncIndexEnvelopeCodec().encode(AppSyncIndexPayload(account, checkpoints = listOf(
+            AppSyncIndexCheckpointReference(checkpoint.checkpointId, 42, AppSyncCanonicalCheckpointCodec().encode(checkpoint).sha256().hex())),
+            updatedAtEpochMillis = 1))
+        val verified = requireNotNull(AppSyncVerifiedCanonicalCheckpoint.verify(account.value, 42, index, codec.encodeCheckpoint(checkpoint)))
+        val replica = "${before.deviceId.value}:${before.deviceEpoch.value}"
+        val journal = AppSyncCanonicalJournal(AppSyncCanonicalOperationBlock(account.value, emptyList()), before.deviceId.value,
+            before.deviceEpoch.value, "different-installation", 0, 0, emptyMap(), emptyList(), 1, 3, 3, "test", 0)
+        fixture.remote.loadFailure = AppSyncJournalLoadResult.Success(emptyList(), verifiedCanonicalCheckpoints = listOf(verified),
+            canonicalDocuments = listOf(LoadedAppSyncCanonicalDocument("43", codec.discover(
+                codec.encodeJournal(replica, journal), account.value, AppSyncV3PayloadKind.Journal))))
+        assertIs<OperationSyncResult.RebootstrapRequired>(fixture.engine.synchronize(account, formHash))
+        assertNotEquals(before.deviceEpoch, fixture.store.installation()?.deviceEpoch)
+        assertEquals(AppSyncInstallationState.RebootstrapRequired, fixture.store.installation()?.state)
+        assertTrue(fixture.store.verifiedCheckpoints().isEmpty())
+        assertEquals(0, fixture.remote.publishCount)
+    }
+
     @Test fun canonicalCloudCannotTriggerEmptyCloudPushOrLegacyBootstrap() = runBlocking {
         val fixture = fixture()
         activate(fixture)
