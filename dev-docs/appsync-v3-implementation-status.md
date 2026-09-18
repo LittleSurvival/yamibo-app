@@ -171,7 +171,7 @@ epoch rotation without checkpoint activation or publication. Ready plans remain 
 the canonical local recorder/runtime path; journal-only bootstrap also remains unfinished.
 See appsync-v3-cloud-plan.md.
 
-Latest checks (2026-09-18): all 643 shared tests and 15 CloudSyncUiState tests passed, with
+Latest checks (2026-09-18): all 647 shared tests and 15 CloudSyncUiState tests passed, with
 zero failures, errors, or skipped tests. This includes canonical field/scalar tests, synthetic
 corpus replay, production setting default round trips, isolated SQLite storage accounting,
 and the existing recovery, production-producer, backup, and convergence suites. Eight additional

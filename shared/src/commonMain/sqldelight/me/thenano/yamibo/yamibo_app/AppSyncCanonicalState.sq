@@ -5,3 +5,6 @@ putState:
 INSERT OR REPLACE INTO AppSyncCanonicalState(
     singletonId, accountBinding, checkpointId, canonicalPayload, canonicalSha256
 ) VALUES (1, ?, ?, ?, ?);
+
+clearState:
+DELETE FROM AppSyncCanonicalState;

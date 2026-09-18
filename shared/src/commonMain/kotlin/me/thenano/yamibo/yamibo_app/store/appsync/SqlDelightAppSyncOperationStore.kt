@@ -542,6 +542,9 @@ internal class SqlDelightAppSyncOperationStore(
                 queries.markOperationsDiscardedByForcePull(discarded.map { it.value })
             }
             domainMutation(result)
+            // This API commits a complete legacy replacement. Clear the superseded
+            // canonical head only after materialization succeeds, in this transaction.
+            db.appSyncCanonicalStateQueries.clearState()
             queries.clearCausalWatermarks()
             coverage.asStableMap().forEach { (replicaKey, sequence) ->
                 queries.upsertCausalWatermark(replicaKey, sequence)
@@ -597,6 +600,9 @@ internal class SqlDelightAppSyncOperationStore(
                 )
             }
             domainMutation(result)
+            // This API commits a complete legacy replacement. Clear the superseded
+            // canonical head only after materialization succeeds, in this transaction.
+            db.appSyncCanonicalStateQueries.clearState()
             queries.clearCausalWatermarks()
             coverage.asStableMap().forEach { (replicaKey, sequence) ->
                 queries.upsertCausalWatermark(replicaKey, sequence)

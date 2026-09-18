@@ -26,3 +26,7 @@ essential note content is never truncated. Recorder regressions cover typed no-o
 preservation, repeated-target batches, invalid source retention, oversized notes, callback
 rollback, generation after deletion, and absence of legacy provenance writes. This does not
 complete normalized storage, all producer acceptance, native writing or field-specific UI.
+
+舊版完整狀態替換的生命週期已接線：`completeBootstrap` 與 `replaceWithVerifiedCloudState` 在 materialization 成功後，於同一筆 transaction 移除被取代的 canonical head。成功換帳號 bootstrap 後，recorder 因沒有 canonical head 而讀取新 legacy projection，不會再因舊帳號 binding 拒絕操作。單純 `prepareForCloudReset`、writer epoch rotation 或失敗的 bootstrap 不清除 canonical state；外層 transaction 失敗時會一起還原 canonical bytes、outbox lifecycle、installation 及 materialized rows。
+
+此清除只適用於上述既有完整 legacy replacement API，不放在一般 canonical activation、遠端 receipt 記錄或本機修改路徑。Canonical 到 canonical 的跨帳號 bootstrap、完整 v3 reset／force-pull UI 與 engine 路由仍需實作；本次不擴大其完成宣稱。

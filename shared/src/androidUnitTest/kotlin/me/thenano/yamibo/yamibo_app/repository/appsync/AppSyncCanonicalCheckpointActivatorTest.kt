@@ -4,6 +4,7 @@ import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import kotlin.test.*
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.*
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncOperationLifecycle
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncInstallationState
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.*
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.*
@@ -243,6 +244,81 @@ class AppSyncCanonicalCheckpointActivatorTest {
         recorder.record("settings", "novelreadersettings.fontsize", SyncOperationKind.Delete, emptyMap()) {}
         assertEquals(2L, recorder.currentGeneration("settings", "novelreadersettings.fontsize"))
         assertTrue(db.appSyncOperationQueries.getResolvedEntities().executeAsList().isEmpty())
+    }
+
+    @Test fun cloudResetPreparationKeepsCanonicalHeadUntilReplacementCommits() = fixture {
+        append()
+        activator().activate(verified())
+        val previous = state.read(account.value)
+        val sources = store.allOutboxOperations()
+        store.prepareForCloudReset()
+        assertNull(store.installation()?.accountBinding)
+        assertEquals(previous, state.read(account.value))
+        assertEquals(sources, store.allOutboxOperations())
+        val legacy = SqlDelightSyncDomainStateAdapter(db, materializer, nowMillis = { 30 })
+        store.completeBootstrap(account, OperationReducer().reduce(operations = emptyList()), SyncCausalContext(),
+            emptySet(), 30, false, null) { legacy.adoptCheckpointWithinTransaction(it.entities.values) }
+        assertNull(state.read(account.value))
+        assertEquals(AppSyncInstallationState.Active, store.installation()?.state)
+        assertTrue(db.appSyncOperationQueries.getSyncSettingValues().executeAsList().isEmpty())
+    }
+
+    @Test fun accountRebootstrapClearsSupersededCanonicalBindingAtomically() = fixture {
+        append()
+        activator().activate(verified())
+        val other = SyncAccountBinding("another-account")
+        val legacy = SqlDelightSyncDomainStateAdapter(db, materializer, nowMillis = { 30 })
+        store.completeBootstrap(other, OperationReducer().reduce(operations = emptyList()), SyncCausalContext(),
+            emptySet(), 30, true, null) { legacy.adoptCheckpointWithinTransaction(it.entities.values) }
+        assertNull(state.read(other.value))
+        assertEquals(other, store.installation()?.accountBinding)
+        assertTrue(store.pendingOperations().isEmpty())
+        assertEquals(AppSyncOperationLifecycle.DiscardedByRebootstrap, store.allOutboxOperations().single().second)
+        assertNotNull(recorder().record("settings", "novelreadersettings.fontsize", SyncOperationKind.Put,
+            mapOf("type" to "int", "value" to "22")) {})
+        assertEquals(other, store.pendingOperations().single().accountBinding)
+        assertEquals(1, db.appSyncOperationQueries.getResolvedEntities().executeAsList().size)
+    }
+
+    @Test fun forcePullReplacementClearsCanonicalHeadButOuterFailureRestoresIt() = fixture {
+        append()
+        activator().activate(verified())
+        val previous = state.read(account.value)
+        val before = store.allOutboxOperations()
+        val installation = store.installation()
+        val settings = db.appSyncOperationQueries.getSyncSettingValues().executeAsList()
+        val legacy = SqlDelightSyncDomainStateAdapter(db, materializer, nowMillis = { 30 })
+        fun replace() = store.replaceWithVerifiedCloudState(OperationReducer().reduce(operations = emptyList()),
+            SyncCausalContext(), emptySet(), 30) { legacy.adoptCheckpointWithinTransaction(it.entities.values) }
+        assertFailsWith<IllegalStateException> {
+            db.transaction {
+                replace()
+                assertNull(state.read(account.value))
+                error("injected after replacement")
+            }
+        }
+        assertEquals(previous, state.read(account.value))
+        assertEquals(before, store.allOutboxOperations())
+        assertEquals(installation, store.installation())
+        assertEquals(settings, db.appSyncOperationQueries.getSyncSettingValues().executeAsList())
+        replace()
+        assertNull(state.read(account.value))
+        assertEquals(AppSyncOperationLifecycle.DiscardedByForcePull, store.allOutboxOperations().single().second)
+    }
+
+    @Test fun failedBootstrapAndWriterRotationRetainCanonicalEvidence() = fixture {
+        append()
+        activator().activate(verified())
+        val previous = state.read(account.value)
+        val before = store.installation()
+        assertFailsWith<IllegalStateException> {
+            store.completeBootstrap(account, OperationReducer().reduce(operations = emptyList()), SyncCausalContext(),
+                emptySet(), 30, true, null) { error("materialization failed") }
+        }
+        assertEquals(previous, state.read(account.value))
+        assertEquals(before, store.installation())
+        store.rotateDeviceEpoch(account, AppSyncInstallationState.RebootstrapRequired)
+        assertEquals(previous, state.read(account.value))
     }
 
     @Test fun localBatchRecordsProvenanceWithoutReplayingMaterializedValuesOrAcknowledgingSources() = fixture {
