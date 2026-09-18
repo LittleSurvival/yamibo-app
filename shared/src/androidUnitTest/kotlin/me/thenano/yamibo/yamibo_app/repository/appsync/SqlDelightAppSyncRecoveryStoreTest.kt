@@ -106,11 +106,15 @@ class SqlDelightAppSyncRecoveryStoreTest {
             Database.Schema.migrate(driver, 43, 44)
             driver.execute(null, "INSERT INTO AppSyncRecoveryPayload VALUES ('existing', 'Journal', 'replica', 'body', 'digest')", 0)
             Database.Schema.migrate(driver, 48, 49)
+            Database.Schema.migrate(driver, 49, 50)
             val row = Database(driver).appSyncOperationQueries.getRecoveryPayload("existing").executeAsOne()
             assertEquals("body", row.canonicalEnvelope)
             assertEquals("digest", row.envelopeFingerprint)
             assertEquals(2L, row.transportVersion)
             assertNull(row.rootIntentFingerprint)
+            assertNull(row.verifiedIndexBlogId)
+            assertNull(row.verifiedIndexFingerprint)
+            assertNull(row.indexVerifiedAtEpochMillis)
         }
     }
 

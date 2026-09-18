@@ -31,3 +31,7 @@ Migration 48 為 frozen recovery payload 增加 transportVersion 與 native root
 分段標題含 generation，因此同名分段只要摘要不同即回報 Conflict，不能視為不存在後再建立。root 主文件標題允許不同 generation，完整讀取的舊 root 可略過。本次測試將發布器的預設 fixture discovery 換成此元件，確保 readback mismatch 仍保留原 intent 且不重送；另覆蓋多頁完整掃描、缺頁、重複頁、上限、登入中斷、候選遺失、重複符合、同名舊 root 與分類不符。
 
 Index 的讀寫 codec 已共用參照衝突檢查：同一 journal replica、checkpoint identity 或 retirement replica 對應不同內容，以及同一類型的實體 Blog ID 對應不同身分，均拒絕；journal 與 checkpoint 不能共用一個 Blog ID。完全相同的重複項目仍相容，編碼時折疊；journal 的舊版 null fingerprint 仍保留。空身分、非正整數 ID 與空白 fingerprint 不可成為新 index 證據。這避免原先 distinctBy 在發布時靜默選第一筆衝突參照，也拒絕外層 checksum 正確的衝突輸入。此驗證不等於 durable index 提交已完成。
+
+Migration 49 在 recovery payload 保存 verifiedIndexBlogId、verifiedIndexFingerprint、indexVerifiedAtEpochMillis，既有列均為 null，不臆造成功證據。舊 `markIndexCommitted` 拒絕 transport 3；專用 `markNativeIndexCommitted` 重新驗證凍結封套、帳號、root intent／已確認 root 與 index 內的 canonical 摘要。journal 另核對 session writer／replica，checkpoint 核對 identity。index 證據與 ActivatingLocal 階段在同一 SQLite 交易寫入；相同回讀證據重試不改寫第一次時間，不同 index 不能覆蓋既有成功證據。此 API 假設呼叫端已 GET 並核對 index 實體 ID／標題，尚須由 native committer 接線；不會確認 outbox、建立可清理 coverage 或進行刪除。
+
+舊版 `AppSyncSegmentIndexCommitter` 在任何 discovery／POST 前拒絕 native transport，避免先寫入舊摘要才於本機提交時失敗。SQLite／fake-provider 測試涵蓋 journal 與 checkpoint 的 canonical 參照、帳號／identity／root 不符、封套摘要誤用、外層交易回滾、重建 store 後重試、第一次時間保留、不同 index 拒絕、舊入口無遠端寫入，以及 pending／coverage 不變。

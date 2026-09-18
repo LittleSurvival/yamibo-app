@@ -73,6 +73,8 @@ internal class AppSyncSegmentIndexCommitter(
     ): AppSyncSegmentIndexCommitResult {
         val session = recoveryStore.session(sessionId)
             ?: return AppSyncSegmentIndexCommitResult.Terminal("Recovery session is missing")
+        if (recoveryStore.usesNativeTransport(sessionId))
+            return AppSyncSegmentIndexCommitResult.Terminal("Native recovery requires the native Index committer")
         if (session.phase == AppSyncRecoveryPhase.ActivatingLocal && session.indexCommitted) {
             return AppSyncSegmentIndexCommitResult.Verified
         }

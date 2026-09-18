@@ -137,6 +137,70 @@ class AppSyncV3SegmentPublisherTest {
         assertEquals(AppSyncV3ArtifactDiscovery.Unknown, reconciler.discover("missing", "0".repeat(64)))
     }
 
+    @Test fun nativeIndexCommitRequiresExactFrozenCanonicalReferenceAndPersistsEvidenceAtomically() = fixture {
+        val root = assertIs<AppSyncV3SegmentPublishResult.ReadyToCommitIndex>(publish())
+        val reference = AppSyncIndexCheckpointReference("checkpoint", root.rootBlogId.value, root.root.metadata.canonicalFingerprint)
+        val postsBefore = provider.posts.size
+        val legacy = AppSyncSegmentIndexCommitter(provider, SqlDelightAppSyncRemoteBlogStore(db), recovery, nowMillis = { 20 })
+        assertIs<AppSyncSegmentIndexCommitResult.Terminal>(legacy.commitCheckpointRoot(session.sessionId, "checkpoint",
+            AppSyncBlogClassSelection.Existing(BlogClassId(7)), FormHash("test")))
+        assertEquals(postsBefore, provider.posts.size)
+        assertEquals(0, provider.listReads)
+        val index = AppSyncIndexPayload(account, checkpoints = listOf(reference), updatedAtEpochMillis = 20)
+        fun body(value: AppSyncIndexPayload = index) = AppSyncIndexEnvelopeCodec().encode(value).replace("\n", "<br>")
+        assertFailsWith<IllegalArgumentException> { recovery.markIndexCommitted(session.sessionId, 20) }
+        for (bad in listOf(index.copy(accountBinding = SyncAccountBinding("other")),
+            index.copy(checkpoints = emptyList()),
+            index.copy(checkpoints = listOf(reference.copy(blogId = 999))),
+            index.copy(checkpoints = listOf(reference.copy(fingerprint = root.root.envelopeSha256))))) {
+            assertFailsWith<IllegalArgumentException> { recovery.markNativeIndexCommitted(session.sessionId, 900, body(bad), 20) }
+            assertEquals(false, recovery.session(session.sessionId)?.indexCommitted)
+            assertNull(db.appSyncOperationQueries.getRecoveryPayload(session.sessionId).executeAsOne().verifiedIndexBlogId)
+        }
+        assertFailsWith<IllegalStateException> {
+            db.transaction {
+                recovery.markNativeIndexCommitted(session.sessionId, 900, body(), 21)
+                error("abort outer transaction")
+            }
+        }
+        assertEquals(AppSyncRecoveryPhase.CommittingIndex, recovery.session(session.sessionId)?.phase)
+        assertNull(db.appSyncOperationQueries.getRecoveryPayload(session.sessionId).executeAsOne().verifiedIndexBlogId)
+        recovery.markNativeIndexCommitted(session.sessionId, 900, body(), 22)
+        val restarted = SqlDelightAppSyncRecoveryStore(db)
+        restarted.markNativeIndexCommitted(session.sessionId, 900, body(), 23)
+        assertEquals(AppSyncRecoveryPhase.ActivatingLocal, restarted.session(session.sessionId)?.phase)
+        val evidence = db.appSyncOperationQueries.getRecoveryPayload(session.sessionId).executeAsOne()
+        assertEquals(900L, evidence.verifiedIndexBlogId)
+        assertEquals(22L, evidence.indexVerifiedAtEpochMillis)
+        assertNotNull(evidence.verifiedIndexFingerprint)
+        assertFailsWith<IllegalArgumentException> { restarted.markNativeIndexCommitted(session.sessionId, 901, body(), 24) }
+        assertEquals(listOf(pending), operations.pendingOperations())
+        assertTrue(operations.verifiedCheckpoints().isEmpty())
+    }
+
+    @Test fun journalIndexCommitBindsWriterReplicaAndRequiresCanonicalFingerprint() = fixture {
+        recovery.rollbackPreCommit(session.sessionId)
+        val journalSession = recovery.createOrResumeSegmentedJournal(account, setOf(pending.operationId.value), "journal", 2)
+        recovery.startSegmentedJournal(journalSession.sessionId, 3)
+        val identity = "${journalSession.targetDeviceId.value}:${journalSession.targetDeviceEpoch.value}"
+        val journal = AppSyncCanonicalJournal(AppSyncCanonicalOperationBlock(account.value, emptyList()),
+            journalSession.targetDeviceId.value, journalSession.targetDeviceEpoch.value, journalSession.targetWriterNonce.value,
+            0, 0, emptyMap(), emptyList(), 1, 3, 3, "test", 0)
+        val frozen = AppSyncV3DocumentCodec().encodeJournal(identity, journal)
+        val root = assertIs<AppSyncV3SegmentPublishResult.ReadyToCommitIndex>(publisher().publish(journalSession.sessionId,
+            frozen, AppSyncV3PayloadKind.Journal, identity, AppSyncBlogClassSelection.Existing(BlogClassId(7)), FormHash("test")))
+        val ref = AppSyncIndexJournalReference(identity, root.rootBlogId.value, root.root.metadata.canonicalFingerprint)
+        fun index(reference: AppSyncIndexJournalReference) = AppSyncIndexEnvelopeCodec().encode(
+            AppSyncIndexPayload(account, journals = listOf(reference), updatedAtEpochMillis = 20))
+        for (bad in listOf(ref.copy(replicaKey = "other"), ref.copy(fingerprint = null), ref.copy(fingerprint = root.root.envelopeSha256))) {
+            assertFailsWith<IllegalArgumentException> { recovery.markNativeIndexCommitted(journalSession.sessionId, 900, index(bad), 20) }
+        }
+        assertEquals(false, recovery.session(journalSession.sessionId)?.indexCommitted)
+        recovery.markNativeIndexCommitted(journalSession.sessionId, 900, index(ref), 21)
+        assertEquals(AppSyncRecoveryPhase.ActivatingLocal, recovery.session(journalSession.sessionId)?.phase)
+        assertEquals(listOf(pending), operations.pendingOperations())
+    }
+
     @Test fun discoveryRejectsDuplicateMatchesAndUnreadableCandidates() = fixture {
         assertIs<AppSyncV3SegmentPublishResult.ReadyToCommitIndex>(publish())
         val artifact = provider.artifacts.entries.last()

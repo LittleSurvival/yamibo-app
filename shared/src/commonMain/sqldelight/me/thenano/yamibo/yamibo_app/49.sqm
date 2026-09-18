@@ -1,0 +1,3 @@
+ALTER TABLE AppSyncRecoveryPayload ADD COLUMN verifiedIndexBlogId INTEGER;
+ALTER TABLE AppSyncRecoveryPayload ADD COLUMN verifiedIndexFingerprint TEXT;
+ALTER TABLE AppSyncRecoveryPayload ADD COLUMN indexVerifiedAtEpochMillis INTEGER;

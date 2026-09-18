@@ -20,6 +20,11 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncReplicaKey
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationId
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.ResolvedSyncEntity
 import me.thenano.yamibo.yamibo_app.repository.appsync.withoutExcludedAppSyncPayloads
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncIndexEnvelopeCodec
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncIndexValidation
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3DocumentCodec
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3DocumentRead
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3PayloadKind
 
 internal class SqlDelightAppSyncRecoveryStore(
     private val db: Database,
@@ -419,6 +424,9 @@ internal class SqlDelightAppSyncRecoveryStore(
 
     fun markIndexCommitted(sessionId: String, verifiedAtEpochMillis: Long) {
         val session = requireSession(sessionId)
+        require(queries.getRecoveryPayload(sessionId).executeAsOneOrNull()?.transportVersion != 3L) {
+            "Native recovery requires bound index readback evidence"
+        }
         require(session.phase == AppSyncRecoveryPhase.CommittingIndex)
         queries.markRecoveryIndexCommitted(verifiedAtEpochMillis, sessionId)
         check(requireSession(sessionId).let {
@@ -513,6 +521,57 @@ internal class SqlDelightAppSyncRecoveryStore(
             next = AppSyncRecoveryPhase.Completed,
             nowEpochMillis = activatedAtEpochMillis,
         )
+    }
+
+    fun usesNativeTransport(sessionId: String): Boolean =
+        queries.getRecoveryPayload(sessionId).executeAsOneOrNull()?.transportVersion == 3L
+
+    /** Called only with a fetched Index body after the publisher verifies its physical ID/title.
+     * Binds the canonical reference to the frozen payload and confirmed root, atomically with
+     * the phase transition. This does not acknowledge operations or authorize cleanup.
+     */
+    fun markNativeIndexCommitted(sessionId: String, indexBlogId: Long, indexReaderHtml: String,
+        verifiedAtEpochMillis: Long) = db.transaction {
+        val session = requireSession(sessionId)
+        require(session.phase == AppSyncRecoveryPhase.CommittingIndex ||
+            (session.phase == AppSyncRecoveryPhase.ActivatingLocal && session.indexCommitted))
+        require(indexBlogId in 1..Int.MAX_VALUE.toLong() && verifiedAtEpochMillis >= 0)
+        val payload = requireNotNull(queries.getRecoveryPayload(sessionId).executeAsOneOrNull())
+        require(payload.transportVersion == 3L && payload.rootIntentFingerprint != null &&
+            payload.rootIntentFingerprint == session.rootFingerprint && session.rootBlogId != null &&
+            session.rootBlogId != indexBlogId)
+        require(stableAppSyncFingerprint(payload.canonicalEnvelope) == payload.envelopeFingerprint)
+        val index = (AppSyncIndexEnvelopeCodec().validateReaderHtml(indexReaderHtml) as? AppSyncIndexValidation.Valid)?.envelope
+        requireNotNull(index) { "Native index readback is invalid" }
+        require(index.payload.accountBinding == session.accountBinding)
+        val kind = AppSyncV3PayloadKind.valueOf(payload.payloadKind)
+        val document = AppSyncV3DocumentCodec().discover(payload.canonicalEnvelope, session.accountBinding.value, kind)
+        when (document) {
+            is AppSyncV3DocumentRead.Checkpoint -> {
+                require(document.document.checkpointId == payload.payloadIdentity)
+                val reference = index.payload.checkpoints.distinct().singleOrNull { it.checkpointId == payload.payloadIdentity }
+                require(reference?.blogId?.toLong() == session.rootBlogId &&
+                    reference.fingerprint == document.metadata.canonicalFingerprint)
+            }
+            is AppSyncV3DocumentRead.Journal -> {
+                require(document.document.deviceId == session.targetDeviceId.value &&
+                    document.document.deviceEpoch == session.targetDeviceEpoch.value &&
+                    document.document.writerNonce == session.targetWriterNonce.value)
+                val key = SyncReplicaKey(session.targetDeviceId, session.targetDeviceEpoch).stableKey
+                require(key == payload.payloadIdentity)
+                val reference = index.payload.journals.distinct().singleOrNull { it.replicaKey == key }
+                require(reference?.blogId?.toLong() == session.rootBlogId &&
+                    reference.fingerprint == document.metadata.canonicalFingerprint)
+            }
+            else -> error("Frozen native payload is invalid")
+        }
+        if (session.indexCommitted) {
+            require(payload.verifiedIndexBlogId == indexBlogId && payload.verifiedIndexFingerprint == index.fingerprint)
+        } else {
+            queries.markNativeRecoveryIndexVerified(indexBlogId, index.fingerprint, verifiedAtEpochMillis, sessionId)
+            queries.markRecoveryIndexCommitted(verifiedAtEpochMillis, sessionId)
+            check(requireSession(sessionId).let { it.indexCommitted && it.phase == AppSyncRecoveryPhase.ActivatingLocal })
+        }
     }
 
     private fun insertOperation(operation: SyncOperation, lifecycle: AppSyncOperationLifecycle, acknowledgedAt: Long?) {

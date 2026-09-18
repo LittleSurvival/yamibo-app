@@ -488,6 +488,11 @@ pinNativeRootIntent:
 UPDATE AppSyncRecoveryPayload SET rootIntentFingerprint = ?
 WHERE sessionId = ? AND transportVersion = 3 AND rootIntentFingerprint IS NULL;
 
+markNativeRecoveryIndexVerified:
+UPDATE AppSyncRecoveryPayload
+SET verifiedIndexBlogId = ?, verifiedIndexFingerprint = ?, indexVerifiedAtEpochMillis = ?
+WHERE sessionId = ? AND transportVersion = 3;
+
 deleteRecoveryPayload:
 DELETE FROM AppSyncRecoveryPayload WHERE sessionId = ?;
 
