@@ -26,6 +26,8 @@ internal class AppSyncV3CommitCoordinator(
         cloud: AppSyncCanonicalCloudPlan.Ready? = null): AppSyncSegmentedJournalCommitResult {
         if (!canRun()) return AppSyncSegmentedJournalCommitResult.Terminal("Native recovery is disabled")
         val session = recovery.session(sessionId) ?: return AppSyncSegmentedJournalCommitResult.Terminal("Native session is missing")
+        if (recovery.usesSanitizedV2Transport(sessionId))
+            return AppSyncSegmentedJournalCommitResult.Terminal("Frozen recovery requires sanitized v2 coordination")
         if (recovery.payloadTransportVersion(sessionId)?.let { it != 3L } == true)
             return AppSyncSegmentedJournalCommitResult.Terminal("Frozen recovery payload requires another protocol")
         if (session.mode == AppSyncRecoveryMode.LegacyShadow) return AppSyncSegmentedJournalCommitResult.Terminal("Native recovery cannot run legacy shadow mode")

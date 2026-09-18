@@ -151,3 +151,20 @@ installation／reader gate。每批最多 8 份 retained journals，未涵蓋的
 新 checkpoint 會重新檢查；成功回收將 companion UTF-8 bytes 加入既有 audit。
 
 正式 coordinator／service dispatch、多段與裝置中斷驗收仍待完成，不能宣告完整回退流程可上線。
+
+
+## 回退發布協調器
+
+`AppSyncSanitizedV2CommitCoordinator` 在 caller 的 engine lease 內，將 Classifying／Staging 接到
+v2 分段、索引 readback 與 canonical 本機啟用。輸入必須包含已驗證 canonical cloud plan，
+錯誤格式或非 journal session 在任何狀態變更與 retry charging 前拒絕；native coordinator 亦拒絕
+回退 session，包括已回收本文、只剩 completion receipt 的回退工作。
+
+協調器沿用持久化 retry identity／deadline，未到期限不發出網路請求也不增加失敗次數；相同
+內容第三次失敗進入 NeedsAttention，須明確 resume。未確認索引前 writer gate 關閉就停止；
+索引已確認後，即使禁止遠端寫入，仍可重試設定與完成本機啟用。成功僅確認 frozen source IDs。
+本文回收後，既有 receipt 驗證加上固定 16 位 root 格式仍能識別回退完成狀態，重複呼叫不重送
+遠端文件或重播設定。
+
+此協調器尚待正式 service 選路及 WorkManager continuation 接線；persisted deadline 本身不等於
+已排入背景工作。多段、裝置中斷、完整 rollback acceptance 仍未完成。

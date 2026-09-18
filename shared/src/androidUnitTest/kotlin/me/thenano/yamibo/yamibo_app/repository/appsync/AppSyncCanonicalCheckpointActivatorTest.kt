@@ -275,6 +275,120 @@ class AppSyncCanonicalCheckpointActivatorTest {
         assertEquals(listOf(first, later), store.pendingOperations())
     }
 
+    private fun Fixture.runFallback(provider: AppSyncV3SegmentPublisherTest.Provider, id: String,
+        canWrite: Boolean = true, cloud: AppSyncCanonicalCloudPlan.Ready = AppSyncCanonicalCloudPlan.Ready(
+            verified(), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())) = kotlinx.coroutines.runBlocking {
+        val recovery = SqlDelightAppSyncRecoveryStore(db)
+        val selection = AppSyncBlogClassSelection.Existing(io.github.littlesurvival.dto.value.BlogClassId(7))
+        val publisher = AppSyncSanitizedV2SegmentPublisher(provider, recovery, { now }, canWrite = { canWrite },
+            discover = AppSyncV3ArtifactReconciler(provider, selection.classId)::discover)
+        val committer = AppSyncSanitizedV2IndexCommitter(provider, recovery, publisher, { now }, { canWrite })
+        AppSyncSanitizedV2CommitCoordinator(committer, recovery, activator(), { now }, { canWrite })
+            .commit(id, selection, io.github.littlesurvival.dto.value.FormHash("test"), cloud)
+    }
+
+    private fun Fixture.startFallback(): Pair<SqlDelightAppSyncRecoveryStore, String> {
+        val recovery = SqlDelightAppSyncRecoveryStore(db)
+        val cloud = AppSyncCanonicalCloudPlan.Ready(verified(), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
+        val starter = AppSyncNativeJournalStarter(db, store, recovery, state, activator(), { now }, { true }, sanitizedV2Fallback = true)
+        return recovery to starter.startBlocking(account, cloud).getOrThrow()
+    }
+
+    @Test fun fallbackCoordinatorCompletesPublicationActivationAndReceiptRetryWithoutSecondTrigger() = fixture {
+        val first = append("20")
+        val (recovery, id) = startFallback()
+        val provider = nativePublishingEnvironment().first
+        val originalCheckpoint = provider.artifacts[123]
+        val later = append("22")
+        assertEquals(AppSyncRecoveryPhase.Classifying, recovery.session(id)?.phase)
+        val result = assertIs<AppSyncSegmentedJournalCommitResult.Verified>(runFallback(provider, id))
+        assertEquals(setOf(first.operationId.value), result.acknowledgedOperationIds)
+        assertEquals(AppSyncRecoveryPhase.Completed, recovery.session(id)?.phase)
+        assertEquals(listOf(later), store.pendingOperations())
+        assertEquals(22, preferences.values["novelreadersettings.fontsize"])
+        assertEquals(originalCheckpoint, provider.artifacts[123])
+        assertEquals(3, provider.posts.size)
+        val cp = assertIs<AppSyncCanonicalPendingMergeResult.Ready>(AppSyncCanonicalPendingMerge()
+            .prepare(checkpoint, listOf(first), "covered-fallback-coordinator", now)).checkpoint
+        assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(verified(cp)))
+        assertFalse(recovery.hasSanitizedV2Payload(id))
+        assertTrue(recovery.usesSanitizedV2Transport(id))
+        preferences.values["novelreadersettings.fontsize"] = 30
+        assertIs<AppSyncSegmentedJournalCommitResult.Verified>(runFallback(provider, id, canWrite = false))
+        assertEquals(3, provider.posts.size)
+        assertEquals(30, preferences.values["novelreadersettings.fontsize"])
+        assertEquals(listOf(later), store.pendingOperations())
+    }
+
+    @Test fun fallbackCoordinatorResumesCommittedSettingsWithWritesDisabledAfterDurableDeadline() = fixture {
+        val first = append("20")
+        val (recovery, id) = startFallback()
+        val provider = nativePublishingEnvironment().first
+        val remoteDevice = SyncDeviceId("fallback-remote")
+        val remote = first.copy(deviceId = remoteDevice,
+            operationId = SyncOperation.idFor(remoteDevice, first.deviceEpoch, first.sequence),
+            fields = first.fields + ("value" to "26"), createdAtEpochMillis = 100)
+        val imported = assertIs<AppSyncCanonicalOperationImport.Accepted>(AppSyncCanonicalOperationImporter().import(account.value, remote))
+        val cloud = AppSyncCanonicalCloudPlan.Ready(verified(), AppSyncCanonicalOperationBlock(account.value, listOf(imported.operation)), emptyList())
+        preferences.fail = true
+        assertIs<AppSyncSegmentedJournalCommitResult.Retryable>(runFallback(provider, id, cloud = cloud))
+        assertTrue(assertNotNull(recovery.session(id)).indexCommitted)
+        assertEquals(1L, recovery.session(id)?.retryCount)
+        assertEquals(listOf(first), store.pendingOperations())
+        val later = append("22")
+        preferences.fail = false
+        assertIs<AppSyncSegmentedJournalCommitResult.Retryable>(runFallback(provider, id, canWrite = false, cloud = cloud))
+        assertEquals(1L, recovery.session(id)?.retryCount)
+        now = assertNotNull(recovery.session(id)?.nextRetryAtEpochMillis)
+        assertIs<AppSyncSegmentedJournalCommitResult.Verified>(runFallback(provider, id, canWrite = false, cloud = cloud))
+        assertEquals(listOf(later), store.pendingOperations())
+        assertEquals(22, preferences.values["novelreadersettings.fontsize"])
+        assertEquals(3, provider.posts.size)
+    }
+
+    @Test fun fallbackCoordinatorPersistsAttemptBudgetAndRequiresExplicitResumeAfterThirdFailure() = fixture {
+        val first = append()
+        val (recovery, id) = startFallback()
+        val provider = nativePublishingEnvironment().first
+        assertIs<AppSyncSegmentedJournalCommitResult.Terminal>(runFallback(provider, id, canWrite = false))
+        assertEquals(AppSyncRecoveryPhase.Classifying, recovery.session(id)?.phase)
+        assertEquals(0L, recovery.session(id)?.retryCount)
+        for (attempt in 1..3) {
+            provider.timeoutAt = attempt
+            val result = runFallback(provider, id)
+            if (attempt < 3) {
+                assertIs<AppSyncSegmentedJournalCommitResult.Retryable>(result)
+                assertIs<AppSyncSegmentedJournalCommitResult.Retryable>(runFallback(provider, id))
+                now = assertNotNull(recovery.session(id)?.nextRetryAtEpochMillis)
+            } else assertIs<AppSyncSegmentedJournalCommitResult.Terminal>(result)
+            assertEquals(attempt.toLong(), recovery.session(id)?.retryCount)
+            assertEquals(attempt, provider.posts.size)
+        }
+        assertEquals(AppSyncRecoveryPhase.NeedsAttention, recovery.session(id)?.phase)
+        assertEquals(listOf(first), store.pendingOperations())
+        assertIs<AppSyncSegmentedJournalCommitResult.Terminal>(runFallback(provider, id))
+        assertEquals(3, provider.posts.size)
+        assertNotNull(recovery.resumeRetryExhaustedRecovery(account, ++now))
+        provider.timeoutAt = null
+        assertIs<AppSyncSegmentedJournalCommitResult.Verified>(runFallback(provider, id))
+        assertTrue(store.pendingOperations().isEmpty())
+    }
+
+    @Test fun canonicalCoordinatorsRejectWrongFrozenFormatWithoutChangingSessionOrChargingAttempts() {
+        for (fallback in listOf(false, true)) fixture {
+            val first = append()
+            val (recovery, id) = stageNativeJournal(first, fallback = fallback)
+            val before = recovery.session(id)
+            val provider = nativePublishingEnvironment().first
+            val cloud = AppSyncCanonicalCloudPlan.Ready(verified(), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
+            val result = if (fallback) commitNative(recovery, id, cloud, now) else runFallback(provider, id)
+            assertIs<AppSyncSegmentedJournalCommitResult.Terminal>(result)
+            assertEquals(before, recovery.session(id))
+            assertEquals(listOf(first), store.pendingOperations())
+            assertTrue(provider.posts.isEmpty())
+        }
+    }
+
     @Test fun ordinaryCanonicalSyncDrainsRetainedJournalsWithoutAnotherTrigger() = fixture {
         retainJournalHistory(17)
         val cp = assertNotNull(state.read(account.value)).copy(checkpointId = "drain-all")

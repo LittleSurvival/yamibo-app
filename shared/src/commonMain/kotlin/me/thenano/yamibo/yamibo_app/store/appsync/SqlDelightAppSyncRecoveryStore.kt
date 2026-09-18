@@ -643,6 +643,14 @@ internal class SqlDelightAppSyncRecoveryStore(
         )
     }
 
+    /** Completion receipts retain the root format after payload reclamation. Only fallback
+     * canonical sessions can pin a 16-character root; native roots require SHA-256.
+     */
+    fun usesSanitizedV2Transport(sessionId: String): Boolean = hasSanitizedV2Payload(sessionId) ||
+        (hasNativeCompletionReceipt(sessionId) && requireSession(sessionId).let {
+            it.mode == AppSyncRecoveryMode.SegmentedJournal && it.rootFingerprint?.length == 16
+        })
+
     fun usesNativeTransport(sessionId: String): Boolean =
         payloadTransportVersion(sessionId) == 3L
 
