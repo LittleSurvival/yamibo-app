@@ -1485,6 +1485,52 @@ internal class YamiboAppSyncJournalRemote(
         val indexedReplicaKeys = linkedSetOf<String>()
         var verifiedIndex: IndexCandidateResult.Valid? = null
         val retirementDiscoveryIssues = mutableListOf<String>()
+        val journalReads = linkedSetOf<Int>()
+        val checkpointReads = linkedSetOf<Int>()
+        val journalBindings = linkedSetOf<Triple<Int, String, String>>()
+        val checkpointBindings = linkedSetOf<Triple<Int, String, String>>()
+        suspend fun readJournal(candidate: StoredAppSyncRemoteBlog): AppSyncJournalLoadResult? {
+            journalReads += candidate.blogId.value
+            when (val result = loadJournal(candidate, accountBinding)) {
+                is JournalCandidateResult.Canonical -> {
+                    collectCanonical(candidate.copy(kind = result.kind), result.document, canonicalDocuments, canonicalReadIssues)
+                    (result.document as? AppSyncV3DocumentRead.Journal)?.let {
+                        journalBindings += Triple(candidate.blogId.value, it.metadata.identity, it.metadata.canonicalFingerprint)
+                    }
+                }
+                is JournalCandidateResult.Valid -> {
+                    val replica = result.journal.payload.replicaKey()
+                    saveJournal(candidate.copy(remoteKey = replica, kind = result.kind), result.journal)
+                    loaded += result.journal
+                    journalBindings += Triple(candidate.blogId.value, replica, result.indexFingerprint)
+                }
+                is JournalCandidateResult.Retryable -> return AppSyncJournalLoadResult.RetryableFailure(result.reason)
+                JournalCandidateResult.NotFound -> retirementDiscoveryIssues += "Journal disappeared during discovery"
+                is JournalCandidateResult.Terminal -> retirementDiscoveryIssues += "Journal validation failed"
+            }
+            return null
+        }
+        suspend fun readCheckpoint(candidate: StoredAppSyncRemoteBlog): AppSyncJournalLoadResult? {
+            checkpointReads += candidate.blogId.value
+            when (val result = loadCheckpoint(candidate, accountBinding)) {
+                is CheckpointCandidateResult.Canonical -> {
+                    collectCanonical(candidate.copy(kind = result.kind), result.document, canonicalDocuments, canonicalReadIssues)
+                    (result.document as? AppSyncV3DocumentRead.Checkpoint)?.let {
+                        checkpointBindings += Triple(candidate.blogId.value, it.document.checkpointId, it.metadata.canonicalFingerprint)
+                    }
+                }
+                is CheckpointCandidateResult.Valid -> {
+                    freshLegacyCheckpoints += result
+                    saveCheckpoint(candidate.copy(kind = result.kind), result.checkpoint)
+                    checkpoints += result.checkpoint
+                    checkpointBindings += Triple(candidate.blogId.value, result.checkpoint.envelope.payload.checkpointId, result.indexFingerprint)
+                }
+                is CheckpointCandidateResult.Retryable -> return AppSyncJournalLoadResult.RetryableFailure(result.reason)
+                CheckpointCandidateResult.NotFound -> retirementDiscoveryIssues += "Checkpoint disappeared during discovery"
+                is CheckpointCandidateResult.Terminal -> retirementDiscoveryIssues += "Checkpoint validation failed"
+            }
+            return null
+        }
         val summaries = pages.flatMap { it.blogs }
         val latestIndexBlogId = summaries
             .filter {
@@ -1518,23 +1564,7 @@ internal class YamiboAppSyncJournalRemote(
                         validatedAtEpochMillis = 0,
                         contentUpdatedAtEpochMillis = timeInfo.epoch * 1_000L,
                     )
-                    when (val result = loadJournal(candidate, accountBinding)) {
-                        is JournalCandidateResult.Canonical -> collectCanonical(candidate.copy(kind = result.kind), result.document, canonicalDocuments, canonicalReadIssues)
-                        is JournalCandidateResult.Valid -> {
-                            val remoteKey = result.journal.payload.replicaKey()
-                            saveJournal(
-                                candidate.copy(remoteKey = remoteKey, kind = result.kind),
-                                result.journal,
-                            )
-                            loaded += result.journal
-                        }
-                        is JournalCandidateResult.Retryable ->
-                            return AppSyncJournalLoadResult.RetryableFailure(result.reason)
-                        JournalCandidateResult.NotFound ->
-                            retirementDiscoveryIssues += "Journal disappeared during discovery"
-                        is JournalCandidateResult.Terminal ->
-                            retirementDiscoveryIssues += "Journal validation failed"
-                    }
+                    readJournal(candidate)?.let { return it }
                 }
                 normalizedTitle == APP_SYNC_INDEX_TITLE -> {
                     if (bId != latestIndexBlogId) continue
@@ -1580,22 +1610,29 @@ internal class YamiboAppSyncJournalRemote(
                         validatedAtEpochMillis = 0,
                         contentUpdatedAtEpochMillis = timeInfo.epoch * 1_000L,
                     )
-                    when (val result = loadCheckpoint(candidate, accountBinding)) {
-                        is CheckpointCandidateResult.Canonical -> collectCanonical(candidate.copy(kind = result.kind), result.document, canonicalDocuments, canonicalReadIssues)
-                        is CheckpointCandidateResult.Valid -> {
-                            freshLegacyCheckpoints += result
-                            saveCheckpoint(candidate.copy(kind = result.kind), result.checkpoint)
-                            checkpoints += result.checkpoint
-                        }
-                        is CheckpointCandidateResult.Retryable ->
-                            return AppSyncJournalLoadResult.RetryableFailure(result.reason)
-                        CheckpointCandidateResult.NotFound ->
-                            retirementDiscoveryIssues += "Checkpoint disappeared during discovery"
-                        is CheckpointCandidateResult.Terminal ->
-                            retirementDiscoveryIssues += "Checkpoint validation failed"
-                    }
+                    readCheckpoint(candidate)?.let { return it }
                 }
             }
+        }
+        // The list is discovery evidence, not proof that every indexed physical artifact
+        // was read. Resolve omitted links by ID; another generation of the same writer
+        // cannot stand in for a missing, different or corrupted indexed document.
+        for (reference in verifiedIndex?.payload?.journals.orEmpty()) {
+            if (reference.blogId !in journalReads) {
+                readJournal(StoredAppSyncRemoteBlog("candidate:${reference.blogId}", AppSyncRemoteBlogKind.Journal,
+                    BlogId(reference.blogId), classId, null, 0, null))?.let { return it }
+            }
+            if (journalBindings.none { it.first == reference.blogId && it.second == reference.replicaKey &&
+                    (reference.fingerprint == null || it.third == reference.fingerprint) })
+                retirementDiscoveryIssues += "Indexed journal reference was not verified"
+        }
+        for (reference in verifiedIndex?.payload?.checkpoints.orEmpty()) {
+            if (reference.blogId !in checkpointReads) {
+                readCheckpoint(StoredAppSyncRemoteBlog("checkpoint-candidate:${reference.blogId}", AppSyncRemoteBlogKind.Checkpoint,
+                    BlogId(reference.blogId), classId, null, 0, null))?.let { return it }
+            }
+            if (Triple(reference.blogId, reference.checkpointId, reference.fingerprint) !in checkpointBindings)
+                retirementDiscoveryIssues += "Indexed checkpoint reference was not verified"
         }
         return AppSyncJournalLoadResult.Success(
             loaded
@@ -1718,6 +1755,7 @@ internal class YamiboAppSyncJournalRemote(
                         ),
                         canonical,
                         kind,
+                        if (kind == AppSyncRemoteBlogKind.CheckpointRoot) stableAppSyncFingerprint(rootBody) else validation.envelope.fingerprint,
                     )
                 }
             }
@@ -1785,6 +1823,7 @@ internal class YamiboAppSyncJournalRemote(
                             payload = validation.envelope.payload,
                         ),
                         kind,
+                        if (kind == AppSyncRemoteBlogKind.JournalRoot) stableAppSyncFingerprint(rootBody) else validation.envelope.fingerprint,
                     )
                 }
             }
@@ -2318,6 +2357,7 @@ internal class YamiboAppSyncJournalRemote(
         data class Valid(
             val journal: LoadedAppSyncJournal,
             val kind: AppSyncRemoteBlogKind = AppSyncRemoteBlogKind.Journal,
+            val indexFingerprint: String = journal.fingerprint,
         ) : JournalCandidateResult
         data object NotFound : JournalCandidateResult
         data class Retryable(val reason: String) : JournalCandidateResult
@@ -2342,6 +2382,7 @@ internal class YamiboAppSyncJournalRemote(
             val checkpoint: LoadedAppSyncCheckpoint,
             val sourceEnvelope: String,
             val kind: AppSyncRemoteBlogKind = AppSyncRemoteBlogKind.Checkpoint,
+            val indexFingerprint: String = checkpoint.envelope.fingerprint,
         ) : CheckpointCandidateResult
         data object NotFound : CheckpointCandidateResult
         data class Retryable(val reason: String) : CheckpointCandidateResult

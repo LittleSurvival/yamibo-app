@@ -456,6 +456,46 @@ class AppSyncCanonicalCheckpointActivatorTest {
         assertEquals(1, indexedOnly.journals.size)
         assertEquals(2L, indexedOnly.journals.single().payload.lastSequence)
         assertIs<AppSyncCanonicalCloudPlan.Ready>(AppSyncCanonicalCloudPlanner().prepare(account, assertNotNull(store.installation()), indexedOnly))
+        val indexRequest = assertNotNull(provider.artifacts[124])
+        val indexPayload = assertIs<AppSyncIndexValidation.Valid>(AppSyncIndexEnvelopeCodec().validate(indexRequest.message)).envelope.payload
+        val rootId = indexPayload.journals.single().blogId
+        val root = assertNotNull(provider.artifacts[rootId])
+        provider.hiddenIds = setOf(rootId, 123)
+        val omitted = assertIs<AppSyncJournalLoadResult.Success>(kotlinx.coroutines.runBlocking { restricted.loadJournals(account, true) })
+        assertTrue(omitted.retirementDiscoveryIssues.isEmpty())
+        assertEquals(rootId.toString(), omitted.journals.single().remoteId)
+        assertEquals(1, omitted.verifiedCanonicalCheckpoints.size)
+        provider.artifacts.remove(rootId)
+        val missing = assertIs<AppSyncJournalLoadResult.Success>(kotlinx.coroutines.runBlocking { remote.loadJournals(account, true) })
+        assertTrue(missing.canonicalDocuments.any { it.remoteId == "125" })
+        assertTrue(missing.retirementDiscoveryIssues.isNotEmpty())
+        cohort.observe(account, missing, now)
+        assertFalse(cohort.canWriteSanitizedV2(assertNotNull(store.installation()), now, true))
+        assertIs<AppSyncCanonicalCloudPlan.NeedsAttention>(AppSyncCanonicalCloudPlanner().prepare(account, assertNotNull(store.installation()), missing))
+        provider.artifacts[rootId] = root
+        provider.artifacts[124] = indexRequest.copy(message = AppSyncIndexEnvelopeCodec().encode(indexPayload.copy(
+            journals = indexPayload.journals.map { it.copy(fingerprint = "wrong-root-fingerprint") })))
+        val mismatched = assertIs<AppSyncJournalLoadResult.Success>(kotlinx.coroutines.runBlocking { remote.loadJournals(account, true) })
+        assertTrue(mismatched.retirementDiscoveryIssues.isNotEmpty())
+        assertIs<AppSyncCanonicalCloudPlan.NeedsAttention>(AppSyncCanonicalCloudPlanner().prepare(account, assertNotNull(store.installation()), mismatched))
+    }
+
+    @Test fun discoveryRequiresEveryIndexedCheckpointEvenWhenAnotherValidBaseExists() = fixture {
+        val provider = nativePublishingEnvironment().first
+        val index = assertNotNull(provider.artifacts[124])
+        val payload = assertIs<AppSyncIndexValidation.Valid>(AppSyncIndexEnvelopeCodec().validate(index.message)).envelope.payload
+        val remote = YamiboAppSyncJournalRemote(provider, SqlDelightAppSyncRemoteBlogStore(db), nowMillis = { now })
+        provider.artifacts[124] = index.copy(message = AppSyncIndexEnvelopeCodec().encode(payload.copy(
+            checkpoints = payload.checkpoints + AppSyncIndexCheckpointReference("missing-checkpoint", 999, "missing-fingerprint"))))
+        val missing = assertIs<AppSyncJournalLoadResult.Success>(kotlinx.coroutines.runBlocking { remote.loadJournals(account, true) })
+        assertEquals(1, missing.verifiedCanonicalCheckpoints.size)
+        assertTrue(missing.retirementDiscoveryIssues.isNotEmpty())
+        assertIs<AppSyncCanonicalCloudPlan.NeedsAttention>(AppSyncCanonicalCloudPlanner().prepare(account, assertNotNull(store.installation()), missing))
+        provider.artifacts[124] = index.copy(message = AppSyncIndexEnvelopeCodec().encode(payload.copy(
+            checkpoints = payload.checkpoints.map { it.copy(fingerprint = "mismatched") })))
+        val corrupt = assertIs<AppSyncJournalLoadResult.Success>(kotlinx.coroutines.runBlocking { remote.loadJournals(account, true) })
+        assertTrue(corrupt.retirementDiscoveryIssues.isNotEmpty())
+        assertTrue(corrupt.verifiedCanonicalCheckpoints.isEmpty())
     }
 
     @Test fun engineFallbackDispatchForcesDiscoveryAndCompletesWithNativeWriterDisabled() = fixture {

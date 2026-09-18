@@ -209,3 +209,19 @@ canonical planning。這不是實際 Yamibo 網路或 Android 裝置驗收。
 一般 v2 探索關閉時，仍讀取目前 index 引用的 root。原先完整探索漏讀 root 的行為會讓下一輪
 只看見舊 direct journal，準備發布時因缺少前次操作而判定 SequenceGap；上述往返測試覆蓋此
 修正，並檢查關閉一般 v2 探索後最新已索引回退日誌仍可建立 canonical plan。
+
+
+## 完整探索的索引引用核對
+
+Discovery 會記錄每份實際讀取文件的 physical Blog ID、journal replica／checkpoint ID 與
+該格式的 index fingerprint。v3 使用 canonical document fingerprint；v2 segmented root 使用
+原 root body 的 fingerprint；一般 legacy envelope 沿用 envelope fingerprint。舊 journal index
+允許 null fingerprint 的契約保留，但仍須讀到相符的實體文件與 replica。
+
+完成清單探索後，逐一解析未被清單讀取到的 index references，不以同一 replica 的舊文件代替。
+直接讀取失敗保留原 retry／validation 結果；找不到或身分／fingerprint 不符時記錄 redacted
+retirementDiscoveryIssues，使 canonical planner 與 reader cohort gate 拒絕繼續。即使仍有另一個
+有效 indexed checkpoint，也不能忽略 index 中缺失的 checkpoint。這不授權刪除缺件或修改索引。
+
+回歸覆蓋清單漏列但仍可直接讀取的 root/checkpoint、最新 root 真正遺失但舊 native journal
+尚存、v2 root fingerprint 不符，以及有效基底之外還存在缺失 checkpoint 的情況。

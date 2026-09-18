@@ -848,6 +848,7 @@ class AppSyncV3SegmentPublisherTest {
         var authOnRead = false
         var wrongRead = false
         var reads = 0
+        var hiddenIds = emptySet<Int>()
         var pageSize = 10_000
         var listReads = 0
         var listFailureAt: Int? = null
@@ -868,8 +869,9 @@ class AppSyncV3SegmentPublisherTest {
             listReads++
             onList(listReads)
             if (page == listFailureAt) return AppSyncCloudResult.Timeout("list interrupted")
-            val total = maxOf(1, (artifacts.size + pageSize - 1) / pageSize)
-            val rows = artifacts.entries.drop((if (repeatPage) 0 else page - 1) * pageSize).take(pageSize)
+            val visible = artifacts.entries.filter { it.key !in hiddenIds }
+            val total = maxOf(1, (visible.size + pageSize - 1) / pageSize)
+            val rows = visible.drop((if (repeatPage) 0 else page - 1) * pageSize).take(pageSize)
             return AppSyncCloudResult.VerifiedSuccess(UserSpaceBlogPage(
                 blogs = rows.map { (id, request) -> BlogSummary("[${AppSyncCloudConfigDefaults.BLOG_CLASS_NAME}] ${request.title}", BlogId(id),
                     "https://example.invalid/blog", "", User(UserId(1), "test", null), TimeInfo("test", epoch = 1)) },
