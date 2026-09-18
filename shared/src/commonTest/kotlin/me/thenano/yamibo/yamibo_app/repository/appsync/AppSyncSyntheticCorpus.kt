@@ -30,6 +30,24 @@ internal object AppSyncSyntheticCorpus {
         )
     }
 
+    /** Snapshot-only corpus compatible with the reader's mandatory FavoriteUpdate projection checks. */
+    fun createWithoutFavoriteUpdates(): Corpus {
+        val original = create()
+        val operations = original.journal.operations.filterNot { it.domainId.value.startsWith("favorite.update-") }
+            .mapIndexed { index, operation ->
+                val sequence = SyncSequence(index + 1L)
+                operation.copy(sequence = sequence, operationId = SyncOperation.idFor(device, epoch, sequence),
+                    causalContext = if (index == 0) SyncCausalContext() else
+                        SyncCausalContext().advance(SyncReplicaKey(device, epoch), SyncSequence(index.toLong())))
+            }
+        val coverage = SyncCausalContext().advance(SyncReplicaKey(device, epoch), operations.last().sequence)
+        val journal = original.journal.copy(operations = operations, lastSequence = operations.size.toLong(),
+            observed = coverage, publishedThroughSequence = operations.size.toLong())
+        val reduced = OperationReducer().reduce(operations = operations)
+        check(reduced.quarantined.isEmpty())
+        return Corpus(original.snapshot.copy(favoriteUpdates = BackupFavoriteUpdates()), journal, reduced.entities.values.toList())
+    }
+
     fun create(size: Size = Size.Small): Corpus {
         val snapshot = snapshot(size)
         val drafts = BackupSnapshotMigrationPlanner().plan(snapshot)

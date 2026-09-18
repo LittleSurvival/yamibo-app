@@ -45,7 +45,7 @@ materializer 的內部輸入將本機值與勝出操作 ID／時間分開；還�
 
 `AppSyncLegacyCheckpointMigration` 從此 legacy 證據建立候選資料，先轉換 resolved field winners，再將 encoded snapshot 經既有 snapshot planner 與 canonical normalizer 轉換，雙向核對可攜 live entity 集合與欄位值。只容許 schema 明定 nullable 的缺值/null 等價，以及省略的顯示文字與空字串等價；其他不一致、重複實體、孤立 RSS 歷史及沒有對應 resolved 刪除來源的 tombstone 均回報 NeedsAttention。已刪除實體及移除關聯不要求出現在 live snapshot。
 
-輸出保留 legacy source/index fingerprint 供後續發布意圖綁定，但仍是未發布的 candidate；正式 migration 必須合併完整 cloud journal 與當下 pending，再建立新 v3 identity、發布及回讀驗證，才能套用／清理。Snapshot-only 舊資料沒有足夠 resolved provenance 時會拒絕，不會憑 snapshot 內容假造勝出來源；此相容路徑及正式 bootstrap 接線仍待完成。
+輸出保留 legacy source/index fingerprint 供後續發布意圖綁定，但仍是未發布的 candidate；正式 migration 必須合併完整 cloud journal 與當下 pending，再建立新 v3 identity、發布及回讀驗證，才能套用／清理。Snapshot-only 舊資料可由下述完整 journal 重建路徑處理；來源不足時拒絕，不會憑 snapshot 內容假造勝出來源。
 
 正式 `YamiboAppSyncJournalRemote` 載入結果現在另附 `verifiedLegacyCheckpoints`。只有同一次載入實際取得的 checkpoint 邏輯 envelope（包含分段重組結果）與已讀回 index，經帳號、實體 blog ID、checkpoint ID 及 fingerprint 綁定成功後才加入。全量 discovery 中未被 index 引用或指紋不符的 checkpoint 仍可供 legacy reader 使用，但沒有遷移證據；記憶體解析快取命中也不重建此證據。此欄位不觸發 canonical processing，也不授權清理。正式 bootstrap 的選擇、合併及發布仍待接線。
 
@@ -68,3 +68,11 @@ Native index committer 已接入凍結的 legacy source：分段發布前先完�
 每次恢復都重新核對凍結 source binding、目前 legacy cloud 的完整性與 coverage，拒絕凍結後雲端新增而未被候選涵蓋的歷史。通過後沿用 native coordinator 完成發布、index、activation、settings reconciliation 與分批清理；較晚的本機編輯在 activation 合併並保持 pending。若已有 indexed native checkpoint，則回到原 canonical planner／recovery 路徑。預設 flags 仍關閉，snapshot-only 舊 checkpoint、無 checkpoint 帳號、manual force/reset、reader capability rollout 與裝置驗收仍未完成。
 
 Native checkpoint activation 在 settings reconciliation 成功後，於同一交易再次讀取發布證據，只將凍結 checkpoint coverage 涵蓋的同帳號／同來源裝置及 epoch pending 標記已確認，再轉入 Cleaning。設定套用失敗時不提前確認，較晚 sequence 不受影響；清理仍只依遠端已驗證 coverage 執行。
+
+## Snapshot-only checkpoint 的真實歷史重建
+
+若舊 checkpoint 的 resolvedEntities 為空而 coverage 非空，`AppSyncLegacyCheckpointMigration` 可使用已載入 journal 中、被該 coverage 涵蓋的操作重建。它要求每個 replica 從第一個序號起完整連續、無身分衝突、帳號相同、操作 causal context 不超過原 checkpoint，且重建後 coverage 完全吻合。晚於 checkpoint 的歷史不參與此步，仍由雲端規劃器在後續合併。
+
+來源經 canonical importer／reducer 保留原本 operation ID、generation、timestamp、刪除 proof 與欄位 winner，再與 snapshot 的可攜內容雙向核對；不建立虛構的 migration writer 或把 snapshot 時間當成每個欄位的來源時間。既有非空 resolved provenance 仍走逐欄轉換，不會被完整重播覆蓋。history 不足、衝突或 snapshot 不一致時保留原來源並回報 NeedsAttention。正式 cloud planner 已傳入完整 journal 集合；失去原始 journal 且無 resolved provenance 的帳號仍需要另行明確的 rebootstrap 決策，不能自動宣稱無損轉換。
+
+測試語料使用符合現行 legacy reader 規則、未包含 FavoriteUpdate 資料的 snapshot-only checkpoint；FavoriteUpdate snapshot 與 resolved projection 必須一致的既有檢查未放寬。包含這類資料卻遺失相應 projection 的損毀文件仍在 reader 階段拒絕。

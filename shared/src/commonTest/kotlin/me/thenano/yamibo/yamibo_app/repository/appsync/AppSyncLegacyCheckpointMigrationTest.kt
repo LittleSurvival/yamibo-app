@@ -19,6 +19,45 @@ class AppSyncLegacyCheckpointMigrationTest {
         return assertNotNull(AppSyncVerifiedLegacyCheckpoint.verify(account.value, 42, index, body))
     }
 
+    @Test fun snapshotOnlyCheckpointReconstructsOriginalWinnersFromCompleteHistory() {
+        val corpus = AppSyncSyntheticCorpus.createWithoutFavoriteUpdates()
+        val payload = corpus.checkpoint()
+        val snapshotOnly = proof(payload.copy(resolvedEntities = emptyList()))
+        val rebuilt = assertIs<AppSyncLegacyCheckpointMigrationResult.Ready>(migration.prepare(snapshotOnly, corpus.journal.operations.reversed()))
+        val original = assertIs<AppSyncLegacyCheckpointMigrationResult.Ready>(migration.prepare(proof(payload)))
+        assertEquals(original.checkpoint, rebuilt.checkpoint)
+        assertEquals(snapshotOnly.fingerprint, rebuilt.sourceFingerprint)
+        val latest = corpus.journal.operations.last()
+        val next = SyncSequence(corpus.journal.lastSequence + 1)
+        val later = latest.copy(sequence = next, operationId = SyncOperation.idFor(latest.deviceId, latest.deviceEpoch, next),
+            causalContext = payload.coverage)
+        assertEquals(rebuilt, migration.prepare(snapshotOnly, corpus.journal.operations + later))
+    }
+
+    @Test fun snapshotOnlyCheckpointDoesNotInventMissingOrConflictingHistory() {
+        val corpus = AppSyncSyntheticCorpus.createWithoutFavoriteUpdates()
+        val verified = proof(corpus.checkpoint().copy(resolvedEntities = emptyList()))
+        fun failure(history: List<SyncOperation>) = assertIs<AppSyncLegacyCheckpointMigrationResult.NeedsAttention>(
+            migration.prepare(verified, history)).reason
+        assertEquals(AppSyncLegacyCheckpointFailure.History, failure(emptyList()))
+        assertEquals(AppSyncLegacyCheckpointFailure.History, failure(corpus.journal.operations.drop(1)))
+        val first = corpus.journal.operations.first()
+        assertEquals(AppSyncLegacyCheckpointFailure.History, failure(corpus.journal.operations +
+            first.copy(createdAtEpochMillis = first.createdAtEpochMillis + 1)))
+        assertEquals(AppSyncLegacyCheckpointFailure.History, failure(corpus.journal.operations + first.copy(accountBinding = SyncAccountBinding("other"))))
+    }
+
+    @Test fun reconstructedHistoryStillMustMatchTheSnapshotsPortableContent() {
+        val corpus = AppSyncSyntheticCorpus.createWithoutFavoriteUpdates()
+        val payload = corpus.checkpoint()
+        val backup = CloudBackupPayloadCodec()
+        val snapshot = backup.decode(payload.encodedSnapshot).getOrThrow()
+        val inconsistent = payload.copy(resolvedEntities = emptyList(), encodedSnapshot = backup.encode(
+            snapshot.copy(notes = snapshot.notes.map { it.copy(content = "wrong snapshot") })).getOrThrow())
+        assertEquals(AppSyncLegacyCheckpointFailure.Snapshot,
+            assertIs<AppSyncLegacyCheckpointMigrationResult.NeedsAttention>(migration.prepare(proof(inconsistent), corpus.journal.operations)).reason)
+    }
+
     @Test fun verifiesLegacyIndexAndMigratesBothRepresentationsOfTheSyntheticCorpus() {
         val verified = proof()
         val migrated = assertIs<AppSyncLegacyCheckpointMigrationResult.Ready>(migration.prepare(verified))

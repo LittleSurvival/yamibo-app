@@ -39,6 +39,16 @@ class AppSyncLegacyCloudMigrationTest {
     private fun failure(cloud: AppSyncJournalLoadResult.Success, pending: List<SyncOperation> = emptyList()) =
         assertIs<AppSyncLegacyCloudMigrationResult.NeedsAttention>(prepare(cloud, pending)).reason
 
+    @Test fun cloudPlannerSuppliesJournalHistoryForSnapshotOnlySources() {
+        val historical = AppSyncSyntheticCorpus.createWithoutFavoriteUpdates()
+        val payload = historical.checkpoint().copy(resolvedEntities = emptyList())
+        val pending = pending().copy(causalContext = historical.journal.observed)
+        val ready = assertIs<AppSyncLegacyCloudMigrationResult.Ready>(prepare(cloud(listOf(payload), listOf(historical.journal)), listOf(pending)))
+        val resolved = assertIs<AppSyncLegacyCloudMigrationResult.Ready>(prepare(cloud(listOf(historical.checkpoint()), listOf(historical.journal)), listOf(pending)))
+        assertEquals(resolved.checkpoint, ready.checkpoint)
+        assertEquals(AppSyncLegacyCloudFailure.Source, failure(cloud(listOf(payload), emptyList())))
+    }
+
     @Test fun mergesAllPortableDomainsAndLaterPendingWithoutCreatingCanonicalVerification() {
         val loaded = cloud()
         val edit = pending()
@@ -84,7 +94,7 @@ class AppSyncLegacyCloudMigrationTest {
         val contradictory = AppSyncCheckpointEnvelopeCodec().createPayload("contradictory", account,
             first.coverage, me.thenano.yamibo.yamibo_app.repository.backup.YamiboBackupFile(appVersionCode = 1, createdAt = 1),
             emptyList(), emptyList(), first.createdAtEpochMillis)
-        assertEquals(AppSyncLegacyCloudFailure.CheckpointConflict, failure(cloud(listOf(first, contradictory))))
+        assertEquals(AppSyncLegacyCloudFailure.Source, failure(cloud(listOf(first, contradictory))))
         val original = corpus.journal.operations.first { it.domainId.value == "detail-note" }
         val changed = original.copy(fields = original.fields + ("content" to "conflict"))
         assertEquals(AppSyncLegacyCloudFailure.CloudMerge,

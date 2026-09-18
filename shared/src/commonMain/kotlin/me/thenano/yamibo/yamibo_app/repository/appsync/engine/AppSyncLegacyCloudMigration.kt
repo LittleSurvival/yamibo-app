@@ -74,7 +74,7 @@ internal class AppSyncLegacyCloudMigration {
         var content: okio.ByteString? = null
         var bytes = 0L
         for (source in sources.sortedBy { it.blogId }) {
-            val imported = AppSyncLegacyCheckpointMigration().prepare(source)
+            val imported = AppSyncLegacyCheckpointMigration().prepare(source, operations)
             if (imported !is AppSyncLegacyCheckpointMigrationResult.Ready) return fail(AppSyncLegacyCloudFailure.Source)
             if (fingerprints[imported.checkpoint.checkpointId] != source.fingerprint ||
                 cloud.checkpoints.none { it.remoteId == source.blogId.toString() && it.envelope.fingerprint == source.fingerprint })
