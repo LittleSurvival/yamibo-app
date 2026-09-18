@@ -17,7 +17,7 @@ Excluded/NoOp 仍有來源 sequence，未來 journal／recovery adapter 必須�
 
 固定 field ID 64 `sourceDiscriminator` 是條件式可省略的必要資料，不可一律分類為 Derived。正式產生端的 post/update/scan discriminator 無法從 event fingerprint 反推，必須以原本的有限大小 scalar 保留。只有與 `details:<排序且去重的 immutable detail IDs>` 完全相同的預設值，才由 normalizer 省略。`sourceFingerprint` 仍由 event key 重建。
 
-舊式 `legacy-ambiguous|...` discriminator 包含歷史標題／摘要，尚需穩定摘要表示與相容性轉接。因此目前明確回傳 `NonReconstructibleEventIdentity` 並保留來源，不以丟棄或改變事件 ID 解決。此限制不是整份規格的完成狀態。
+舊式 `legacy-ambiguous|...` discriminator 包含歷史標題／摘要。Normalizer 現在先核對原事件 ID，再將它轉成下述版本化識別，移除重複的顯示文字；不改變原事件 ID 或來源操作。
 
 測試涵蓋全部 19 個 domain 的正式合成來源、序號與衝突證據保留、來源不可變、unknown/no-op 結果、identity mismatch、超長標題省略、超長筆記拒絕、共享刪除 proof、自訂事件 discriminator 保留及 ambiguous 來源保護。
 
@@ -76,3 +76,11 @@ Native checkpoint activation 在 settings reconciliation 成功後，於同一�
 來源經 canonical importer／reducer 保留原本 operation ID、generation、timestamp、刪除 proof 與欄位 winner，再與 snapshot 的可攜內容雙向核對；不建立虛構的 migration writer 或把 snapshot 時間當成每個欄位的來源時間。既有非空 resolved provenance 仍走逐欄轉換，不會被完整重播覆蓋。history 不足、衝突或 snapshot 不一致時保留原來源並回報 NeedsAttention。正式 cloud planner 已傳入完整 journal 集合；失去原始 journal 且無 resolved provenance 的帳號仍需要另行明確的 rebootstrap 決策，不能自動宣稱無損轉換。
 
 測試語料使用符合現行 legacy reader 規則、未包含 FavoriteUpdate 資料的 snapshot-only checkpoint；FavoriteUpdate snapshot 與 resolved projection 必須一致的既有檢查未放寬。包含這類資料卻遺失相應 projection 的損毀文件仍在 reader 階段拒絕。
+
+## Ambiguous event 的有限長度識別
+
+`legacy-identity-v1|<scope SHA-256>|<original event fingerprint>` 保存原 16 位 hexadecimal event fingerprint，scope 綁定原 identity 規則中的 target type、target ID、author ID（null 等同 0）及 mode。這是識別／損毀檢查資料，不是認證或簽章。原始 discriminator 的摘要／標題不再重複放入必要欄位；summary 與允許的有限顯示標題仍依各自 schema 規則處理。
+
+只有 ambiguous、沒有 immutable detail IDs、來源 ID 核對成功的 legacy discriminator 可轉換。新版 identity helper 辨識此表示、驗證 scope 及格式後保留原事件 ID；canonical reducer／materializer 因而可還原且再匯入。普通 detail/custom discriminator 與未轉換的本機生成規則保持原行為。原 legacy 操作仍保留原文，轉換不就地修改來源。
+
+舊版 v2 reader 不理解此 discriminator 表示；v3 writer 仍必須等所有相關 reader 能力與 rollout gate 通過。停用 v3 writer 後的 sanitized v2 回退需要另外核對可讀能力，不能把此表示宣稱為任意舊客戶端都可讀。完整回退流程與能力公告仍待完成。

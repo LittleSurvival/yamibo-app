@@ -115,17 +115,43 @@ class AppSyncCanonicalOperationImporterTest {
     }
 
     @Test
-    fun ambiguousDefaultIdentityRemainsProtectedUntilDigestMigrationExists() {
+    fun ambiguousDefaultIdentityMigratesWithoutDuplicatingPresentationText() {
         val event = source("favorite.update-event")
-        val fields = event.fields
+        val fields = event.fields + ("title" to "TITLE-".repeat(200))
         val identity = favoriteUpdateEventIdentity(requireNotNull(fields["targetType"]), requireNotNull(fields["targetId"]).toLong(),
             0, requireNotNull(fields["mode"]), emptyList(), true, requireNotNull(fields["detectedAt"]).toLong(),
             requireNotNull(fields["summary"]), requireNotNull(fields["title"]))
         val ambiguous = event.copy(entityId = SyncEntityId(identity.syncId), fields = fields + mapOf(
             "detailIds" to "", "ambiguous" to "true", "sourceFingerprint" to identity.sourceFingerprint,
             "sourceDiscriminator" to identity.sourceDiscriminator))
-        assertEquals(AppSyncCanonicalImportFailure.NonReconstructibleEventIdentity,
-            assertIs<AppSyncCanonicalOperationImport.NeedsAttention>(importer.import(account, ambiguous)).failure)
+        val accepted = assertIs<AppSyncCanonicalOperationImport.Accepted>(importer.import(account, ambiguous))
+        val evidence = assertIs<AppSyncCanonicalValue.Text>(accepted.operation.fields[64]).value
+        assertTrue(evidence.startsWith("legacy-identity-v1|"))
+        assertTrue(evidence.length < 110)
+        assertFalse(evidence.contains("TITLE-"))
+        assertEquals(identity.syncId, accepted.operation.entityId)
         assertEquals(identity.sourceDiscriminator, ambiguous.fields["sourceDiscriminator"])
+        val codec = AppSyncCanonicalOperationBlockCodec()
+        val block = AppSyncCanonicalOperationBlock(account, listOf(accepted.operation))
+        val decoded = codec.decode(account, codec.encode(block))
+        assertEquals(block, decoded)
+        val reduced = me.thenano.yamibo.yamibo_app.repository.appsync.engine.OperationReducer().reduceCanonical(
+            AppSyncCanonicalCheckpoint("base", account, 0, emptyMap(), emptyList()), decoded)
+        assertTrue(reduced.quarantined.isEmpty())
+        val restored = AppSyncCanonicalMaterializedFields.restore(reduced.entities.single())
+        assertEquals(identity.sourceFingerprint, restored["sourceFingerprint"])
+        assertEquals(evidence, restored["sourceDiscriminator"])
+        assertEquals("", restored["title"])
+        // A legacy Put producer supplies nullable cache keys from the local row.
+        val legacyFields = mapOf("coverUrl" to null, "forumName" to null, "latestPostTitle" to null) + restored
+        val reimported = assertIs<AppSyncCanonicalOperationImport.Accepted>(importer.import(account, ambiguous.copy(fields = legacyFields)))
+        val titleId = AppSyncCanonicalSchema.domains.getValue("favorite.update-event").fields.getValue("title").id
+        assertEquals(accepted.operation, reimported.operation.copy(fields = reimported.operation.fields - titleId))
+        for (field in listOf("targetId", "authorId")) {
+            assertIs<AppSyncCanonicalOperationImport.NeedsAttention>(importer.import(account,
+                ambiguous.copy(fields = legacyFields + (field to "999999"))))
+        }
+        assertIs<AppSyncCanonicalOperationImport.NeedsAttention>(importer.import(account,
+            ambiguous.copy(fields = legacyFields + ("sourceDiscriminator" to evidence.dropLast(1)))))
     }
 }

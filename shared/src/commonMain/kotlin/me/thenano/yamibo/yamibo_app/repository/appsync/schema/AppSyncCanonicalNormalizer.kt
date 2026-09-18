@@ -53,11 +53,26 @@ internal object AppSyncCanonicalNormalizer {
                 ?: return AppSyncCanonicalFieldsResult.Excluded(
                     AppSyncCanonicalIssue(domain.id, null, AppSyncCanonicalIssueReason.UnknownSetting))
         } else null
+        val originalDiscriminator = fields["sourceDiscriminator"]
+        val portableFields = if (domain.id == 17 && originalDiscriminator?.startsWith("legacy-ambiguous|") == true) {
+            val digest = try {
+                require(originalDiscriminator.length <= AppSyncCanonicalSchema.ENTITY_BYTES)
+                require(fields["ambiguous"] == "true" && fields["detailIds"].isNullOrBlank())
+                me.thenano.yamibo.yamibo_app.repository.backup.portableLegacyFavoriteUpdateDiscriminator(
+                    requireNotNull(fields["targetType"]), requireNotNull(fields["targetId"]).toLong(),
+                    requireNotNull(fields["authorId"]).toLong(), requireNotNull(fields["mode"]), originalDiscriminator)
+                    .also { require("event:" + it.substringAfterLast('|') == entityId) }
+            } catch (_: Exception) {
+                return AppSyncCanonicalFieldsResult.NeedsAttention(AppSyncCanonicalIssue(domain.id, 64,
+                    AppSyncCanonicalIssueReason.InvalidType))
+            }
+            fields + ("sourceDiscriminator" to digest)
+        } else fields
         val result = linkedMapOf<Int, AppSyncCanonicalValue>()
         val exclusions = mutableListOf<AppSyncCanonicalIssue>()
         var bytes = 0L
         // Sort for deterministic diagnostics as well as deterministic field order.
-        fields.entries.sortedBy { it.key }.forEach { (name, raw) ->
+        portableFields.entries.sortedBy { it.key }.forEach { (name, raw) ->
             val field = domain.fields[name]
             // Only the default immutable-detail discriminator is derivable. Custom production
             // discriminators (post/update/scan evidence) are essential identity evidence.

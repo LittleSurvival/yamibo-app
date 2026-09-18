@@ -82,10 +82,9 @@ internal class AppSyncCanonicalOperationImporter {
     private fun eventCanBeReconstructed(source: SyncOperation): Boolean = try {
         val fields = source.fields
         val details = requireNotNull(fields["detailIds"]).split(',').filter(String::isNotBlank).map(String::toLong).distinct().sorted()
-        // Default ambiguous discriminators embed refetchable title text. A digest representation
-        // is still required before these can be migrated without retaining that duplication.
+        // Validate the original identity before normalizing legacy presentation evidence.
         val discriminator = fields["sourceDiscriminator"]
-        if (discriminator.isNullOrBlank() || discriminator.startsWith("legacy-ambiguous|")) false
+        if (discriminator.isNullOrBlank()) false
         else favoriteUpdateEventIdentity(requireNotNull(fields["targetType"]), requireNotNull(fields["targetId"]).toLong(),
             requireNotNull(fields["authorId"]).toLong(), requireNotNull(fields["mode"]), details,
             requireNotNull(fields["ambiguous"]).toBooleanStrict(), requireNotNull(fields["detectedAt"]).toLong(),
