@@ -389,6 +389,93 @@ class AppSyncCanonicalCheckpointActivatorTest {
         }
     }
 
+    private fun Fixture.fallbackContinuation(provider: AppSyncV3SegmentPublisherTest.Provider,
+        prefer: () -> Boolean = { true }, allowed: () -> Boolean = { true }, nativeAllowed: () -> Boolean = { false }): AppSyncNativeRecoveryContinuation {
+        val recovery = SqlDelightAppSyncRecoveryStore(db)
+        val blogs = SqlDelightAppSyncRemoteBlogStore(db).also {
+            it.saveClassId(account, io.github.littlesurvival.dto.value.BlogClassId(7))
+        }
+        val nativeGate = { !prefer() && nativeAllowed() }
+        val fallbackGate = { prefer() && allowed() }
+        return AppSyncNativeRecoveryContinuation(provider, store, recovery, blogs, activator(), { now }, nativeGate,
+            journalStarter = AppSyncNativeJournalStarter(db, store, recovery, state, activator(), { now }, nativeGate),
+            preferSanitizedV2 = prefer, canWriteSanitizedV2 = fallbackGate,
+            sanitizedV2Starter = AppSyncNativeJournalStarter(db, store, recovery, state, activator(), { now }, fallbackGate,
+                sanitizedV2Fallback = true))
+    }
+
+    @Test fun engineFallbackDispatchForcesDiscoveryAndCompletesWithNativeWriterDisabled() = fixture {
+        val first = append("20")
+        val provider = nativePublishingEnvironment().first
+        val continuation = fallbackContinuation(provider)
+        val cloud = AppSyncJournalLoadResult.Success(emptyList(), verifiedCanonicalCheckpoints = listOf(verified()))
+        val result = assertIs<OperationSyncResult.Converged>(synchronize(cloud, continuation))
+        assertEquals(1, result.acknowledgedLocalCount)
+        assertTrue(forcedLoads.all { it })
+        assertEquals(1, loadCalls)
+        val recovery = SqlDelightAppSyncRecoveryStore(db)
+        val session = assertNotNull(recovery.recoverySession(account))
+        assertEquals(AppSyncRecoveryPhase.Completed, session.phase)
+        val payload = assertIs<AppSyncJournalValidation.Valid>(AppSyncJournalEnvelopeCodec()
+            .validate(recovery.sanitizedV2Payload(session.sessionId))).envelope.payload
+        assertEquals(2, payload.protocolWriteVersion)
+        assertEquals(listOf(first.operationId), payload.operations.map { it.operationId })
+        assertTrue(store.pendingOperations().isEmpty())
+        assertEquals(3, provider.posts.size)
+    }
+
+    @Test fun engineFallbackModeChangePreservesFrozenFormatAndRequiresCompatibleExplicitResume() = fixture {
+        val first = append()
+        val provider = nativePublishingEnvironment().first
+        val recovery = SqlDelightAppSyncRecoveryStore(db)
+        var prefer = true
+        var allowed = false
+        fun continuation() = fallbackContinuation(provider, { prefer }, { allowed }, { true })
+        val cloud = AppSyncJournalLoadResult.Success(emptyList(), verifiedCanonicalCheckpoints = listOf(verified()))
+        assertIs<OperationSyncResult.PausedProvider>(synchronize(cloud, continuation()))
+        assertNull(recovery.recoverySession(account))
+        assertTrue(provider.posts.isEmpty())
+        allowed = true
+        provider.timeoutAt = 1
+        assertIs<OperationSyncResult.RetryScheduled>(synchronize(cloud, continuation()))
+        val frozen = assertNotNull(recovery.recoverySession(account))
+        val bytes = recovery.sanitizedV2Payload(frozen.sessionId)
+        now = assertNotNull(frozen.nextRetryAtEpochMillis)
+        prefer = false
+        assertIs<OperationSyncResult.PausedProvider>(synchronize(cloud, continuation()))
+        assertEquals(AppSyncRecoveryPhase.NeedsAttention, recovery.session(frozen.sessionId)?.phase)
+        assertEquals("native-compatibility", recovery.session(frozen.sessionId)?.lastErrorCategory)
+        assertEquals(1, provider.posts.size)
+        assertEquals(bytes, recovery.sanitizedV2Payload(frozen.sessionId))
+        assertEquals(listOf(first), store.pendingOperations())
+        prefer = true
+        assertNotNull(recovery.resumeRetryExhaustedRecovery(account, ++now))
+        provider.timeoutAt = null
+        assertIs<OperationSyncResult.Converged>(synchronize(cloud, continuation()))
+        assertEquals(AppSyncRecoveryPhase.Completed, recovery.session(frozen.sessionId)?.phase)
+        assertEquals(bytes, recovery.sanitizedV2Payload(frozen.sessionId))
+        assertTrue(store.pendingOperations().isEmpty())
+    }
+
+    @Test fun engineResumesCommittedFallbackWhenBothWriterModesAreDisabled() = fixture {
+        val first = append()
+        val (recovery, id) = stageNativeJournal(first, fallback = true)
+        val provider = nativePublishingEnvironment().first
+        val cloud = AppSyncJournalLoadResult.Success(emptyList(), verifiedCanonicalCheckpoints = listOf(verified()))
+        preferences.fail = true
+        assertIs<OperationSyncResult.RetryScheduled>(synchronize(cloud, fallbackContinuation(provider, { false }, { false })))
+        assertEquals(listOf(first), store.pendingOperations())
+        val later = append("22")
+        preferences.fail = false
+        now = assertNotNull(recovery.session(id)?.nextRetryAtEpochMillis)
+        assertIs<OperationSyncResult.Converged>(synchronize(cloud, fallbackContinuation(provider, { false }, { false })))
+        assertEquals(AppSyncRecoveryPhase.Completed, recovery.session(id)?.phase)
+        assertEquals(listOf(later), store.pendingOperations())
+        assertEquals(22, preferences.values["novelreadersettings.fontsize"])
+        assertTrue(provider.posts.isEmpty())
+        assertTrue(forcedLoads.all { it })
+    }
+
     @Test fun ordinaryCanonicalSyncDrainsRetainedJournalsWithoutAnotherTrigger() = fixture {
         retainJournalHistory(17)
         val cp = assertNotNull(state.read(account.value)).copy(checkpointId = "drain-all")

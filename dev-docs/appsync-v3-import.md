@@ -166,5 +166,24 @@ v2 分段、索引 readback 與 canonical 本機啟用。輸入必須包含已�
 本文回收後，既有 receipt 驗證加上固定 16 位 root 格式仍能識別回退完成狀態，重複呼叫不重送
 遠端文件或重播設定。
 
-此協調器尚待正式 service 選路及 WorkManager continuation 接線；persisted deadline 本身不等於
-已排入背景工作。多段、裝置中斷、完整 rollback acceptance 仍未完成。
+此協調器已由正式 service recovery adapter 選路，使用既有 recovery session／retry deadline
+與背景排程入口。Persisted deadline 本身不等於已排入背景工作；回退模式的真實 WorkManager、
+多段、裝置中斷及完整 rollback acceptance 仍未完成。
+
+
+## 正式服務回退選路
+
+`appSyncSanitizedV2FallbackEnabled` 預設 false，僅選擇新的 canonical journal 使用 sanitized v2。
+選用時停止新的 native journal／checkpoint migration；回退不依賴 v3 writer／benchmark 開關，
+但仍要求 `appSyncV3ReaderReady` 及新的完整、相容 reader cohort。每次回退同步強制 authoritative
+cloud discovery，觀察結果更新 cohort 後，才在 engine 的既有 lease 內準備與發布。
+
+`AppSyncNativeRecoveryContinuation` 以 session 內固定的 companion／receipt 辨識已存在工作的
+格式，不以目前開關重新編碼。尚未提交索引的工作遇到對應格式 gate 關閉，保存 compatibility
+stop，保留本文與來源，需恢復相容條件後 explicit resume。已提交索引的工作在兩種 writer
+皆關閉時仍能完成本機設定與來源確認；deadline 未到仍不重試。
+
+新回退要求完整 verified canonical checkpoint；沒有基底時不藉回退開關發出新的 v3 checkpoint。
+此開關不宣告 reader capability，不啟用雲端刪除；既有裝置 cohort／reader rollout 與實際裝置
+回退續跑驗收仍須完成。新增 engine integration 覆蓋強制探索、native writer 關閉時回退發布、
+開關切換時保留固定格式，以及已提交工作在所有 writer 關閉後恢復設定。

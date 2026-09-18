@@ -392,13 +392,26 @@ class AppSyncService(
         legacyStarter = me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncLegacyMigrationStarter(
             db, store, recoveryStore, nowMillis, ::canWriteNativeJournal),
         canAttemptMigration = {
-            listOf(me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncV3FeatureFlagKeys.WRITER,
+            !preferSanitizedV2() && listOf(me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncV3FeatureFlagKeys.WRITER,
                 me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncV3FeatureFlagKeys.READER_READY,
                 me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncV3FeatureFlagKeys.BENCHMARKS_APPROVED)
                 .all { settingsStore.getBoolean(it, false) }
         },
+        preferSanitizedV2 = ::preferSanitizedV2,
+        canWriteSanitizedV2 = ::canWriteSanitizedV2Journal,
+        sanitizedV2Starter = me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncNativeJournalStarter(
+            db, store, recoveryStore, canonicalState, canonicalActivator, nowMillis, ::canWriteSanitizedV2Journal,
+            sanitizedV2Fallback = true),
     )
-    private fun canWriteNativeJournal(): Boolean =
+    private fun preferSanitizedV2(): Boolean = settingsStore.getBoolean(
+        me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncV3FeatureFlagKeys.SANITIZED_V2_FALLBACK, false)
+
+    private fun canWriteSanitizedV2Journal(): Boolean = preferSanitizedV2() && store.installation()?.let { installation ->
+        readerCohortStore.canWriteSanitizedV2(installation, nowMillis(), settingsStore.getBoolean(
+            me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncV3FeatureFlagKeys.READER_READY, false))
+    } == true
+
+    private fun canWriteNativeJournal(): Boolean = !preferSanitizedV2() &&
             store.installation()?.let { installation ->
                 readerCohortStore.canWrite(installation, nowMillis(),
                     settingsStore.getBoolean(me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncV3FeatureFlagKeys.WRITER, false),

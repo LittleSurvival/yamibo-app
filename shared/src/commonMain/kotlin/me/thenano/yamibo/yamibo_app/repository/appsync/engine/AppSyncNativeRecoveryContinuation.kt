@@ -9,6 +9,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.remote.*
 import me.thenano.yamibo.yamibo_app.store.appsync.*
 
 internal object AppSyncV3FeatureFlagKeys {
+    const val SANITIZED_V2_FALLBACK = "appSyncSanitizedV2FallbackEnabled"
     const val WRITER = "appSyncV3WriterEnabled"
     const val READER_READY = "appSyncV3ReaderReady"
     const val BENCHMARKS_APPROVED = "appSyncV3BenchmarksApproved"
@@ -29,12 +30,15 @@ internal class AppSyncNativeRecoveryContinuation(
     private val journalStarter: AppSyncNativeJournalStarter? = null,
     private val legacyStarter: AppSyncLegacyMigrationStarter? = null,
     private val canAttemptMigration: () -> Boolean = canWrite,
+    private val preferSanitizedV2: () -> Boolean = { false },
+    private val canWriteSanitizedV2: () -> Boolean = { false },
+    private val sanitizedV2Starter: AppSyncNativeJournalStarter? = null,
 ) : AppSyncCanonicalRecoveryContinuation {
     override fun hasPending(account: SyncAccountBinding): Boolean = recovery.recoverySession(account)?.let {
         it.phase != AppSyncRecoveryPhase.Completed && recovery.usesNativeTransport(it.sessionId)
     } == true
 
-    override fun requiresAuthoritativeDiscovery(): Boolean = legacyStarter != null && canAttemptMigration()
+    override fun requiresAuthoritativeDiscovery(): Boolean = preferSanitizedV2() || legacyStarter != null && canAttemptMigration()
 
     override suspend fun resumeLegacy(account: SyncAccountBinding, formHash: FormHash,
         cloud: AppSyncJournalLoadResult.Success): OperationSyncResult? {
@@ -125,7 +129,11 @@ internal class AppSyncNativeRecoveryContinuation(
     override suspend fun resume(account: SyncAccountBinding, formHash: FormHash,
         cloud: AppSyncCanonicalCloudPlan.Ready): OperationSyncResult? {
         val starting = !hasPending(account)
-        if (starting && (!canWrite() || journalStarter == null)) return null
+        val startFallback = starting && preferSanitizedV2()
+        val starter = if (startFallback) sanitizedV2Starter else journalStarter
+        if (starting && startFallback && (!canWriteSanitizedV2() || starter == null))
+            return OperationSyncResult.PausedProvider("Sanitized v2 publication requires compatible readers and configured recovery")
+        if (starting && !startFallback && (!canWrite() || starter == null)) return null
         return try {
             val installation = requireNotNull(operations.installation())
             require(installation.accountBinding == account)
@@ -140,23 +148,34 @@ internal class AppSyncNativeRecoveryContinuation(
             }.map {
                 SyncOperation.idFor(SyncDeviceId(it.deviceId), SyncDeviceEpoch(it.deviceEpoch), SyncSequence(it.sequence))
             }).distinct().filterNot(operations::isApplied)
-            if (starting && requireNotNull(journalStarter).start(account, cloud).isFailure)
+            if (starting && requireNotNull(starter).start(account, cloud).isFailure)
                 return OperationSyncResult.PausedProvider("Native journal could not be prepared from verified cloud history")
             val session = requireNotNull(recovery.recoverySession(account))
             if (session.phase == AppSyncRecoveryPhase.NeedsAttention)
                 return OperationSyncResult.PausedProvider("Native recovery requires explicit resume")
-            if (!session.indexCommitted && !canWrite()) {
+            val fallback = recovery.usesSanitizedV2Transport(session.sessionId)
+            val canPublish = if (fallback) canWriteSanitizedV2 else canWrite
+            if (!session.indexCommitted && !canPublish()) {
                 block(account, "native-compatibility")
                 return OperationSyncResult.PausedProvider("Native recovery requires compatible readers and approved rollout")
             }
             val payload = recovery.nativePayload(session.sessionId)
             val coveredAcknowledged = if (starting) pending - operations.pendingOperations().map { it.operationId.value }.toSet() else emptySet()
-            val publisher = AppSyncV3SegmentPublisher(provider, recovery, nowMillis, canWrite = { canWrite() },
-                discover = AppSyncV3ArtifactReconciler(provider, selection.classId)::discover)
-            val committer = AppSyncV3IndexCommitter(provider, recovery, publisher, nowMillis, { canWrite() })
-            val coordinator = AppSyncV3CommitCoordinator(committer, recovery, nowMillis, activator,
-                canRun = { recovery.session(session.sessionId)?.indexCommitted == true || canWrite() })
-            when (val result = coordinator.commit(session.sessionId, payload.body, payload.identity, selection, formHash, cloud)) {
+            val result = if (fallback) {
+                val publisher = AppSyncSanitizedV2SegmentPublisher(provider, recovery, nowMillis, canWrite = { canPublish() },
+                    discover = AppSyncV3ArtifactReconciler(provider, selection.classId)::discover)
+                val committer = AppSyncSanitizedV2IndexCommitter(provider, recovery, publisher, nowMillis, { canPublish() })
+                AppSyncSanitizedV2CommitCoordinator(committer, recovery, activator, nowMillis, { canPublish() })
+                    .commit(session.sessionId, selection, formHash, cloud)
+            } else {
+                val publisher = AppSyncV3SegmentPublisher(provider, recovery, nowMillis, canWrite = { canPublish() },
+                    discover = AppSyncV3ArtifactReconciler(provider, selection.classId)::discover)
+                val committer = AppSyncV3IndexCommitter(provider, recovery, publisher, nowMillis, { canPublish() })
+                AppSyncV3CommitCoordinator(committer, recovery, nowMillis, activator,
+                    canRun = { recovery.session(session.sessionId)?.indexCommitted == true || canPublish() })
+                    .commit(session.sessionId, payload.body, payload.identity, selection, formHash, cloud)
+            }
+            when (result) {
                 is AppSyncSegmentedJournalCommitResult.Verified -> OperationSyncResult.Converged(
                     appliedRemoteCount = remoteIds.count(operations::isApplied),
                     acknowledgedLocalCount = (result.acknowledgedOperationIds + coveredAcknowledged +
@@ -169,7 +188,7 @@ internal class AppSyncNativeRecoveryContinuation(
                 is AppSyncSegmentedJournalCommitResult.Retryable -> OperationSyncResult.RetryScheduled(result.reason)
                 is AppSyncSegmentedJournalCommitResult.Conflict -> OperationSyncResult.RetryScheduled(result.reason)
                 is AppSyncSegmentedJournalCommitResult.Terminal -> {
-                    block(account, if (!canWrite()) "native-compatibility" else "native-recovery-evidence")
+                    block(account, if (!canPublish()) "native-compatibility" else "native-recovery-evidence")
                     OperationSyncResult.PausedProvider(result.reason)
                 }
             }
