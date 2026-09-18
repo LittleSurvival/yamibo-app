@@ -16,8 +16,78 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.remote.*
 import me.thenano.yamibo.yamibo_app.repository.appsync.schema.*
 import me.thenano.yamibo.yamibo_app.store.appsync.*
 import okio.ByteString.Companion.encodeUtf8
+import me.thenano.yamibo.yamibo_app.repository.appsync.domain.stableAppSyncFingerprint
 
 class AppSyncV3SegmentPublisherTest {
+    private fun Fixture.prepareFallback(): String {
+        val (id, body, identity) = prepareJournal()
+        recovery.pinPayload(id, "Journal", identity, 3) { body }
+        recovery.pinSanitizedV2Payload(id) { true }
+        recovery.startSegmentedJournal(id, 3)
+        return id
+    }
+
+    private fun Fixture.fallbackPublisher(target: Int = 4096, gate: suspend () -> Boolean = { true },
+        discovery: suspend (String, String) -> AppSyncV3ArtifactDiscovery = AppSyncV3ArtifactReconciler(provider, BlogClassId(7))::discover) =
+        AppSyncSanitizedV2SegmentPublisher(provider, SqlDelightAppSyncRecoveryStore(db), { 10 },
+            AppSyncSegmentEnvelopeCodec(AppSyncPayloadBudget(target)), gate, discovery)
+
+    @Test fun fallbackPublicationReconcilesLostRootAndRestartsWithFrozenConfiguration() = fixture {
+        val id = prepareFallback()
+        val native = recovery.nativePayload(id)
+        val oldRoot = AppSyncBlogWriteRequest(BlogId(77), "original-native-root", native.body,
+            AppSyncBlogClassSelection.Existing(BlogClassId(7)), FormHash("test"))
+        provider.artifacts[77] = oldRoot
+        provider.timeoutAt = 2
+        provider.storeTimedOut = true
+        val selection = AppSyncBlogClassSelection.Existing(BlogClassId(7))
+        val first = assertIs<AppSyncSegmentPublishResult.ReadyToCommitIndex>(fallbackPublisher().publish(id, selection, FormHash("test")))
+        assertEquals(2, provider.posts.size)
+        assertEquals(AppSyncRecoveryPhase.CommittingIndex, recovery.session(id)?.phase)
+        assertFalse(recovery.session(id)!!.indexCommitted)
+        assertEquals(listOf(pending), operations.pendingOperations())
+        assertEquals(first, fallbackPublisher(8192).publish(id, selection, FormHash("test")))
+        assertEquals(4096, recovery.nativeSegmentConfiguration(id)?.targetChars)
+        assertEquals(2, provider.posts.size)
+        assertEquals(oldRoot, provider.artifacts[77])
+        assertTrue(provider.posts.all { it.blogId == null })
+        assertEquals(stableAppSyncFingerprint(first.rootBody), first.rootFingerprint)
+        val root = AppSyncSegmentEnvelopeCodec().decodeRoot(first.rootBody).getOrThrow()
+        assertEquals(2, root.protocolVersion)
+        assertEquals(stableAppSyncFingerprint(recovery.sanitizedV2Payload(id)), root.envelopeFingerprint)
+        val reconstructed = assertIs<AppSyncSegmentReconstruction.Valid>(AppSyncSegmentEnvelopeCodec().reconstruct(root) {
+            blogId -> provider.artifacts[blogId.toInt()]?.message
+        })
+        assertEquals(recovery.sanitizedV2Payload(id), reconstructed.canonicalEnvelope)
+    }
+
+    @Test fun fallbackUnknownDiscoveryNeverCreatesAgainAndReadbackTamperingStopsPublication() = fixture {
+        val id = prepareFallback()
+        provider.timeoutAt = 1
+        provider.storeTimedOut = true
+        val selection = AppSyncBlogClassSelection.Existing(BlogClassId(7))
+        val unknown = fallbackPublisher(discovery = { _, _ -> AppSyncV3ArtifactDiscovery.Unknown })
+        repeat(2) { assertIs<AppSyncSegmentPublishResult.Retryable>(unknown.publish(id, selection, FormHash("test"))) }
+        assertEquals(1, provider.posts.size)
+        assertIs<AppSyncSegmentPublishResult.ReadyToCommitIndex>(fallbackPublisher().publish(id, selection, FormHash("test")))
+        assertEquals(2, provider.posts.size)
+        val segment = recovery.segmentWrites(id).single().blogId!!.toInt()
+        provider.artifacts[segment] = provider.artifacts.getValue(segment).copy(message = "changed")
+        assertIs<AppSyncSegmentPublishResult.Terminal>(fallbackPublisher().publish(id, selection, FormHash("test")))
+        assertEquals(2, provider.posts.size)
+    }
+
+    @Test fun fallbackChecksGateAgainBeforeRootAndRejectsOrdinaryNativeSessions() = fixture {
+        val selection = AppSyncBlogClassSelection.Existing(BlogClassId(7))
+        assertIs<AppSyncSegmentPublishResult.Terminal>(fallbackPublisher().publish(session.sessionId, selection, FormHash("test")))
+        val id = prepareFallback()
+        assertIs<AppSyncSegmentPublishResult.Terminal>(fallbackPublisher(gate = { provider.posts.isEmpty() })
+            .publish(id, selection, FormHash("test")))
+        assertEquals(1, provider.posts.size)
+        assertNull(recovery.session(id)?.rootBlogId)
+        assertIs<AppSyncSegmentPublishResult.ReadyToCommitIndex>(fallbackPublisher().publish(id, selection, FormHash("test")))
+        assertEquals(2, provider.posts.size)
+    }
     @Test fun fallbackBindingRejectsNativePublishersBeforeProviderWrites() = fixture {
         val (id, body, identity) = prepareJournal()
         recovery.pinPayload(id, "Journal", identity, 3) { body }

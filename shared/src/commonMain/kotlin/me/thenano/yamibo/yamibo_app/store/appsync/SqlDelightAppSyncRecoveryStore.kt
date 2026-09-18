@@ -329,7 +329,10 @@ internal class SqlDelightAppSyncRecoveryStore(
     fun pinNativeRootIntent(sessionId: String, fingerprint: String): Boolean = db.transactionWithResult {
         val session = requireSession(sessionId)
         require(session.phase == AppSyncRecoveryPhase.PublishingRoot || session.phase == AppSyncRecoveryPhase.CommittingIndex)
-        require(fingerprint.length == 64 && fingerprint.all { it in '0'..'9' || it in 'a'..'f' })
+        // V2 roots retain their legacy wire fingerprint; discovery/readback additionally
+        // checks the exact body with SHA-256. The frozen companion selects this protocol.
+        val fingerprintLength = if (hasSanitizedV2Payload(sessionId)) 16 else 64
+        require(fingerprint.length == fingerprintLength && fingerprint.all { it in '0'..'9' || it in 'a'..'f' })
         val payload = requireNotNull(queries.getRecoveryPayload(sessionId).executeAsOneOrNull())
         require(payload.transportVersion == 3L) { "Native root intent requires a native payload" }
         check(stableAppSyncFingerprint(payload.canonicalEnvelope) == payload.envelopeFingerprint) {

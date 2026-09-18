@@ -108,3 +108,13 @@ Migration 58→59 新增 `AppSyncV2FallbackPayload`，以 recovery session 為�
 重新載入核對兩份固定 bytes、當前 writer 與 canonical→v2 轉換結果。後續本機操作不加入已固定的 journal；交易失敗會一起回復，pre-commit rollback 會清除附屬 payload，保留 pending sources。開始發布後不得把普通 native session 改成回退 session。v3 segment／index publisher 在回退綁定存在時拒絕執行，避免重新打開 v3 flag 後誤發錯誤格式。
 
 目前這個 starter 選項尚未由正式 service 啟用；v2 專用發布、索引確認與 canonical activation 還需接線並驗證中斷重試。因此 3.9 與完整回退驗收仍未完成。
+
+## Sanitized v2 分段發布
+
+`AppSyncSanitizedV2SegmentPublisher` 僅接受有固定 v2 companion 的 canonical session，輸出現有 v2 segment／root 格式。分段設定沿用 session 內固定的 configuration，開始時先核對整份已持久化分段計畫，再由尾段向前建立所有文件。每次 POST 前重查 reader gate；POST 一律使用新文件，不更新原 native root。
+
+每段以 SHA-256 綁定 durable intent，已確認的段重試時仍必須實際讀回，比對 Blog ID、title 及完整 body。回應遺失或候選不明時使用完整分頁探索；Unknown、授權失效與衝突均不得視為不存在，也不在同一次呼叫重送 POST。Root 的持久化 intent 依 v2 格式保留 16 位 wire fingerprint，但探索另外使用 SHA-256 並核對完整內容；僅有 v2 companion 的 session 可以使用此規則，普通 v3 root 仍要求 64 位 SHA-256。
+
+成功僅進入 CommittingIndex，不提交索引、不確認 outbox、不啟動清理。正式 index readback、canonical activation 與 service dispatch 仍待接線；原 v3 文件保持原狀。
+
+共用 reader-text 還原也保留 v2 segment／root 的換行，避免 Discuz `<br>` 呈現使完整 body 核對或 SHA-256 探索誤判。既有 v1/v2 journal 的讀取方式沒有因此改成 v3 解碼。

@@ -49,6 +49,10 @@ internal class AppSyncSegmentEnvelopeCodec(
     private val maximumSegments: Int = 4_096,
     private val maximumDecodedEnvelopeChars: Int = 16 * 1024 * 1024,
 ) {
+    internal val configuration get() = AppSyncV3SegmentConfiguration(1, budget.targetChars, maximumSegments, maximumDecodedEnvelopeChars)
+    internal fun withConfiguration(configuration: AppSyncV3SegmentConfiguration) = AppSyncSegmentEnvelopeCodec(
+        AppSyncPayloadBudget(configuration.targetChars), json, configuration.maximumSegments, configuration.maximumEnvelopeChars)
+
     fun split(
         canonicalEnvelope: String,
         accountBinding: String,

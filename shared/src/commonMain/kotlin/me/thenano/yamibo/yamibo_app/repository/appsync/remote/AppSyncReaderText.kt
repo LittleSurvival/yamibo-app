@@ -13,7 +13,9 @@ internal fun appSyncReaderText(html: String): String {
     return try {
         val body = Ksoup.parseBodyFragment(html).body()
         if (!html.contains(APP_SYNC_V3_ENVELOPE_MARKER) && !html.contains(AppSyncV3SegmentCodec.ROOT) &&
-            !html.contains(AppSyncV3SegmentCodec.SEGMENT)) body.text()
+            !html.contains(AppSyncV3SegmentCodec.SEGMENT) &&
+            !html.contains(AppSyncSegmentEnvelopeCodec.ROOT_MARKER) &&
+            !html.contains(AppSyncSegmentEnvelopeCodec.SEGMENT_MARKER)) body.text()
         else {
             body.select("br,p,div,li").after("\n")
             body.wholeText().replace("\r\n", "\n").split('\n', limit = 64)
