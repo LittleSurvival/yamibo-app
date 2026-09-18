@@ -1652,9 +1652,11 @@ internal class YamiboAppSyncJournalRemote(
             is CanonicalEnvelopeResult.Retryable ->
                 return CheckpointCandidateResult.Retryable(loaded.reason)
             is CanonicalEnvelopeResult.Terminal ->
-                return CheckpointCandidateResult.Terminal(loaded.reason)
+                return if (rootBody.contains(AppSyncV3SegmentCodec.ROOT)) CheckpointCandidateResult.Canonical(
+                    AppSyncV3DocumentRead.Invalid(), AppSyncRemoteBlogKind.CheckpointRoot)
+                else CheckpointCandidateResult.Terminal(loaded.reason)
         }
-        val kind = if (rootBody.contains(AppSyncSegmentEnvelopeCodec.ROOT_MARKER)) {
+        val kind = if (rootBody.contains(AppSyncSegmentEnvelopeCodec.ROOT_MARKER) || rootBody.contains(AppSyncV3SegmentCodec.ROOT)) {
             AppSyncRemoteBlogKind.CheckpointRoot
         } else {
             AppSyncRemoteBlogKind.Checkpoint
@@ -1717,9 +1719,11 @@ internal class YamiboAppSyncJournalRemote(
             is CanonicalEnvelopeResult.Retryable ->
                 return JournalCandidateResult.Retryable(loaded.reason)
             is CanonicalEnvelopeResult.Terminal ->
-                return JournalCandidateResult.Terminal(loaded.reason)
+                return if (rootBody.contains(AppSyncV3SegmentCodec.ROOT)) JournalCandidateResult.Canonical(
+                    AppSyncV3DocumentRead.Invalid(), AppSyncRemoteBlogKind.JournalRoot)
+                else JournalCandidateResult.Terminal(loaded.reason)
         }
-        val kind = if (rootBody.contains(AppSyncSegmentEnvelopeCodec.ROOT_MARKER)) {
+        val kind = if (rootBody.contains(AppSyncSegmentEnvelopeCodec.ROOT_MARKER) || rootBody.contains(AppSyncV3SegmentCodec.ROOT)) {
             AppSyncRemoteBlogKind.JournalRoot
         } else {
             AppSyncRemoteBlogKind.Journal
@@ -1753,9 +1757,11 @@ internal class YamiboAppSyncJournalRemote(
         }
     }
 
-    private fun canonicalRootIdentityMatches(rootBody: String, identity: String): Boolean =
-        !rootBody.contains(AppSyncSegmentEnvelopeCodec.ROOT_MARKER) ||
-            segmentCodec.decodeRoot(rootBody).getOrNull()?.identity == identity
+    private fun canonicalRootIdentityMatches(rootBody: String, identity: String): Boolean = when {
+        rootBody.contains(AppSyncV3SegmentCodec.ROOT) -> AppSyncV3SegmentCodec().decodeRoot(rootBody).getOrNull()?.metadata?.identity == identity
+        rootBody.contains(AppSyncSegmentEnvelopeCodec.ROOT_MARKER) -> segmentCodec.decodeRoot(rootBody).getOrNull()?.identity == identity
+        else -> true
+    }
 
     private suspend fun loadIndex(
         candidate: StoredAppSyncRemoteBlog,
@@ -1800,6 +1806,38 @@ internal class YamiboAppSyncJournalRemote(
         expectedKind: AppSyncSegmentPayloadKind,
         accountBinding: SyncAccountBinding,
     ): CanonicalEnvelopeResult {
+        if (rootBody.contains(AppSyncV3SegmentCodec.ROOT)) {
+            val codec = AppSyncV3SegmentCodec()
+            val root = codec.decodeRoot(rootBody).getOrElse { return CanonicalEnvelopeResult.Terminal("Invalid native v3 root") }
+            val kind = if (expectedKind == AppSyncSegmentPayloadKind.Journal) AppSyncV3PayloadKind.Journal else AppSyncV3PayloadKind.Checkpoint
+            val ids = mutableListOf<Long>()
+            var failure: CanonicalEnvelopeResult? = null
+            val reconstructed = codec.reconstruct(root, accountBinding.value, kind) { id ->
+                val page = when (val fetched = provider.fetchBlog(BlogId(id))) {
+                    is AppSyncCloudResult.VerifiedSuccess -> fetched.value
+                    AppSyncCloudResult.NotFound -> {
+                        failure = CanonicalEnvelopeResult.Retryable("Committed v3 segment is not visible yet"); null
+                    }
+                    is AppSyncCloudResult.NetworkFailed, is AppSyncCloudResult.Timeout, AppSyncCloudResult.Maintenance -> {
+                        failure = CanonicalEnvelopeResult.Retryable(fetched.describeForJournal()); null
+                    }
+                    else -> { failure = CanonicalEnvelopeResult.Terminal(fetched.describeForJournal()); null }
+                }
+                if (page == null) null
+                else if (page.blogInfo.blogId.value != id || page.blogInfo.title !=
+                    AppSyncV3SegmentCodec.segmentTitle(kind, root.generation, ids.size)) {
+                    failure = CanonicalEnvelopeResult.Terminal("Native v3 segment reader identity mismatch"); null
+                } else {
+                    ids += id.toLong()
+                    readerText(page.rootBlog.contentHtml)
+                }
+            }
+            failure?.let { return it }
+            return when (reconstructed) {
+                is AppSyncV3SegmentRead.Verified -> CanonicalEnvelopeResult.Valid(reconstructed.envelope, ids)
+                is AppSyncV3SegmentRead.Invalid -> CanonicalEnvelopeResult.Terminal(reconstructed.reason)
+            }
+        }
         if (!rootBody.contains(AppSyncSegmentEnvelopeCodec.ROOT_MARKER)) {
             return CanonicalEnvelopeResult.Valid(rootBody)
         }

@@ -7,8 +7,10 @@ import okio.GzipSink
 import okio.GzipSource
 import okio.buffer
 
+@kotlinx.serialization.Serializable
 internal enum class AppSyncV3PayloadKind(val wireId: Int) { Journal(1), Checkpoint(2) }
 
+@kotlinx.serialization.Serializable
 internal data class AppSyncV3EnvelopeMetadata(
     val schemaVersion: Int,
     val codecVersion: Int,

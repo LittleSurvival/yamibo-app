@@ -64,6 +64,73 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCanonicalJo
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCanonicalJournalPublishResult
 
 class YamiboAppSyncJournalRemoteTest {
+    @Test fun nativeJournalRootCannotBeOverwrittenByLegacyPublication() = runBlocking {
+        val codec = me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3SegmentCodec()
+        val kind = me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3PayloadKind.Journal
+        val prepared = canonicalPublication()
+        val plan = codec.plan(prepared.envelope, ACCOUNT.value, kind)
+        val body = codec.encodeSegment(plan.drafts.single())
+        val root = codec.root(plan, codec.reference(100, body))
+        val title = AppSyncJournalDefaults.journalTitle(payload().deviceId, payload().deviceEpoch)
+        val provider = FakeProvider().apply {
+            pages[PageKey(null, 1)] = success(classPage())
+            pages[PageKey(CLASS_ID, 1)] = success(UserSpaceBlogPage(blogs = listOf(summary(BlogId(42), title))))
+            blogs[BlogId(42)] = success(page(BlogId(42), title, codec.encodeRoot(root)))
+            blogs[BlogId(100)] = success(page(BlogId(100),
+                me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3SegmentCodec.segmentTitle(kind, root.generation, 0), body))
+        }
+        val store = FakeRemoteStore()
+        val remote = remote(provider, store)
+        val loaded = assertIs<AppSyncJournalLoadResult.Success>(remote.loadJournals(ACCOUNT, true))
+        assertEquals(prepared.journal, assertIs<AppSyncV3DocumentRead.Journal>(loaded.canonicalDocuments.single().document).document)
+        assertEquals(AppSyncRemoteBlogKind.JournalRoot, store.load("device:epoch")?.kind)
+        assertIs<AppSyncJournalPublishResult.StoragePressure>(remote.publishOwnJournal(payload(), null, FORM_HASH))
+        assertEquals(0, provider.submitCalls)
+    }
+
+    @Test fun nativeSegmentedCheckpointLoadsWithIndexEvidenceAndCorruptionCannotBecomeEmptyCloud() = runBlocking {
+        val codec = me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3SegmentCodec(
+            me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncPayloadBudget(4096))
+        val kind = me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3PayloadKind.Checkpoint
+        val checkpoint = AppSyncCanonicalCheckpoint("native-root", ACCOUNT.value, 1,
+            (1..500).associate { "device-$it:epoch" to it.toLong() }, emptyList())
+        val plan = codec.plan(AppSyncV3DocumentCodec().encodeCheckpoint(checkpoint), ACCOUNT.value, kind)
+        val provider = FakeProvider()
+        var next: me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3SegmentReference? = null
+        for (draft in plan.drafts.reversed()) {
+            val body = codec.encodeSegment(draft, next)
+            val id = BlogId(100 + draft.index)
+            provider.blogs[id] = success(page(id,
+                me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3SegmentCodec.segmentTitle(kind, draft.generation, draft.index), body))
+            next = codec.reference(id.value, body)
+        }
+        val root = codec.root(plan, requireNotNull(next))
+        val title = AppSyncJournalDefaults.CHECKPOINT_TITLE_PREFIX + checkpoint.checkpointId
+        provider.blogs[BlogId(77)] = success(page(BlogId(77), title, codec.encodeRoot(root)))
+        provider.blogs[BlogId(78)] = success(page(BlogId(78), APP_SYNC_INDEX_TITLE, indexCodec.encode(
+            AppSyncIndexPayload(ACCOUNT, checkpoints = listOf(AppSyncIndexCheckpointReference(checkpoint.checkpointId, 77,
+                plan.metadata.canonicalFingerprint)), updatedAtEpochMillis = 2))))
+        provider.pages[PageKey(null, 1)] = success(classPage())
+        provider.pages[PageKey(CLASS_ID, 1)] = success(UserSpaceBlogPage(blogs = listOf(
+            summary(BlogId(77), title), summary(BlogId(78), APP_SYNC_INDEX_TITLE))))
+        val store = FakeRemoteStore()
+        val remote = remote(provider, store)
+        val loaded = assertIs<AppSyncJournalLoadResult.Success>(remote.loadJournals(ACCOUNT, true))
+        assertEquals(checkpoint, loaded.verifiedCanonicalCheckpoints.single().document)
+        assertEquals(AppSyncRemoteBlogKind.CheckpointRoot, store.load("checkpoint:native-root")?.kind)
+        val cached = assertIs<AppSyncJournalLoadResult.Success>(remote.loadJournals(ACCOUNT, false))
+        assertEquals(checkpoint, cached.verifiedCanonicalCheckpoints.single().document)
+        provider.blogs.remove(BlogId(100))
+        assertIs<AppSyncJournalLoadResult.RetryableFailure>(remote.loadJournals(ACCOUNT, true))
+        provider.blogs[BlogId(100)] = success(page(BlogId(100), "wrong segment title", "invalid"))
+        val invalid = assertIs<AppSyncJournalLoadResult.Success>(remote.loadJournals(ACCOUNT, true))
+        assertTrue(invalid.requiresCanonicalProcessing)
+        assertTrue(invalid.canonicalReadIssues.isNotEmpty())
+        assertTrue(invalid.verifiedCanonicalCheckpoints.isEmpty())
+        assertEquals(0, provider.submitCalls)
+        assertTrue(provider.deleteRequests.isEmpty())
+    }
+
     @Test fun indexPublicationDoesNotAdvertisePhysicalEvidenceAliases() = runBlocking {
         for (checkpointKind in listOf(AppSyncRemoteBlogKind.Checkpoint, AppSyncRemoteBlogKind.CheckpointRoot)) {
             val journal = storedJournal(payload(), BlogId(42))
