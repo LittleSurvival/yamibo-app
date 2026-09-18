@@ -25,3 +25,8 @@ DELETE FROM AppSyncLocalPruneAudit WHERE createdAtEpochMillis <= ?;
 
 getAudit:
 SELECT * FROM AppSyncLocalPruneAudit WHERE accountBinding = ?;
+
+addRetainedAudit:
+UPDATE AppSyncLocalPruneAudit SET removedRetainedJournals = removedRetainedJournals + ?,
+removedPayloadBytes = removedPayloadBytes + ?, updatedAtEpochMillis = ?
+WHERE accountBinding = ? AND checkpointFingerprint = ?;

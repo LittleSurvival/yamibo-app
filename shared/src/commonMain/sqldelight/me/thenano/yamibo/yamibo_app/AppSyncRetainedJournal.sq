@@ -4,6 +4,17 @@ SELECT * FROM AppSyncRetainedJournal WHERE sessionId = ?;
 getForAccount:
 SELECT sessionId FROM AppSyncRetainedJournal WHERE accountBinding = ? ORDER BY completedAtEpochMillis, sessionId;
 
+getUnchecked:
+SELECT sessionId FROM AppSyncRetainedJournal WHERE accountBinding = ?
+AND (lastCheckedCheckpointFingerprint IS NULL OR lastCheckedCheckpointFingerprint != ?)
+ORDER BY completedAtEpochMillis, sessionId LIMIT ?;
+
+markChecked:
+UPDATE AppSyncRetainedJournal SET lastCheckedCheckpointFingerprint = ? WHERE sessionId = ?;
+
+deleteCovered:
+DELETE FROM AppSyncRetainedJournal WHERE sessionId = ?;
+
 preserveCompleted:
 INSERT INTO AppSyncRetainedJournal(sessionId, accountBinding, generationId, payloadIdentity,
 canonicalEnvelope, envelopeFingerprint, rootBlogId, rootFingerprint, indexIntentBody, indexIntentSha256,

@@ -51,4 +51,8 @@ Migration 55（schema version 56）新增裝置端 `AppSyncRetainedJournal`。�
 
 若同 session ID 已有保留資料，所有保存的身分、主體與證據都必須一致；不接受覆寫。交易中斷會同時還原舊 session 與保留副本變更。證據損壞時拒絕取代，保留原 session 與 payload。已經取得完成收據、主體已合法清理的 session 不會重建副本。
 
-此資料排除於 AppSync 與可攜備份，也不參與單靠時間的 30 天收據到期刪除。保留副本後續仍須接上完整 checkpoint coverage 驗證與有界清理；在此接線完成前會繼續占用本機空間，不能宣稱整體 reclamation 已完成。
+此資料排除於 AppSync 與可攜備份，也不參與單靠時間的 30 天收據到期刪除。只有以下完整 checkpoint coverage 驗證與有界清理能移除保留主體，不能僅因保存時間較久就丟棄副本。
+
+Migration 56（schema version 57）新增每列最後檢查的 checkpoint fingerprint，並在既有 payload-free prune audit 加入 removedRetainedJournals。一般 canonical 清理與 native checkpoint Cleaning 每批最多檢查 8 份保留 journal，逐份載入及解碼；同一 checkpoint 下，未覆蓋列保存檢查進度，後續批次繼續後面的列。新 checkpoint fingerprint 會使未刪除列重新符合檢查條件。
+
+清理沿用外層交易的 checkpoint digest／indexed evidence、installation account、canonical head 及設定重整檢查；每份保留資料另驗 journal envelope fingerprint、index SHA／fingerprint、account／replica 與 root reference，要求 checkpoint 覆蓋全部 published、observed、acknowledgement 與 causal dependencies。資料刪除、檢查進度和累計位元組／保留 journal 筆數同一交易提交；例外全部回滾，再次呼叫不重複計數。hasMore 包含尚未檢查的保留資料，native Cleaning 會接續批次；一般 reader 的獨立背景批次排程仍待補齊。audit 沿用建立日起 30 天到期，不保存 journal/index 主體。

@@ -2,7 +2,9 @@ package me.thenano.yamibo.yamibo_app.repository.appsync.cleanup
 
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.SqlDelightCanonicalCheckpointState
-import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncVerifiedCanonicalCheckpoint
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.*
+import me.thenano.yamibo.yamibo_app.repository.appsync.domain.stableAppSyncFingerprint
+import okio.ByteString.Companion.encodeUtf8
 import me.thenano.yamibo.yamibo_app.repository.appsync.schema.AppSyncCanonicalCheckpointCodec
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase
 import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncRecoveryStore
@@ -73,8 +75,53 @@ internal class AppSyncCanonicalLocalPruner(private val db: Database,
             }
             val frozenBytes = if (cleaningSessionId == null)
                 SqlDelightAppSyncRecoveryStore(db).pruneCompletedNativeJournal(verified) else 0L
-            AppSyncLocalPruneResult(removed, bytes + frozenBytes, hasMore)
+            val retained = pruneRetained(verified, now)
+            AppSyncLocalPruneResult(removed, bytes + frozenBytes + retained.first, hasMore || retained.second)
         }
+
+    /** Runs only inside the validated checkpoint/head transaction above. Each retained body
+     * is decoded separately; the persistent per-checkpoint cursor prevents uncovered rows
+     * from starving later rows or causing an endless Cleaning loop.
+     */
+    private fun pruneRetained(verified: AppSyncVerifiedCanonicalCheckpoint, now: Long): Pair<Long, Boolean> {
+        val account = verified.document.accountBinding
+        val queries = db.appSyncRetainedJournalQueries
+        var removed = 0L
+        var bytes = 0L
+        for (id in queries.getUnchecked(account, verified.fingerprint, 8).executeAsList()) {
+            val row = queries.getBySession(id).executeAsOne()
+            require(row.accountBinding == account && row.rootBlogId > 0 && row.verifiedIndexBlogId > 0 &&
+                row.rootBlogId != row.verifiedIndexBlogId)
+            require(stableAppSyncFingerprint(row.canonicalEnvelope) == row.envelopeFingerprint &&
+                row.indexIntentBody.encodeUtf8().sha256().hex() == row.indexIntentSha256)
+            val read = AppSyncV3DocumentCodec().discover(row.canonicalEnvelope, account, AppSyncV3PayloadKind.Journal)
+                as? AppSyncV3DocumentRead.Journal
+            requireNotNull(read)
+            require(read.metadata.identity == row.payloadIdentity)
+            val index = (AppSyncIndexEnvelopeCodec().validate(row.indexIntentBody) as? AppSyncIndexValidation.Valid)?.envelope
+            requireNotNull(index)
+            require(index.payload.accountBinding.value == account && index.fingerprint == row.verifiedIndexFingerprint)
+            val reference = index.payload.journals.distinct().singleOrNull { it.replicaKey == row.payloadIdentity }
+            require(reference?.blogId?.toLong() == row.rootBlogId && reference.fingerprint == read.metadata.canonicalFingerprint)
+            val journal = read.document
+            val required = journal.observed.toMutableMap()
+            val own = "${journal.deviceId}:${journal.deviceEpoch}"
+            required[own] = maxOf(required[own] ?: 0L, journal.lastSequence, journal.publishedThroughSequence ?: 0L)
+            for (coverage in journal.acknowledgements.map { it.coverage } + journal.block.operations.map { it.causalContext }) {
+                coverage.forEach { (replica, sequence) -> required[replica] = maxOf(required[replica] ?: 0L, sequence) }
+            }
+            if (required.all { (replica, sequence) -> (verified.document.coverage[replica] ?: 0L) >= sequence }) {
+                bytes += row.canonicalEnvelope.encodeUtf8().size.toLong() + row.indexIntentBody.encodeUtf8().size
+                queries.deleteCovered(id)
+                removed++
+            } else queries.markChecked(verified.fingerprint, id)
+        }
+        if (removed > 0) {
+            db.appSyncLocalPruneQueries.recordAudit(account, verified.fingerprint, now)
+            db.appSyncLocalPruneQueries.addRetainedAudit(removed, bytes, now, account, verified.fingerprint)
+        }
+        return bytes to queries.getUnchecked(account, verified.fingerprint, 1).executeAsList().isNotEmpty()
+    }
 
     companion object { const val RETENTION_MILLIS = 30L * 24 * 60 * 60 * 1000 }
 }

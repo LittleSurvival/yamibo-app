@@ -15,6 +15,76 @@ import me.thenano.yamibo.yamibo_app.store.appsync.*
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 
 class AppSyncCanonicalCheckpointActivatorTest {
+    @Test fun corruptRetainedIndexPreservesPayloadAndRollsBackEarlierOutboxDeletion() = fixture {
+        val id = retainJournalHistory(1).single()
+        val cp = assertNotNull(state.read(account.value)).copy(checkpointId = "covered-retained")
+        driver.execute(null, "UPDATE AppSyncRetainedJournal SET indexIntentBody = 'corrupt'", 0)
+        assertIs<AppSyncCanonicalActivationResult.NeedsAttention>(activator().activate(verified(cp)))
+        assertNotNull(db.appSyncRetainedJournalQueries.getBySession(id).executeAsOneOrNull())
+        assertEquals(1, store.allOutboxOperations().size)
+        assertNull(db.appSyncRetainedJournalQueries.getBySession(id).executeAsOne().lastCheckedCheckpointFingerprint)
+        assertTrue(db.appSyncLocalPruneQueries.getAudit(account.value).executeAsList().isEmpty())
+    }
+
+    @Test fun retainedJournalCleanupHasBoundedPersistentProgressAndRechecksNewCheckpoints() = fixture {
+        val ids = retainJournalHistory(17)
+        val pruner = me.thenano.yamibo.yamibo_app.repository.appsync.cleanup.AppSyncCanonicalLocalPruner(db, state)
+        assertTrue(pruner.prune(verified(), now).hasMore)
+        assertEquals(8, ids.count { db.appSyncRetainedJournalQueries.getBySession(it).executeAsOne().lastCheckedCheckpointFingerprint != null })
+        assertTrue(pruner.prune(verified(), now).hasMore)
+        assertFalse(pruner.prune(verified(), now).hasMore)
+        assertEquals(17, db.appSyncRetainedJournalQueries.getForAccount(account.value).executeAsList().size)
+        val cp = assertNotNull(state.read(account.value)).copy(checkpointId = "all-retained-history")
+        val proof = verified(cp)
+        assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(proof))
+        assertEquals(9, db.appSyncRetainedJournalQueries.getForAccount(account.value).executeAsList().size)
+        val restarted = me.thenano.yamibo.yamibo_app.repository.appsync.cleanup.AppSyncCanonicalLocalPruner(db, state)
+        assertTrue(restarted.prune(proof, now).hasMore)
+        assertFalse(restarted.prune(proof, now).hasMore)
+        assertTrue(db.appSyncRetainedJournalQueries.getForAccount(account.value).executeAsList().isEmpty())
+        val audit = db.appSyncLocalPruneQueries.getAudit(account.value).executeAsList().single { it.checkpointFingerprint == proof.fingerprint }
+        assertEquals(17L, audit.removedRetainedJournals)
+        assertEquals(17L, audit.removedRows)
+        assertTrue(audit.removedPayloadBytes > 0)
+        assertEquals(0L, restarted.prune(proof, now).removedPayloadBytes)
+        assertEquals(audit, db.appSyncLocalPruneQueries.getAudit(account.value).executeAsOne())
+    }
+
+    @Test fun retainedCleanupCursorDeletionAndAuditAllRollBackTogether() = fixture {
+        val id = retainJournalHistory(1).single()
+        val pruner = me.thenano.yamibo.yamibo_app.repository.appsync.cleanup.AppSyncCanonicalLocalPruner(db, state)
+        assertFailsWith<IllegalStateException> {
+            db.transaction {
+                pruner.prune(verified(), now)
+                assertNotNull(db.appSyncRetainedJournalQueries.getBySession(id).executeAsOne().lastCheckedCheckpointFingerprint)
+                error("interrupted cursor")
+            }
+        }
+        assertNull(db.appSyncRetainedJournalQueries.getBySession(id).executeAsOne().lastCheckedCheckpointFingerprint)
+        val cp = assertNotNull(state.read(account.value)).copy(checkpointId = "covered-retained")
+        assertFailsWith<IllegalStateException> {
+            db.transaction {
+                assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(verified(cp)))
+                assertNull(db.appSyncRetainedJournalQueries.getBySession(id).executeAsOneOrNull())
+                error("interrupted deletion")
+            }
+        }
+        assertNotNull(db.appSyncRetainedJournalQueries.getBySession(id).executeAsOneOrNull())
+        assertTrue(db.appSyncLocalPruneQueries.getAudit(account.value).executeAsList().isEmpty())
+        assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(verified(cp)))
+        assertNull(db.appSyncRetainedJournalQueries.getBySession(id).executeAsOneOrNull())
+    }
+
+    @Test fun retainedCleanupMigrationCreatesNoImplicitProgress() {
+        JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).use { driver ->
+            Database.Schema.migrate(driver, oldVersion = 53, newVersion = 57)
+            val db = Database(driver)
+            assertTrue(db.appSyncRetainedJournalQueries.getUnchecked(account.value, "checkpoint", 8).executeAsList().isEmpty())
+            db.appSyncLocalPruneQueries.recordAudit(account.value, "checkpoint", 1)
+            assertEquals(0L, db.appSyncLocalPruneQueries.getAudit(account.value).executeAsOne().removedRetainedJournals)
+        }
+    }
+
     @Test fun replacingCompletedJournalPreservesFrozenEvidenceOutsideTheActiveSessionSlot() = fixture {
         val first = append()
         val (recovery, id) = stageNativeJournal(first)
@@ -509,6 +579,7 @@ class AppSyncCanonicalCheckpointActivatorTest {
     @Test fun pruneAuditMigrationCreatesNoInventedDeletionEvidence() {
         JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).use { driver ->
             Database.Schema.migrate(driver, oldVersion = 53, newVersion = 54)
+            Database.Schema.migrate(driver, oldVersion = 54, newVersion = 57)
             assertTrue(Database(driver).appSyncLocalPruneQueries.getAudit(account.value).executeAsList().isEmpty())
         }
     }
@@ -950,7 +1021,18 @@ class AppSyncCanonicalCheckpointActivatorTest {
         override fun hasKey(key: String) = key in values
     }
 
-    private inner class Fixture(val db: Database) {
+    private inner class Fixture(val db: Database, val driver: JdbcSqliteDriver) {
+        fun retainJournalHistory(count: Int): List<String> {
+            val recovery = SqlDelightAppSyncRecoveryStore(db)
+            val cloud = AppSyncCanonicalCloudPlan.Ready(verified(), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
+            repeat(count) {
+                val (_, id) = stageNativeJournal(append())
+                assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activateJournalRecovery(recovery, id, cloud))
+            }
+            val placeholder = recovery.createOrResumeSegmentedJournal(account, emptySet(), "next-after-retained", now)
+            recovery.rollbackPreCommit(placeholder.sessionId)
+            return db.appSyncRetainedJournalQueries.getForAccount(account.value).executeAsList()
+        }
         var now = 20L
         var loadCalls = 0
         var loadThrows = false
@@ -988,7 +1070,7 @@ class AppSyncCanonicalCheckpointActivatorTest {
         }
         fun stageNativeJournal(source: SyncOperation, observed: Map<String, Long> = emptyMap()): Pair<SqlDelightAppSyncRecoveryStore, String> {
             val recovery = SqlDelightAppSyncRecoveryStore(db)
-            val session = recovery.createOrResumeSegmentedJournal(account, setOf(source.operationId.value), "journal-source", 1)
+            val session = recovery.createOrResumeSegmentedJournal(account, setOf(source.operationId.value), "journal-source-${source.operationId.value}", 1)
             val imported = assertIs<AppSyncCanonicalOperationImport.Accepted>(AppSyncCanonicalOperationImporter().import(account.value, source))
             val identity = source.replicaKey.stableKey
             val journal = AppSyncCanonicalJournal(AppSyncCanonicalOperationBlock(account.value, listOf(imported.operation)),
@@ -1072,7 +1154,7 @@ class AppSyncCanonicalCheckpointActivatorTest {
     private fun fixture(test: Fixture.() -> Unit) {
         JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).use { driver ->
             Database.Schema.create(driver)
-            Fixture(Database(driver)).test()
+            Fixture(Database(driver), driver).test()
         }
     }
 
