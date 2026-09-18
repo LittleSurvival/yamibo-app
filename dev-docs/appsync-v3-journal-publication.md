@@ -31,3 +31,7 @@ Migration 46 在 canonical head 增加外部設定待重整標記。完整套用
 Migration 47 新增帳號隔離的 reader cohort 證據表。engine 每次取得 cloud load 結果後通知 store；只有完整 discovery 且沒有缺頁／驗證問題的結果能建立證據，cache-only、失敗、缺少 index 指定 replica、重複 replica／physical ID 衝突都撤銷先前證據。保存資料只有 replica、writer nonce、remote ID、文件摘要、read version 與 heartbeat，不保存操作內容，也不進入可攜備份。
 
 `canWrite` 還要求 installation 為 Active、自身 replica 已遠端宣告 read >= 3 且 writer nonce 相符、所有相關 active reader 支援 v3、證據未逾五分鐘，且 writer 開關、本機完整 reader 與效能驗收三項外部條件皆通過。九十天 inactive 判斷以完整掃描當下為準，不能只等待本機時間流逝就把舊 reader 排除；時鐘倒退也不授權。reader 宣告目前仍為 v2，完整 v3 分段／bootstrap 等讀取路徑完成前不提高宣告。此證據表不是 index 寫入證明，也不授權清理；native writer 仍尚未接線啟用。
+
+`AppSyncCanonicalJournalBaseline` 現在可從通過 cloud planner 的資料重建自身 writer 的發布基礎。planner 保留所有 native／legacy journal 的 metadata 與實體別名；baseline 合併相同 writer 的 observed、published-through、acknowledgement 與尚未被 checkpoint 覆蓋的操作，拒絕 nonce、同序號內容或 acknowledgement coverage 衝突。published-through 不可超過本機已配置序號。
+
+只有 index-verified checkpoint 的 coverage 能取代已裁切或無法匯入的舊前綴；其後的 retained tail 必須逐號連續至 published-through。未覆蓋的 Excluded／NoOp 來源仍拒絕發布，不靠省略操作填補缺口。checkpoint 已涵蓋全部歷史時，可建立 metadata-only 基礎並追加下一序號。此步驟是純計算，不標記 acknowledged、不刪除來源；新 session 的原子凍結與 service 接線尚待完成，writer gate 維持關閉。

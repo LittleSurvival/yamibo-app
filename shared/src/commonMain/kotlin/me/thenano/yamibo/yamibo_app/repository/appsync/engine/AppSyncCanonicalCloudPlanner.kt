@@ -14,7 +14,9 @@ internal enum class AppSyncCanonicalCloudFailure {
 internal sealed interface AppSyncCanonicalCloudPlan {
     data class Ready(val checkpoint: AppSyncVerifiedCanonicalCheckpoint,
         val canonicalOperations: AppSyncCanonicalOperationBlock,
-        val legacyOperations: List<SyncOperation>) : AppSyncCanonicalCloudPlan
+        val legacyOperations: List<SyncOperation>,
+        val nativeJournals: List<AppSyncV3DocumentRead.Journal> = emptyList(),
+        val legacyJournals: List<AppSyncJournalPayload> = emptyList()) : AppSyncCanonicalCloudPlan
     data class NeedsAttention(val reason: AppSyncCanonicalCloudFailure,
         val mergeFailure: AppSyncPendingMergeFailure? = null) : AppSyncCanonicalCloudPlan
 }
@@ -169,6 +171,8 @@ internal class AppSyncCanonicalCloudPlanner {
             coverageConflict -> attention(AppSyncCanonicalCloudFailure.CheckpointConflict)
             else -> AppSyncCanonicalCloudPlan.NeedsAttention(AppSyncCanonicalCloudFailure.MergeFailure, mergeFailure)
         }
-        return AppSyncCanonicalCloudPlan.Ready(selected, block, legacy)
+        return AppSyncCanonicalCloudPlan.Ready(selected, block, legacy,
+            cloud.canonicalDocuments.mapNotNull { it.document as? AppSyncV3DocumentRead.Journal },
+            cloud.journals.map { it.payload })
     }
 }

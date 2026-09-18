@@ -114,4 +114,73 @@ class AppSyncCanonicalJournalPreparationTest {
         assertEquals(6L, appended.journal.firstSequence)
         assertEquals(AppSyncCanonicalJournalFailure.SequenceGap, reason(prepare(state.copy(coverage = mapOf("local:epoch" to 7L)), listOf(source(7)), existing)))
     }
+
+    private fun cloud(checkpoint: AppSyncCanonicalCheckpoint = base,
+        native: List<AppSyncV3DocumentRead.Journal> = emptyList(), legacy: List<AppSyncJournalPayload> = emptyList()) =
+        AppSyncCanonicalCloudPlan.Ready(verified(checkpoint), AppSyncCanonicalOperationBlock(account.value, emptyList()),
+            emptyList(), native, legacy)
+
+    private fun legacy(vararg sources: SyncOperation) = AppSyncJournalPayload(account, installation.deviceId,
+        installation.deviceEpoch, installation.writerNonce, sources.firstOrNull()?.sequence?.value ?: 0,
+        sources.lastOrNull()?.sequence?.value ?: 0, sources.toList(),
+        SyncCausalContext(mapOf("local:epoch" to (sources.lastOrNull()?.sequence?.value ?: 0))), heartbeatAtEpochMillis = 1)
+
+    @Test fun cloudBaselineBridgesLegacyHistoryAndMultipleNativeAliases() {
+        val first = source(); val second = source(2); val third = source(3)
+        val native = read(assertIs<AppSyncCanonicalJournalPreparationResult.Ready>(prepare(local(first, second), listOf(first, second))))
+        fun alias(sequence: Long): AppSyncV3DocumentRead.Journal {
+            val document = native.document.copy(block = native.document.block.copy(
+                operations = native.document.block.operations.filter { it.sequence == sequence }),
+                firstSequence = sequence, lastSequence = sequence)
+            return assertIs<AppSyncV3DocumentRead.Journal>(codec.discover(codec.encodeJournal("local:epoch", document),
+                account.value, AppSyncV3PayloadKind.Journal))
+        }
+        val baseline = AppSyncCanonicalJournalBaseline.prepare(installation, cloud(native = listOf(alias(1), alias(2), alias(2)),
+            legacy = listOf(legacy(first)))).getOrThrow()
+        assertEquals(listOf(1L, 2L), baseline.document.block.operations.map { it.sequence })
+        val appended = assertIs<AppSyncCanonicalJournalPreparationResult.Ready>(prepare(local(first, second, third), listOf(third), baseline))
+        assertEquals(listOf(1L, 2L, 3L), appended.journal.block.operations.map { it.sequence })
+        assertEquals(setOf(third.operationId), appended.sourceOperationIds)
+        assertTrue(AppSyncCanonicalJournalBaseline.prepare(installation,
+            cloud(native = listOf(native.copy(metadata = native.metadata.copy(uncompressedLength = 1))))).isFailure)
+    }
+
+    @Test fun onlyVerifiedCheckpointMayReplaceAnUnimportableLegacyPrefix() {
+        val excluded = source().copy(domainId = SyncDomainId("unknown"))
+        val second = source(2)
+        val history = legacy(excluded, second)
+        assertTrue(AppSyncCanonicalJournalBaseline.prepare(installation, cloud(legacy = listOf(history))).isFailure)
+        val checkpoint = local(source())
+        val baseline = AppSyncCanonicalJournalBaseline.prepare(installation, cloud(checkpoint, legacy = listOf(history))).getOrThrow()
+        assertEquals(listOf(2L), baseline.document.block.operations.map { it.sequence })
+        assertEquals(checkpoint.coverage, baseline.document.acknowledgements.single().coverage)
+        assertEquals(2L, baseline.document.publishedThroughSequence)
+    }
+
+    @Test fun metadataOnlyCheckpointBaselineAllowsTheNextSequence() {
+        val checkpoint = local(source(), source(2))
+        val baseline = AppSyncCanonicalJournalBaseline.prepare(installation, cloud(checkpoint)).getOrThrow()
+        assertTrue(baseline.document.block.operations.isEmpty())
+        assertEquals(2L, baseline.document.publishedThroughSequence)
+        val next = assertIs<AppSyncCanonicalJournalPreparationResult.Ready>(prepare(local(source(), source(2), source(3)), listOf(source(3)), baseline))
+        assertEquals(3L, next.journal.firstSequence)
+    }
+
+    @Test fun baselineRejectsMissingPublishedTailAndAWriterAheadOfLocalAllocation() {
+        assertTrue(AppSyncCanonicalJournalBaseline.prepare(installation, cloud(legacy = listOf(legacy(source(2))))).isFailure)
+        val metadata = legacy().copy(observed = SyncCausalContext(mapOf("local:epoch" to 2L)), publishedThroughSequence = 2)
+        assertTrue(AppSyncCanonicalJournalBaseline.prepare(installation, cloud(legacy = listOf(metadata))).isFailure)
+        assertTrue(AppSyncCanonicalJournalBaseline.prepare(installation.copy(nextSequence = 2), cloud(local(source(), source(2)))).isFailure)
+    }
+
+    @Test fun baselineRejectsWriterOperationAndAcknowledgementCollisions() {
+        val first = source()
+        val journal = legacy(first)
+        assertTrue(AppSyncCanonicalJournalBaseline.prepare(installation, cloud(legacy = listOf(journal.copy(writerNonce = SyncWriterNonce("clone"))))).isFailure)
+        assertTrue(AppSyncCanonicalJournalBaseline.prepare(installation, cloud(legacy = listOf(journal,
+            legacy(first.copy(fields = first.fields + ("content" to "different")))))).isFailure)
+        assertTrue(AppSyncCanonicalJournalBaseline.prepare(installation, cloud(legacy = listOf(journal.copy(
+            checkpointAcknowledgements = listOf(AppSyncCheckpointAcknowledgement(base.checkpointId,
+                SyncCausalContext(mapOf("local:epoch" to 1L)))))))).isFailure)
+    }
 }
