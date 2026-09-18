@@ -14,6 +14,98 @@ import me.thenano.yamibo.yamibo_app.store.appsync.*
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 
 class AppSyncCanonicalCheckpointActivatorTest {
+    @Test fun engineResumesCommittedNativeRecoveryWhenWritesAreDisabledAndDoesNotRepublish() = fixture {
+        val source = append()
+        val (recovery, id) = stageNativeJournal(source)
+        val continuation = nativeContinuation(recovery)
+        val cloud = AppSyncJournalLoadResult.Success(emptyList(), verifiedCanonicalCheckpoints = listOf(verified()))
+        val result = assertIs<OperationSyncResult.Converged>(synchronize(cloud, continuation))
+        assertEquals(1, result.acknowledgedLocalCount)
+        assertEquals(AppSyncRecoveryPhase.Completed, recovery.session(id)?.phase)
+        assertEquals(18, preferences.values["novelreadersettings.fontsize"])
+        assertNotNull(state.read(account.value))
+        assertNull(db.appSyncOperationQueries.getRunLease().executeAsOneOrNull())
+        assertFalse(continuation.hasPending(account))
+    }
+
+    @Test fun nativeWriteGateNeedsExplicitResumeAndLegacyCloudCannotBypassIt() = fixture {
+        val source = append()
+        val (recovery, id) = stageNativeCheckpoint(committed = false)
+        val continuation = nativeContinuation(recovery)
+        val cloud = AppSyncJournalLoadResult.Success(emptyList(), verifiedCanonicalCheckpoints = listOf(verified()))
+        assertIs<OperationSyncResult.PausedProvider>(synchronize(cloud, continuation))
+        assertEquals(AppSyncRecoveryPhase.NeedsAttention, recovery.session(id)?.phase)
+        assertEquals("native-compatibility", recovery.session(id)?.lastErrorCategory)
+        assertEquals(0L, recovery.session(id)?.retryCount)
+        assertNull(state.read(account.value))
+        val reads = loadCalls
+        assertIs<OperationSyncResult.PausedProvider>(synchronize(cloud, continuation))
+        assertEquals(reads, loadCalls)
+        recovery.resumeRetryExhaustedRecovery(account, now)
+        assertEquals(AppSyncRecoveryPhase.CommittingIndex, recovery.session(id)?.phase)
+        assertIs<OperationSyncResult.PausedProvider>(synchronize(AppSyncJournalLoadResult.Success(emptyList()), continuation))
+        assertEquals("native-cloud-validation", recovery.session(id)?.lastErrorCategory)
+        assertEquals(listOf(source), store.pendingOperations())
+        assertNull(state.read(account.value))
+        assertFalse(recovery.session(id)!!.indexCommitted)
+    }
+
+    @Test fun nativeCloudReadFailuresRespectDurableDeadlineAndExhaustionBeforeReadingAgain() = fixture {
+        append()
+        val (recovery, id) = stageNativeCheckpoint()
+        val continuation = nativeContinuation(recovery)
+        val failure = AppSyncJournalLoadResult.RetryableFailure("offline")
+        repeat(3) { attempt ->
+            assertIs<OperationSyncResult.RetryScheduled>(synchronize(failure, continuation))
+            assertEquals((attempt + 1).toLong(), recovery.session(id)?.retryCount)
+            val reads = loadCalls
+            if (attempt < 2) {
+                assertIs<OperationSyncResult.RetryScheduled>(synchronize(failure, continuation))
+                assertEquals(reads, loadCalls)
+                now = assertNotNull(recovery.session(id)?.nextRetryAtEpochMillis)
+            }
+        }
+        assertEquals(AppSyncRecoveryPhase.NeedsAttention, recovery.session(id)?.phase)
+        val reads = loadCalls
+        assertTrue(forcedLoads.all { it })
+        assertIs<OperationSyncResult.PausedProvider>(synchronize(failure, continuation))
+        assertEquals(reads, loadCalls)
+        assertNull(state.read(account.value))
+        assertNull(db.appSyncOperationQueries.getRunLease().executeAsOneOrNull())
+    }
+
+    @Test fun nativeGateExpiringInsideCommitRemainsExplicitlyResumableWithoutChargingPayloadFailure() = fixture {
+        append()
+        val (recovery, id) = stageNativeCheckpoint(committed = false)
+        var gateChecks = 0
+        val continuation = nativeContinuation(recovery) { ++gateChecks <= 2 }
+        val cloud = AppSyncJournalLoadResult.Success(emptyList(), verifiedCanonicalCheckpoints = listOf(verified()))
+        assertIs<OperationSyncResult.PausedProvider>(synchronize(cloud, continuation))
+        assertEquals(AppSyncRecoveryPhase.NeedsAttention, recovery.session(id)?.phase)
+        assertEquals("native-compatibility", recovery.session(id)?.lastErrorCategory)
+        assertEquals(0L, recovery.session(id)?.retryCount)
+        recovery.resumeRetryExhaustedRecovery(account, now)
+        assertEquals(AppSyncRecoveryPhase.CommittingIndex, recovery.session(id)?.phase)
+        assertNull(recovery.session(id)?.lastErrorCategory)
+        assertNull(state.read(account.value))
+    }
+
+    @Test fun unexpectedNativeReadExceptionAlsoPersistsOneFailureAndReleasesLease() = fixture {
+        append()
+        val (recovery, id) = stageNativeCheckpoint()
+        val continuation = nativeContinuation(recovery)
+        loadThrows = true
+        val cloud = AppSyncJournalLoadResult.Success(emptyList())
+        assertIs<OperationSyncResult.RetryScheduled>(synchronize(cloud, continuation))
+        assertEquals(1L, recovery.session(id)?.retryCount)
+        assertNotNull(recovery.session(id)?.nextRetryAtEpochMillis)
+        assertNull(db.appSyncOperationQueries.getRunLease().executeAsOneOrNull())
+        val reads = loadCalls
+        assertIs<OperationSyncResult.RetryScheduled>(synchronize(cloud, continuation))
+        assertEquals(reads, loadCalls)
+        assertEquals(1L, recovery.session(id)?.retryCount)
+    }
+
     @Test fun journalRecoveryMergesOtherDeviceStateAndWaitsForSettingsBeforeAcknowledgingOnlyFrozenSources() = fixture {
         val published = append()
         val (recovery, id) = stageNativeJournal(published)
@@ -360,12 +452,27 @@ class AppSyncCanonicalCheckpointActivatorTest {
     }
 
     private inner class Fixture(val db: Database) {
+        var now = 20L
+        var loadCalls = 0
+        var loadThrows = false
+        val forcedLoads = mutableListOf<Boolean>()
         val store = SqlDelightAppSyncOperationStore(db).also {
             it.initialize("database"); it.bindAccount(account, AppSyncInstallationState.Active)
         }
         val preferences = Preferences()
         val materializer = DatabaseSyncDomainMaterializer(db, preferences)
         val state = SqlDelightCanonicalCheckpointState(db, materializer)
+        fun nativeContinuation(recovery: SqlDelightAppSyncRecoveryStore, canWrite: () -> Boolean = { false }): AppSyncNativeRecoveryContinuation {
+            val provider = object : AppSyncBlogProvider {
+                override suspend fun fetchMyBlogs(blogClassId: io.github.littlesurvival.dto.value.BlogClassId?, page: Int): Nothing = error("Unexpected native scan")
+                override suspend fun fetchBlog(blogId: io.github.littlesurvival.dto.value.BlogId): Nothing = error("Unexpected native read")
+                override suspend fun submitBlog(request: AppSyncBlogWriteRequest): Nothing = error("Unexpected native write")
+                override suspend fun deleteBlog(request: AppSyncBlogDeleteRequest): Nothing = error("Unexpected native cleanup")
+            }
+            val blogs = SqlDelightAppSyncRemoteBlogStore(db)
+            blogs.saveClassId(account, io.github.littlesurvival.dto.value.BlogClassId(7))
+            return AppSyncNativeRecoveryContinuation(provider, store, recovery, blogs, activator(), { now }, canWrite)
+        }
         fun commitNative(recovery: SqlDelightAppSyncRecoveryStore, id: String, cloud: AppSyncCanonicalCloudPlan.Ready,
             now: Long) = kotlinx.coroutines.runBlocking {
             val provider = object : AppSyncBlogProvider {
@@ -429,10 +536,14 @@ class AppSyncCanonicalCheckpointActivatorTest {
             if (committed) recovery.markNativeIndexCommitted(session.sessionId, 400, index, 7)
             return recovery to session.sessionId
         }
-        fun synchronize(cloud: AppSyncJournalLoadResult.Success,
-            resume: suspend (SyncAccountBinding, io.github.littlesurvival.dto.value.FormHash, AppSyncCanonicalCloudPlan.Ready) -> OperationSyncResult? = { _, _, _ -> null }): OperationSyncResult = kotlinx.coroutines.runBlocking {
+        fun synchronize(cloud: AppSyncJournalLoadResult, recovery: AppSyncCanonicalRecoveryContinuation? = null,
+            onResume: suspend (SyncAccountBinding, io.github.littlesurvival.dto.value.FormHash, AppSyncCanonicalCloudPlan.Ready) -> OperationSyncResult? = { _, _, _ -> null }): OperationSyncResult = kotlinx.coroutines.runBlocking {
             val remote = object : AppSyncJournalRemote {
-                override suspend fun loadJournals(accountBinding: SyncAccountBinding, forceDiscovery: Boolean) = cloud
+                override suspend fun loadJournals(accountBinding: SyncAccountBinding, forceDiscovery: Boolean): AppSyncJournalLoadResult {
+                    loadCalls++; forcedLoads += forceDiscovery
+                    check(!loadThrows) { "Unexpected load failure" }
+                    return cloud
+                }
                 override suspend fun publishOwnJournal(payload: AppSyncJournalPayload, expectedFingerprint: String?,
                     formHash: io.github.littlesurvival.dto.value.FormHash): AppSyncJournalPublishResult =
                     error("Canonical reader must not publish a legacy journal")
@@ -441,14 +552,18 @@ class AppSyncCanonicalCheckpointActivatorTest {
                 override fun currentState(): Map<SyncEntityKey, ResolvedSyncEntity> = error("Legacy state read")
                 override fun apply(result: OperationReductionResult) = error("Legacy state write")
             }
-            OperationSyncEngine(store, remote, legacy, nowMillis = { 20 }, ownerId = { "canonical-reader-test" },
+            OperationSyncEngine(store, remote, legacy, nowMillis = { now }, ownerId = { "canonical-reader-test" },
                 activateCanonical = { activator().activate(it.checkpoint, it.canonicalOperations, it.legacyOperations) },
                 hasCanonicalState = { db.appSyncCanonicalStateQueries.getState().executeAsOneOrNull() != null },
-                resumeCanonicalRecovery = resume)
-                .synchronize(account, io.github.littlesurvival.dto.value.FormHash("test"), detectEmptyCloud = true)
+                canonicalRecovery = recovery ?: object : AppSyncCanonicalRecoveryContinuation {
+                    override suspend fun resume(account: SyncAccountBinding, formHash: io.github.littlesurvival.dto.value.FormHash,
+                        cloud: AppSyncCanonicalCloudPlan.Ready) = onResume(account, formHash, cloud)
+                })
+                .synchronize(account, io.github.littlesurvival.dto.value.FormHash("test"), detectEmptyCloud = true,
+                    forceDiscovery = recovery?.hasPending(account) == true)
         }
         fun activator(operations: AppSyncOperationStore = store) =
-            AppSyncCanonicalCheckpointActivator(db, operations, state, materializer, { 20 })
+            AppSyncCanonicalCheckpointActivator(db, operations, state, materializer, { now })
         fun append(value: String = "18") = store.appendLocalOperation(account,
             SyncDomainId("settings"), SyncEntityId("novelreadersettings.fontsize"), 1,
             SyncOperationKind.Put, mapOf("type" to "int", "value" to value), store.causalContext(),

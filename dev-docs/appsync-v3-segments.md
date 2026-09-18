@@ -62,7 +62,7 @@ v2 segment publisher 與 v2 coordinator 在入口即拒絕 transport 3，包括�
 
 反向亦相同：native coordinator 若發現 frozen payload 的 transport 不是 3，會在任何 phase／retry 更新前拒絕；尚未凍結的 native session 則可正常起始。測試確認 v2 frozen body、來源及 retry state 原樣保留，沒有 discovery 或 POST。
 
-`OperationSyncEngine.resumeCanonicalRecovery` 是 service 接線用的可選接點，預設回傳 null，保留既有 reader 行為。它在同步 mutex／database lease 內、reader cohort observation 與 canonical cloud planner 驗證成功後執行，且早於一般 canonical activation。writer 衝突與無效 cloud 不會呼叫接點。非 null 結果直接交回 service；null 則照常啟用 reader projection。測試核對呼叫時 lease 存在、返回後釋放，以及無效 cloud／pending 保留與預設相容性。此接點尚未由正式 service 綁定 native writer；仍需整合最新 cloud plan、cohort gate 與 worker 排程。
+`OperationSyncEngine.canonicalRecovery` 是可選的 recovery continuation，未提供時保留既有 reader 行為。其 `resume` 在同步 mutex／database lease 內、reader cohort observation 與 canonical cloud planner 驗證成功後執行，且早於一般 canonical activation。writer 衝突與無效 cloud 不會呼叫 resume。非 null 結果直接交回 service；null 則照常啟用 reader projection。測試核對呼叫時 lease 存在、返回後釋放，以及無效 cloud／pending 保留與預設相容性。
 
 Native checkpoint coordinator 現可接收本次驗證完成的 cloud plan。`AppSyncCanonicalRecoveryPlanner` 比較凍結 checkpoint 與最新雲端 base，保留兩者各自的 index 驗證證據，允許 index 版本不同；不把已壓縮的 winner 操作冒充為完整 journal。先檢查帳號、checkpoint ID／摘要、跨 checkpoint 的操作及 proof 衝突，再分別用雲端 journals 補齊候選。只有結果覆蓋凍結 checkpoint 與完整 cloud plan，且所有合格候選產生相同 canonical 內容，才選擇啟用 base。覆蓋不完整或內容矛盾時保留 session 與本機資料。
 
@@ -71,3 +71,9 @@ Native checkpoint coordinator 現可接收本次驗證完成的 cloud plan。`Ap
 Journal recovery 在 coordinator 收到 cloud plan 時，亦透過 canonical activator 執行。它先從持久化 index／frozen payload 重驗 writer 及來源，合併當次 cloud operations 與 frozen journal，拒絕同一操作 ID 或 proof ID 的不同內容，並在啟用交易內再次檢查 recovery 證據。雲端 checkpoint 的原始 coverage 仍單獨保存；本機 overlay 可包含後續編輯。設定尚未還原時不確認任何來源、不完成 session；成功後在另一筆交易重驗來源、canonical head 的完整性／coverage 與設定旗標，才只確認凍結來源並完成。已完成重試不重套設定。未提供 cloud plan 的低階 publication-only 呼叫仍保留既有行為；正式 service 必須傳入已驗證 plan 及 canonical activator，不能把 publication-only 確認當作完整同步。
 
 啟用前的必要 coverage 同時納入 frozen journal 的 observed、published-through、acknowledgement 及操作 causal context，避免只補齊 journal 自身 sequence 就遺漏已觀察的其他裝置歷史。缺少任何必要歷史時，projection、checkpoint evidence 與 outbox 確認均不變。回歸也確認重試間新增、且已觀察到雲端更新的本機編輯依因果順序勝出；它仍保持 pending，不會被先前 journal 的成功確認順帶標記。
+
+正式 `AppSyncService` 現綁定 `AppSyncNativeRecoveryContinuation`，只接續已存在且已凍結的 transport 3 session，傳入完整 cloud plan 與 canonical activator；尚不建立新的 v3 發佈或初次 migration。native session 強制完整 discovery，preflight 在 lease 內檢查 NeedsAttention／持久化重試期限；讀取失敗使用同一 phase／payload 的重試預算，無有效 canonical base 時禁止落入 legacy writer。設定旗標 `appSyncV3WriterEnabled`、`appSyncV3ReaderReady`、`appSyncV3BenchmarksApproved` 全數預設 false；遠端寫入還必須通過當次 reader cohort gate。已確認 index 的本機 activation 可在 writer flag 關閉時繼續，不再 POST。
+
+缺少相容性或無效雲端／凍結證據會留下 NeedsAttention，避免 worker 不斷接續；只有明確手動恢復會重設這些可恢復分類並重新檢查條件。成功後 service 偵測 canonical head，跳過 legacy checkpoint／journal retirement。coordinator 的 persisted deadline 仍須由 Android worker 成功排入下一個工作；排程證據與 UI／重開機驗收尚未完成。native transport budget 持久化、初次 checkpoint 建立及一般新 journal 寫入也仍是獨立待辦。
+
+Service continuation 將本次 cloud plan 的 checkpoint 驗證物件一路傳至 native index committer。凍結 index intent 前，最新權威 index 必須仍保有同一 checkpoint ID、實體 Blog ID 與 canonical 摘要；缺少 index 或 reference 已變更時不凍結 intent、不送出 index POST。之後仍使用兩次 base 比對與精確 readback，保留既有不能原子 CAS 的限制。同步接收計數排除本 installation 的 writer 操作，避免把本機確認同時計成遠端接收。

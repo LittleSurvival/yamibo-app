@@ -29,6 +29,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncVerifiedCan
 import okio.ByteString.Companion.encodeUtf8
 
 internal data class NativeRecoveryIndexIntent(val body: String, val targetBlogId: Long?, val baseSha256: String?)
+internal data class NativeRecoveryPayload(val body: String, val kind: AppSyncV3PayloadKind, val identity: String)
 
 internal class SqlDelightAppSyncRecoveryStore(
     private val db: Database,
@@ -533,6 +534,23 @@ internal class SqlDelightAppSyncRecoveryStore(
     fun payloadTransportVersion(sessionId: String): Long? =
         queries.getRecoveryPayload(sessionId).executeAsOneOrNull()?.transportVersion
 
+    fun nativePayload(sessionId: String): NativeRecoveryPayload {
+        val session = requireSession(sessionId)
+        val payload = requireNotNull(queries.getRecoveryPayload(sessionId).executeAsOneOrNull())
+        require(payload.transportVersion == 3L)
+        require(stableAppSyncFingerprint(payload.canonicalEnvelope) == payload.envelopeFingerprint)
+        val kind = if (session.mode == AppSyncRecoveryMode.SegmentedCheckpoint) AppSyncV3PayloadKind.Checkpoint
+            else { require(session.mode == AppSyncRecoveryMode.SegmentedJournal); AppSyncV3PayloadKind.Journal }
+        val document = AppSyncV3DocumentCodec().discover(payload.canonicalEnvelope, session.accountBinding.value, kind)
+        val metadata = when (document) {
+            is AppSyncV3DocumentRead.Checkpoint -> document.metadata
+            is AppSyncV3DocumentRead.Journal -> document.metadata
+            else -> error("Invalid frozen native payload")
+        }
+        require(metadata.identity == payload.payloadIdentity && payload.payloadKind == kind.name)
+        return NativeRecoveryPayload(payload.canonicalEnvelope, kind, payload.payloadIdentity)
+    }
+
     fun nativeIndexIntent(sessionId: String): NativeRecoveryIndexIntent? {
         val row = queries.getRecoveryPayload(sessionId).executeAsOneOrNull() ?: return null
         val body = row.indexIntentBody ?: return null
@@ -857,9 +875,10 @@ internal class SqlDelightAppSyncRecoveryStore(
         nowEpochMillis: Long,
     ): AppSyncRecoverySession? = db.transactionWithResult {
         val session = recoverySession(accountBinding) ?: return@transactionWithResult null
-        if (session.phase != AppSyncRecoveryPhase.NeedsAttention ||
-            session.retryIdentity == null || session.lastErrorCategory != "retry-exhausted"
-        ) {
+        val retryExhausted = session.retryIdentity != null && session.lastErrorCategory == "retry-exhausted"
+        val nativeResume = usesNativeTransport(session.sessionId) && session.lastErrorCategory in
+            setOf("native-compatibility", "native-cloud-validation", "native-recovery-evidence")
+        if (session.phase != AppSyncRecoveryPhase.NeedsAttention || (!retryExhausted && !nativeResume)) {
             return@transactionWithResult session
         }
         val writes = segmentWrites(session.sessionId)

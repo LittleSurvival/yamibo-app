@@ -380,6 +380,17 @@ class AppSyncService(
         cleanupObservationStore = cleanupObservationStore,
         capacityFlags = capacityFlags,
     )
+    private val nativeRecovery = me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncNativeRecoveryContinuation(
+        blogProvider, store, recoveryStore, remoteBlogStore, canonicalActivator, nowMillis,
+        canWrite = {
+            store.installation()?.let { installation ->
+                readerCohortStore.canWrite(installation, nowMillis(),
+                    settingsStore.getBoolean(me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncV3FeatureFlagKeys.WRITER, false),
+                    settingsStore.getBoolean(me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncV3FeatureFlagKeys.READER_READY, false),
+                    settingsStore.getBoolean(me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncV3FeatureFlagKeys.BENCHMARKS_APPROVED, false))
+            } == true
+        },
+    )
     private var localSnapshotSource: BackupRepositoryImpl? = null
     private val migrationPlanner = BackupSnapshotMigrationPlanner()
     private val localProjectionRepairPlanner = LocalProjectionRepairPlanner()
@@ -413,6 +424,7 @@ class AppSyncService(
         },
         hasCanonicalState = { db.appSyncCanonicalStateQueries.getState().executeAsOneOrNull() != null },
         observeCloud = { account, result -> readerCohortStore.observe(account, result, nowMillis()) },
+        canonicalRecovery = nativeRecovery,
     )
     private val manualOverride = ManualSyncOverrideCoordinator(
         store = store,
@@ -1042,7 +1054,7 @@ class AppSyncService(
         val result = engine.synchronize(
             accountBinding = binding,
             formHash = authRepository.currentUser()?.formHash,
-            forceDiscovery = forceDiscovery,
+            forceDiscovery = forceDiscovery || nativeRecovery.hasPending(binding),
             // Until Index commit, staged v2 data is intentionally invisible and the cloud can
             // still look empty. Resume the durable source set instead of seeding it again.
             detectEmptyCloud = runPolicy.detectEmptyCloud,
@@ -1054,7 +1066,8 @@ class AppSyncService(
         }
         var checkpointResult: CheckpointCreationResult? = null
         var retirementResult: AppSyncJournalRetirementMaintenanceResult? = null
-        if (result is OperationSyncResult.Converged) {
+        if (result is OperationSyncResult.Converged &&
+            db.appSyncCanonicalStateQueries.getState().executeAsOneOrNull() == null) {
             authRepository.currentUser()?.formHash?.let { formHash ->
                 if (localSnapshotSource != null) {
                     checkpointResult = checkpointCoordinator.createIfNeeded(binding, formHash)

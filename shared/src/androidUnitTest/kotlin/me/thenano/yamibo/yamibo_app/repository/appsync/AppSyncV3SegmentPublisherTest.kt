@@ -349,6 +349,34 @@ class AppSyncV3SegmentPublisherTest {
         assertEquals(false, recovery.session(session.sessionId)?.indexCommitted)
     }
 
+    @Test fun nativeIndexMustRetainTheCheckpointUsedByTheCurrentCloudPlan() = fixture {
+        assertIs<AppSyncV3SegmentPublishResult.ReadyToCommitIndex>(publish())
+        val required = AppSyncCanonicalCheckpoint("required-base", account.value, 1, emptyMap(), emptyList())
+        val reference = AppSyncIndexCheckpointReference(required.checkpointId, 700,
+            AppSyncCanonicalCheckpointCodec().encode(required).sha256().hex())
+        val base = AppSyncIndexPayload(account, checkpoints = listOf(reference), updatedAtEpochMillis = 5)
+        val body = AppSyncIndexEnvelopeCodec().encode(base)
+        val verified = assertNotNull(AppSyncVerifiedCanonicalCheckpoint.verify(account.value, 700, body,
+            AppSyncV3DocumentCodec().encodeCheckpoint(required)))
+        suspend fun attempt() = committer().commit(session.sessionId, envelope, kind, "checkpoint",
+            AppSyncBlogClassSelection.Existing(BlogClassId(7)), FormHash("test"), requiredCheckpoint = verified)
+        val posts = provider.posts.size
+        assertIs<AppSyncSegmentIndexCommitResult.Conflict>(attempt())
+        assertEquals(posts, provider.posts.size)
+        assertNull(recovery.nativeIndexIntent(session.sessionId))
+        val request = AppSyncBlogWriteRequest(BlogId(800), APP_SYNC_INDEX_TITLE, body,
+            AppSyncBlogClassSelection.Existing(BlogClassId(7)), FormHash("test"))
+        provider.artifacts[800] = request.copy(message = AppSyncIndexEnvelopeCodec().encode(base.copy(
+            checkpoints = listOf(reference.copy(blogId = 701)))))
+        assertIs<AppSyncSegmentIndexCommitResult.Conflict>(attempt())
+        assertEquals(posts, provider.posts.size)
+        assertNull(recovery.nativeIndexIntent(session.sessionId))
+        provider.artifacts[800] = request
+        assertIs<AppSyncSegmentIndexCommitResult.Verified>(attempt())
+        val written = assertIs<AppSyncIndexValidation.Valid>(AppSyncIndexEnvelopeCodec().validate(provider.posts.last().message))
+        assertTrue(reference in written.envelope.payload.checkpoints)
+    }
+
     @Test fun nativeCoordinatorContinuesFromStagingThroughVerifiedActivationInOneRun() = fixture {
         val (id, frozen, identity) = prepareJournal()
         val coordinator = AppSyncV3CommitCoordinator(committer(), recovery, { 100 }, canRun = { true })

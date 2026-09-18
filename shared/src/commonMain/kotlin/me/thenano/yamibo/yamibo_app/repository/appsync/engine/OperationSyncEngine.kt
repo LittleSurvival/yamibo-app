@@ -210,6 +210,13 @@ internal interface SyncDomainStateAdapter {
         currentState().keys.count { it.domainId == domainId }
 }
 
+internal interface AppSyncCanonicalRecoveryContinuation {
+    fun hasPending(account: SyncAccountBinding): Boolean = false
+    fun preflight(account: SyncAccountBinding): OperationSyncResult? = null
+    fun cloudFailure(account: SyncAccountBinding, retryable: Boolean) = Unit
+    suspend fun resume(account: SyncAccountBinding, formHash: FormHash, cloud: AppSyncCanonicalCloudPlan.Ready): OperationSyncResult?
+}
+
 internal sealed interface OperationSyncResult {
     /**
      * The authoritative cloud scan found neither journals nor checkpoints.
@@ -273,7 +280,7 @@ internal class OperationSyncEngine(
     private val activateCanonical: ((AppSyncCanonicalCloudPlan.Ready) -> AppSyncCanonicalActivationResult)? = null,
     private val hasCanonicalState: () -> Boolean = { false },
     private val observeCloud: (SyncAccountBinding, AppSyncJournalLoadResult) -> Unit = { _, _ -> },
-    private val resumeCanonicalRecovery: suspend (SyncAccountBinding, FormHash, AppSyncCanonicalCloudPlan.Ready) -> OperationSyncResult? = { _, _, _ -> null },
+    private val canonicalRecovery: AppSyncCanonicalRecoveryContinuation? = null,
 ) {
     private val processMutex = Mutex()
     private val compaction = CompactionCoordinator(store, nowMillis, inactiveAfterMillis)
@@ -321,6 +328,7 @@ internal class OperationSyncEngine(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
+                canonicalRecovery?.cloudFailure(accountBinding, retryable = true)
                 Logger.e(
                     LOG_TAG,
                     "Unexpected synchronization provider failure; pending operations were preserved",
@@ -351,8 +359,10 @@ internal class OperationSyncEngine(
         val receivedOperations = linkedMapOf<SyncOperationId, SyncOperation>()
         val uploadedOperations = linkedMapOf<SyncOperationId, SyncOperation>()
 
+        canonicalRecovery?.preflight(accountBinding)?.let { return it }
         repeat(maxAttempts) { attemptIndex ->
-            val requestedForcedDiscovery = forceDiscovery && attemptIndex == 0
+            val requestedForcedDiscovery = forceDiscovery &&
+                (attemptIndex == 0 || canonicalRecovery?.hasPending(accountBinding) == true)
             val pendingBeforeLoad = store.pendingOperations()
             val legacyMigrationCandidate = legacyClassifier.classify(
                 pendingBeforeLoad,
@@ -390,11 +400,13 @@ internal class OperationSyncEngine(
                         "Journal load attempt ${attemptIndex + 1}/$maxAttempts failed: ${result.reason}",
                     )
                     if (attemptIndex == maxAttempts - 1) {
+                        canonicalRecovery?.cloudFailure(accountBinding, retryable = true)
                         return OperationSyncResult.RetryScheduled(result.reason)
                     }
                     return@repeat
                 }
                 is AppSyncJournalLoadResult.TerminalFailure -> {
+                    canonicalRecovery?.cloudFailure(accountBinding, retryable = false)
                     store.updateState(AppSyncInstallationState.PausedProvider)
                     return OperationSyncResult.PausedProvider(result.reason)
                 }
@@ -402,13 +414,14 @@ internal class OperationSyncEngine(
             if (cloud.requiresCanonicalProcessing) {
                 val plan = AppSyncCanonicalCloudPlanner().prepare(accountBinding, requireNotNull(store.installation()), cloud)
                 if (plan is AppSyncCanonicalCloudPlan.NeedsAttention && plan.reason == AppSyncCanonicalCloudFailure.OwnWriterConflict) {
+                    canonicalRecovery?.cloudFailure(accountBinding, retryable = false)
                     store.rotateDeviceEpoch(accountBinding, AppSyncInstallationState.RebootstrapRequired)
                     return OperationSyncResult.RebootstrapRequired("The device journal is owned by another restored installation")
                 }
                 // This callback runs under the same process mutex/database lease as normal
                 // synchronization, after cohort observation and full canonical validation.
                 if (plan is AppSyncCanonicalCloudPlan.Ready) {
-                    resumeCanonicalRecovery(accountBinding, formHash, plan)?.let { return it }
+                    canonicalRecovery?.resume(accountBinding, formHash, plan)?.let { return it }
                 }
                 val reason = when (plan) {
                     is AppSyncCanonicalCloudPlan.NeedsAttention -> "Canonical cloud validation: ${plan.reason}"
@@ -421,8 +434,14 @@ internal class OperationSyncEngine(
                         else "Canonical state applied; v3 publication is not yet enabled"
                     }
                 }
+                canonicalRecovery?.cloudFailure(accountBinding, retryable = false)
                 store.updateState(AppSyncInstallationState.PausedProvider)
                 return OperationSyncResult.PausedProvider(reason)
+            }
+            if (canonicalRecovery?.hasPending(accountBinding) == true) {
+                canonicalRecovery.cloudFailure(accountBinding, retryable = false)
+                store.updateState(AppSyncInstallationState.PausedProvider)
+                return OperationSyncResult.PausedProvider("Native recovery requires a verified canonical cloud base")
             }
             // A later partial discovery or removed v3 artifact must not send the canonical
             // installation through legacy reduction, compaction or an empty-cloud force push.

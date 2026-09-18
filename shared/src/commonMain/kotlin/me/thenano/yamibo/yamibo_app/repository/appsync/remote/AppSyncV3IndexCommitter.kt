@@ -24,8 +24,9 @@ internal class AppSyncV3IndexCommitter(
     private val codec = AppSyncIndexEnvelopeCodec()
 
     suspend fun commit(sessionId: String, envelope: String, kind: AppSyncV3PayloadKind, identity: String,
-        selection: AppSyncBlogClassSelection.Existing, formHash: FormHash): AppSyncSegmentIndexCommitResult = try {
-        commitVerified(sessionId, envelope, kind, identity, selection, formHash)
+        selection: AppSyncBlogClassSelection.Existing, formHash: FormHash,
+        requiredCheckpoint: AppSyncVerifiedCanonicalCheckpoint? = null): AppSyncSegmentIndexCommitResult = try {
+        commitVerified(sessionId, envelope, kind, identity, selection, formHash, requiredCheckpoint)
     } catch (stop: Stop) { stop.result
     } catch (cancelled: CancellationException) { throw cancelled
     } catch (_: IllegalArgumentException) { AppSyncSegmentIndexCommitResult.Conflict("Native index binding or persisted intent changed")
@@ -33,7 +34,8 @@ internal class AppSyncV3IndexCommitter(
     } catch (_: Exception) { AppSyncSegmentIndexCommitResult.Retryable("Native index publication interrupted") }
 
     private suspend fun commitVerified(sessionId: String, envelope: String, kind: AppSyncV3PayloadKind, identity: String,
-        selection: AppSyncBlogClassSelection.Existing, formHash: FormHash): AppSyncSegmentIndexCommitResult {
+        selection: AppSyncBlogClassSelection.Existing, formHash: FormHash,
+        requiredCheckpoint: AppSyncVerifiedCanonicalCheckpoint?): AppSyncSegmentIndexCommitResult {
         if (!canWrite()) return AppSyncSegmentIndexCommitResult.Terminal("Native index publication is disabled")
         val session = requireNotNull(recovery.session(sessionId))
         if (session.indexCommitted && session.phase in setOf(AppSyncRecoveryPhase.ActivatingLocal, AppSyncRecoveryPhase.Completed) && recovery.usesNativeTransport(sessionId))
@@ -48,6 +50,13 @@ internal class AppSyncV3IndexCommitter(
         val scanner = AppSyncV3ArtifactReconciler(provider, selection.classId)
         val account = session.accountBinding.value
         var current = observe(scanner, account)
+        requiredCheckpoint?.let { checkpoint ->
+            require(checkpoint.document.accountBinding == account)
+            require(current?.envelope?.payload?.checkpoints?.any {
+                it.checkpointId == checkpoint.document.checkpointId && it.blogId.toLong() == checkpoint.blogId &&
+                    it.fingerprint == checkpoint.fingerprint
+            } == true) { "Required canonical checkpoint is no longer indexed" }
+        }
         val intent = recovery.nativeIndexIntent(sessionId) ?: run {
             val base = current?.envelope?.payload ?: AppSyncIndexPayload(session.accountBinding, updatedAtEpochMillis = nowMillis())
             val fp = publication.root.metadata.canonicalFingerprint

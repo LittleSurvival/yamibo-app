@@ -37,6 +37,9 @@ internal class AppSyncV3CommitCoordinator(
         } catch (cancelled: CancellationException) { throw cancelled
         } catch (_: IllegalArgumentException) { AppSyncSegmentedJournalCommitResult.Conflict("Native recovery evidence changed")
         } catch (_: Exception) { AppSyncSegmentedJournalCommitResult.Retryable("Native recovery interrupted") }
+        // A rollout/cohort gate can expire between the initial check and a guarded POST.
+        // Let the service persist a resumable compatibility stop, not a payload violation.
+        if (result is AppSyncSegmentedJournalCommitResult.Terminal && !canRun()) return result
         val category = when (result) {
             is AppSyncSegmentedJournalCommitResult.Retryable -> AppSyncRecoveryFailureCategory.AmbiguousWrite
             is AppSyncSegmentedJournalCommitResult.Conflict -> AppSyncRecoveryFailureCategory.IndexConflict
@@ -61,7 +64,8 @@ internal class AppSyncV3CommitCoordinator(
         }
         if (session.phase !in setOf(AppSyncRecoveryPhase.ActivatingLocal, AppSyncRecoveryPhase.Completed)) {
             when (val result = committer.commit(sessionId, envelope,
-                if (checkpoint) AppSyncV3PayloadKind.Checkpoint else AppSyncV3PayloadKind.Journal, identity, selection, formHash)) {
+                if (checkpoint) AppSyncV3PayloadKind.Checkpoint else AppSyncV3PayloadKind.Journal, identity, selection, formHash,
+                requiredCheckpoint = cloud?.checkpoint)) {
                 AppSyncSegmentIndexCommitResult.Verified -> Unit
                 AppSyncSegmentIndexCommitResult.FormExpired -> return AppSyncSegmentedJournalCommitResult.FormExpired
                 is AppSyncSegmentIndexCommitResult.Retryable -> return AppSyncSegmentedJournalCommitResult.Retryable(result.reason)
