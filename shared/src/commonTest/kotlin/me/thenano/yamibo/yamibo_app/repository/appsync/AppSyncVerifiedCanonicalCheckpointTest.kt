@@ -1,6 +1,8 @@
 package me.thenano.yamibo.yamibo_app.repository.appsync
 
 import kotlin.test.*
+import kotlinx.serialization.json.Json
+import me.thenano.yamibo.yamibo_app.repository.appsync.domain.stableAppSyncFingerprint
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncAccountBinding
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.*
 import me.thenano.yamibo.yamibo_app.repository.appsync.schema.*
@@ -43,11 +45,20 @@ class AppSyncVerifiedCanonicalCheckpointTest {
             index(references = listOf(reference.copy(blogId = 124))),
             index(references = listOf(reference.copy(checkpointId = "other"))),
             index(references = listOf(reference.copy(fingerprint = "0".repeat(64)))),
-            index(references = listOf(reference, reference.copy(checkpointId = "duplicate-blog"))))
+            conflictingIndex())
             .forEach { assertNull(AppSyncVerifiedCanonicalCheckpoint.verify("account", 123, it, body)) }
         listOf(0L, -1L, Int.MAX_VALUE.toLong() + 1).forEach {
             assertNull(AppSyncVerifiedCanonicalCheckpoint.verify("account", it, index(), body))
         }
+    }
+
+    // Hostile remote input must bypass the production writer, which now rejects conflicts.
+    private fun conflictingIndex(): String {
+        val payload = AppSyncIndexPayload(SyncAccountBinding("account"),
+            checkpoints = listOf(reference, reference.copy(checkpointId = "duplicate-blog")), updatedAtEpochMillis = 2)
+        val json = Json.encodeToString(AppSyncIndexPayload.serializer(), payload)
+        val marker = AppSyncJournalDefaults.INDEX_MARKER
+        return "[$marker:BEGIN]\nschema=${AppSyncJournalDefaults.JOURNAL_SCHEMA_VERSION}\nfingerprint=${stableAppSyncFingerprint(json)}\npayload=$json\n[$marker:END]"
     }
 
     @Test fun unsupportedCorruptWrongAccountAndLegacyBodiesNeverProduceCanonicalEvidence() {

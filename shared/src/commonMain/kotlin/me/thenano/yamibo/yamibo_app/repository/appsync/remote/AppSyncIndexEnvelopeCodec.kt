@@ -57,6 +57,7 @@ internal class AppSyncIndexEnvelopeCodec(
     },
 ) {
     fun encode(payload: AppSyncIndexPayload): String {
+        require(referenceProblem(payload) == null) { referenceProblem(payload).orEmpty() }
         val normalized = payload.copy(
             journals = payload.journals.distinctBy { it.replicaKey }.sortedBy { it.replicaKey },
             checkpoints = payload.checkpoints.distinctBy { it.checkpointId }.sortedBy { it.checkpointId },
@@ -130,7 +131,33 @@ internal class AppSyncIndexEnvelopeCodec(
         ) {
             return AppSyncIndexValidation.Invalid("Index retirement references are invalid", true)
         }
+        referenceProblem(payload)?.let { return AppSyncIndexValidation.Invalid(it, true) }
         return AppSyncIndexValidation.Valid(ParsedAppSyncIndexEnvelope(payload, fingerprint))
+    }
+
+    // Exact retransmissions are harmless; a logical identity must never silently select
+    // one of two different physical references. Readers and writers enforce the same rule.
+    private fun referenceProblem(payload: AppSyncIndexPayload): String? {
+        if (payload.journals.any { it.replicaKey.isBlank() || it.blogId <= 0 || it.fingerprint?.isBlank() == true })
+            return "Index journal reference is invalid"
+        if (payload.checkpoints.any { it.checkpointId.isBlank() || it.blogId <= 0 || it.fingerprint.isBlank() })
+            return "Index checkpoint reference is invalid"
+        if (conflicting(payload.journals) { it.replicaKey } || conflicting(payload.journals) { it.blogId } ||
+            conflicting(payload.checkpoints) { it.checkpointId } || conflicting(payload.checkpoints) { it.blogId } ||
+            conflicting(payload.retirements) { it.replicaKey } || conflicting(payload.retirements) { it.blogId })
+            return "Index references conflict"
+        val journalIds = payload.journals.map { it.blogId }.toSet()
+        if (payload.checkpoints.any { it.blogId in journalIds }) return "Index artifact kinds conflict"
+        return null
+    }
+
+    private fun <T, K> conflicting(values: List<T>, key: (T) -> K): Boolean {
+        val seen = mutableMapOf<K, T>()
+        for (value in values) {
+            val previous = seen.put(key(value), value)
+            if (previous != null && previous != value) return true
+        }
+        return false
     }
 
     private fun frame(payload: String, fingerprint: String): String = buildString {

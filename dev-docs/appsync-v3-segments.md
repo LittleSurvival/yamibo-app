@@ -29,3 +29,5 @@ Migration 48 為 frozen recovery payload 增加 transportVersion 與 native root
 這是沒有伺服器 snapshot token 的分頁讀取；無法保證掃描期間其他裝置不新增文件，呼叫端仍須持有本機帳號/session lease，並遵守 writer identity／cohort gate。元件不做遠端修改，也不以掃描結果授權清理。正式服務接線與 durable index commit 仍待完成。
 
 分段標題含 generation，因此同名分段只要摘要不同即回報 Conflict，不能視為不存在後再建立。root 主文件標題允許不同 generation，完整讀取的舊 root 可略過。本次測試將發布器的預設 fixture discovery 換成此元件，確保 readback mismatch 仍保留原 intent 且不重送；另覆蓋多頁完整掃描、缺頁、重複頁、上限、登入中斷、候選遺失、重複符合、同名舊 root 與分類不符。
+
+Index 的讀寫 codec 已共用參照衝突檢查：同一 journal replica、checkpoint identity 或 retirement replica 對應不同內容，以及同一類型的實體 Blog ID 對應不同身分，均拒絕；journal 與 checkpoint 不能共用一個 Blog ID。完全相同的重複項目仍相容，編碼時折疊；journal 的舊版 null fingerprint 仍保留。空身分、非正整數 ID 與空白 fingerprint 不可成為新 index 證據。這避免原先 distinctBy 在發布時靜默選第一筆衝突參照，也拒絕外層 checksum 正確的衝突輸入。此驗證不等於 durable index 提交已完成。
