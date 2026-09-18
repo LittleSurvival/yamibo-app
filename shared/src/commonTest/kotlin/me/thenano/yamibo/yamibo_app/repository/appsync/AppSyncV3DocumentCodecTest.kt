@@ -6,6 +6,20 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.remote.*
 import okio.ByteString.Companion.encodeUtf8
 
 class AppSyncV3DocumentCodecTest {
+    @Test fun discoveryChecksAccountAndInnerIdentityBeforeReturningDocuments() {
+        assertEquals(checkpoint, assertIs<AppSyncV3DocumentRead.Checkpoint>(codec.discover(
+            codec.encodeCheckpoint(checkpoint), "account", AppSyncV3PayloadKind.Checkpoint)).document)
+        assertEquals(journal, assertIs<AppSyncV3DocumentRead.Journal>(codec.discover(
+            codec.encodeJournal("device:epoch", journal), "account", AppSyncV3PayloadKind.Journal)).document)
+        assertIs<AppSyncV3DocumentRead.Invalid>(codec.discover(codec.encodeJournal("other:epoch", journal),
+            "account", AppSyncV3PayloadKind.Journal))
+        assertIs<AppSyncV3DocumentRead.Invalid>(codec.discover(codec.encodeCheckpoint(checkpoint),
+            "other", AppSyncV3PayloadKind.Checkpoint))
+        val mismatched = AppSyncV3EnvelopeCodec().encode(AppSyncV3PayloadKind.Checkpoint, "account", "wrong",
+            AppSyncCanonicalCheckpointCodec().encode(checkpoint))
+        assertIs<AppSyncV3DocumentRead.Invalid>(codec.discover(mismatched, "account", AppSyncV3PayloadKind.Checkpoint))
+    }
+
     private val codec = AppSyncV3DocumentCodec()
     private val journal = AppSyncCanonicalJournal(AppSyncCanonicalOperationBlock("account", emptyList()),
         "device", "epoch", "writer", 0, 0, mapOf("device:epoch" to 10), emptyList(), 1, 3, 3, "test", 10)

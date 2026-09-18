@@ -56,8 +56,70 @@ import me.thenano.yamibo.yamibo_app.repository.backup.YamiboBackupFile
 import me.thenano.yamibo.yamibo_app.store.appsync.AppSyncRemoteBlogKind
 import me.thenano.yamibo.yamibo_app.store.appsync.AppSyncRemoteBlogStore
 import me.thenano.yamibo.yamibo_app.store.appsync.StoredAppSyncRemoteBlog
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3DocumentCodec
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3DocumentRead
+import me.thenano.yamibo.yamibo_app.repository.appsync.schema.*
 
 class YamiboAppSyncJournalRemoteTest {
+    @Test fun canonicalCheckpointSurvivesDiscoveryAndCachedLoading() = runBlocking {
+        val checkpoint = AppSyncCanonicalCheckpoint("canonical", ACCOUNT.value, 1, emptyMap(), emptyList())
+        val id = BlogId(77)
+        val title = AppSyncJournalDefaults.CHECKPOINT_TITLE_PREFIX + "canonical"
+        val provider = FakeProvider().apply {
+            pages[PageKey(null, 1)] = success(classPage())
+            pages[PageKey(CLASS_ID, 1)] = success(UserSpaceBlogPage(blogs = listOf(summary(id, title))))
+            blogs[id] = success(page(id, title, AppSyncV3DocumentCodec().encodeCheckpoint(checkpoint)))
+        }
+        val store = FakeRemoteStore()
+        val remote = remote(provider, store)
+        val discovered = assertIs<AppSyncJournalLoadResult.Success>(remote.loadJournals(ACCOUNT, true))
+        assertTrue(discovered.requiresCanonicalProcessing)
+        assertTrue(discovered.canonicalReadIssues.isEmpty())
+        assertEquals(checkpoint, assertIs<AppSyncV3DocumentRead.Checkpoint>(discovered.canonicalDocuments.single().document).document)
+        val cached = assertIs<AppSyncJournalLoadResult.Success>(remote.loadJournals(ACCOUNT, false))
+        assertEquals(discovered.canonicalDocuments, cached.canonicalDocuments)
+        assertEquals(0, provider.submitCalls)
+        assertTrue(provider.deleteRequests.isEmpty())
+        assertIs<AppSyncCloudResetResult.TerminalFailure>(remote.deleteAllVerifiedSyncData(ACCOUNT, FORM_HASH))
+        assertTrue(provider.deleteRequests.isEmpty())
+    }
+
+    @Test fun unsupportedAndCorruptedCanonicalCandidatesAreNotEmptyCloud() = runBlocking {
+        val checkpoint = AppSyncCanonicalCheckpoint("canonical", ACCOUNT.value, 1, emptyMap(), emptyList())
+        val encoded = AppSyncV3DocumentCodec().encodeCheckpoint(checkpoint)
+        for (body in listOf(encoded.replace("codec=1", "codec=9"), encoded.replace("length=", "length=9"))) {
+            val id = BlogId(77)
+            val title = AppSyncJournalDefaults.CHECKPOINT_TITLE_PREFIX + "canonical"
+            val provider = FakeProvider().apply {
+                pages[PageKey(null, 1)] = success(classPage())
+                pages[PageKey(CLASS_ID, 1)] = success(UserSpaceBlogPage(blogs = listOf(summary(id, title))))
+                blogs[id] = success(page(id, title, body))
+            }
+            val loaded = assertIs<AppSyncJournalLoadResult.Success>(remote(provider, FakeRemoteStore()).loadJournals(ACCOUNT, true))
+            assertTrue(loaded.requiresCanonicalProcessing)
+            assertTrue(loaded.canonicalDocuments.isEmpty())
+            assertEquals(1, loaded.canonicalReadIssues.size)
+            assertEquals(0, provider.submitCalls)
+        }
+    }
+
+    @Test fun canonicalJournalCannotBeOverwrittenOrRetiredByLegacyPaths() = runBlocking {
+        val id = BlogId(42)
+        val legacy = payload()
+        val canonical = AppSyncCanonicalJournal(AppSyncCanonicalOperationBlock(ACCOUNT.value, emptyList()),
+            "device", "epoch", "writer", 0, 0, emptyMap(), emptyList(), 1, 3, 3, "test", null)
+        val provider = FakeProvider().apply {
+            blogs[id] = success(page(id, AppSyncJournalDefaults.journalTitle(legacy.deviceId, legacy.deviceEpoch),
+                AppSyncV3DocumentCodec().encodeJournal("device:epoch", canonical)))
+        }
+        val remote = remote(provider, FakeRemoteStore(storedJournal(legacy, id)))
+        assertIs<AppSyncJournalPublishResult.TerminalFailure>(remote.publishOwnJournal(legacy, null, FORM_HASH))
+        assertIs<me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalRetirementRemoteResult.TerminalFailure>(
+            remote.deleteRetiredJournal(retirementIntent(), FORM_HASH))
+        assertEquals(0, provider.submitCalls)
+        assertTrue(provider.deleteRequests.isEmpty())
+    }
+
     private val journalCodec = AppSyncJournalEnvelopeCodec()
     private val indexCodec = AppSyncIndexEnvelopeCodec()
     private val checkpointCodec = AppSyncCheckpointEnvelopeCodec()

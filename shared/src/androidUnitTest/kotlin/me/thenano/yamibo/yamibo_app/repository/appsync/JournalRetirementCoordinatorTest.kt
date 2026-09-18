@@ -35,6 +35,18 @@ import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncOperationStor
 import me.thenano.yamibo.yamibo_app.repository.backup.YamiboBackupFile
 
 class JournalRetirementCoordinatorTest {
+    @Test fun canonicalReadIssuesBlockLegacyRetirementEvidenceAndDeletion() = runBlocking {
+        val fixture = fixture()
+        val observations = fixture.store.replicaObservations(ACCOUNT)
+        fixture.remote.cloud = fixture.remote.cloud.copy(canonicalReadIssues = listOf("Unsupported canonical cloud format"))
+        assertIs<AppSyncJournalRetirementMaintenanceResult.TerminalFailure>(
+            fixture.coordinator.maintain(ACCOUNT, FORM_HASH, true, true))
+        assertTrue(fixture.store.retirementIntents(ACCOUNT).isEmpty())
+        assertEquals(observations, fixture.store.replicaObservations(ACCOUNT))
+        assertEquals(0, fixture.remote.indexCalls)
+        assertEquals(0, fixture.remote.deleteCalls)
+    }
+
     @Test
     fun reportOnlyRecordsCandidateWithoutRemoteMutation() = runBlocking {
         val fixture = fixture()

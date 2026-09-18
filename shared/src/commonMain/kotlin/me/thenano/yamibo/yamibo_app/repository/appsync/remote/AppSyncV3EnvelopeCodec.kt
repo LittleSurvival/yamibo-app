@@ -63,7 +63,7 @@ internal class AppSyncV3EnvelopeCodec(
     }
 
     fun decode(text: String, expectedAccount: String, expectedKind: AppSyncV3PayloadKind,
-        expectedIdentity: String): AppSyncV3EnvelopeRead {
+        expectedIdentity: String?): AppSyncV3EnvelopeRead {
         if (text.length.toLong() > maximumEnvelopeChars) return invalid(AppSyncV3EnvelopeError.EnvelopeLimit)
         // Limit splitting so an attacker cannot allocate one object for each newline.
         val lines = text.split('\n', limit = 13)
@@ -87,7 +87,7 @@ internal class AppSyncV3EnvelopeCodec(
         val length = unsignedInt(values[6]) ?: return invalid(AppSyncV3EnvelopeError.Metadata)
         if (!validIdentity(account) || !validIdentity(identity) || length > maximumCanonicalBytes ||
             !isDigest(values[7]) || !isDigest(values[8])) return invalid(AppSyncV3EnvelopeError.Metadata)
-        if (account != expectedAccount || kind != expectedKind || identity != expectedIdentity) {
+        if (account != expectedAccount || kind != expectedKind || (expectedIdentity != null && identity != expectedIdentity)) {
             return invalid(AppSyncV3EnvelopeError.BindingMismatch)
         }
         if (schema != SCHEMA || codec != CODEC || compressor != GZIP) {

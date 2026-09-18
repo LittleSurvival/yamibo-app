@@ -173,6 +173,7 @@ internal class ManualSyncOverrideCoordinator(
             is AppSyncJournalLoadResult.RetryableFailure -> return CloudLoad.Failed(result.reason)
             is AppSyncJournalLoadResult.TerminalFailure -> return CloudLoad.Failed(result.reason)
         }
+        if (cloud.requiresCanonicalProcessing) return CloudLoad.Failed("Canonical cloud state requires v3 processing")
         val checkpoint = cloud.checkpoints.maxWithOrNull(
             compareBy(
                 { it.envelope.payload.coverage.asStableMap().values.sum() },

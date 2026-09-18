@@ -69,6 +69,8 @@ internal class JournalRetirementCoordinator(
                 is AppSyncJournalLoadResult.TerminalFailure ->
                     return AppSyncJournalRetirementMaintenanceResult.TerminalFailure(loaded.reason)
             }
+            if (cloud.requiresCanonicalProcessing) return AppSyncJournalRetirementMaintenanceResult.TerminalFailure(
+                "Canonical cloud state requires v3 processing")
             store.updateDiscoveryTime(now)
             cloud.journals.forEach { journal ->
                 val publishedThrough = journal.payload.resolvedPublishedThroughSequence()

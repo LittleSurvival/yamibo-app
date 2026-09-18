@@ -62,14 +62,15 @@ internal class AppSyncCanonicalJournalCodec(
         return output.readByteString()
     }
 
-    fun decode(expectedAccount: String, expectedDevice: String, expectedEpoch: String,
+    fun decode(expectedAccount: String, expectedDevice: String?, expectedEpoch: String?,
         bytes: ByteString): AppSyncCanonicalJournal = try {
         require(bytes.size <= maximumBytes) { "Journal byte limit exceeded" }
         val source = Buffer().write(bytes)
         require(source.readByteString(4) == MAGIC && source.readByte().toInt() == 1) { "Unknown canonical journal" }
         val device = source.text()
         val epoch = source.text()
-        require(device == expectedDevice && epoch == expectedEpoch) { "Journal owner mismatch" }
+        require((expectedDevice == null || device == expectedDevice) &&
+            (expectedEpoch == null || epoch == expectedEpoch)) { "Journal owner mismatch" }
         val nonce = source.text()
         val first = source.nonnegative()
         val last = source.nonnegative()

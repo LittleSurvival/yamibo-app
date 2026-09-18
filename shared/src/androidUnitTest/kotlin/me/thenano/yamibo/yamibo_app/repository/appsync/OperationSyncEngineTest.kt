@@ -54,6 +54,31 @@ import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncOperationStor
 import me.thenano.yamibo.yamibo_app.store.appsync.LocalSyncOperationDraft
 
 class OperationSyncEngineTest {
+    @Test fun canonicalCloudCannotTriggerEmptyCloudPushOrLegacyBootstrap() = runBlocking {
+        val fixture = fixture()
+        activate(fixture)
+        val checkpoint = me.thenano.yamibo.yamibo_app.repository.appsync.schema.AppSyncCanonicalCheckpoint(
+            "canonical", account.value, 1, emptyMap(), emptyList())
+        val codec = me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3DocumentCodec()
+        val document = assertIs<me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3DocumentRead.Checkpoint>(
+            codec.readCheckpoint(codec.encodeCheckpoint(checkpoint), account.value, checkpoint.checkpointId))
+        for (cloud in listOf(
+            AppSyncJournalLoadResult.Success(emptyList(), canonicalDocuments = listOf(
+                me.thenano.yamibo.yamibo_app.repository.appsync.engine.LoadedAppSyncCanonicalDocument("42", document))),
+            AppSyncJournalLoadResult.Success(emptyList(), canonicalReadIssues = listOf("Unsupported canonical cloud format")),
+        )) {
+            fixture.remote.loadFailure = cloud
+            val before = fixture.remote.loadCount
+            assertIs<OperationSyncResult.PausedProvider>(fixture.engine.synchronize(account, formHash, detectEmptyCloud = true))
+            assertEquals(before + 1, fixture.remote.loadCount)
+            assertEquals(0, fixture.remote.publishCount)
+            assertIs<AppSyncBootstrapResult.Paused>(fixture.bootstrap.bootstrap(account))
+            assertTrue(fixture.store.verifiedCheckpoints().isEmpty())
+            assertEquals(0, fixture.remote.publishCount)
+            fixture.store.updateState(AppSyncInstallationState.Active)
+        }
+    }
+
     private val account = SyncAccountBinding("account")
     private val formHash = FormHash("form")
 

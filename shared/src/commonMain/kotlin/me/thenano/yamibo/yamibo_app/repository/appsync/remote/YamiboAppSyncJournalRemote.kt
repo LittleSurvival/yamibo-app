@@ -5,6 +5,7 @@ import io.github.littlesurvival.dto.value.BlogClassId
 import io.github.littlesurvival.dto.value.BlogId
 import io.github.littlesurvival.dto.value.FormHash
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalLoadResult
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.LoadedAppSyncCanonicalDocument
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncJournalPublishResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncCheckpointPublishResult
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncCheckpointRetentionResult
@@ -113,6 +114,8 @@ internal class YamiboAppSyncJournalRemote(
             when {
                 title.startsWith(AppSyncJournalDefaults.JOURNAL_TITLE_PREFIX) -> {
                     when (val result = loadJournal(candidate, accountBinding)) {
+                        is JournalCandidateResult.Canonical -> return AppSyncCloudResetResult.TerminalFailure(
+                            "Canonical cloud reset requires v3 processing")
                         is JournalCandidateResult.Valid -> verifiedIds += bId
                         is JournalCandidateResult.Retryable ->
                             return AppSyncCloudResetResult.RetryableFailure(result.reason)
@@ -129,6 +132,8 @@ internal class YamiboAppSyncJournalRemote(
                 }
                 title.startsWith(AppSyncJournalDefaults.CHECKPOINT_TITLE_PREFIX) -> {
                     when (val result = loadCheckpoint(candidate, accountBinding)) {
+                        is CheckpointCandidateResult.Canonical -> return AppSyncCloudResetResult.TerminalFailure(
+                            "Canonical cloud reset requires v3 processing")
                         is CheckpointCandidateResult.Valid -> verifiedIds += bId
                         is CheckpointCandidateResult.Retryable ->
                             return AppSyncCloudResetResult.RetryableFailure(result.reason)
@@ -296,6 +301,8 @@ internal class YamiboAppSyncJournalRemote(
             contentUpdatedAtEpochMillis = null,
         )
         when (val loaded = loadJournal(candidate, intent.accountBinding)) {
+            is JournalCandidateResult.Canonical -> return AppSyncJournalRetirementRemoteResult.TerminalFailure(
+                "Canonical journal cannot be retired using legacy proof")
             JournalCandidateResult.NotFound ->
                 return AppSyncJournalRetirementRemoteResult.Verified
             is JournalCandidateResult.Retryable ->
@@ -366,6 +373,8 @@ internal class YamiboAppSyncJournalRemote(
             }
             if (verifiedCached == null) {
                 when (val loaded = loadJournal(cached, payload.accountBinding)) {
+                    is JournalCandidateResult.Canonical -> return AppSyncJournalPublishResult.TerminalFailure(
+                        "Canonical journal cannot be overwritten by a legacy writer")
                     is JournalCandidateResult.Valid -> {
                         saveJournal(cached, loaded.journal)
                         verifiedCached = loaded.journal
@@ -1292,6 +1301,8 @@ internal class YamiboAppSyncJournalRemote(
         if (cachedJournals.isEmpty() && cachedCheckpoints.isEmpty()) return null
 
         val loadedJournals = mutableListOf<LoadedAppSyncJournal>()
+        val canonicalDocuments = mutableListOf<LoadedAppSyncCanonicalDocument>()
+        val canonicalReadIssues = mutableListOf<String>()
         for (candidate in cachedJournals.values) {
             val cachedPayload = verifiedJournalCache[candidate.remoteKey]
                 ?.takeIf {
@@ -1304,6 +1315,7 @@ internal class YamiboAppSyncJournalRemote(
                 continue
             }
             when (val result = loadJournal(candidate, accountBinding)) {
+                is JournalCandidateResult.Canonical -> collectCanonical(candidate.copy(kind = result.kind), result.document, canonicalDocuments, canonicalReadIssues)
                 is JournalCandidateResult.Valid -> {
                     saveJournal(candidate.copy(kind = result.kind), result.journal)
                     loadedJournals += result.journal
@@ -1331,6 +1343,7 @@ internal class YamiboAppSyncJournalRemote(
                 continue
             }
             when (val result = loadCheckpoint(candidate, accountBinding)) {
+                is CheckpointCandidateResult.Canonical -> collectCanonical(candidate.copy(kind = result.kind), result.document, canonicalDocuments, canonicalReadIssues)
                 is CheckpointCandidateResult.Valid -> {
                     saveCheckpoint(candidate.copy(kind = result.kind), result.checkpoint)
                     loadedCheckpoints += result.checkpoint
@@ -1345,7 +1358,7 @@ internal class YamiboAppSyncJournalRemote(
                 }
             }
         }
-        if (loadedJournals.isEmpty() && loadedCheckpoints.isEmpty()) return null
+        if (loadedJournals.isEmpty() && loadedCheckpoints.isEmpty() && canonicalDocuments.isEmpty() && canonicalReadIssues.isEmpty()) return null
         return AppSyncJournalLoadResult.Success(
             journals = loadedJournals
                 .filterNot { journal ->
@@ -1354,6 +1367,8 @@ internal class YamiboAppSyncJournalRemote(
                 .distinctBy { it.payload.replicaKey() },
             checkpoints = loadedCheckpoints.distinctBy { it.envelope.payload.checkpointId },
             indexedReplicaKeys = indexedReplicaKeys,
+            canonicalDocuments = canonicalDocuments,
+            canonicalReadIssues = canonicalReadIssues.distinct(),
         )
     }
 
@@ -1450,6 +1465,8 @@ internal class YamiboAppSyncJournalRemote(
         }
         val loaded = mutableListOf<LoadedAppSyncJournal>()
         val checkpoints = mutableListOf<LoadedAppSyncCheckpoint>()
+        val canonicalDocuments = mutableListOf<LoadedAppSyncCanonicalDocument>()
+        val canonicalReadIssues = mutableListOf<String>()
         val indexedReplicaKeys = linkedSetOf<String>()
         val retirementDiscoveryIssues = mutableListOf<String>()
         val summaries = pages.flatMap { it.blogs }
@@ -1479,6 +1496,7 @@ internal class YamiboAppSyncJournalRemote(
                         contentUpdatedAtEpochMillis = timeInfo.epoch * 1_000L,
                     )
                     when (val result = loadJournal(candidate, accountBinding)) {
+                        is JournalCandidateResult.Canonical -> collectCanonical(candidate.copy(kind = result.kind), result.document, canonicalDocuments, canonicalReadIssues)
                         is JournalCandidateResult.Valid -> {
                             val remoteKey = result.journal.payload.replicaKey()
                             saveJournal(
@@ -1537,6 +1555,7 @@ internal class YamiboAppSyncJournalRemote(
                         contentUpdatedAtEpochMillis = timeInfo.epoch * 1_000L,
                     )
                     when (val result = loadCheckpoint(candidate, accountBinding)) {
+                        is CheckpointCandidateResult.Canonical -> collectCanonical(candidate.copy(kind = result.kind), result.document, canonicalDocuments, canonicalReadIssues)
                         is CheckpointCandidateResult.Valid -> {
                             saveCheckpoint(candidate.copy(kind = result.kind), result.checkpoint)
                             checkpoints += result.checkpoint
@@ -1560,7 +1579,29 @@ internal class YamiboAppSyncJournalRemote(
             checkpoints.distinctBy { it.envelope.payload.checkpointId },
             indexedReplicaKeys = indexedReplicaKeys,
             retirementDiscoveryIssues = retirementDiscoveryIssues.distinct(),
+            canonicalDocuments = canonicalDocuments,
+            canonicalReadIssues = canonicalReadIssues.distinct(),
         )
+    }
+
+    private fun collectCanonical(candidate: StoredAppSyncRemoteBlog, document: AppSyncV3DocumentRead,
+        documents: MutableList<LoadedAppSyncCanonicalDocument>, issues: MutableList<String>) {
+        val metadata = when (document) {
+            is AppSyncV3DocumentRead.Checkpoint -> document.metadata
+            is AppSyncV3DocumentRead.Journal -> document.metadata
+            is AppSyncV3DocumentRead.Unsupported -> {
+                issues += "Unsupported canonical cloud format"
+                return
+            }
+            is AppSyncV3DocumentRead.Invalid -> {
+                issues += "Canonical document validation failed"
+                return
+            }
+        }
+        documents += LoadedAppSyncCanonicalDocument(candidate.blogId.value.toString(), document)
+        store.save(candidate.copy(remoteKey = if (document is AppSyncV3DocumentRead.Checkpoint)
+            checkpointRemoteKey(document.document.checkpointId) else metadata.identity,
+            fingerprint = metadata.canonicalFingerprint, validatedAtEpochMillis = nowMillis()))
     }
 
     private suspend fun loadCheckpoint(
@@ -1598,6 +1639,16 @@ internal class YamiboAppSyncJournalRemote(
             AppSyncRemoteBlogKind.CheckpointRoot
         } else {
             AppSyncRemoteBlogKind.Checkpoint
+        }
+        if (canonical.contains(APP_SYNC_V3_ENVELOPE_MARKER)) {
+            var document = AppSyncV3DocumentCodec().discover(canonical, accountBinding.value, AppSyncV3PayloadKind.Checkpoint)
+            if (document is AppSyncV3DocumentRead.Checkpoint &&
+                (!canonicalRootIdentityMatches(rootBody, document.metadata.identity) ||
+                    (candidate.remoteKey.startsWith("checkpoint:") && candidate.remoteKey != checkpointRemoteKey(document.document.checkpointId)) ||
+                    (candidate.fingerprint != null && candidate.fingerprint != document.metadata.canonicalFingerprint))) {
+                document = AppSyncV3DocumentRead.Invalid(AppSyncV3EnvelopeError.BindingMismatch)
+            }
+            return CheckpointCandidateResult.Canonical(document, kind)
         }
         return when (val validation = checkpointCodec.validate(canonical)) {
             is AppSyncCheckpointValidation.Valid -> {
@@ -1654,6 +1705,15 @@ internal class YamiboAppSyncJournalRemote(
         } else {
             AppSyncRemoteBlogKind.Journal
         }
+        if (canonical.contains(APP_SYNC_V3_ENVELOPE_MARKER)) {
+            var document = AppSyncV3DocumentCodec().discover(canonical, accountBinding.value, AppSyncV3PayloadKind.Journal)
+            if (document is AppSyncV3DocumentRead.Journal &&
+                (!canonicalRootIdentityMatches(rootBody, document.metadata.identity) ||
+                    (!candidate.remoteKey.startsWith("candidate:") && candidate.remoteKey != document.metadata.identity))) {
+                document = AppSyncV3DocumentRead.Invalid(AppSyncV3EnvelopeError.BindingMismatch)
+            }
+            return JournalCandidateResult.Canonical(document, kind)
+        }
         return when (val validation = journalCodec.validate(canonical)) {
             is AppSyncJournalValidation.Valid -> {
                 if (validation.envelope.payload.accountBinding != accountBinding) {
@@ -1673,6 +1733,10 @@ internal class YamiboAppSyncJournalRemote(
                 JournalCandidateResult.Terminal(validation.reason)
         }
     }
+
+    private fun canonicalRootIdentityMatches(rootBody: String, identity: String): Boolean =
+        !rootBody.contains(AppSyncSegmentEnvelopeCodec.ROOT_MARKER) ||
+            segmentCodec.decodeRoot(rootBody).getOrNull()?.identity == identity
 
     private suspend fun loadIndex(
         candidate: StoredAppSyncRemoteBlog,
@@ -2137,6 +2201,7 @@ internal class YamiboAppSyncJournalRemote(
             journal.payload.resolvedPublishedThroughSequence()
 
     private sealed interface JournalCandidateResult {
+        data class Canonical(val document: AppSyncV3DocumentRead, val kind: AppSyncRemoteBlogKind) : JournalCandidateResult
         data class Valid(
             val journal: LoadedAppSyncJournal,
             val kind: AppSyncRemoteBlogKind = AppSyncRemoteBlogKind.Journal,
@@ -2157,6 +2222,7 @@ internal class YamiboAppSyncJournalRemote(
     }
 
     private sealed interface CheckpointCandidateResult {
+        data class Canonical(val document: AppSyncV3DocumentRead, val kind: AppSyncRemoteBlogKind) : CheckpointCandidateResult
         data class Valid(
             val checkpoint: LoadedAppSyncCheckpoint,
             val kind: AppSyncRemoteBlogKind = AppSyncRemoteBlogKind.Checkpoint,

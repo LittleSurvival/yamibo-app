@@ -20,6 +20,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncJournalPayl
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncProtocolCapabilities
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointAcknowledgement
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.ParsedAppSyncCheckpointEnvelope
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncV3DocumentRead
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.resolvedPublishedThroughSequence
 import me.thenano.yamibo.yamibo_app.store.appsync.AppSyncOperationStore
 
@@ -34,13 +35,22 @@ internal data class LoadedAppSyncCheckpoint(
     val envelope: ParsedAppSyncCheckpointEnvelope,
 )
 
+/** Account-verified discovery only; not index membership or cleanup authorization. */
+internal data class LoadedAppSyncCanonicalDocument(val remoteId: String, val document: AppSyncV3DocumentRead)
+
 internal sealed interface AppSyncJournalLoadResult {
     data class Success(
         val journals: List<LoadedAppSyncJournal>,
         val checkpoints: List<LoadedAppSyncCheckpoint> = emptyList(),
         val indexedReplicaKeys: Set<String> = emptySet(),
         val retirementDiscoveryIssues: List<String> = emptyList(),
-    ) : AppSyncJournalLoadResult
+        val canonicalDocuments: List<LoadedAppSyncCanonicalDocument> = emptyList(),
+        val canonicalReadIssues: List<String> = emptyList(),
+    ) : AppSyncJournalLoadResult {
+        // Removed once every consuming coordinator can process canonical state. Until then,
+        // a readable v3 account must never become an empty-cloud push or legacy cleanup.
+        val requiresCanonicalProcessing: Boolean get() = canonicalDocuments.isNotEmpty() || canonicalReadIssues.isNotEmpty()
+    }
     data object NotLoggedIn : AppSyncJournalLoadResult
     data class RetryableFailure(val reason: String) : AppSyncJournalLoadResult
     data class TerminalFailure(val reason: String) : AppSyncJournalLoadResult
@@ -349,6 +359,7 @@ internal class OperationSyncEngine(
                 detectEmptyCloud &&
                 !requestedForcedDiscovery &&
                 initialLoad is AppSyncJournalLoadResult.Success &&
+                !initialLoad.requiresCanonicalProcessing &&
                 initialLoad.journals.isEmpty() &&
                 initialLoad.checkpoints.isEmpty()
             ) {
@@ -378,6 +389,10 @@ internal class OperationSyncEngine(
                     store.updateState(AppSyncInstallationState.PausedProvider)
                     return OperationSyncResult.PausedProvider(result.reason)
                 }
+            }
+            if (cloud.requiresCanonicalProcessing) {
+                store.updateState(AppSyncInstallationState.PausedProvider)
+                return OperationSyncResult.PausedProvider("Canonical cloud state requires v3 processing")
             }
             if (
                 detectEmptyCloud &&

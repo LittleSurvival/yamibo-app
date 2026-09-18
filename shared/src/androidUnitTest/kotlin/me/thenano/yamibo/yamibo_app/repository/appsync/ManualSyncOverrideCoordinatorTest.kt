@@ -37,6 +37,21 @@ import me.thenano.yamibo.yamibo_app.store.appsync.LocalSyncOperationDraft
 import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncOperationStore
 
 class ManualSyncOverrideCoordinatorTest {
+    @Test fun canonicalReadIssuesBlockBothOverrideDirectionsWithoutLocalChanges() = runBlocking {
+        val store = activeStore()
+        val local = settingOperation("local", "local-device")
+        val domain = FakeDomainState(OperationReducer().reduce(operations = listOf(local)).entities)
+        val remote = FakeRemote(settingOperation("cloud", "remote-device")).apply {
+            canonicalReadIssues = listOf("Unsupported canonical cloud format")
+        }
+        val coordinator = ManualSyncOverrideCoordinator(store, remote, domain, nowMillis = { 1_000L })
+        for (direction in ManualSyncOverrideDirection.entries) {
+            assertIs<ManualSyncPreviewResult.Failed>(coordinator.preview(account, direction))
+            assertEquals("local", domain.value())
+            assertTrue(store.pendingOperations().isEmpty())
+        }
+    }
+
     private val account = SyncAccountBinding("account")
 
     @Test
@@ -234,6 +249,7 @@ class ManualSyncOverrideCoordinatorTest {
         var operation: SyncOperation,
     ) : AppSyncJournalRemote {
         var loadFailure: String? = null
+        var canonicalReadIssues: List<String> = emptyList()
 
         override suspend fun loadJournals(
             accountBinding: SyncAccountBinding,
@@ -241,6 +257,7 @@ class ManualSyncOverrideCoordinatorTest {
         ): AppSyncJournalLoadResult {
             loadFailure?.let { return AppSyncJournalLoadResult.RetryableFailure(it) }
             return AppSyncJournalLoadResult.Success(
+                canonicalReadIssues = canonicalReadIssues,
                 journals = listOf(
                     LoadedAppSyncJournal(
                         remoteId = "1",

@@ -77,6 +77,10 @@ internal class BootstrapCoordinator(
                 return AppSyncBootstrapResult.Paused(result.reason)
             }
         }
+        if (cloud.requiresCanonicalProcessing) {
+            store.updateState(AppSyncInstallationState.PausedProvider)
+            return AppSyncBootstrapResult.Paused("Canonical cloud state requires v3 processing")
+        }
         val checkpoint = cloud.checkpoints.maxWithOrNull(
             compareBy(
                 { it.envelope.payload.coverage.asStableMap().values.sum() },

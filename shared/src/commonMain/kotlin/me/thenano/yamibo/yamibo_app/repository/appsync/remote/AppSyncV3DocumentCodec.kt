@@ -15,6 +15,27 @@ internal class AppSyncV3DocumentCodec(
     private val journal: AppSyncCanonicalJournalCodec = AppSyncCanonicalJournalCodec(),
     private val checkpoint: AppSyncCanonicalCheckpointCodec = AppSyncCanonicalCheckpointCodec(),
 ) {
+    /** Discovery verifies the account and inner/outer identity, but does not establish index
+     * membership or freshness. Activation still requires separately verified index evidence.
+     */
+    fun discover(text: String, expectedAccount: String, expectedKind: AppSyncV3PayloadKind): AppSyncV3DocumentRead =
+        when (val verified = envelope.decode(text, expectedAccount, expectedKind, null)) {
+            is AppSyncV3EnvelopeRead.Invalid -> AppSyncV3DocumentRead.Invalid(verified.reason)
+            is AppSyncV3EnvelopeRead.Unsupported -> AppSyncV3DocumentRead.Unsupported(
+                verified.schemaVersion, verified.codecVersion, verified.compressorId)
+            is AppSyncV3EnvelopeRead.VerifiedBytes -> try {
+                when (expectedKind) {
+                    AppSyncV3PayloadKind.Checkpoint -> AppSyncV3DocumentRead.Checkpoint(
+                        checkpoint.decode(expectedAccount, verified.metadata.identity, verified.bytes), verified.metadata)
+                    AppSyncV3PayloadKind.Journal -> {
+                        val document = journal.decode(expectedAccount, null, null, verified.bytes)
+                        require(verified.metadata.identity == "${document.deviceId}:${document.deviceEpoch}") { "Journal identity mismatch" }
+                        AppSyncV3DocumentRead.Journal(document, verified.metadata)
+                    }
+                }
+            } catch (_: Exception) { AppSyncV3DocumentRead.Invalid() }
+        }
+
     fun encodeJournal(identity: String, document: AppSyncCanonicalJournal): String = envelope.encode(
         AppSyncV3PayloadKind.Journal, document.block.accountBinding, identity, journal.encode(document))
 

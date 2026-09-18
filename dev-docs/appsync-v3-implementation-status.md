@@ -134,8 +134,12 @@ Production remote HTML extraction now preserves v3 envelope line boundaries and 
 instead of flattening them. Typed dispatcher reads distinguish legacy/v3 journal/checkpoint,
 unsupported versions and invalid documents, with expected bindings checked in segmented roots
 and inner documents. Five new tests cover HTML wrappers, legacy compatibility, duplicate/corrupt
-frames, missing segments and owner/account mismatches. Typed remote load models and engine
-activation remain pending; this is not a completed v3 reader rollout. See appsync-v3-reader.md.
+frames, missing segments and owner/account mismatches. Remote load results now retain validated
+canonical documents and redacted read issues through discovery/cached links. Seven additional
+tests cover discovery identity, remote loading/reset/writer/delete guards and legacy engine,
+bootstrap, manual override and retirement protection. Canonical accounts cannot become empty
+legacy cloud results. Those coordinators intentionally pause until full canonical processing is
+integrated; reader capability and writer rollout remain disabled. See appsync-v3-reader.md.
 
 An index-bound evidence factory and transactional activation adapter now preserve pending
 edits while keeping verified remote coverage distinct from local overlay coverage. Five SQLite
@@ -151,7 +155,7 @@ failure preserving source evidence. Recorder routing and persistent failure hand
 integration; the current BLOB rewrite is not evidence of the device write-amplification gate.
 See appsync-v3-state.md.
 
-Latest checks (2026-09-18): all 611 shared tests and 15 CloudSyncUiState tests passed, with
+Latest checks (2026-09-18): all 618 shared tests and 15 CloudSyncUiState tests passed, with
 zero failures, errors, or skipped tests. This includes canonical field/scalar tests, synthetic
 corpus replay, production setting default round trips, isolated SQLite storage accounting,
 and the existing recovery, production-producer, backup, and convergence suites. Eight additional
