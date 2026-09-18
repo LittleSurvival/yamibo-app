@@ -35,17 +35,17 @@ internal class AppSyncSanitizedV2JournalPreparation(private val canWrite: () -> 
         if (journal.protocolReadVersion < 3) return fail(AppSyncV2JournalFailure.Compatibility)
         try { AppSyncCanonicalJournalCodec().encode(journal) }
         catch (_: Exception) { return fail(AppSyncV2JournalFailure.InvalidJournal) }
-        val exported = AppSyncSanitizedV2OperationExporter().export(journal.block)
+        val exported = AppSyncSanitizedV2OperationExporter().export(journal.block, allowPortableEventIdentity = true)
         if (exported !is AppSyncV2OperationExport.Ready) return fail(AppSyncV2JournalFailure.OperationExport)
         return try {
-            val payload = AppSyncJournalPayload(SyncAccountBinding(journal.block.accountBinding), SyncDeviceId(journal.deviceId),
+            val codec = AppSyncJournalEnvelopeCodec()
+            val payload = codec.wirePayload(AppSyncJournalPayload(SyncAccountBinding(journal.block.accountBinding), SyncDeviceId(journal.deviceId),
                 SyncDeviceEpoch(journal.deviceEpoch), SyncWriterNonce(journal.writerNonce), journal.firstSequence, journal.lastSequence,
                 exported.operations.sortedBy { it.sequence.value }, SyncCausalContext(journal.observed),
                 journal.acknowledgements.sortedBy { it.checkpointId }.map {
                     AppSyncCheckpointAcknowledgement(it.checkpointId, SyncCausalContext(it.coverage))
-                }, journal.heartbeatAtEpochMillis, journal.protocolReadVersion, 2, journal.appVersion, journal.publishedThroughSequence)
-            val codec = AppSyncJournalEnvelopeCodec()
-            val envelope = codec.encode(payload)
+                }, journal.heartbeatAtEpochMillis, journal.protocolReadVersion, 2, journal.appVersion, journal.publishedThroughSequence))
+            val envelope = codec.encodeSanitizedFallback(payload)
             val verified = codec.validate(envelope) as? AppSyncJournalValidation.Valid
                 ?: return fail(AppSyncV2JournalFailure.InvalidJournal)
             if (verified.envelope.payload != payload) return fail(AppSyncV2JournalFailure.InvalidJournal)

@@ -476,6 +476,52 @@ class AppSyncCanonicalCheckpointActivatorTest {
                 sanitizedV2Fallback = true))
     }
 
+    @Test fun ambiguousEventFallbackPreservesIdentityThroughPublicationDiscoveryAndActivation() = fixture {
+        val original = AppSyncSyntheticCorpus.create().journal.operations.first { it.domainId.value == "favorite.update-event" }
+        val fields = original.fields
+        val identity = me.thenano.yamibo.yamibo_app.repository.backup.favoriteUpdateEventIdentity(
+            fields.getValue("targetType")!!, fields.getValue("targetId")!!.toLong(), fields.getValue("authorId")!!.toLong(),
+            fields.getValue("mode")!!, emptyList(), true, fields.getValue("detectedAt")!!.toLong(),
+            fields.getValue("summary")!!, fields.getValue("title")!!)
+        val source = store.appendLocalOperation(account, original.domainId, SyncEntityId(identity.syncId), 1,
+            SyncOperationKind.Put, fields + mapOf("sourceDiscriminator" to identity.sourceDiscriminator,
+                "sourceFingerprint" to identity.sourceFingerprint, "detailIds" to "", "ambiguous" to "true"),
+            store.causalContext(), now, SyncOperationOrigin.UserAction)
+        val canonical = assertIs<AppSyncCanonicalOperationImport.Accepted>(
+            AppSyncCanonicalOperationImporter().import(account.value, source)).operation
+        val provider = nativePublishingEnvironment().first
+        val originalCheckpoint = provider.artifacts[123]
+        val (recovery, id) = startFallback()
+        val frozen = assertNotNull(recovery.sanitizedV2Payload(id))
+        val prepared = assertIs<AppSyncJournalValidation.Valid>(AppSyncJournalEnvelopeCodec().validate(frozen)).envelope.payload
+        assertEquals(identity.syncId, prepared.operations.single().entityId.value)
+        assertTrue(prepared.operations.single().fields.getValue("sourceDiscriminator")!!.startsWith(
+            me.thenano.yamibo.yamibo_app.repository.backup.PORTABLE_LEGACY_EVENT_PREFIX))
+        assertNull(prepared.operations.single().fields["coverUrl"])
+        assertIs<AppSyncSegmentedJournalCommitResult.Verified>(runFallback(provider, id))
+        assertTrue(store.pendingOperations().isEmpty())
+        val local = db.favoriteUpdateEventQueries.getBySyncId(identity.syncId).executeAsOne()
+        assertEquals(identity.sourceFingerprint, local.sourceFingerprint)
+        assertEquals(prepared.operations.single().fields["sourceDiscriminator"], local.sourceDiscriminator)
+        assertEquals(1, db.favoriteUpdateEventQueries.getAll().executeAsList().size)
+        assertEquals(originalCheckpoint, provider.artifacts[123])
+        val remote = YamiboAppSyncJournalRemote(provider, SqlDelightAppSyncRemoteBlogStore(db), nowMillis = { now })
+        val loaded = assertIs<AppSyncJournalLoadResult.Success>(kotlinx.coroutines.runBlocking { remote.loadJournals(account, true) })
+        assertTrue(loaded.canonicalReadIssues.isEmpty())
+        assertTrue(loaded.retirementDiscoveryIssues.isEmpty())
+        assertEquals(prepared, loaded.journals.single().payload)
+        val roundTrip = assertIs<AppSyncCanonicalOperationImport.Accepted>(
+            AppSyncCanonicalOperationImporter().import(account.value, loaded.journals.single().payload.operations.single()))
+        assertEquals(canonical, roundTrip.operation)
+        val plan = assertIs<AppSyncCanonicalCloudPlan.Ready>(AppSyncCanonicalCloudPlanner().prepare(
+            account, assertNotNull(store.installation()), loaded))
+        assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(plan.checkpoint, plan.canonicalOperations, plan.legacyOperations))
+        val reapplied = db.favoriteUpdateEventQueries.getAll().executeAsList().single()
+        assertEquals(local.syncId, reapplied.syncId)
+        assertEquals(local.sourceFingerprint, reapplied.sourceFingerprint)
+        assertEquals(local.sourceDiscriminator, reapplied.sourceDiscriminator)
+    }
+
     @Test fun fallbackRemoteRoundTripRetainsNativeHistoryAndAllowsNextPublication() = fixture {
         val provider = nativePublishingEnvironment().first
         val own = assertNotNull(store.installation())

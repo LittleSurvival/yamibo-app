@@ -85,15 +85,15 @@ Native checkpoint activation 在 settings reconciliation 成功後，於同一�
 
 舊版 v2 reader 不理解此 discriminator 表示；v3 writer 仍必須等所有相關 reader 能力與 rollout gate 通過。停用 v3 writer 後的 sanitized v2 回退需要另外核對可讀能力，不能把此表示宣稱為任意舊客戶端都可讀。完整回退流程與能力公告仍待完成。
 
-Legacy publication 現在有共用相容性檢查：journal 操作、checkpoint 的各欄位 provenance／relation／tombstone 來源及 snapshot event 若包含新版 portable discriminator，v1/v2 codec 拒絕編碼；正式單篇／分段 journal、checkpoint 與 legacy shadow recovery 在 provider 請求或工作建立前回報明確相容性原因。讀取驗證沒有改成拒絕新版識別。這是避免錯誤降版的保護，並不代表 sanitized v2 回退轉換已完成；後續 adapter 必須取得可驗證原始 legacy 證據，或使用另行核對的新 reader 相容策略。
+Legacy publication 現在有共用相容性檢查：journal 操作、checkpoint 的各欄位 provenance／relation／tombstone 來源及 snapshot event 若包含新版 portable discriminator，v1/v2 codec 拒絕編碼；正式單篇／分段 journal、checkpoint 與 legacy shadow recovery 在 provider 請求或工作建立前回報明確相容性原因。讀取驗證沒有改成拒絕新版識別。這是一般 legacy 發布的降版保護。專用 sanitized v2 journal adapter 使用另行核對的 reader 3 相容策略，透過獨立入口保留 portable identity；一般 journal／checkpoint／shadow 入口不因此解除限制。
 
 ## Sanitized v2 操作轉換邊界
 
-`AppSyncSanitizedV2OperationExporter` 接受完整 canonical operation block，先驗證 schema、大小、操作身分及共用刪除授權，再將 typed portable 欄位轉回 v2 字串值。舊格式契約需要的實體識別由 structured key 還原；Patch 只補契約必要的識別欄位，Delete 只有原刪除授權證明，不附帶陳舊實體內容。預設 detail event discriminator 可由 immutable detail IDs 還原；portable ambiguous discriminator 則明確回報 reader compatibility 限制，不嘗試重新塞入舊標題／摘要。
+`AppSyncSanitizedV2OperationExporter` 接受完整 canonical operation block，先驗證 schema、大小、操作身分及共用刪除授權，再將 typed portable 欄位轉回 v2 字串值。舊格式契約需要的實體識別由 structured key 還原；Patch 只補契約必要的識別欄位，Delete 只有原刪除授權證明，不附帶陳舊實體內容。預設 detail event discriminator 可由 immutable detail IDs 還原；portable ambiguous discriminator 預設仍回報 reader compatibility 限制；專用回退轉換明確允許新版 portable 識別，發布另受 reader 3 cohort gate 控制，不重新塞入舊標題／摘要。
 
 每筆輸出須通過現行 legacy domain 契約，並重新匯入為與來源完全相同的 canonical operation 與 proof。任何一筆不符即拒絕整批；診斷只有固定原因，不包含使用者資料。快取、父實體標籤和本機欄位不從 materialized projection 補回。
 
-新版 legacy domain 契約已允許省略 canonical registry 判定為 Cache、ParentJoinable、DeviceLocal 或 BoundedPresentation 的欄位；Essential 與必要 Derived 識別仍須存在。使用者命名的 RSS title 仍屬 Essential 且不得省略；event 以已驗證 discriminator 還原識別，不要求重複顯示標題。本機 materializer 僅為缺少的非 nullable cache／顯示欄位提供空字串，RSS 歷程從現有 parent 取得省略的 title／query，不改寫 remote winners。這讓 19-domain 語料的 canonical operations 可經 sanitized v2 編碼、讀取、reduce 並套用資料庫。這項行為需要已更新的 reader；不能據此推論已發佈舊版客戶端也接受缺少欄位。此 adapter 尚未接入正式 fallback dispatch，不代表任意舊 reader 均可讀、來源已確認、v3 root 已替換或完整回退已完成；正式發布仍須 reader capability、durable intent、index readback 與原 v3 root 保護。
+新版 legacy domain 契約已允許省略 canonical registry 判定為 Cache、ParentJoinable、DeviceLocal 或 BoundedPresentation 的欄位；Essential 與必要 Derived 識別仍須存在。使用者命名的 RSS title 仍屬 Essential 且不得省略；event 以已驗證 discriminator 還原識別，不要求重複顯示標題。本機 materializer 僅為缺少的非 nullable cache／顯示欄位提供空字串，RSS 歷程從現有 parent 取得省略的 title／query，不改寫 remote winners。這讓 19-domain 語料的 canonical operations 可經 sanitized v2 編碼、讀取、reduce 並套用資料庫。這項行為需要已更新的 reader；不能據此推論已發佈舊版客戶端也接受缺少欄位。此 adapter 已接入正式 fallback dispatch，但不代表任意舊 reader 均可讀；正式發布仍須 reader capability、durable intent、index readback 與原 v3 root 保護。
 
 ## 回退 journal 與 reader gate
 
@@ -107,7 +107,7 @@ Migration 58→59 新增 `AppSyncV2FallbackPayload`，以 recovery session 為�
 
 重新載入核對兩份固定 bytes、當前 writer 與 canonical→v2 轉換結果。後續本機操作不加入已固定的 journal；交易失敗會一起回復，pre-commit rollback 會清除附屬 payload，保留 pending sources。開始發布後不得把普通 native session 改成回退 session。v3 segment／index publisher 在回退綁定存在時拒絕執行，避免重新打開 v3 flag 後誤發錯誤格式。
 
-目前這個 starter 選項尚未由正式 service 啟用；v2 專用發布、索引確認與 canonical activation 還需接線並驗證中斷重試。因此 3.9 與完整回退驗收仍未完成。
+此 starter 已由正式 service 的預設關閉回退開關選用，接上專用 v2 發布、索引確認與 canonical activation；完整裝置／跨平台及 checkpoint 回退驗收仍待完成，3.9 不因此宣告完成。
 
 ## Sanitized v2 分段發布
 
@@ -239,3 +239,33 @@ session 保持 PublishingSegments，來源仍 pending。重新建立 store／pub
 修改 chunk 並使該段指紋自洽，仍會因整體 envelope 驗證不符而拒絕，不能產生部分 journal。
 還原後重新探索可讀回原內容。此測試使用記憶體 provider 與 SQLite、模擬元件重建；不代表
 Android process death、重開機、實際網路或跨平台驗收已完成。
+
+
+## Portable ambiguous event 的回退身分
+
+`AppSyncSanitizedV2OperationExporter` 預設拒絕需要 reader 3 的 portable event identity，只有
+專用 canonical→v2 preparation 明確啟用轉換。轉換仍經 canonical validation、legacy contract
+及重新 import 完全相等檢查，保留原 entity ID、operation ID、scope digest、原事件 fingerprint
+和因果證據，不從 materialized title／summary 重建身分或引入舊 cache。
+
+`AppSyncJournalEnvelopeCodec.encodeSanitizedFallback` 是專用入口，要求 read version >= 3、
+write version = 2；其餘序列化與既有 v2 bytes 相同，不改寫已凍結的普通回退資料。一般 `encode`
+及 legacy provider 入口仍拒絕這類 identity，checkpoint/shadow 保護亦保留。此方法只產生 bytes，
+不構成發布授權；新 session 與每次遠端寫入仍核對 live reader cohort，已保存 evidence 的純
+重建只用於驗證與回收。新回歸涵蓋 ID/語意往返、普通入口拒絕、read/write protocol 拒絕與
+準備途中 gate 失效。
+
+v2 編碼會補上舊 reader 所需的 `coverUrl: null`。preparation 與 encoder 共用同一個
+`wirePayload` 轉換，讓解碼後的精確相等檢查比較實際 wire shape；canonical operation 仍不含
+cover cache，既有編碼 bytes 不因這個重構而改變。
+
+SQLite／記憶體 provider 整合回歸涵蓋 ambiguous event 的凍結、分段發布、index commit、
+來源確認、本機 materialization、正式 remote loader 讀回及再次 activation；驗證原 entity ID
+與 source fingerprint 保留、portable discriminator 一致、無重複事件，原 checkpoint 不變。
+此驗證不代表真實裝置／process death 或跨平台驗收完成。
+
+再次 activation 的整合回歸也揭露 raw outbox 與 sanitized remote 同 operation ID 的欄位差異。
+`AppSyncCanonicalPendingMerge` 對兩筆不同 raw body 分別 import，只有兩者皆 Accepted 且
+canonical operation 與 delete proof 完全相等才去重；保留原始第一筆來源供既有 receipts 流程
+使用。不同 portable value、時間、身分、因果或刪除授權仍是 IdentityCollision；不同的
+Excluded／NoOp 來源不因同樣沒有 materialized 值而獲准合併。

@@ -5,8 +5,8 @@ import me.thenano.yamibo.yamibo_app.repository.backup.PORTABLE_LEGACY_EVENT_PREF
 import me.thenano.yamibo.yamibo_app.repository.backup.CloudBackupPayloadCodec
 
 /** Legacy wire framing does not make v3-only event evidence readable by older clients.
- * Readers retain support; only legacy publication is rejected. A future downgrade adapter
- * must supply original legacy evidence or a separately verified compatible-reader policy.
+ * Readers retain support; ordinary legacy publication is rejected. The dedicated sanitized
+ * fallback adapter retains portable evidence only behind the compatible reader-3 cohort gate.
  */
 internal object AppSyncLegacyReaderCompatibility {
     const val REASON = "Portable event identity requires v3 reader compatibility"

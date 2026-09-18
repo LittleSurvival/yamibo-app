@@ -3,7 +3,9 @@ package me.thenano.yamibo.yamibo_app.repository.appsync
 import kotlin.test.*
 import me.thenano.yamibo.yamibo_app.repository.appsync.schema.*
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.*
-import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncBulkDeleteProofFields
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.*
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.*
+import me.thenano.yamibo.yamibo_app.repository.appsync.remote.*
 
 class AppSyncSanitizedV2OperationExporterTest {
     @Test fun omittedOversizedDisplayTitleDoesNotBecomeAnEmptyPortableWinner() {
@@ -84,18 +86,58 @@ class AppSyncSanitizedV2OperationExporterTest {
         assertFalse(result.toString().contains("private-title"))
     }
 
-    @Test fun portableAmbiguousEventEvidenceRequiresNewReaderInsteadOfReintroducingLegacyText() {
+    private fun ambiguousOperation(): AppSyncCanonicalOperation {
         val event = corpus.journal.operations.first { it.domainId.value == "favorite.update-event" }
         val fields = event.fields
         val identity = me.thenano.yamibo.yamibo_app.repository.backup.favoriteUpdateEventIdentity(
             fields.getValue("targetType")!!, fields.getValue("targetId")!!.toLong(), fields.getValue("authorId")!!.toLong(),
             fields.getValue("mode")!!, emptyList(), true, fields.getValue("detectedAt")!!.toLong(),
             fields.getValue("summary")!!, fields.getValue("title")!!)
-        val canonical = imported(event.copy(entityId = SyncEntityId(identity.syncId), fields = fields + mapOf(
+        return imported(event.copy(entityId = SyncEntityId(identity.syncId), fields = fields + mapOf(
             "sourceDiscriminator" to identity.sourceDiscriminator, "sourceFingerprint" to identity.sourceFingerprint,
             "detailIds" to "", "ambiguous" to "true"))).operation
+    }
+
+    @Test fun portableAmbiguousEventEvidenceRequiresNewReaderInsteadOfReintroducingLegacyText() {
+        val canonical = ambiguousOperation()
         val result = assertIs<AppSyncV2OperationExport.NeedsAttention>(exporter.export(
             AppSyncCanonicalOperationBlock(account, listOf(canonical))))
         assertEquals(AppSyncV2ExportFailure.ReaderCompatibility, result.reason)
+        val exported = assertIs<AppSyncV2OperationExport.Ready>(exporter.export(
+            AppSyncCanonicalOperationBlock(account, listOf(canonical)), allowPortableEventIdentity = true)).operations.single()
+        assertEquals(canonical, imported(exported).operation)
+        assertEquals(canonical.entityId, exported.entityId.value)
+        assertTrue(assertNotNull(exported.fields["sourceDiscriminator"]).startsWith(
+            me.thenano.yamibo.yamibo_app.repository.backup.PORTABLE_LEGACY_EVENT_PREFIX))
+    }
+
+    @Test fun compatibleFallbackPreservesPortableLegacyEventIdentityWhileOrdinaryWriterStillRejectsIt() {
+        val canonical = ambiguousOperation()
+        val installation = AppSyncInstallation("db", SyncAccountBinding(account), SyncDeviceId(canonical.deviceId),
+            SyncDeviceEpoch(canonical.deviceEpoch), SyncWriterNonce("writer"), canonical.sequence + 1,
+            AppSyncInstallationState.Active, null, null, null, false, AppSyncScheduleSettings(), 0, 0)
+        val replica = "${canonical.deviceId}:${canonical.deviceEpoch}"
+        val journal = AppSyncCanonicalJournal(AppSyncCanonicalOperationBlock(account, listOf(canonical)),
+            canonical.deviceId, canonical.deviceEpoch, installation.writerNonce.value, canonical.sequence, canonical.sequence,
+            canonical.causalContext + (replica to canonical.sequence), emptyList(), 100, 3, 3, "test", canonical.sequence)
+        assertIs<AppSyncV2JournalPreparation.NeedsAttention>(AppSyncSanitizedV2JournalPreparation().prepare(installation, journal))
+        val ready = assertIs<AppSyncV2JournalPreparation.Ready>(AppSyncSanitizedV2JournalPreparation { true }.prepare(installation, journal))
+        val codec = AppSyncJournalEnvelopeCodec()
+        assertFailsWith<IllegalArgumentException> { codec.encode(ready.payload) }
+        assertFailsWith<IllegalArgumentException> { codec.encodeSanitizedFallback(ready.payload.copy(protocolReadVersion = 2)) }
+        assertFailsWith<IllegalArgumentException> { codec.encodeSanitizedFallback(ready.payload.copy(protocolWriteVersion = 3)) }
+        val decoded = assertIs<AppSyncJournalValidation.Valid>(codec.validate(ready.envelope)).envelope.payload
+        assertEquals(ready.payload, decoded)
+        assertEquals(2, decoded.protocolWriteVersion)
+        assertEquals(3, decoded.protocolReadVersion)
+        assertEquals(canonical, imported(decoded.operations.single()).operation)
+        assertEquals(canonical.entityId, decoded.operations.single().entityId.value)
+        var checks = 0
+        val denied = assertIs<AppSyncV2JournalPreparation.NeedsAttention>(AppSyncSanitizedV2JournalPreparation {
+            ++checks == 1
+        }.prepare(installation, journal))
+        assertEquals(AppSyncV2JournalFailure.Compatibility, denied.reason)
+        assertEquals(AppSyncV2JournalFailure.Compatibility, assertIs<AppSyncV2JournalPreparation.NeedsAttention>(
+            AppSyncSanitizedV2JournalPreparation { true }.prepare(installation, journal.copy(protocolReadVersion = 2))).reason)
     }
 }

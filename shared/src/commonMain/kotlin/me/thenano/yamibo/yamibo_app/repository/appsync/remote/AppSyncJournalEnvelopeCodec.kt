@@ -100,14 +100,21 @@ internal class AppSyncJournalEnvelopeCodec(
 ) {
     fun encode(payload: AppSyncJournalPayload): String {
         require(!AppSyncLegacyReaderCompatibility.requiresV3(payload)) { AppSyncLegacyReaderCompatibility.REASON }
+        return encodeValidated(payload)
+    }
+
+    /** Only the dedicated sanitized fallback path may use reader-3 identity evidence in v2
+     * framing. Its caller must independently verify the live cohort before every remote write.
+     * Ordinary legacy publishers retain the default encode guard.
+     */
+    internal fun encodeSanitizedFallback(payload: AppSyncJournalPayload): String {
+        require(payload.protocolReadVersion >= 3 && payload.protocolWriteVersion == 2)
+        return encodeValidated(payload)
+    }
+
+    private fun encodeValidated(payload: AppSyncJournalPayload): String {
         validatePayload(payload)?.let { throw IllegalArgumentException(it) }
-        // Older v2 reducers require these keys on Put even when no cover exists. Keep only
-        // the nullable wire shape; canonical storage/projections must not carry cover fields.
-        val compatiblePayload = payload.copy(operations = payload.operations.map { operation ->
-            if (operation.kind == SyncOperationKind.Put && operation.domainId.value in LEGACY_COVER_REQUIRED_DOMAINS) {
-                operation.copy(fields = mapOf("coverUrl" to null) + operation.fields)
-            } else operation
-        })
+        val compatiblePayload = wirePayload(payload)
         val payloadJson = json.encodeToString(AppSyncJournalPayload.serializer(), compatiblePayload)
         val fingerprint = stableAppSyncFingerprint(payloadJson)
         val encodedPayload = compress(payloadJson)
@@ -118,6 +125,16 @@ internal class AppSyncJournalEnvelopeCodec(
             appendLine("payload=$encodedPayload")
             append("[${AppSyncJournalDefaults.JOURNAL_MARKER}:END]")
         }
+    }
+
+    internal fun wirePayload(payload: AppSyncJournalPayload): AppSyncJournalPayload {
+        // Older v2 reducers require these keys on Put even when no cover exists. Keep only
+        // the nullable wire shape; canonical storage/projections must not carry cover fields.
+        return payload.copy(operations = payload.operations.map { operation ->
+            if (operation.kind == SyncOperationKind.Put && operation.domainId.value in LEGACY_COVER_REQUIRED_DOMAINS) {
+                operation.copy(fields = mapOf("coverUrl" to null) + operation.fields)
+            } else operation
+        })
     }
 
     fun validateReaderHtml(contentHtml: String): AppSyncJournalValidation =

@@ -16,7 +16,7 @@ internal sealed interface AppSyncV2OperationExport {
  * This does not authorize publication, acknowledge sources, or replace an indexed v3 root.
  */
 internal class AppSyncSanitizedV2OperationExporter {
-    fun export(block: AppSyncCanonicalOperationBlock): AppSyncV2OperationExport {
+    fun export(block: AppSyncCanonicalOperationBlock, allowPortableEventIdentity: Boolean = false): AppSyncV2OperationExport {
         try { AppSyncCanonicalOperationBlockCodec().encode(block) }
         catch (_: Exception) { return attention(AppSyncV2ExportFailure.InvalidCanonical) }
         val proofs = block.authorizations.associateBy { it.authorizationId }
@@ -49,7 +49,7 @@ internal class AppSyncSanitizedV2OperationExporter {
                 SyncAccountBinding(block.accountBinding), SyncDomainId(domain.name), SyncEntityId(operation.entityId),
                 operation.generation, operation.kind, fields, SyncCausalContext(operation.causalContext),
                 operation.createdAtEpochMillis, operation.origin, operation.authorizationId)
-            if (AppSyncLegacyReaderCompatibility.requiresV3(source))
+            if (!allowPortableEventIdentity && AppSyncLegacyReaderCompatibility.requiresV3(source))
                 return attention(AppSyncV2ExportFailure.ReaderCompatibility)
             if (SyncDomainRegistry.Default.validationFailure(source) != null)
                 return attention(AppSyncV2ExportFailure.LegacyContract)

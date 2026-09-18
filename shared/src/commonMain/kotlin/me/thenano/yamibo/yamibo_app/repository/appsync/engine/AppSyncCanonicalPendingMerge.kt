@@ -39,8 +39,18 @@ internal class AppSyncCanonicalPendingMerge(
         if (sources.any { it.accountBinding.value != current.accountBinding }) return attention(AppSyncPendingMergeFailure.AccountMismatch)
         val unique = linkedMapOf<SyncOperationId, SyncOperation>()
         sources.forEach { source ->
-            val old = unique.put(source.operationId, source)
-            if (old != null && old != source) return attention(AppSyncPendingMergeFailure.IdentityCollision)
+            val old = unique[source.operationId]
+            if (old == null) unique[source.operationId] = source
+            else if (old != source) {
+                // Sanitized fallback intentionally removes cache fields and may replace raw
+                // event evidence with its portable identity. Only exact canonical operation
+                // and authorization equality can establish that these are the same source.
+                val left = importer.import(current.accountBinding, old)
+                val right = importer.import(current.accountBinding, source)
+                if (left !is AppSyncCanonicalOperationImport.Accepted || right !is AppSyncCanonicalOperationImport.Accepted ||
+                    left.operation != right.operation || left.proof != right.proof)
+                    return attention(AppSyncPendingMergeFailure.IdentityCollision)
+            }
         }
         val nativeImports = linkedMapOf<SyncOperationId, AppSyncCanonicalOperationImport.Accepted>()
         if (canonicalBlock != null) {

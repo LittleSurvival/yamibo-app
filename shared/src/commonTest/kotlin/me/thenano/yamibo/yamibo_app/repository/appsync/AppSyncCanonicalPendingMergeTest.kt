@@ -25,6 +25,24 @@ class AppSyncCanonicalPendingMergeTest {
         }
     }
 
+    @Test fun sanitizedDuplicatesRequireExactCanonicalContentAndAuthorization() {
+        val original = source("favorite.item", 1)
+        val sanitized = assertIs<AppSyncV2OperationExport.Ready>(AppSyncSanitizedV2OperationExporter().export(native(original))).operations.single()
+        for (sources in listOf(listOf(original, sanitized), listOf(sanitized, original))) {
+            assertEquals(ready(base(), listOf(original)).checkpoint, ready(base(), sources).checkpoint)
+        }
+        val changed = sanitized.copy(fields = sanitized.fields + ("title" to "different portable title"))
+        assertEquals(AppSyncPendingMergeFailure.IdentityCollision, failure(base(), listOf(original, changed)).reason)
+        val delete = original.copy(kind = SyncOperationKind.Delete, origin = SyncOperationOrigin.UserAction,
+            bulkDeleteAuthorizationId = "batch", fields = mapOf(AppSyncBulkDeleteProofFields.SCOPE to "selection",
+                AppSyncBulkDeleteProofFields.COUNT to "1", AppSyncBulkDeleteProofFields.EXPIRES_AT to Long.MAX_VALUE.toString()))
+        assertEquals(AppSyncPendingMergeFailure.IdentityCollision, failure(base(), listOf(delete,
+            delete.copy(fields = delete.fields + (AppSyncBulkDeleteProofFields.COUNT to "2")))).reason)
+        val excluded = original.copy(domainId = SyncDomainId("settings"), entityId = SyncEntityId("future.setting"))
+        assertEquals(AppSyncPendingMergeFailure.IdentityCollision, failure(base(), listOf(excluded,
+            excluded.copy(fields = excluded.fields + ("title" to "changed")))).reason)
+    }
+
     @Test fun mixedRepresentationIdentityCollisionAndNativeGapAreRejected() {
         val first = source("detail-note", 1)
         val block = native(first)
