@@ -203,6 +203,9 @@ class AppSyncV3SegmentPublisherTest {
         assertEquals(false, recovery.session(journalSession.sessionId)?.indexCommitted)
         recovery.markNativeIndexCommitted(journalSession.sessionId, 900, index(ref), 21)
         assertEquals(AppSyncRecoveryPhase.ActivatingLocal, recovery.session(journalSession.sessionId)?.phase)
+        // This synthetic journal contains no source operation: publication alone cannot acknowledge it.
+        assertFailsWith<IllegalArgumentException> { recovery.activateCommittedSession(journalSession.sessionId, 22) }
+        assertEquals(AppSyncRecoveryPhase.ActivatingLocal, recovery.session(journalSession.sessionId)?.phase)
         assertEquals(listOf(pending), operations.pendingOperations())
     }
 
@@ -219,6 +222,47 @@ class AppSyncV3SegmentPublisherTest {
         assertIs<AppSyncSegmentIndexCommitResult.Verified>(commit())
         assertEquals(count, provider.posts.size)
         assertEquals(listOf(pending), operations.pendingOperations())
+        assertTrue(operations.verifiedCheckpoints().isEmpty())
+        assertFailsWith<IllegalArgumentException> { recovery.activateCommittedSession(session.sessionId, 30) }
+        assertEquals(AppSyncRecoveryPhase.ActivatingLocal, recovery.session(session.sessionId)?.phase)
+    }
+
+    @Test fun nativeJournalActivationAcknowledgesOnlyExactPublishedSourcesAndRollsBackAtomically() = fixture {
+        recovery.rollbackPreCommit(session.sessionId)
+        val journalSession = recovery.createOrResumeSegmentedJournal(account, setOf(pending.operationId.value), "journal", 2)
+        recovery.startSegmentedJournal(journalSession.sessionId, 3)
+        val imported = assertIs<AppSyncCanonicalOperationImport.Accepted>(AppSyncCanonicalOperationImporter().import(account.value, pending))
+        val identity = "${journalSession.targetDeviceId.value}:${journalSession.targetDeviceEpoch.value}"
+        val document = AppSyncCanonicalJournal(AppSyncCanonicalOperationBlock(account.value, listOf(imported.operation)),
+            journalSession.targetDeviceId.value, journalSession.targetDeviceEpoch.value, journalSession.targetWriterNonce.value,
+            pending.sequence.value, pending.sequence.value, emptyMap(), emptyList(), 1, 3, 3, "test", pending.sequence.value)
+        val frozen = AppSyncV3DocumentCodec().encodeJournal(identity, document)
+        suspend fun commitJournal() = committer().commit(journalSession.sessionId, frozen, AppSyncV3PayloadKind.Journal, identity,
+            AppSyncBlogClassSelection.Existing(BlogClassId(7)), FormHash("test"))
+        assertIs<AppSyncSegmentIndexCommitResult.Verified>(commitJournal())
+        val later = operations.appendLocalOperation(account, SyncDomainId("settings"), SyncEntityId("novelreadersettings.fontsize"),
+            1, SyncOperationKind.Put, mapOf("type" to "int", "value" to "19"), SyncCausalContext(), 30, SyncOperationOrigin.UserAction)
+        val before = operations.installation()
+        assertFailsWith<IllegalStateException> {
+            db.transaction {
+                recovery.activateCommittedSession(journalSession.sessionId, 31)
+                error("abort activation")
+            }
+        }
+        assertEquals(before, operations.installation())
+        assertEquals(listOf(pending, later), operations.pendingOperations())
+        assertEquals(AppSyncRecoveryPhase.ActivatingLocal, recovery.session(journalSession.sessionId)?.phase)
+        SqlDelightAppSyncRecoveryStore(db).activateCommittedSession(journalSession.sessionId, 32)
+        assertEquals(listOf(later), operations.pendingOperations())
+        assertEquals(AppSyncOperationLifecycle.Acknowledged, operations.allOutboxOperations().single { it.first == pending }.second)
+        assertEquals(AppSyncRecoveryPhase.Completed, recovery.session(journalSession.sessionId)?.phase)
+        assertEquals(before?.nextSequence, operations.installation()?.nextSequence)
+        val activated = operations.installation()
+        recovery.activateCommittedSession(journalSession.sessionId, 33)
+        assertEquals(activated, operations.installation())
+        val count = provider.posts.size
+        assertIs<AppSyncSegmentIndexCommitResult.Verified>(commitJournal())
+        assertEquals(count, provider.posts.size)
         assertTrue(operations.verifiedCheckpoints().isEmpty())
     }
 

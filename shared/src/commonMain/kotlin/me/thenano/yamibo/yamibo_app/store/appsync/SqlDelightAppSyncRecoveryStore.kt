@@ -680,6 +680,13 @@ internal class SqlDelightAppSyncRecoveryStore(
 
     fun activateCommittedSession(sessionId: String, activatedAtEpochMillis: Long) {
         val session = requireSession(sessionId)
+        if (usesNativeTransport(sessionId)) {
+            require(session.mode == AppSyncRecoveryMode.SegmentedJournal) {
+                "Native checkpoint requires canonical projection activation"
+            }
+            activateNativeJournal(sessionId, activatedAtEpochMillis)
+            return
+        }
         when (session.mode) {
             AppSyncRecoveryMode.LegacyShadow ->
                 activateCommittedRecovery(sessionId, activatedAtEpochMillis)
@@ -688,6 +695,47 @@ internal class SqlDelightAppSyncRecoveryStore(
             AppSyncRecoveryMode.SegmentedCheckpoint ->
                 activateCommittedSegmentedCheckpoint(sessionId, activatedAtEpochMillis)
         }
+    }
+
+    private fun activateNativeJournal(sessionId: String, activatedAtEpochMillis: Long) = db.transaction {
+        val session = requireSession(sessionId)
+        require(session.mode == AppSyncRecoveryMode.SegmentedJournal && session.indexCommitted)
+        if (session.phase == AppSyncRecoveryPhase.Completed) return@transaction
+        require(session.phase == AppSyncRecoveryPhase.ActivatingLocal && activatedAtEpochMillis >= 0)
+        val payload = requireNotNull(queries.getRecoveryPayload(sessionId).executeAsOneOrNull())
+        require(payload.transportVersion == 3L)
+        val intent = requireNotNull(nativeIndexIntent(sessionId))
+        markNativeIndexCommitted(sessionId, requireNotNull(payload.verifiedIndexBlogId), intent.body,
+            requireNotNull(payload.indexVerifiedAtEpochMillis))
+        val journal = AppSyncV3DocumentCodec().discover(payload.canonicalEnvelope, session.accountBinding.value,
+            AppSyncV3PayloadKind.Journal) as? AppSyncV3DocumentRead.Journal
+        requireNotNull(journal)
+        val operations = SqlDelightAppSyncOperationStore(db, json)
+        val installation = requireNotNull(operations.installation())
+        require(installation.accountBinding == session.accountBinding && installation.deviceId == session.sourceDeviceId &&
+            installation.deviceEpoch == session.sourceDeviceEpoch && installation.writerNonce == session.targetWriterNonce &&
+            installation.state == AppSyncInstallationState.Active)
+        val sources = operations.allOutboxOperations().associateBy { it.first.operationId.value }
+        val published = journal.document.block.operations.associateBy { Triple(it.deviceId, it.deviceEpoch, it.sequence) }
+        val proofs = journal.document.block.authorizations.associateBy { it.authorizationId }
+        val importer = me.thenano.yamibo.yamibo_app.repository.appsync.schema.AppSyncCanonicalOperationImporter()
+        for (id in session.sourceOperationIds) {
+            val (source, lifecycle) = requireNotNull(sources[id]) { "Native publication source is missing" }
+            require(lifecycle in setOf(AppSyncOperationLifecycle.PendingLocal, AppSyncOperationLifecycle.PublishedUnverified,
+                AppSyncOperationLifecycle.Acknowledged))
+            require(source.deviceId == session.sourceDeviceId && source.deviceEpoch == session.sourceDeviceEpoch)
+            val imported = importer.import(session.accountBinding.value, source)
+                as? me.thenano.yamibo.yamibo_app.repository.appsync.schema.AppSyncCanonicalOperationImport.Accepted
+            requireNotNull(imported) { "Native publication does not represent this source" }
+            val operation = imported.operation
+            require(published[Triple(operation.deviceId, operation.deviceEpoch, operation.sequence)] == operation)
+            require(imported.proof == operation.authorizationId?.let(proofs::get))
+        }
+        if (session.sourceOperationIds.isNotEmpty()) queries.markOperationsAcknowledged(activatedAtEpochMillis, session.sourceOperationIds.toList())
+        queries.upsertRemoteBlog("journal-root:${session.generationId}", AppSyncRemoteBlogKind.JournalRoot.name.uppercase(),
+            requireNotNull(session.rootBlogId), null, journal.metadata.canonicalFingerprint, activatedAtEpochMillis, activatedAtEpochMillis)
+        queries.updateInstallationHeartbeat(activatedAtEpochMillis, session.rootBlogId, AppSyncInstallationState.Active.name.uppercase())
+        transition(sessionId, AppSyncRecoveryPhase.ActivatingLocal, AppSyncRecoveryPhase.Completed, activatedAtEpochMillis)
     }
 
     private fun activateCommittedSegmentedCheckpoint(

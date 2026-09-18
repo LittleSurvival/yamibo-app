@@ -43,3 +43,7 @@ Migration 50 凍結 native index 的完整 body／SHA-256、更新目標 ID 與�
 Provider 不支援 compare-and-swap，因此更新前檢查與 POST 間仍有跨裝置競爭窗口；此元件尚未接入正式服務，也未宣告並行 writer／worker／清理驗收完成。呼叫端仍須完成 writer/cohort 驗證、durable retry 排程及後續本機 activation。缺少固定傳輸設定與完整裝置驗收，v3 rollout 保持關閉。
 
 五項新增 SQLite／fake-provider 測試涵蓋 root 後建立 index、pending 保留、遺失回應後重建 committer 且不重送、保留其他參照、前置版本變動、預設及提交前 gate、完整掃描中斷、虛假成功回應、重複候選與登入中斷。Migration 測試確認新欄位預設為 null；既有 store 提交測試改為先保存 immutable intent。
+
+Native journal 的本機 activation 現在由 `activateCommittedSession` 分流，不能沿用舊版僅根據 source IDs 確認的路徑。交易內重驗 index intent／已保存證據、凍結 journal、安裝帳號／device／epoch／writer／Active 狀態。每筆 session 來源須存在、屬於可確認生命週期，且經 canonical importer 後操作與共享刪除 proof 均完整存在於已發布 journal；Excluded／NoOp／無法轉接或缺少操作時拒絕全部 activation。
+
+通過後只確認該 session 的來源，保存 canonical fingerprint 的 root 連結，更新 heartbeat 並進入 Completed；sequence counter 與後來新增的 pending 操作保持原值。全部 SQL 在同一交易，外層回滾會一起回復；Completed 重試不再改寫時間或提交遠端。不建立 checkpoint coverage，也不刪除來源。Native checkpoint 暫時拒絕 generic activation，仍需接上 canonical projection／pending overlay 的專用流程，不能只標記完成。

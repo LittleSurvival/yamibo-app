@@ -36,7 +36,7 @@ internal class AppSyncV3IndexCommitter(
         selection: AppSyncBlogClassSelection.Existing, formHash: FormHash): AppSyncSegmentIndexCommitResult {
         if (!canWrite()) return AppSyncSegmentIndexCommitResult.Terminal("Native index publication is disabled")
         val session = requireNotNull(recovery.session(sessionId))
-        if (session.indexCommitted && session.phase == AppSyncRecoveryPhase.ActivatingLocal && recovery.usesNativeTransport(sessionId))
+        if (session.indexCommitted && session.phase in setOf(AppSyncRecoveryPhase.ActivatingLocal, AppSyncRecoveryPhase.Completed) && recovery.usesNativeTransport(sessionId))
             return AppSyncSegmentIndexCommitResult.Verified
         val publication = when (val result = publisher.publish(sessionId, envelope, kind, identity, selection, formHash)) {
             is AppSyncV3SegmentPublishResult.ReadyToCommitIndex -> result
