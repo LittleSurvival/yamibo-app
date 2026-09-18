@@ -9,6 +9,37 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.*
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 
 class AppSyncCanonicalDatabaseMaterializerTest {
+    @Test fun sanitizedV2CorpusMaterializesWithParentJoinsAndWithoutExcludedWireFields() = database { db, materializer ->
+        val corpus = AppSyncSyntheticCorpus.create()
+        val canonical = corpus.journal.operations.map {
+            assertIs<AppSyncCanonicalOperationImport.Accepted>(AppSyncCanonicalOperationImporter()
+                .import(corpus.journal.accountBinding.value, it)).operation
+        }
+        val exported = assertIs<AppSyncV2OperationExport.Ready>(AppSyncSanitizedV2OperationExporter()
+            .export(AppSyncCanonicalOperationBlock(corpus.journal.accountBinding.value, canonical))).operations
+        val codec = me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncJournalEnvelopeCodec()
+        val read = assertIs<me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncJournalValidation.Valid>(
+            codec.validate(codec.encode(corpus.journal.copy(operations = exported))))
+        val resolved = me.thenano.yamibo.yamibo_app.repository.appsync.engine.OperationReducer()
+            .reduce(operations = read.envelope.payload.operations).entities.values
+        assertEquals(AppSyncCanonicalSchema.domains.keys, resolved.map { it.key.domainId.value }.toSet())
+        db.transaction {
+            resolved.sortedBy {
+                me.thenano.yamibo.yamibo_app.repository.appsync.engine.SqlDelightSyncDomainStateAdapter
+                    .MATERIALIZATION_ORDER.getValue(it.key.domainId.value)
+            }.forEach(materializer::apply)
+        }
+        val parents = db.rssSearchSubscriptionQueries.getAll().executeAsList().associateBy { it.id }
+        val history = db.rssSearchReadingHistoryQueries.getAll().executeAsList().single()
+        assertEquals(parents.getValue(history.subscriptionId).title, history.subscriptionTitle)
+        assertEquals(parents.getValue(history.subscriptionId).query, history.subscriptionQuery)
+        assertEquals("", history.threadTitle)
+        assertNull(history.coverUrl)
+        assertTrue(db.tagCatalogReadingHistoryQueries.getAll().executeAsList().all { it.postTitle == "" && it.threadTitle == "" })
+        assertTrue(db.favoriteUpdateEventQueries.getAll().executeAsList().isNotEmpty())
+        assertTrue(exported.none { "subscriptionTitle" in it.fields || "subscriptionQuery" in it.fields || "coverUrl" in it.fields })
+    }
+
     private fun checkpoint(): AppSyncCanonicalCheckpoint {
         val corpus = AppSyncSyntheticCorpus.create()
         val cache = mutableMapOf<SyncOperationId, AppSyncCanonicalOperation>()

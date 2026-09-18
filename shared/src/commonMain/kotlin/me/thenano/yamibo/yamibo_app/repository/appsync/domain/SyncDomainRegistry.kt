@@ -5,6 +5,8 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperation
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationKind
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncPortability
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncPortabilityPolicy
+import me.thenano.yamibo.yamibo_app.repository.appsync.schema.AppSyncCanonicalSchema
+import me.thenano.yamibo.yamibo_app.repository.appsync.schema.AppSyncFieldClass
 import me.thenano.yamibo.yamibo_app.repository.backup.favoriteUpdateEventIdentity
 import me.thenano.yamibo.yamibo_app.repository.rss.normalizeRssSearchKeyword
 import me.thenano.yamibo.yamibo_app.repository.rss.rssSearchSubscriptionSyncId
@@ -35,7 +37,10 @@ internal data class SyncDomainContract(
         if (operation.domainId != id) return "Operation domain does not match contract"
         if (operation.kind !in allowedKinds) return "Operation kind is not allowed by ${id.value}"
         val missing = requiredFieldsByKind[operation.kind].orEmpty().filter {
-            AppSyncPortabilityPolicy.field(id.value, it).portability == AppSyncPortability.Portable
+            AppSyncPortabilityPolicy.field(id.value, it).portability == AppSyncPortability.Portable &&
+                AppSyncCanonicalSchema.domains[id.value]?.fields?.get(it)?.classification !in setOf(
+                    AppSyncFieldClass.Cache, AppSyncFieldClass.ParentJoinable,
+                    AppSyncFieldClass.DeviceLocal, AppSyncFieldClass.BoundedPresentation)
         }.toSet() - operation.fields.keys
         if (missing.isNotEmpty()) return "Missing required fields: ${missing.sorted().joinToString()}"
         allowedFieldsByKind[operation.kind]?.let { allowed ->
@@ -357,7 +362,7 @@ internal class SyncDomainRegistry(
                 ambiguous = required("ambiguous").toBooleanStrict(),
                 detectedAt = required("detectedAt").toLong(),
                 summary = required("summary"),
-                title = required("title"),
+                title = operation.fields["title"].orEmpty(),
                 sourceDiscriminator = required("sourceDiscriminator"),
             )
             require(operation.entityId.value == identity.syncId)

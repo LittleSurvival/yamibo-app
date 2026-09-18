@@ -6,6 +6,18 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operation.*
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncBulkDeleteProofFields
 
 class AppSyncSanitizedV2OperationExporterTest {
+    @Test fun omittedOversizedDisplayTitleDoesNotBecomeAnEmptyPortableWinner() {
+        val source = corpus.journal.operations.first { it.domainId.value == "favorite.item" }
+        val canonical = imported(source.copy(fields = source.fields + ("title" to "標題".repeat(300)))).operation
+        assertFalse(6 in canonical.fields)
+        val exported = assertIs<AppSyncV2OperationExport.Ready>(exporter.export(
+            AppSyncCanonicalOperationBlock(account, listOf(canonical)))).operations.single()
+        assertFalse("title" in exported.fields)
+        assertEquals(canonical, imported(exported).operation)
+        val invalid = source.copy(fields = source.fields - "targetId")
+        assertIs<AppSyncCanonicalOperationImport.NeedsAttention>(AppSyncCanonicalOperationImporter().import(account, invalid))
+    }
+
     private val corpus by lazy { AppSyncSyntheticCorpus.create() }
     private val account get() = corpus.journal.accountBinding.value
     private val exporter = AppSyncSanitizedV2OperationExporter()
@@ -36,10 +48,7 @@ class AppSyncSanitizedV2OperationExporterTest {
                 }
             }
         }
-        // These legacy Put contracts still require excluded parent/cache fields. Do not
-        // repopulate them from local projections to make a downgrade appear successful.
-        assertEquals(setOf("rss.search-subscription", "reading.tag-catalog", "reading.rss-search",
-            "reading.rss-catalog", "favorite.update-event"), blocked)
+        assertEquals(emptySet(), blocked)
         assertEquals(operations, corpus.journal.operations)
     }
 

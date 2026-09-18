@@ -73,10 +73,20 @@ internal class DatabaseSyncDomainMaterializer(
         replacementCovers?.get(entity.key.domainId.value to entity.key.entityId.value)
 
     override fun apply(entity: ResolvedSyncEntity) = apply(MaterializedEntity(
-        entity.key, entity.fields.mapValues { it.value.value },
+        entity.key, legacyLocalValues(entity),
         entity.fields.mapValues { Winner(it.value.operation.operationId, it.value.operation.createdAtEpochMillis) },
         entity.relationPresent, entity.relationOperation?.createdAtEpochMillis, entity.tombstone != null,
     ))
+
+    private fun legacyLocalValues(entity: ResolvedSyncEntity): Map<String, String?> {
+        val values = entity.fields.mapValues { it.value.value }.toMutableMap()
+        // Empty local display columns are not new remote winners or operation evidence.
+        AppSyncCanonicalSchema.domains[entity.key.domainId.value]?.fields?.values?.filter {
+            it.classification == AppSyncFieldClass.BoundedPresentation ||
+                it.classification == AppSyncFieldClass.Cache && !it.nullable
+        }?.forEach { if (it.name !in values) values[it.name] = "" }
+        return values
+    }
 
     /** Applies database projections atomically; canonical provenance remains owned by the caller.
      * Does not activate a checkpoint, delete old journals, or update external settings preferences.
@@ -604,8 +614,8 @@ internal class DatabaseSyncDomainMaterializer(
         val fields = entity.values()
         db.rssSearchReadingHistoryQueries.upsert(
             parent.id,
-            fields.require("subscriptionTitle"),
-            fields.require("subscriptionQuery"),
+            fields["subscriptionTitle"] ?: parent.title,
+            fields["subscriptionQuery"] ?: parent.query,
             fields.long("subscriptionPage"),
             fields.long("threadId"),
             fields.require("threadTitle"),
@@ -632,8 +642,8 @@ internal class DatabaseSyncDomainMaterializer(
         val fields = entity.values()
         db.rssCatalogReadingHistoryQueries.upsert(
             parent.id,
-            fields.require("subscriptionTitle"),
-            fields.require("subscriptionQuery"),
+            fields["subscriptionTitle"] ?: parent.title,
+            fields["subscriptionQuery"] ?: parent.query,
             fields.long("subscriptionPage"),
             fields.long("threadId"),
             fields.require("threadTitle"),

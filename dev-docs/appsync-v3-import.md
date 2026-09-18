@@ -93,4 +93,4 @@ Legacy publication 現在有共用相容性檢查：journal 操作、checkpoint 
 
 每筆輸出須通過現行 legacy domain 契約，並重新匯入為與來源完全相同的 canonical operation 與 proof。任何一筆不符即拒絕整批；診斷只有固定原因，不包含使用者資料。快取、父實體標籤和本機欄位不從 materialized projection 補回。
 
-目前語料中 RSS 訂閱、tag catalog／RSS search／RSS catalog 瀏覽歷程、FavoriteUpdate event 的 legacy Put 契約仍要求已排除的欄位，轉換回報 LegacyContract。這是尚待解決的 reader／writer 契約相容問題，不能透過恢復已排除資料迴避。此 adapter 尚未接入正式 fallback dispatch，不代表任意舊 reader 均可讀、來源已確認、v3 root 已替換或完整回退已完成；正式發布仍須 reader capability、durable intent、index readback 與原 v3 root 保護。
+新版 legacy domain 契約已允許省略 canonical registry 判定為 Cache、ParentJoinable、DeviceLocal 或 BoundedPresentation 的欄位；Essential 與必要 Derived 識別仍須存在。使用者命名的 RSS title 仍屬 Essential 且不得省略；event 以已驗證 discriminator 還原識別，不要求重複顯示標題。本機 materializer 僅為缺少的非 nullable cache／顯示欄位提供空字串，RSS 歷程從現有 parent 取得省略的 title／query，不改寫 remote winners。這讓 19-domain 語料的 canonical operations 可經 sanitized v2 編碼、讀取、reduce 並套用資料庫。這項行為需要已更新的 reader；不能據此推論已發佈舊版客戶端也接受缺少欄位。此 adapter 尚未接入正式 fallback dispatch，不代表任意舊 reader 均可讀、來源已確認、v3 root 已替換或完整回退已完成；正式發布仍須 reader capability、durable intent、index readback 與原 v3 root 保護。
