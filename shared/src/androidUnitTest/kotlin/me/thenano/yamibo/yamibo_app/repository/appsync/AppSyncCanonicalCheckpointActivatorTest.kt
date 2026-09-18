@@ -14,6 +14,40 @@ import me.thenano.yamibo.yamibo_app.store.appsync.*
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 
 class AppSyncCanonicalCheckpointActivatorTest {
+    @Test fun engineRecoveryHookRunsUnderLeaseBeforeGenericActivationAndReleasesOnReturn() = fixture {
+        val pending = append()
+        var calls = 0
+        val cloud = AppSyncJournalLoadResult.Success(emptyList(), verifiedCanonicalCheckpoints = listOf(verified()))
+        val expected = OperationSyncResult.RetryScheduled("native recovery continuation")
+        assertEquals(expected, synchronize(cloud) { binding, _, plan ->
+            calls++
+            assertEquals(account, binding)
+            assertEquals(checkpoint.checkpointId, plan.checkpoint.document.checkpointId)
+            assertNotNull(db.appSyncOperationQueries.getRunLease().executeAsOneOrNull())
+            assertNull(state.read(account.value))
+            expected
+        })
+        assertEquals(1, calls)
+        assertNull(db.appSyncOperationQueries.getRunLease().executeAsOneOrNull())
+        assertNull(state.read(account.value))
+        assertEquals(listOf(pending), store.pendingOperations())
+    }
+
+    @Test fun invalidCanonicalCloudCannotInvokeRecoveryHookAndNullHookKeepsReaderBehavior() = fixture {
+        val pending = append()
+        val cloud = AppSyncJournalLoadResult.Success(emptyList(), verifiedCanonicalCheckpoints = listOf(verified()))
+        var calls = 0
+        assertIs<OperationSyncResult.PausedProvider>(synchronize(cloud.copy(canonicalReadIssues = listOf("corrupt"))) { _, _, _ ->
+            calls++; error("Invalid cloud must not reach recovery")
+        })
+        assertEquals(0, calls)
+        assertNull(state.read(account.value))
+        store.updateState(AppSyncInstallationState.Active)
+        assertIs<OperationSyncResult.PausedProvider>(synchronize(cloud) { _, _, _ -> calls++; null })
+        assertEquals(1, calls)
+        assertNotNull(state.read(account.value))
+        assertEquals(listOf(pending), store.pendingOperations())
+    }
     @Test fun nativeCoordinatorRetriesCheckpointSettingsWithoutRepeatingRemotePublication() = fixture {
         val pending = append()
         val (recovery, id) = stageNativeCheckpoint()
@@ -275,7 +309,8 @@ class AppSyncCanonicalCheckpointActivatorTest {
             if (committed) recovery.markNativeIndexCommitted(session.sessionId, 400, index, 7)
             return recovery to session.sessionId
         }
-        fun synchronize(cloud: AppSyncJournalLoadResult.Success): OperationSyncResult = kotlinx.coroutines.runBlocking {
+        fun synchronize(cloud: AppSyncJournalLoadResult.Success,
+            resume: suspend (SyncAccountBinding, io.github.littlesurvival.dto.value.FormHash, AppSyncCanonicalCloudPlan.Ready) -> OperationSyncResult? = { _, _, _ -> null }): OperationSyncResult = kotlinx.coroutines.runBlocking {
             val remote = object : AppSyncJournalRemote {
                 override suspend fun loadJournals(accountBinding: SyncAccountBinding, forceDiscovery: Boolean) = cloud
                 override suspend fun publishOwnJournal(payload: AppSyncJournalPayload, expectedFingerprint: String?,
@@ -288,7 +323,8 @@ class AppSyncCanonicalCheckpointActivatorTest {
             }
             OperationSyncEngine(store, remote, legacy, nowMillis = { 20 }, ownerId = { "canonical-reader-test" },
                 activateCanonical = { activator().activate(it.checkpoint, it.canonicalOperations, it.legacyOperations) },
-                hasCanonicalState = { db.appSyncCanonicalStateQueries.getState().executeAsOneOrNull() != null })
+                hasCanonicalState = { db.appSyncCanonicalStateQueries.getState().executeAsOneOrNull() != null },
+                resumeCanonicalRecovery = resume)
                 .synchronize(account, io.github.littlesurvival.dto.value.FormHash("test"), detectEmptyCloud = true)
         }
         fun activator(operations: AppSyncOperationStore = store) =

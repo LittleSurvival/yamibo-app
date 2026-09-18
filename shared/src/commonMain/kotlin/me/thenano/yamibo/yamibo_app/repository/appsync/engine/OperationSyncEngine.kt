@@ -273,6 +273,7 @@ internal class OperationSyncEngine(
     private val activateCanonical: ((AppSyncCanonicalCloudPlan.Ready) -> AppSyncCanonicalActivationResult)? = null,
     private val hasCanonicalState: () -> Boolean = { false },
     private val observeCloud: (SyncAccountBinding, AppSyncJournalLoadResult) -> Unit = { _, _ -> },
+    private val resumeCanonicalRecovery: suspend (SyncAccountBinding, FormHash, AppSyncCanonicalCloudPlan.Ready) -> OperationSyncResult? = { _, _, _ -> null },
 ) {
     private val processMutex = Mutex()
     private val compaction = CompactionCoordinator(store, nowMillis, inactiveAfterMillis)
@@ -403,6 +404,11 @@ internal class OperationSyncEngine(
                 if (plan is AppSyncCanonicalCloudPlan.NeedsAttention && plan.reason == AppSyncCanonicalCloudFailure.OwnWriterConflict) {
                     store.rotateDeviceEpoch(accountBinding, AppSyncInstallationState.RebootstrapRequired)
                     return OperationSyncResult.RebootstrapRequired("The device journal is owned by another restored installation")
+                }
+                // This callback runs under the same process mutex/database lease as normal
+                // synchronization, after cohort observation and full canonical validation.
+                if (plan is AppSyncCanonicalCloudPlan.Ready) {
+                    resumeCanonicalRecovery(accountBinding, formHash, plan)?.let { return it }
                 }
                 val reason = when (plan) {
                     is AppSyncCanonicalCloudPlan.NeedsAttention -> "Canonical cloud validation: ${plan.reason}"

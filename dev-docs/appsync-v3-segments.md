@@ -61,3 +61,5 @@ Native checkpoint 已提供專用 `AppSyncCanonicalCheckpointActivator.activateR
 v2 segment publisher 與 v2 coordinator 在入口即拒絕 transport 3，包括已經進入 ActivatingLocal 的 session；不得跳過 native coordinator 直接啟用，也不得把錯誤分流計入 native retry budget。回歸測試確認發布前及 index 提交後均保持 session、pending 與遠端寫入數不變。
 
 反向亦相同：native coordinator 若發現 frozen payload 的 transport 不是 3，會在任何 phase／retry 更新前拒絕；尚未凍結的 native session 則可正常起始。測試確認 v2 frozen body、來源及 retry state 原樣保留，沒有 discovery 或 POST。
+
+`OperationSyncEngine.resumeCanonicalRecovery` 是 service 接線用的可選接點，預設回傳 null，保留既有 reader 行為。它在同步 mutex／database lease 內、reader cohort observation 與 canonical cloud planner 驗證成功後執行，且早於一般 canonical activation。writer 衝突與無效 cloud 不會呼叫接點。非 null 結果直接交回 service；null 則照常啟用 reader projection。測試核對呼叫時 lease 存在、返回後釋放，以及無效 cloud／pending 保留與預設相容性。此接點尚未由正式 service 綁定 native writer；仍需整合最新 cloud plan、cohort gate 與 worker 排程。
