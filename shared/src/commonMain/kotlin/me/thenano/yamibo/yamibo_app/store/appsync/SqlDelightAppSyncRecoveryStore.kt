@@ -730,8 +730,8 @@ internal class SqlDelightAppSyncRecoveryStore(
         require(checkpoint.coverage.all { (replica, sequence) -> (local.coverage[replica] ?: 0L) >= sequence })
         val payload = queries.getRecoveryPayload(session.sessionId).executeAsOne()
         val intent = requireNotNull(nativeIndexIntent(session.sessionId))
-        markNativeIndexCommitted(session.sessionId, requireNotNull(payload.verifiedIndexBlogId), intent.body,
-            requireNotNull(payload.indexVerifiedAtEpochMillis))
+        markCanonicalIndexCommitted(session.sessionId, requireNotNull(payload.verifiedIndexBlogId), intent.body,
+            requireNotNull(payload.indexVerifiedAtEpochMillis), hasSanitizedV2Payload(session.sessionId))
         val journal = (AppSyncV3DocumentCodec().discover(payload.canonicalEnvelope, checkpoint.accountBinding,
             AppSyncV3PayloadKind.Journal) as AppSyncV3DocumentRead.Journal).document
         val own = "${journal.deviceId}:${journal.deviceEpoch}"
@@ -755,7 +755,8 @@ internal class SqlDelightAppSyncRecoveryStore(
         val sessionId = session.sessionId
         val payload = queries.getRecoveryPayload(sessionId).executeAsOne()
         val receipts = db.appSyncNativeCompletionQueries
-        val bytes = receipts.getPayloadBytes(sessionId).executeAsOne()
+        val fallback = db.appSyncV2FallbackPayloadQueries.getForSession(sessionId).executeAsOneOrNull()
+        val bytes = receipts.getPayloadBytes(sessionId).executeAsOne() + (fallback?.envelope?.encodeUtf8()?.size?.toLong() ?: 0L)
         val segments = segmentWrites(sessionId).size.toLong()
         receipts.insertReceipt(sessionId, session.accountBinding.value, session.generationId,
             verified.document.checkpointId, verified.fingerprint, requireNotNull(session.rootBlogId),
@@ -763,6 +764,7 @@ internal class SqlDelightAppSyncRecoveryStore(
             requireNotNull(payload.verifiedIndexFingerprint), bytes, segments, completedAt)
         queries.deleteRecoverySegmentWrites(sessionId)
         queries.deleteRecoveryShadowOperations(sessionId)
+        db.appSyncV2FallbackPayloadQueries.deleteForSession(sessionId)
         queries.deleteRecoveryPayload(sessionId)
         receipts.deleteWork(sessionId)
         return bytes
@@ -1028,8 +1030,8 @@ internal class SqlDelightAppSyncRecoveryStore(
         val payload = requireNotNull(queries.getRecoveryPayload(sessionId).executeAsOneOrNull())
         require(payload.transportVersion == 3L)
         val intent = requireNotNull(nativeIndexIntent(sessionId))
-        markNativeIndexCommitted(sessionId, requireNotNull(payload.verifiedIndexBlogId), intent.body,
-            requireNotNull(payload.indexVerifiedAtEpochMillis))
+        markCanonicalIndexCommitted(sessionId, requireNotNull(payload.verifiedIndexBlogId), intent.body,
+            requireNotNull(payload.indexVerifiedAtEpochMillis), hasSanitizedV2Payload(sessionId))
         val journal = AppSyncV3DocumentCodec().discover(payload.canonicalEnvelope, session.accountBinding.value,
             AppSyncV3PayloadKind.Journal) as? AppSyncV3DocumentRead.Journal
         requireNotNull(journal)
@@ -1064,7 +1066,9 @@ internal class SqlDelightAppSyncRecoveryStore(
         val journal = nativeJournalForActivation(sessionId)
         if (session.sourceOperationIds.isNotEmpty()) queries.markOperationsAcknowledged(activatedAtEpochMillis, session.sourceOperationIds.toList())
         queries.upsertRemoteBlog("journal-root:${session.generationId}", AppSyncRemoteBlogKind.JournalRoot.name.uppercase(),
-            requireNotNull(session.rootBlogId), null, journal.metadata.canonicalFingerprint, activatedAtEpochMillis, activatedAtEpochMillis)
+            requireNotNull(session.rootBlogId), null,
+            if (hasSanitizedV2Payload(sessionId)) requireNotNull(session.rootFingerprint) else journal.metadata.canonicalFingerprint,
+            activatedAtEpochMillis, activatedAtEpochMillis)
         queries.updateInstallationHeartbeat(activatedAtEpochMillis, session.rootBlogId, AppSyncInstallationState.Active.name.uppercase())
         transition(sessionId, AppSyncRecoveryPhase.ActivatingLocal, AppSyncRecoveryPhase.Completed, activatedAtEpochMillis)
     }

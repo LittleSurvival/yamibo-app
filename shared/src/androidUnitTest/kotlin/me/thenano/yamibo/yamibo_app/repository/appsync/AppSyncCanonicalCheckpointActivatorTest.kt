@@ -462,12 +462,13 @@ class AppSyncCanonicalCheckpointActivatorTest {
         assertNull(db.appSyncOperationQueries.getRecoveryPayload(id).executeAsOneOrNull())
     }
 
-    @Test fun completedJournalPayloadWaitsForCheckpointCoverageThenExpiresItsReceipt() = fixture {
+    @Test fun completedJournalPayloadWaitsForCheckpointCoverageThenExpiresItsReceipt() = listOf(false, true).forEach { fallback -> fixture {
         val first = append()
-        val (recovery, id) = stageNativeJournal(first)
+        val (recovery, id) = stageNativeJournal(first, fallback = fallback)
         val baseCloud = AppSyncCanonicalCloudPlan.Ready(verified(), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
         assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activateJournalRecovery(recovery, id, baseCloud))
-        val frozenBytes = db.appSyncNativeCompletionQueries.getPayloadBytes(id).executeAsOne()
+        val frozenBytes = db.appSyncNativeCompletionQueries.getPayloadBytes(id).executeAsOne() +
+            (if (fallback) recovery.sanitizedV2Payload(id).encodeToByteArray().size.toLong() else 0L)
         assertTrue(frozenBytes > 0)
         assertEquals(0L, recovery.pruneCompletedNativeJournal(verified()))
         assertNotNull(db.appSyncOperationQueries.getRecoveryPayload(id).executeAsOneOrNull())
@@ -479,6 +480,7 @@ class AppSyncCanonicalCheckpointActivatorTest {
         assertTrue(applied.removedLocalPayloadBytes > frozenBytes)
         assertNull(db.appSyncOperationQueries.getRecoveryPayload(id).executeAsOneOrNull())
         assertTrue(recovery.segmentWrites(id).isEmpty())
+        assertFalse(recovery.hasSanitizedV2Payload(id))
         val receipt = db.appSyncNativeCompletionQueries.getForSession(id).executeAsOne()
         assertEquals(covered.checkpointId, receipt.checkpointId)
         assertEquals(frozenBytes, receipt.payloadBytesRemoved)
@@ -489,7 +491,7 @@ class AppSyncCanonicalCheckpointActivatorTest {
         recovery.expireCompletedRecoveryMetadata(now + 30L * 24 * 60 * 60 * 1000)
         assertNull(recovery.session(id))
         assertEquals(listOf(later), store.pendingOperations())
-    }
+    } }
 
     @Test fun journalReclamationRequiresCoverageOfObservedRemoteDependencies() = fixture {
         val first = append()
@@ -998,6 +1000,50 @@ class AppSyncCanonicalCheckpointActivatorTest {
         assertEquals(30, preferences.values["novelreadersettings.fontsize"])
     }
 
+    @Test fun fallbackActivationRetriesSettingsAndAcknowledgesOnlyFrozenSources() = fixture {
+        val published = append()
+        val (recovery, id) = stageNativeJournal(published, fallback = true)
+        val frozen = recovery.sanitizedV2Payload(id)
+        val cloud = AppSyncCanonicalCloudPlan.Ready(verified(), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
+        preferences.fail = true
+        assertFalse(assertIs<AppSyncCanonicalActivationResult.Applied>(
+            activator().activateJournalRecovery(recovery, id, cloud)).settingsReconciled)
+        assertEquals(AppSyncRecoveryPhase.ActivatingLocal, recovery.session(id)?.phase)
+        assertEquals(listOf(published), store.pendingOperations())
+        val later = append("22")
+        preferences.fail = false
+        val restarted = SqlDelightAppSyncRecoveryStore(db)
+        assertTrue(assertIs<AppSyncCanonicalActivationResult.Applied>(
+            activator().activateJournalRecovery(restarted, id, cloud)).settingsReconciled)
+        assertEquals(AppSyncRecoveryPhase.Completed, restarted.session(id)?.phase)
+        assertEquals(listOf(later), store.pendingOperations())
+        assertEquals(AppSyncOperationLifecycle.Acknowledged, store.outboxOperation(published.operationId.value)?.second)
+        assertEquals(22, preferences.values["novelreadersettings.fontsize"])
+        assertEquals(frozen, restarted.sanitizedV2Payload(id))
+        val session = assertNotNull(restarted.session(id))
+        val root = db.appSyncOperationQueries.getRemoteBlog("journal-root:${session.generationId}").executeAsOne()
+        assertEquals(session.rootFingerprint, root.fingerprint)
+        assertEquals(16, root.fingerprint?.length)
+        preferences.values["novelreadersettings.fontsize"] = 30
+        assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activateJournalRecovery(restarted, id, cloud))
+        assertEquals(30, preferences.values["novelreadersettings.fontsize"])
+        assertEquals(listOf(later), store.pendingOperations())
+    }
+
+    @Test fun fallbackActivationRejectsTamperedCompanionWithoutAcknowledgement() = fixture {
+        val published = append()
+        val (recovery, id) = stageNativeJournal(published, fallback = true)
+        driver.execute(null, "UPDATE AppSyncV2FallbackPayload SET envelope = 'tampered' WHERE sessionId = ?", 1) {
+            bindString(0, id)
+        }
+        val cloud = AppSyncCanonicalCloudPlan.Ready(verified(), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
+        assertIs<AppSyncCanonicalActivationResult.NeedsAttention>(activator().activateJournalRecovery(recovery, id, cloud))
+        assertNull(state.read(account.value))
+        assertTrue(preferences.values.isEmpty())
+        assertEquals(listOf(published), store.pendingOperations())
+        assertEquals(AppSyncRecoveryPhase.ActivatingLocal, recovery.session(id)?.phase)
+    }
+
     @Test fun conflictingJournalRecoveryEvidenceCannotWriteProjectionOrAcknowledge() = fixture {
         val published = append()
         val (recovery, id) = stageNativeJournal(published)
@@ -1378,26 +1424,32 @@ class AppSyncCanonicalCheckpointActivatorTest {
                 AppSyncBlogClassSelection.Existing(io.github.littlesurvival.dto.value.BlogClassId(7)),
                 io.github.littlesurvival.dto.value.FormHash("test"), cloud)
         }
-        fun stageNativeJournal(source: SyncOperation, observed: Map<String, Long> = emptyMap()): Pair<SqlDelightAppSyncRecoveryStore, String> {
+        fun stageNativeJournal(source: SyncOperation, observed: Map<String, Long> = emptyMap(), fallback: Boolean = false): Pair<SqlDelightAppSyncRecoveryStore, String> {
             val recovery = SqlDelightAppSyncRecoveryStore(db)
             val session = recovery.createOrResumeSegmentedJournal(account, setOf(source.operationId.value), "journal-source-${source.operationId.value}", 1)
             val imported = assertIs<AppSyncCanonicalOperationImport.Accepted>(AppSyncCanonicalOperationImporter().import(account.value, source))
             val identity = source.replicaKey.stableKey
             val journal = AppSyncCanonicalJournal(AppSyncCanonicalOperationBlock(account.value, listOf(imported.operation)),
                 source.deviceId.value, source.deviceEpoch.value, session.targetWriterNonce.value,
-                source.sequence.value, source.sequence.value, observed, emptyList(), 1, 3, 3, "test", source.sequence.value)
+                source.sequence.value, source.sequence.value, observed, if (fallback) listOf(AppSyncCanonicalAcknowledgement(checkpoint.checkpointId, checkpoint.coverage)) else emptyList(),
+                1, 3, 3, "test", source.sequence.value)
             recovery.pinPayload(session.sessionId, "Journal", identity, 3) { AppSyncV3DocumentCodec().encodeJournal(identity, journal) }
+            if (fallback) recovery.pinSanitizedV2Payload(session.sessionId) { true }
             recovery.startSegmentedJournal(session.sessionId, 2)
             recovery.saveSegmentIntent(session.sessionId, 0, 1, "segment", null)
             recovery.markSegmentVerified(session.sessionId, 0, "segment", 200, 3)
             recovery.transition(session.sessionId, AppSyncRecoveryPhase.PublishingSegments, AppSyncRecoveryPhase.PublishingRoot, 4)
-            recovery.pinNativeRootIntent(session.sessionId, "b".repeat(64))
-            recovery.markRootVerified(session.sessionId, 300, "b".repeat(64), 5)
+            val rootFingerprint = "b".repeat(if (fallback) 16 else 64)
+            recovery.pinNativeRootIntent(session.sessionId, rootFingerprint)
+            recovery.markRootVerified(session.sessionId, 300, rootFingerprint, 5)
             val index = AppSyncIndexEnvelopeCodec().encode(AppSyncIndexPayload(account,
                 journals = listOf(AppSyncIndexJournalReference(identity, 300,
-                    AppSyncCanonicalJournalCodec().encode(journal).sha256().hex())), updatedAtEpochMillis = 6))
+                    if (fallback) rootFingerprint else AppSyncCanonicalJournalCodec().encode(journal).sha256().hex())),
+                checkpoints = if (fallback) listOf(AppSyncIndexCheckpointReference(checkpoint.checkpointId, 123, verified().fingerprint)) else emptyList(),
+                updatedAtEpochMillis = 6))
             recovery.pinNativeIndexIntent(session.sessionId, NativeRecoveryIndexIntent(index, null, null))
-            recovery.markNativeIndexCommitted(session.sessionId, 400, index, 7)
+            if (fallback) recovery.markSanitizedV2IndexCommitted(session.sessionId, 400, index, 7)
+            else recovery.markNativeIndexCommitted(session.sessionId, 400, index, 7)
             return recovery to session.sessionId
         }
         fun remoteCheckpoint(source: SyncOperation): AppSyncCanonicalCheckpoint {

@@ -126,3 +126,20 @@ Migration 58→59 新增 `AppSyncV2FallbackPayload`，以 recovery session 為�
 索引 body、原索引 SHA-256 及目標 Blog ID 在 POST 前固定，再次探索確認基底未變及 reader gate 通過才送出。回應遺失以完整索引探索與實際讀回確認，已出現相同固定 body 時不重送。Provider 沒有 compare-and-swap，最後讀取與 POST 間的競態限制仍存在，不能宣稱伺服器端原子交換。
 
 `markSanitizedV2IndexCommitted` 與 native 入口分開，核對完整固定 intent、實體 root ID、v2 root fingerprint、canonical→v2 payload 及至少一個已確認 checkpoint 後，才原子記錄 index evidence 並進入 ActivatingLocal。Native 入口拒絕帶 v2 companion 的 session；以 canonical document fingerprint 冒充 v2 root fingerprint 或移除已確認 checkpoint 均拒絕。這一步不確認 pending operations、不改寫本機投影、不執行清理；後續 canonical activation 與 service dispatch 仍待完成。
+
+
+## 回退日誌本機啟用與目前 session 回收
+
+已確認回退索引的 session 可使用 `activateJournalRecovery` 合併目前雲端與固定 canonical journal。
+啟用前及資料庫交易內重新檢查 v2 companion、來源操作、writer 與固定索引，沿用完整歷史 coverage
+檢查。外部設定寫入失敗時維持 ActivatingLocal，不確認來源；重啟後重新合併後續 pending 操作，
+只確認原 session 的 source IDs。Completed 重複呼叫不重播設定。遠端 root 紀錄保存 v2 root
+fingerprint，避免誤記 canonical document fingerprint。
+
+目前 Completed session 必須等到後續已驗證 checkpoint 涵蓋整份 journal 的 own、observed、
+acknowledged 與 causal history，才在同一交易中刪除 canonical／v2 本文並保存 payload-free receipt。
+回收 byte 計數包含 v2 companion 的 UTF-8 bytes；未覆蓋、證據不符或 pending source 均不能提前清理。
+
+跨 session 的 retained-journal 尚未支援保存回退 companion，因此尚未被 checkpoint 回收的 Completed
+回退 session 仍拒絕被下一個 session 取代，保留全部證據。此限制及正式 coordinator／service dispatch、
+多段與裝置中斷驗收仍待完成，不能宣告完整回退流程可上線。
