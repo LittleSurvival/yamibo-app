@@ -68,6 +68,8 @@ import me.thenano.yamibo.yamibo_app.repository.settings.core.StringSetting
 import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncOperationStore
 import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncRemoteBlogStore
 import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncRecoveryStore
+import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncRecoveryWorkStore
+import me.thenano.yamibo.yamibo_app.store.appsync.AppSyncRecoveryWorkRequest
 import me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncCleanupObservationStore
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
@@ -104,6 +106,7 @@ data class AppSyncRecoveryStatus(
     val blockingDomain: String?,
     val redactedBlockingEntity: String?,
     val payloadFingerprint: String,
+    val retryEnqueued: Boolean = false,
 )
 
 enum class AppSyncRecoveryPublicPhase {
@@ -357,6 +360,7 @@ class AppSyncService(
     )
     private val remoteBlogStore = SqlDelightAppSyncRemoteBlogStore(db)
     private val recoveryStore = SqlDelightAppSyncRecoveryStore(db)
+    private val recoveryWorkStore = SqlDelightAppSyncRecoveryWorkStore(db)
     private val cleanupObservationStore = SqlDelightAppSyncCleanupObservationStore(db)
     private val capacityFlags = AppSyncCapacityFeatureFlags(
         v2ReadsEnabled = settingsStore.getBoolean(AppSyncCapacityFeatureFlagKeys.V2_READS, true),
@@ -649,6 +653,20 @@ class AppSyncService(
         val binding = currentAccountBinding() ?: return
         recoveryStore.resumeRetryExhaustedRecovery(binding, nowMillis())
     }
+
+    fun recoveryWorkRequest(): AppSyncRecoveryWorkRequest? = currentAccountBinding()?.let(recoveryWorkStore::current)
+
+    fun prepareRecoveryWork(proposedId: String): AppSyncRecoveryWorkRequest? = currentAccountBinding()?.let {
+        recoveryWorkStore.prepare(it, proposedId, nowMillis())
+    }
+
+    fun confirmRecoveryWorkEnqueued(requestId: String): Boolean =
+        recoveryWorkRequest()?.requestId == requestId && recoveryWorkStore.markEnqueued(requestId, nowMillis())
+
+    fun beginRecoveryWork(requestId: String): Boolean =
+        currentAccountBinding()?.let { recoveryWorkStore.begin(it, requestId, nowMillis()) } == true
+
+    fun retireRecoveryWork(requestId: String) = recoveryWorkStore.retire(requestId, nowMillis())
     suspend fun synchronizeNow(
         forceDiscovery: Boolean = false,
         trigger: String = "manual",
@@ -1411,7 +1429,10 @@ class AppSyncService(
                 it.phase != me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncRecoveryPhase.Completed
             }
             ?.let { session ->
-                appSyncRecoveryStatus(session, recoveryStore.segmentWrites(session.sessionId))
+                val work = recoveryWorkStore.current(session.accountBinding)
+                appSyncRecoveryStatus(session, recoveryStore.segmentWrites(session.sessionId)).copy(
+                    retryEnqueued = work?.enqueuedAtEpochMillis != null && work.startedAtEpochMillis == null,
+                )
             }
         val phase = phaseOverride?.takeIf { it == AppSyncServicePhase.Running }
             ?: AppSyncServicePhase.PausedAuth.takeIf { state == AppSyncInstallationState.PausedAuth }

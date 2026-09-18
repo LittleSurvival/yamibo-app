@@ -313,6 +313,7 @@ class CloudSyncUiStateTest {
             blockingDomain = null,
             redactedBlockingEntity = null,
             payloadFingerprint = "abc123",
+            retryEnqueued = true,
         )
         val state = status(AppSyncServicePhase.RecoveryUploadingSegments).copy(
             presentationMessage = AppSyncStatusMessage.RecoveryInProgress,
@@ -323,6 +324,11 @@ class CloudSyncUiStateTest {
         assertEquals(CloudSyncOperation.Idle, state.operation)
         assertTrue(state.manualSyncAvailable)
         assertTrue(state.details.any { it.label == CloudSyncDetailLabel.RecoveryRetry })
+        val unconfirmed = status(AppSyncServicePhase.RecoveryUploadingSegments).copy(
+            recoveryStatus = recovery.copy(retryEnqueued = false),
+        ).toUiState(backgroundSchedulerAvailable = true)
+        assertFalse(unconfirmed.details.any { it.label == CloudSyncDetailLabel.RecoveryRetry })
+        assertTrue(unconfirmed.manualSyncAvailable)
         assertFalse(state.actionsAvailable)
         assertTrue(state.refreshAvailable)
         assertEquals(

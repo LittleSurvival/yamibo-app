@@ -1,0 +1,25 @@
+getForSession:
+SELECT * FROM AppSyncRecoveryWork WHERE sessionId = ?;
+
+getForRequest:
+SELECT * FROM AppSyncRecoveryWork WHERE requestId = ?;
+
+getForExecution:
+SELECT * FROM AppSyncRecoveryWork WHERE requestId = ? OR predecessorRequestId = ?;
+
+prepare:
+INSERT OR REPLACE INTO AppSyncRecoveryWork(sessionId, requestId, predecessorRequestId, retryKey, notBeforeEpochMillis,
+    requestedAtEpochMillis, enqueuedAtEpochMillis, startedAtEpochMillis, retiredAtEpochMillis)
+VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL);
+
+markEnqueued:
+UPDATE AppSyncRecoveryWork SET enqueuedAtEpochMillis = COALESCE(enqueuedAtEpochMillis, ?)
+WHERE requestId = ? AND retiredAtEpochMillis IS NULL;
+
+markStarted:
+UPDATE AppSyncRecoveryWork SET startedAtEpochMillis = COALESCE(startedAtEpochMillis, ?)
+WHERE requestId = ? AND retiredAtEpochMillis IS NULL;
+
+retire:
+UPDATE AppSyncRecoveryWork SET retiredAtEpochMillis = ?, enqueuedAtEpochMillis = NULL
+WHERE requestId = ?;

@@ -40,6 +40,9 @@ class AppSyncWorker(
             settingsStore = rawSettings,
             authRepository = auth,
         )
+        inputData.getString(AndroidAppSyncBackgroundScheduler.RECOVERY_REQUEST_ID)?.let { requestId ->
+            if (!service.beginRecoveryWork(requestId)) return Result.success()
+        }
         // Recovery counts failures per immutable target in SQL. A run counter would stop
         // a healthy recovery after three different segments each needed one retry.
         if (service.currentStatus().recoveryStatus == null &&
@@ -70,13 +73,16 @@ class AppSyncWorker(
             service.accountAutomaticTrigger(pendingGeneration)
         }
         val recovery = status.recoveryStatus
+        // The lease holder owns continuation; overlapping periodic/manual callbacks must
+        // not append another copy of its recovery chain.
+        if (phase == AppSyncServicePhase.Running) return Result.success()
         if (recovery != null && phase !in setOf(
                 AppSyncServicePhase.RecoveryNeedsAttention, AppSyncServicePhase.PausedAuth,
                 AppSyncServicePhase.Quarantined, AppSyncServicePhase.Disabled,
             )
         ) {
             AndroidAppSyncBackgroundScheduler(applicationContext)
-                .continueRecovery(recovery.nextRetryAtEpochMillis)
+                .continueRecovery(service)
             return Result.success()
         }
         when (phase) {

@@ -1,0 +1,11 @@
+CREATE TABLE AppSyncRecoveryWork (
+    sessionId TEXT NOT NULL PRIMARY KEY REFERENCES AppSyncRecoverySession(sessionId) ON DELETE CASCADE,
+    requestId TEXT NOT NULL UNIQUE,
+    predecessorRequestId TEXT,
+    retryKey TEXT NOT NULL,
+    notBeforeEpochMillis INTEGER NOT NULL,
+    requestedAtEpochMillis INTEGER NOT NULL,
+    enqueuedAtEpochMillis INTEGER,
+    startedAtEpochMillis INTEGER,
+    retiredAtEpochMillis INTEGER
+);

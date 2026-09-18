@@ -304,6 +304,14 @@ internal class AppSyncCloudUiController(
         scope.launch {
             while (isActive) {
                 delay(1_000)
+                try {
+                    scheduler?.reconcileRecoveryWork(service)
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    // A transient scheduler query failure must not stop status observation.
+                    // Keep last confirmed evidence until an authoritative query succeeds.
+                }
                 service.currentStatus()
             }
         }
@@ -538,7 +546,7 @@ internal fun AppSyncServiceStatus.toUiState(
                 ),
             )
             recoveryStatus?.let { recovery ->
-                recovery.nextRetryAtEpochMillis?.let { retryAt ->
+                recovery.nextRetryAtEpochMillis?.takeIf { recovery.retryEnqueued }?.let { retryAt ->
                     add(CloudSyncDetail(
                         CloudSyncDetailLabel.RecoveryRetry,
                         CloudSyncDetailValue.Timestamp(formatDateTime(retryAt)),

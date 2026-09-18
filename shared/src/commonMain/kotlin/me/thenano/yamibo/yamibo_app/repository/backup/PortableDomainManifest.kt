@@ -46,6 +46,7 @@ internal object PortableDomainManifest {
         excluded("AppSyncOperation", "Remote synchronization metadata"),
         excluded("AppSyncCanonicalState", "Canonical synchronization provenance and coverage"),
         excluded("AppSyncReaderCohort", "Account-scoped authoritative reader capability evidence"),
+        excluded("AppSyncRecoveryWork", "Device-local durable background work identities and enqueue evidence"),
         excluded("AppSyncInstallation", "Device and account binding metadata"),
         excluded("AppSyncRemoteBlog", "Remote transport cache"),
         excluded("authentication", "Credentials, cookies, and FormHash are device-local secrets"),

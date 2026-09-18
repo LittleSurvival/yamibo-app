@@ -1,6 +1,7 @@
 package me.thenano.yamibo.yamibo_app.appsync
 
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncServicePhase
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncService
 import me.thenano.yamibo.yamibo_app.util.time.FixedScheduleInterval
 
 interface AppSyncBackgroundScheduler {
@@ -8,6 +9,7 @@ interface AppSyncBackgroundScheduler {
     fun runNow()
     val ownsManualExecution: Boolean get() = false
     suspend fun runManual() = runNow()
+    suspend fun reconcileRecoveryWork(service: AppSyncService) = Unit
 }
 
 internal fun shouldNotifyBackgroundQuarantine(
