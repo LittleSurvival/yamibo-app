@@ -339,6 +339,9 @@ class AppSyncService(
     private val nowMillis: () -> Long = ::currentTimeMillis,
 ) {
     private val store = SqlDelightAppSyncOperationStore(db)
+    private val canonicalState = me.thenano.yamibo.yamibo_app.repository.appsync.engine.SqlDelightCanonicalCheckpointState(
+        db, DatabaseSyncDomainMaterializer(db, settingsStore),
+    )
     private val domainState = SqlDelightSyncDomainStateAdapter(
         db = db,
         materializer = DatabaseSyncDomainMaterializer(db, settingsStore),
@@ -448,6 +451,7 @@ class AppSyncService(
         store = store,
         domainState = domainState,
         nowMillis = nowMillis,
+        canonicalState = canonicalState,
     )
     private val mutableStatus: MutableStateFlow<AppSyncServiceStatus>
 

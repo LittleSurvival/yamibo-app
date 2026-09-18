@@ -158,6 +158,93 @@ class AppSyncCanonicalCheckpointActivatorTest {
         assertTrue(store.verifiedCheckpoints().isEmpty())
     }
 
+    private fun Fixture.recorder() = AppSyncMutationRecorder(true, store,
+        SqlDelightSyncDomainStateAdapter(db, materializer, nowMillis = { 30 }), { 30 }, state)
+
+    @Test fun recorderUsesCanonicalValuesForNoOpsAndKeepsLegacyProvenanceEmpty() = fixture {
+        append()
+        activator().activate(verified())
+        val recorder = recorder()
+        val sequence = store.installation()?.nextSequence
+        var callbacks = 0
+        assertNull(recorder.record("settings", "novelreadersettings.fontsize", SyncOperationKind.Patch,
+            mapOf("type" to "int", "value" to "018")) { callbacks++ })
+        assertEquals(sequence, store.installation()?.nextSequence)
+        assertEquals(1, callbacks)
+        val operation = assertNotNull(recorder.record("settings", "novelreadersettings.fontsize", SyncOperationKind.Patch,
+            mapOf("type" to "int", "value" to "22")) { callbacks++ })
+        assertEquals(2, callbacks)
+        assertEquals("22", state.read(account.value)?.entities?.single()?.values()?.values?.first { it.legacyValue() == "22" }?.legacyValue())
+        assertEquals(operation.sequence.value, state.read(account.value)?.coverage?.get(operation.replicaKey.stableKey))
+        assertTrue(db.appSyncOperationQueries.getResolvedEntities().executeAsList().isEmpty())
+        assertEquals(2, store.pendingOperations().size)
+        assertEquals(18, preferences.values["novelreadersettings.fontsize"])
+    }
+
+    @Test fun recorderBatchComparesAgainstEarlierCanonicalOperationsInSameCommand() = fixture {
+        append()
+        activator().activate(verified())
+        fun draft(value: String) = LocalSyncOperationDraft(SyncDomainId("settings"),
+            SyncEntityId("novelreadersettings.fontsize"), kind = SyncOperationKind.Patch,
+            fields = mapOf("type" to "int", "value" to value))
+        val created = recorder().recordBatch(listOf(draft("22"), draft("22"), draft("18"))) {}
+        assertEquals(listOf("22", "18"), created.map { it.fields["value"] })
+        assertEquals(listOf(2L, 3L), created.map { it.sequence.value })
+        assertTrue(state.read(account.value)!!.entities.single().values().values.any { it.legacyValue() == "18" })
+        assertEquals(3, store.pendingOperations().size)
+    }
+
+    @Test fun recorderImportFailureCommitsOriginalSourceAndLocalMutation() = fixture {
+        append()
+        activator().activate(verified())
+        val previous = state.read(account.value)
+        val created = assertNotNull(recorder().record("settings", "novelreadersettings.fontsize", SyncOperationKind.Patch,
+            mapOf("type" to "int", "value" to "invalid")) { preferences.values["local-edit"] = "retained" })
+        assertEquals("retained", preferences.values["local-edit"])
+        assertEquals("invalid", store.pendingOperations().last().fields["value"])
+        assertEquals(created, store.pendingOperations().last())
+        assertEquals(previous, state.read(account.value))
+        assertEquals(AppSyncInstallationState.Quarantined, store.installation()?.state)
+    }
+
+    @Test fun recorderOversizedNotePreservesUntruncatedSourceAndLocalEdit() = fixture {
+        activator().activate(verified())
+        val source = AppSyncSyntheticCorpus.create().journal.operations.first { it.domainId.value == "detail-note" }
+        val content = "x".repeat(128 * 1024 + 1)
+        val previous = state.read(account.value)
+        val created = assertNotNull(recorder().record(source.domainId.value, source.entityId.value, SyncOperationKind.Put,
+            source.fields + ("content" to content)) { preferences.values["local-note"] = content })
+        assertEquals(content, preferences.values["local-note"])
+        assertEquals(content, created.fields["content"])
+        assertEquals(created, store.pendingOperations().single())
+        assertEquals(previous, state.read(account.value))
+        assertEquals(AppSyncInstallationState.Quarantined, store.installation()?.state)
+    }
+
+    @Test fun recorderCallbackFailureRollsBackOutboxAndCanonicalProvenance() = fixture {
+        append()
+        activator().activate(verified())
+        val previous = state.read(account.value)
+        val outbox = store.allOutboxOperations()
+        val sequence = store.installation()?.nextSequence
+        assertFailsWith<IllegalStateException> {
+            recorder().record("settings", "novelreadersettings.fontsize", SyncOperationKind.Patch,
+                mapOf("type" to "int", "value" to "22")) { error("local mutation failed") }
+        }
+        assertEquals(outbox, store.allOutboxOperations())
+        assertEquals(previous, state.read(account.value))
+        assertEquals(sequence, store.installation()?.nextSequence)
+    }
+
+    @Test fun recorderGenerationReadsCanonicalTombstoneWithoutLegacyProjection() = fixture {
+        append()
+        activator().activate(verified())
+        val recorder = recorder()
+        recorder.record("settings", "novelreadersettings.fontsize", SyncOperationKind.Delete, emptyMap()) {}
+        assertEquals(2L, recorder.currentGeneration("settings", "novelreadersettings.fontsize"))
+        assertTrue(db.appSyncOperationQueries.getResolvedEntities().executeAsList().isEmpty())
+    }
+
     @Test fun localBatchRecordsProvenanceWithoutReplayingMaterializedValuesOrAcknowledgingSources() = fixture {
         append()
         assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(verified()))

@@ -1,5 +1,8 @@
 package me.thenano.yamibo.yamibo_app.repository.appsync
 
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.SqlDelightCanonicalCheckpointState
+import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncCanonicalLocalUpdate
+import me.thenano.yamibo.yamibo_app.repository.appsync.schema.AppSyncCanonicalSchema
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncBulkDeleteProofFields
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.SqlDelightSyncDomainStateAdapter
 import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncBulkDeleteAuthorization
@@ -18,8 +21,17 @@ internal class AppSyncMutationRecorder(
     private val store: AppSyncOperationStore,
     private val domainState: SqlDelightSyncDomainStateAdapter,
     private val nowMillis: () -> Long,
+    private val canonicalState: SqlDelightCanonicalCheckpointState? = null,
 ) {
     fun currentGeneration(domain: String, entityId: String): Long {
+        val account = store.installation()?.accountBinding
+        val canonical = account?.let { canonicalState?.read(it.value) }
+        if (canonical != null) {
+            val domainId = AppSyncCanonicalSchema.domains[domain]?.id ?: return 1
+            val entity = canonical.entities.singleOrNull { it.domainId == domainId && it.entityId == entityId } ?: return 1
+            return if (entity.tombstone != null || entity.relation?.kind == SyncOperationKind.RelationRemove)
+                entity.generation + 1 else entity.generation
+        }
         return domainState.currentGeneration(SyncDomainId(domain), SyncEntityId(entityId))
     }
 
@@ -41,7 +53,7 @@ internal class AppSyncMutationRecorder(
             mutation(null)
             return null
         }
-        val preparation = AppSyncMutationPreparation(domainState::entityState)
+        val prepareFields = preparation(account.value)
         return store.appendLocalCommand(
             accountBinding = account,
             causalContext = store.causalContext(),
@@ -51,10 +63,10 @@ internal class AppSyncMutationRecorder(
                 SyncDomainId(domain), SyncEntityId(entityId), entityGeneration, kind, fields,
                 bulkDeleteAuthorizationId,
             ))) },
-            prepareOperationFields = preparation::prepareFields,
+            prepareOperationFields = prepareFields,
             afterOperationsCreated = { operations ->
                 mutation(operations.singleOrNull())
-                operations.forEach(domainState::recordLocal)
+                recordProvenance(account.value, operations)
             },
         ).singleOrNull()
     }
@@ -76,17 +88,17 @@ internal class AppSyncMutationRecorder(
             mutation(emptyList())
             return emptyList()
         }
-        val preparation = AppSyncMutationPreparation(domainState::entityState)
+        val prepareFields = preparation(account.value)
         return store.appendLocalCommand(
             accountBinding = account,
             causalContext = store.causalContext(),
             createdAtEpochMillis = nowMillis(),
             origin = SyncOperationOrigin.UserAction,
             localMutation = { portableDrafts(drafts) },
-            prepareOperationFields = preparation::prepareFields,
+            prepareOperationFields = prepareFields,
             afterOperationsCreated = { operations ->
                 mutation(operations)
-                operations.forEach(domainState::recordLocal)
+                recordProvenance(account.value, operations)
             },
         )
     }
@@ -156,18 +168,36 @@ internal class AppSyncMutationRecorder(
             mutation()
             return emptyList()
         }
-        val preparation = AppSyncMutationPreparation(domainState::entityState)
+        val prepareFields = preparation(account.value)
         return store.appendLocalCommand(
             accountBinding = account,
             causalContext = store.causalContext(),
             createdAtEpochMillis = nowMillis(),
             origin = SyncOperationOrigin.UserAction,
             localMutation = { portableDrafts(mutation()) },
-            prepareOperationFields = preparation::prepareFields,
+            prepareOperationFields = prepareFields,
             afterOperationsCreated = { operations ->
-                operations.forEach(domainState::recordLocal)
+                recordProvenance(account.value, operations)
             },
         )
+    }
+
+    private fun preparation(account: String): (SyncOperation) -> Map<String, String?>? {
+        // Defer the snapshot until appendLocalCommand holds the database transaction.
+        val prepare by lazy {
+            val canonical = canonicalState?.read(account)
+            if (canonical == null) AppSyncMutationPreparation(domainState::entityState)::prepareFields
+            else AppSyncCanonicalMutationPreparation(canonical)::prepareFields
+        }
+        return { operation -> prepare(operation) }
+    }
+
+    private fun recordProvenance(account: String, operations: List<SyncOperation>) {
+        when (canonicalState?.recordLocalBatch(account, operations)) {
+            null, AppSyncCanonicalLocalUpdate.NotActivated -> operations.forEach(domainState::recordLocal)
+            is AppSyncCanonicalLocalUpdate.Recorded -> Unit
+            is AppSyncCanonicalLocalUpdate.NeedsAttention -> store.updateState(AppSyncInstallationState.Quarantined)
+        }
     }
 
     // Filter before constructing SyncOperation, whose field-name validator also rejects
