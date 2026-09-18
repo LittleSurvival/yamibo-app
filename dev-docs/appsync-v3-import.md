@@ -281,3 +281,22 @@ Excluded／NoOp 來源不因同樣沒有 materialized 值而獲准合併。
 
 這是純轉換；尚未接入回退 checkpoint 的 snapshot、封套、持久化 session、發布與啟用流程。
 回退模式目前仍跳過 checkpoint cadence，後續需完成上述路徑才能宣稱歷史保留可收斂。
+
+
+## 回退 checkpoint 封套準備
+
+新增 `AppSyncCanonicalSnapshotValidation`，沿用原 legacy checkpoint migration 的全部 portable
+實體／值比對，供回退 preparation 重用。snapshot 只能證明目前值一致，不能提供操作來源。
+`AppSyncSanitizedV2CheckpointPreparation` 預設拒絕執行；允許時先轉換 verified canonical
+projection，檢查 portable snapshot，建立 v2 payload／tombstones，再編碼、讀回並重新 import，
+要求 canonical bytes 完全相等，最後再次檢查相容性 gate。
+
+checkpoint codec 的專用 fallback 編碼入口容許 portable event identity，一般入口仍拒絕。
+更新後的 reader 可由 key 取得省略的 event/filter identity 欄位，並將缺少的 bounded event title
+視為空顯示值、缺少的 details discriminator 使用既有 identity 規則；不向來源操作新增欄位。
+快照與明示欄位不符仍拒絕，summary 仍為必要欄位，無法解析的 key 回傳 Invalid。
+preparation 在確認快照 portable 值吻合後，排除 event forumName/latestPostTitle，並從原
+canonical 身分證據選用 discriminator 與 bounded title；不重算或更換事件 ID。
+
+此處仍是記憶體內準備，尚未接上 durable checkpoint session、遠端 commit、cadence 與 cleanup。
+所有實際發布仍需每次核對 reader cohort；專用 codec 方法本身不構成發布授權。

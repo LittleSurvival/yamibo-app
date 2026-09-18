@@ -98,13 +98,19 @@ internal class AppSyncCheckpointEnvelopeCodec(
         )
     }
 
-    fun encode(payload: AppSyncCheckpointPayload): String {
+    fun encode(payload: AppSyncCheckpointPayload): String = encodeValidated(payload, allowPortableEventIdentity = false)
+
+    /** Pure encoding; the dedicated fallback session must separately enforce the reader-3 cohort gate. */
+    internal fun encodeSanitizedFallback(payload: AppSyncCheckpointPayload): String =
+        encodeValidated(payload, allowPortableEventIdentity = true)
+
+    private fun encodeValidated(payload: AppSyncCheckpointPayload, allowPortableEventIdentity: Boolean): String {
         validatePayload(payload)?.let { throw IllegalArgumentException(it) }
         require(payload.resolvedEntities == payload.resolvedEntities.withoutExcludedAppSyncPayloads()) {
             "Checkpoint contains excluded AppSync projection fields"
         }
         val snapshot = backupCodec.decode(payload.encodedSnapshot).getOrThrow()
-        require(!AppSyncLegacyReaderCompatibility.requiresV3(payload, snapshot)) { AppSyncLegacyReaderCompatibility.REASON }
+        require(allowPortableEventIdentity || !AppSyncLegacyReaderCompatibility.requiresV3(payload, snapshot)) { AppSyncLegacyReaderCompatibility.REASON }
         require(snapshot == snapshot.withPortableAppSyncPayloads()) {
             "Checkpoint contains excluded AppSync snapshot fields"
         }
@@ -196,7 +202,11 @@ internal class AppSyncCheckpointEnvelopeCodec(
         return null
     }
 
-    private fun validateFavoriteUpdateProjection(
+    private fun validateFavoriteUpdateProjection(snapshot: YamiboBackupFile, entities: List<ResolvedSyncEntity>): String? =
+        try { validateFavoriteUpdateValues(snapshot, entities) }
+        catch (_: Exception) { "Checkpoint projection identity is invalid" }
+
+    private fun validateFavoriteUpdateValues(
         snapshot: YamiboBackupFile,
         entities: List<ResolvedSyncEntity>,
     ): String? {
@@ -208,7 +218,11 @@ internal class AppSyncCheckpointEnvelopeCodec(
             return "Checkpoint FavoriteUpdate event projection does not match resolved entities"
         }
         snapshotEvents.forEach { (syncId, event) ->
-            val fields = eventEntities.getValue(syncId).fields.mapValues { it.value.value }
+            val entity = eventEntities.getValue(syncId)
+            val fields = me.thenano.yamibo.yamibo_app.repository.appsync.schema.AppSyncCanonicalEntityKeys
+                .parse(17, syncId).derivedFields() + entity.fields.mapValues { it.value.value }
+            val discriminator = fields["sourceDiscriminator"] ?: me.thenano.yamibo.yamibo_app.repository.appsync.schema
+                .defaultAppSyncEventDiscriminator(fields["detailIds"])
             val expected = mapOf(
                 "targetType" to event.targetType,
                 "targetId" to event.targetId.toString(),
@@ -228,7 +242,14 @@ internal class AppSyncCheckpointEnvelopeCodec(
                 "sourceFingerprint" to event.sourceFingerprint,
                 "sourceDiscriminator" to event.sourceDiscriminator,
             )
-            if (expected.any { (key, value) -> fields[key] != value }) {
+            if (expected.any { (key, value) ->
+                val actual = when (key) {
+                    "sourceDiscriminator" -> discriminator
+                    "title" -> fields[key].orEmpty()
+                    else -> fields[key]
+                }
+                actual != value
+            }) {
                 return "Checkpoint FavoriteUpdate event $syncId differs from resolved state"
             }
         }
@@ -240,7 +261,8 @@ internal class AppSyncCheckpointEnvelopeCodec(
             return "Checkpoint FavoriteUpdate FID choices do not match resolved entities"
         }
         snapshotFids.forEach { (entityId, choice) ->
-            val fields = fidEntities.getValue(entityId).fields.mapValues { it.value.value }
+            val fields = me.thenano.yamibo.yamibo_app.repository.appsync.schema.AppSyncCanonicalEntityKeys
+                .parse(18, entityId).derivedFields() + fidEntities.getValue(entityId).fields.mapValues { it.value.value }
             if (fields["fid"] != choice.fid.toString() || fields["enabled"] != choice.enabled.toString()) {
                 return "Checkpoint FavoriteUpdate FID choice $entityId differs from resolved state"
             }
@@ -255,7 +277,8 @@ internal class AppSyncCheckpointEnvelopeCodec(
             return "Checkpoint FavoriteUpdate category choices do not match resolved entities"
         }
         snapshotCategories.forEach { (entityId, choice) ->
-            val fields = categoryEntities.getValue(entityId).fields.mapValues { it.value.value }
+            val fields = me.thenano.yamibo.yamibo_app.repository.appsync.schema.AppSyncCanonicalEntityKeys
+                .parse(19, entityId).derivedFields() + categoryEntities.getValue(entityId).fields.mapValues { it.value.value }
             if (
                 fields["categorySyncId"] != choice.categorySyncId ||
                 fields["enabled"] != choice.enabled.toString()
