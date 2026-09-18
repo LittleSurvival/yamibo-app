@@ -121,7 +121,16 @@ internal class AppSyncCanonicalCheckpointActivator(
                     current.indexFingerprint == verified.indexFingerprint)
             })
             if (result is AppSyncCanonicalActivationResult.Applied && result.settingsReconciled) {
-                recovery.beginNativeCheckpointCleanup(sessionId, nowMillis())
+                db.transaction {
+                    val committed = recovery.nativeCheckpointForActivation(sessionId)
+                    val covered = operations.pendingOperations().filter {
+                        it.accountBinding == session.accountBinding && it.deviceId == session.sourceDeviceId &&
+                            it.deviceEpoch == session.sourceDeviceEpoch &&
+                            it.sequence.value <= (committed.document.coverage[it.replicaKey.stableKey] ?: 0L)
+                    }.map { it.operationId }.toSet()
+                    operations.markAcknowledged(covered, nowMillis())
+                    recovery.beginNativeCheckpointCleanup(sessionId, nowMillis())
+                }
                 val cleaned = cleanCheckpointBatch(sessionId)
                 result.copy(removedLocalRows = cleaned.removedLocalRows,
                     removedLocalPayloadBytes = cleaned.removedLocalPayloadBytes, cleanupPending = cleaned.cleanupPending)

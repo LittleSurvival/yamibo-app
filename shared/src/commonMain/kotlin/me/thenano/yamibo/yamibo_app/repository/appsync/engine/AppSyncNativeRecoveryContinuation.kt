@@ -27,10 +27,76 @@ internal class AppSyncNativeRecoveryContinuation(
     private val nowMillis: () -> Long,
     private val canWrite: () -> Boolean = { false },
     private val journalStarter: AppSyncNativeJournalStarter? = null,
+    private val legacyStarter: AppSyncLegacyMigrationStarter? = null,
+    private val canAttemptMigration: () -> Boolean = canWrite,
 ) : AppSyncCanonicalRecoveryContinuation {
     override fun hasPending(account: SyncAccountBinding): Boolean = recovery.recoverySession(account)?.let {
         it.phase != AppSyncRecoveryPhase.Completed && recovery.usesNativeTransport(it.sessionId)
     } == true
+
+    override fun requiresAuthoritativeDiscovery(): Boolean = legacyStarter != null && canAttemptMigration()
+
+    override suspend fun resumeLegacy(account: SyncAccountBinding, formHash: FormHash,
+        cloud: AppSyncJournalLoadResult.Success): OperationSyncResult? {
+        val starting = !hasPending(account)
+        if (starting && (legacyStarter == null || !canWrite() || cloud.requiresCanonicalProcessing || cloud.verifiedLegacyCheckpoints.isEmpty())) return null
+        if (!starting && cloud.verifiedCanonicalCheckpoints.isNotEmpty()) return null
+        return try {
+            if (!starting && recovery.legacyMigrationSource(requireNotNull(recovery.recoverySession(account)).sessionId) == null) return null
+            val pending = operations.pendingOperations().filter { it.accountBinding == account }.map { it.operationId.value }.toSet()
+            if (starting && requireNotNull(legacyStarter).start(account, cloud).isFailure)
+                return OperationSyncResult.PausedProvider("Legacy migration could not be prepared from verified cloud history")
+            val session = requireNotNull(recovery.recoverySession(account))
+            val source = requireNotNull(recovery.legacyMigrationSource(session.sessionId))
+            val frozen = recovery.nativePayload(session.sessionId)
+            val checkpoint = (AppSyncV3DocumentCodec().discover(frozen.body, account.value, AppSyncV3PayloadKind.Checkpoint)
+                as? AppSyncV3DocumentRead.Checkpoint)?.document
+            requireNotNull(checkpoint)
+            // The only native discovery allowed before the first index commit is our exact
+            // frozen checkpoint. Never reinterpret unrelated native state as legacy input.
+            require(cloud.canonicalDocuments.all { (it.document as? AppSyncV3DocumentRead.Checkpoint)?.document == checkpoint })
+            require(cloud.verifiedLegacyCheckpoints.any {
+                it.blogId == source.blogId && it.fingerprint == source.fingerprint && it.indexFingerprint == source.indexFingerprint &&
+                    it.read().payload.checkpointId == source.checkpointId
+            })
+            val current = AppSyncLegacyCloudMigration().prepare(account, requireNotNull(operations.installation()),
+                cloud.copy(canonicalDocuments = emptyList()), emptyList(), checkpoint.checkpointId, checkpoint.createdAtEpochMillis)
+            require(current is AppSyncLegacyCloudMigrationResult.Ready)
+            require(current.checkpoint.coverage.all { (replica, sequence) -> (checkpoint.coverage[replica] ?: 0) >= sequence })
+            val merged = AppSyncCanonicalPendingMerge().prepare(checkpoint, cloud.journals.flatMap { it.payload.operations },
+                checkpoint.checkpointId, checkpoint.createdAtEpochMillis)
+            require(merged is AppSyncCanonicalPendingMergeResult.Ready && merged.checkpoint == checkpoint)
+            if (!session.indexCommitted && !canWrite()) {
+                block(account, "native-compatibility")
+                return OperationSyncResult.PausedProvider("Native recovery requires compatible readers and approved rollout")
+            }
+            val selection = AppSyncBlogClassSelection.Existing(requireNotNull(remoteBlogs.loadClassId(account)))
+            val publisher = AppSyncV3SegmentPublisher(provider, recovery, nowMillis, canWrite = { canWrite() },
+                discover = AppSyncV3ArtifactReconciler(provider, selection.classId)::discover)
+            val committer = AppSyncV3IndexCommitter(provider, recovery, publisher, nowMillis, { canWrite() })
+            val coordinator = AppSyncV3CommitCoordinator(committer, recovery, nowMillis, activator,
+                canRun = { recovery.session(session.sessionId)?.indexCommitted == true || canWrite() })
+            when (val result = coordinator.commit(session.sessionId, frozen.body, frozen.identity, selection, formHash)) {
+                is AppSyncSegmentedJournalCommitResult.Verified -> OperationSyncResult.Converged(0,
+                    (pending - operations.pendingOperations().map { it.operationId.value }.toSet()).size,
+                    0, 1, emptyList())
+                AppSyncSegmentedJournalCommitResult.FormExpired -> {
+                    operations.updateState(AppSyncInstallationState.PausedAuth)
+                    OperationSyncResult.PausedAuth("Native recovery authentication expired")
+                }
+                is AppSyncSegmentedJournalCommitResult.Retryable -> OperationSyncResult.RetryScheduled(result.reason)
+                is AppSyncSegmentedJournalCommitResult.Conflict -> OperationSyncResult.RetryScheduled(result.reason)
+                is AppSyncSegmentedJournalCommitResult.Terminal -> {
+                    block(account, if (!canWrite()) "native-compatibility" else "native-recovery-evidence")
+                    OperationSyncResult.PausedProvider(result.reason)
+                }
+            }
+        } catch (cancelled: CancellationException) { throw cancelled
+        } catch (_: Exception) {
+            block(account, "native-migration-evidence")
+            OperationSyncResult.PausedProvider("Legacy migration evidence could not be reconciled")
+        }
+    }
 
     override fun preflight(account: SyncAccountBinding): OperationSyncResult? {
         if (!hasPending(account)) return null
@@ -93,7 +159,8 @@ internal class AppSyncNativeRecoveryContinuation(
             when (val result = coordinator.commit(session.sessionId, payload.body, payload.identity, selection, formHash, cloud)) {
                 is AppSyncSegmentedJournalCommitResult.Verified -> OperationSyncResult.Converged(
                     appliedRemoteCount = remoteIds.count(operations::isApplied),
-                    acknowledgedLocalCount = (result.acknowledgedOperationIds + coveredAcknowledged).count { it in pending },
+                    acknowledgedLocalCount = (result.acknowledgedOperationIds + coveredAcknowledged +
+                        (pending - operations.pendingOperations().map { it.operationId.value }.toSet())).count { it in pending },
                     quarantineCount = 0, attempts = 1, changes = emptyList())
                 AppSyncSegmentedJournalCommitResult.FormExpired -> {
                     operations.updateState(AppSyncInstallationState.PausedAuth)

@@ -62,3 +62,9 @@ materializer 的內部輸入將本機值與勝出操作 ID／時間分開；還�
 Native index committer 已接入凍結的 legacy source：分段發布前先完整掃描及讀回 index，要求來源 blog／checkpoint／fingerprint 仍被引用，且整份 index fingerprint 與規劃時相同；分段發布後再次核對。若上次 index POST 已成功但未確認，只有實體 index ID 與整份凍結意圖 SHA 完全一致，才允許跨過舊 index fingerprint 的差異。既有提交前 base 重讀仍保留，provider 沒有 CAS 的競爭限制也不變。
 
 本機 `markNativeIndexCommitted` 同時要求回讀 index 保留凍結的 legacy checkpoint 引用，避免只驗證新產物便提前承認遷移。偽 provider／SQLite 回歸涵蓋缺 index、移除來源、改 blog／fingerprint／index 時間、發布中競爭，以及 lost response 後重建 committer 不重複 POST；全程 pending 保持未確認。正式 engine／continuation 的 legacy 路由仍待完成。
+
+正式 service 已建立 legacy starter，engine 在既有 process mutex／run lease 內、cohort observation 後呼叫 `resumeLegacy`。三個 rollout flags 全開時強制完整 discovery，取得新鮮 cohort 及 migration source；真正建立工作與每次遠端寫入仍要求 cohort gate 成立。已凍結遷移若尚未被 index 引用，可接受與 frozen checkpoint 完全相同的未索引分段產物；其他 native 內容不會轉作 legacy 資料。
+
+每次恢復都重新核對凍結 source binding、目前 legacy cloud 的完整性與 coverage，拒絕凍結後雲端新增而未被候選涵蓋的歷史。通過後沿用 native coordinator 完成發布、index、activation、settings reconciliation 與分批清理；較晚的本機編輯在 activation 合併並保持 pending。若已有 indexed native checkpoint，則回到原 canonical planner／recovery 路徑。預設 flags 仍關閉，snapshot-only 舊 checkpoint、無 checkpoint 帳號、manual force/reset、reader capability rollout 與裝置驗收仍未完成。
+
+Native checkpoint activation 在 settings reconciliation 成功後，於同一交易再次讀取發布證據，只將凍結 checkpoint coverage 涵蓋的同帳號／同來源裝置及 epoch pending 標記已確認，再轉入 Cleaning。設定套用失敗時不提前確認，較晚 sequence 不受影響；清理仍只依遠端已驗證 coverage 執行。

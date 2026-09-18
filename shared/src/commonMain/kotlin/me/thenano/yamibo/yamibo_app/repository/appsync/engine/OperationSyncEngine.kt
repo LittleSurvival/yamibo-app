@@ -214,6 +214,8 @@ internal interface SyncDomainStateAdapter {
 
 internal interface AppSyncCanonicalRecoveryContinuation {
     fun hasPending(account: SyncAccountBinding): Boolean = false
+    fun requiresAuthoritativeDiscovery(): Boolean = false
+    suspend fun resumeLegacy(account: SyncAccountBinding, formHash: FormHash, cloud: AppSyncJournalLoadResult.Success): OperationSyncResult? = null
     fun preflight(account: SyncAccountBinding): OperationSyncResult? = null
     fun cloudFailure(account: SyncAccountBinding, retryable: Boolean) = Unit
     suspend fun resume(account: SyncAccountBinding, formHash: FormHash, cloud: AppSyncCanonicalCloudPlan.Ready): OperationSyncResult?
@@ -363,7 +365,7 @@ internal class OperationSyncEngine(
 
         canonicalRecovery?.preflight(accountBinding)?.let { return it }
         repeat(maxAttempts) { attemptIndex ->
-            val requestedForcedDiscovery = forceDiscovery &&
+            val requestedForcedDiscovery = canonicalRecovery?.requiresAuthoritativeDiscovery() == true || forceDiscovery &&
                 (attemptIndex == 0 || canonicalRecovery?.hasPending(accountBinding) == true)
             val pendingBeforeLoad = store.pendingOperations()
             val legacyMigrationCandidate = legacyClassifier.classify(
@@ -413,6 +415,7 @@ internal class OperationSyncEngine(
                     return OperationSyncResult.PausedProvider(result.reason)
                 }
             }
+            canonicalRecovery?.resumeLegacy(accountBinding, formHash, cloud)?.let { return it }
             if (cloud.requiresCanonicalProcessing) {
                 val plan = AppSyncCanonicalCloudPlanner().prepare(accountBinding, requireNotNull(store.installation()), cloud)
                 if (plan is AppSyncCanonicalCloudPlan.NeedsAttention && plan.reason == AppSyncCanonicalCloudFailure.OwnWriterConflict) {

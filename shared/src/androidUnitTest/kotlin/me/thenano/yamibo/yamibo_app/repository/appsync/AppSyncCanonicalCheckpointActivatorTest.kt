@@ -28,6 +28,92 @@ class AppSyncCanonicalCheckpointActivatorTest {
             authoritativeDiscovery = true, verifiedLegacyCheckpoints = listOf(source))
     }
 
+    private fun Fixture.legacyPublishingEnvironment(cloud: AppSyncJournalLoadResult.Success):
+        Pair<AppSyncV3SegmentPublisherTest.Provider, AppSyncNativeRecoveryContinuation> {
+        val provider = AppSyncV3SegmentPublisherTest.Provider()
+        val source = cloud.verifiedLegacyCheckpoints.single()
+        val payload = source.read().payload
+        val index = AppSyncIndexEnvelopeCodec().encode(AppSyncIndexPayload(account,
+            checkpoints = listOf(AppSyncIndexCheckpointReference(payload.checkpointId, source.blogId.toInt(), source.fingerprint)),
+            updatedAtEpochMillis = 1))
+        val selection = AppSyncBlogClassSelection.Existing(io.github.littlesurvival.dto.value.BlogClassId(7))
+        provider.artifacts[124] = AppSyncBlogWriteRequest(io.github.littlesurvival.dto.value.BlogId(124), APP_SYNC_INDEX_TITLE,
+            index, selection, io.github.littlesurvival.dto.value.FormHash("test"))
+        val recovery = SqlDelightAppSyncRecoveryStore(db)
+        val blogs = SqlDelightAppSyncRemoteBlogStore(db).also { it.saveClassId(account, selection.classId) }
+        return provider to AppSyncNativeRecoveryContinuation(provider, store, recovery, blogs, activator(), { now }, { true },
+            legacyStarter = AppSyncLegacyMigrationStarter(db, store, recovery, { now }, { true }))
+    }
+
+    @Test fun engineMigratesLegacyCloudThroughPublicationActivationAndCleanupInOneRun() = fixture {
+        val source = append()
+        val cloud = legacyMigrationCloud()
+        val (provider, continuation) = legacyPublishingEnvironment(cloud)
+        val result = assertIs<OperationSyncResult.Converged>(synchronize(cloud, continuation))
+        assertEquals(1, result.acknowledgedLocalCount)
+        assertEquals(listOf(true), forcedLoads)
+        assertEquals(18, preferences.values["novelreadersettings.fontsize"])
+        val recovery = SqlDelightAppSyncRecoveryStore(db)
+        val session = assertNotNull(recovery.recoverySession(account))
+        assertEquals(AppSyncRecoveryPhase.Completed, session.phase)
+        assertTrue(session.indexCommitted)
+        assertTrue(store.pendingOperations().isEmpty())
+        assertEquals(1L, state.read(account.value)?.coverage?.get(source.replicaKey.stableKey))
+        assertEquals(3, provider.posts.size)
+        assertNotNull(db.appSyncNativeCompletionQueries.getForSession(session.sessionId).executeAsOneOrNull())
+        assertNull(db.appSyncOperationQueries.getRecoveryPayload(session.sessionId).executeAsOneOrNull())
+        assertNull(db.appSyncOperationQueries.getRunLease().executeAsOneOrNull())
+    }
+
+    @Test fun engineResumesUnindexedFrozenMigrationAndPreservesEditsMadeDuringRetry() = fixture {
+        val first = append()
+        val cloud = legacyMigrationCloud()
+        val (provider, continuation) = legacyPublishingEnvironment(cloud)
+        provider.onList = { if (provider.posts.size >= 2) provider.listFailureAt = 1 }
+        assertIs<OperationSyncResult.RetryScheduled>(synchronize(cloud, continuation))
+        val recovery = SqlDelightAppSyncRecoveryStore(db)
+        val session = assertNotNull(recovery.recoverySession(account))
+        val payload = recovery.nativePayload(session.sessionId)
+        assertNull(state.read(account.value))
+        assertEquals(listOf(first), store.pendingOperations())
+        val later = append("22")
+        val discovered = AppSyncV3DocumentCodec().discover(payload.body, account.value, AppSyncV3PayloadKind.Checkpoint)
+        val retryCloud = cloud.copy(canonicalDocuments = listOf(LoadedAppSyncCanonicalDocument("102", discovered)))
+        now = assertNotNull(session.nextRetryAtEpochMillis)
+        provider.onList = {}
+        provider.listFailureAt = null
+        val blogs = SqlDelightAppSyncRemoteBlogStore(db)
+        val restarted = AppSyncNativeRecoveryContinuation(provider, store, SqlDelightAppSyncRecoveryStore(db), blogs,
+            activator(), { now }, { true }, legacyStarter = AppSyncLegacyMigrationStarter(db, store, recovery, { now }, { true }))
+        assertEquals(1, assertIs<OperationSyncResult.Converged>(synchronize(retryCloud, restarted)).acknowledgedLocalCount)
+        assertEquals(AppSyncRecoveryPhase.Completed, recovery.session(session.sessionId)?.phase)
+        assertEquals(3, provider.posts.size)
+        assertEquals(listOf(later), store.pendingOperations())
+        assertEquals(22, preferences.values["novelreadersettings.fontsize"])
+        assertEquals(2L, state.read(account.value)?.coverage?.get(first.replicaKey.stableKey))
+    }
+
+    @Test fun migrationRetryCannotAdoptAnUnrelatedUnindexedNativeCheckpoint() = fixture {
+        append()
+        val cloud = legacyMigrationCloud()
+        val (provider, continuation) = legacyPublishingEnvironment(cloud)
+        provider.onList = { if (provider.posts.size >= 2) provider.listFailureAt = 1 }
+        assertIs<OperationSyncResult.RetryScheduled>(synchronize(cloud, continuation))
+        val recovery = SqlDelightAppSyncRecoveryStore(db)
+        val session = assertNotNull(recovery.recoverySession(account))
+        now = assertNotNull(session.nextRetryAtEpochMillis)
+        provider.onList = {}
+        provider.listFailureAt = null
+        val unrelated = AppSyncV3DocumentCodec().discover(AppSyncV3DocumentCodec().encodeCheckpoint(checkpoint),
+            account.value, AppSyncV3PayloadKind.Checkpoint)
+        val result = synchronize(cloud.copy(canonicalDocuments = listOf(LoadedAppSyncCanonicalDocument("999", unrelated))), continuation)
+        assertIs<OperationSyncResult.PausedProvider>(result)
+        assertEquals(AppSyncRecoveryPhase.NeedsAttention, recovery.session(session.sessionId)?.phase)
+        assertEquals(2, provider.posts.size)
+        assertNull(state.read(account.value))
+        assertEquals(1, store.pendingOperations().size)
+    }
+
     @Test fun legacyMigrationFreezesPendingAndSourceEvidenceWithoutLocalActivation() = fixture {
         val source = append()
         val cloud = legacyMigrationCloud()

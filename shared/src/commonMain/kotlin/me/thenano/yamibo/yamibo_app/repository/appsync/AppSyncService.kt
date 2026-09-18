@@ -389,6 +389,14 @@ class AppSyncService(
         canWrite = ::canWriteNativeJournal,
         journalStarter = me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncNativeJournalStarter(
             db, store, recoveryStore, canonicalState, canonicalActivator, nowMillis, ::canWriteNativeJournal),
+        legacyStarter = me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncLegacyMigrationStarter(
+            db, store, recoveryStore, nowMillis, ::canWriteNativeJournal),
+        canAttemptMigration = {
+            listOf(me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncV3FeatureFlagKeys.WRITER,
+                me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncV3FeatureFlagKeys.READER_READY,
+                me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncV3FeatureFlagKeys.BENCHMARKS_APPROVED)
+                .all { settingsStore.getBoolean(it, false) }
+        },
     )
     private fun canWriteNativeJournal(): Boolean =
             store.installation()?.let { installation ->
