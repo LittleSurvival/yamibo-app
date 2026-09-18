@@ -1,6 +1,7 @@
 package me.thenano.yamibo.yamibo_app.repository.appsync.engine
 
 import me.thenano.yamibo.yamibo_app.Database
+import me.thenano.yamibo.yamibo_app.repository.appsync.model.AppSyncOperationLifecycle
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncCausalContext
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperation
 import me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncVerifiedCanonicalCheckpoint
@@ -41,8 +42,15 @@ internal class AppSyncCanonicalCheckpointActivator(
                 }
                 // Read inside the same transaction as activation so concurrent local appends
                 // cannot fall between snapshot preparation and projection replacement.
-                val sources = operations.allOutboxOperations().map { it.first } + legacyRemoteOperations
-                pendingCount = operations.pendingOperations().size
+                // Other accounts and discarded/superseded bodies remain audit evidence, never local overlays.
+                // Acknowledged/compacted sources can still cover gaps in an older checkpoint.
+                val sources = operations.allOutboxOperations()
+                    .filter { (source, _) -> source.accountBinding.value == checkpoint.accountBinding }.filterNot { (_, lifecycle) ->
+                    lifecycle == AppSyncOperationLifecycle.DiscardedByForcePull ||
+                        lifecycle == AppSyncOperationLifecycle.DiscardedByRebootstrap ||
+                        lifecycle == AppSyncOperationLifecycle.SupersededByRecovery
+                }.map { it.first } + legacyRemoteOperations
+                pendingCount = operations.pendingOperations().count { it.accountBinding.value == checkpoint.accountBinding }
                 val merged = merger.prepare(checkpoint, sources, checkpoint.checkpointId, checkpoint.createdAtEpochMillis,
                     remoteOperations)
                 if (merged is AppSyncCanonicalPendingMergeResult.NeedsAttention) {

@@ -17,3 +17,7 @@ SettingsStore 位於 SQLite 之外，因此在最外層交易提交後 reconcile
 五項 SQLite 測試涵蓋 pending 保留與再次編輯、遠端／本機 coverage 區分、內層交易已完成後的外層回滾、外部設定失敗重試、無法匯入的 pending 及帳號錯配。三項索引證據測試涵蓋正確綁定、引用歧義、無效索引及不相容文件。
 
 此 adapter 尚未接入正式同步 engine。正式啟用仍須整合 typed remote load、run lease、索引發現／新鮮度、canonical 本機 mutation routing、帳號重設與 legacy fallback。不得據此開啟 v3 writer、宣告 cohort reader ready 或刪除 legacy evidence。
+
+啟用時的本機 overlay 現在依 checkpoint 帳號及 outbox lifecycle 選取。其他帳號、`DiscardedByForcePull`、`DiscardedByRebootstrap`、`SupersededByRecovery` 的原始 body 保留作為歷史資料，不重新匯入、不產生此帳號的 applied receipt，也不增加本機 coverage。同帳號 `Acknowledged`／`Compacted` 來源仍參與合併，因為較舊 checkpoint 可能尚未涵蓋它們；其 lifecycle 不會被改寫。
+
+SQLite 回歸驗證包含三種排除 lifecycle（刻意放入無法匯入的歷史 body）、確認／壓縮來源補足較舊基底，以及成功換帳號後舊 acknowledged 歷史不進入新帳號 activation。所有原始 outbox rows 皆保持不變。這不代表舊 payload 的實體清理已完成，也不取代完整 canonical bootstrap／engine／writer 的後續整合。

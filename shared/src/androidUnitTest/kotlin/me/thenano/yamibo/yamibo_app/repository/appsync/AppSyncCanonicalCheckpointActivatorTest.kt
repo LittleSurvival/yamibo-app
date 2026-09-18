@@ -81,6 +81,76 @@ class AppSyncCanonicalCheckpointActivatorTest {
         }
     }
 
+    @Test fun discardedAndSupersededSourcesCannotResurrectDuringActivation() {
+        for (lifecycle in listOf(AppSyncOperationLifecycle.DiscardedByForcePull,
+            AppSyncOperationLifecycle.DiscardedByRebootstrap, AppSyncOperationLifecycle.SupersededByRecovery)) fixture {
+            val obsolete = append("invalid historical body")
+            when (lifecycle) {
+                AppSyncOperationLifecycle.DiscardedByForcePull -> {
+                    store.replaceWithVerifiedCloudState(OperationReducer().reduce(operations = emptyList()),
+                        SyncCausalContext(), emptySet(), 16) {}
+                }
+                AppSyncOperationLifecycle.SupersededByRecovery -> {
+                    db.appSyncOperationQueries.markOperationsSupersededByRecovery(listOf(obsolete.operationId.value))
+                    store.rotateDeviceEpoch(account, AppSyncInstallationState.Active)
+                }
+                else -> store.rotateDeviceEpoch(account, AppSyncInstallationState.Active)
+            }
+            val pending = append("22")
+            val before = store.allOutboxOperations()
+            assertEquals(lifecycle, before.first { it.first.operationId == obsolete.operationId }.second)
+            val result = assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(verified()))
+            assertEquals(1, result.pendingOperationCount)
+            assertEquals(22, preferences.values["novelreadersettings.fontsize"])
+            val local = assertNotNull(state.read(account.value))
+            assertEquals(mapOf(pending.replicaKey.stableKey to 1L), local.coverage)
+            assertEquals(before, store.allOutboxOperations())
+            assertEquals(listOf(pending), store.pendingOperations())
+            assertFalse(store.isApplied(obsolete.operationId))
+            assertTrue(store.isApplied(pending.operationId))
+        }
+    }
+
+    @Test fun acknowledgedAndCompactedSourcesStillCompleteOlderCheckpointCoverage() {
+        for (compacted in listOf(false, true)) fixture {
+            val source = append()
+            store.markAcknowledged(setOf(source.operationId), 16)
+            if (compacted) store.markCompacted(setOf(source.operationId))
+            val before = store.allOutboxOperations()
+            val applied = assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(verified()))
+            assertEquals(0, applied.pendingOperationCount)
+            assertEquals(18, preferences.values["novelreadersettings.fontsize"])
+            assertEquals(mapOf(source.replicaKey.stableKey to 1L), state.read(account.value)?.coverage)
+            assertEquals(before, store.allOutboxOperations())
+            assertTrue(store.verifiedCheckpoints().single().coverage.asStableMap().isEmpty())
+        }
+    }
+
+    @Test fun oldAccountAcknowledgedHistoryCannotEnterNewAccountActivation() = fixture {
+        val historical = append()
+        store.markAcknowledged(setOf(historical.operationId), 16)
+        val other = SyncAccountBinding("other-account")
+        store.completeBootstrap(other, OperationReducer().reduce(operations = emptyList()), SyncCausalContext(),
+            emptySet(), 17, true, null) {}
+        val pending = assertNotNull(recorder().record("settings", "novelreadersettings.fontsize", SyncOperationKind.Put,
+            mapOf("type" to "int", "value" to "22")) {})
+        val target = checkpoint.copy(accountBinding = other.value)
+        val index = AppSyncIndexEnvelopeCodec().encode(AppSyncIndexPayload(other,
+            checkpoints = listOf(AppSyncIndexCheckpointReference(target.checkpointId, 123,
+                AppSyncCanonicalCheckpointCodec().encode(target).sha256().hex())), updatedAtEpochMillis = 18))
+        val evidence = assertNotNull(AppSyncVerifiedCanonicalCheckpoint.verify(other.value, 123, index,
+            AppSyncV3DocumentCodec().encodeCheckpoint(target)))
+        val before = store.allOutboxOperations()
+        val result = assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(evidence))
+        assertEquals(1, result.pendingOperationCount)
+        assertEquals(22, preferences.values["novelreadersettings.fontsize"])
+        assertEquals(mapOf(pending.replicaKey.stableKey to 1L), state.read(other.value)?.coverage)
+        assertEquals(before, store.allOutboxOperations())
+        assertFalse(store.isApplied(historical.operationId))
+        assertEquals(AppSyncOperationLifecycle.Acknowledged,
+            store.allOutboxOperations().first { it.first == historical }.second)
+    }
+
     @Test fun pendingEditSurvivesAndRemoteCoverageNeverClaimsLocalOperations() = fixture {
         val pending = append()
         val outbox = store.allOutboxOperations()
