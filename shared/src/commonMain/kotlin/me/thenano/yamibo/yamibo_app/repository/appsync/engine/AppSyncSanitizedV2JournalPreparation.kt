@@ -24,14 +24,22 @@ internal class AppSyncSanitizedV2JournalPreparation(private val canWrite: () -> 
             installation.writerNonce.value != journal.writerNonce ||
             maxOf(journal.lastSequence, journal.publishedThroughSequence ?: 0, journal.observed[replica] ?: 0) >= installation.nextSequence)
             return fail(AppSyncV2JournalFailure.Writer)
+        val result = encodeFrozen(journal)
+        return if (canWrite()) result else fail(AppSyncV2JournalFailure.Compatibility)
+    }
+
+    /** Pure conversion for checking retained evidence after its original writer has changed.
+     * This grants no publication permission; new sessions must use prepare and provider gates.
+     */
+    internal fun encodeFrozen(journal: AppSyncCanonicalJournal): AppSyncV2JournalPreparation {
         if (journal.protocolReadVersion < 3) return fail(AppSyncV2JournalFailure.Compatibility)
         try { AppSyncCanonicalJournalCodec().encode(journal) }
         catch (_: Exception) { return fail(AppSyncV2JournalFailure.InvalidJournal) }
         val exported = AppSyncSanitizedV2OperationExporter().export(journal.block)
         if (exported !is AppSyncV2OperationExport.Ready) return fail(AppSyncV2JournalFailure.OperationExport)
         return try {
-            val payload = AppSyncJournalPayload(requireNotNull(installation.accountBinding), installation.deviceId,
-                installation.deviceEpoch, installation.writerNonce, journal.firstSequence, journal.lastSequence,
+            val payload = AppSyncJournalPayload(SyncAccountBinding(journal.block.accountBinding), SyncDeviceId(journal.deviceId),
+                SyncDeviceEpoch(journal.deviceEpoch), SyncWriterNonce(journal.writerNonce), journal.firstSequence, journal.lastSequence,
                 exported.operations.sortedBy { it.sequence.value }, SyncCausalContext(journal.observed),
                 journal.acknowledgements.sortedBy { it.checkpointId }.map {
                     AppSyncCheckpointAcknowledgement(it.checkpointId, SyncCausalContext(it.coverage))
@@ -41,7 +49,6 @@ internal class AppSyncSanitizedV2JournalPreparation(private val canWrite: () -> 
             val verified = codec.validate(envelope) as? AppSyncJournalValidation.Valid
                 ?: return fail(AppSyncV2JournalFailure.InvalidJournal)
             if (verified.envelope.payload != payload) return fail(AppSyncV2JournalFailure.InvalidJournal)
-            if (!canWrite()) return fail(AppSyncV2JournalFailure.Compatibility)
             AppSyncV2JournalPreparation.Ready(payload, envelope, verified.envelope.fingerprint)
         } catch (_: Exception) { fail(AppSyncV2JournalFailure.InvalidJournal) }
     }

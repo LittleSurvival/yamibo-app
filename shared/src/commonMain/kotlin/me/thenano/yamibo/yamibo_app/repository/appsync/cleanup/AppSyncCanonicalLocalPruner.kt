@@ -102,7 +102,20 @@ internal class AppSyncCanonicalLocalPruner(private val db: Database,
             requireNotNull(index)
             require(index.payload.accountBinding.value == account && index.fingerprint == row.verifiedIndexFingerprint)
             val reference = index.payload.journals.distinct().singleOrNull { it.replicaKey == row.payloadIdentity }
-            require(reference?.blogId?.toLong() == row.rootBlogId && reference.fingerprint == read.metadata.canonicalFingerprint)
+            require((row.fallbackEnvelope == null) == (row.fallbackEnvelopeSha256 == null))
+            val expectedFingerprint = row.fallbackEnvelope?.let { envelope ->
+                require(envelope.encodeUtf8().sha256().hex() == row.fallbackEnvelopeSha256)
+                val exported = me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncSanitizedV2JournalPreparation()
+                    .encodeFrozen(read.document) as? me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncV2JournalPreparation.Ready
+                requireNotNull(exported)
+                require(exported.envelope == envelope)
+                require(index.payload.checkpoints.any { checkpoint ->
+                    read.document.acknowledgements.any { it.checkpointId == checkpoint.checkpointId }
+                })
+                require(row.rootFingerprint.length == 16)
+                row.rootFingerprint
+            } ?: read.metadata.canonicalFingerprint
+            require(reference?.blogId?.toLong() == row.rootBlogId && reference.fingerprint == expectedFingerprint)
             val journal = read.document
             val required = journal.observed.toMutableMap()
             val own = "${journal.deviceId}:${journal.deviceEpoch}"
@@ -111,7 +124,8 @@ internal class AppSyncCanonicalLocalPruner(private val db: Database,
                 coverage.forEach { (replica, sequence) -> required[replica] = maxOf(required[replica] ?: 0L, sequence) }
             }
             if (required.all { (replica, sequence) -> (verified.document.coverage[replica] ?: 0L) >= sequence }) {
-                bytes += row.canonicalEnvelope.encodeUtf8().size.toLong() + row.indexIntentBody.encodeUtf8().size
+                bytes += row.canonicalEnvelope.encodeUtf8().size.toLong() + row.indexIntentBody.encodeUtf8().size +
+                    (row.fallbackEnvelope?.encodeUtf8()?.size?.toLong() ?: 0L)
                 queries.deleteCovered(id)
                 removed++
             } else queries.markChecked(verified.fingerprint, id)

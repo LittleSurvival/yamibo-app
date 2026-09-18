@@ -18,10 +18,12 @@ DELETE FROM AppSyncRetainedJournal WHERE sessionId = ?;
 preserveCompleted:
 INSERT INTO AppSyncRetainedJournal(sessionId, accountBinding, generationId, payloadIdentity,
 canonicalEnvelope, envelopeFingerprint, rootBlogId, rootFingerprint, indexIntentBody, indexIntentSha256,
-verifiedIndexBlogId, verifiedIndexFingerprint, indexVerifiedAtEpochMillis, completedAtEpochMillis)
+verifiedIndexBlogId, verifiedIndexFingerprint, indexVerifiedAtEpochMillis, completedAtEpochMillis,
+fallbackEnvelope, fallbackEnvelopeSha256)
 SELECT s.sessionId, s.accountBinding, s.generationId, p.payloadIdentity, p.canonicalEnvelope,
 p.envelopeFingerprint, s.rootBlogId, s.rootFingerprint, p.indexIntentBody, p.indexIntentSha256,
-p.verifiedIndexBlogId, p.verifiedIndexFingerprint, p.indexVerifiedAtEpochMillis, s.completedAtEpochMillis
+p.verifiedIndexBlogId, p.verifiedIndexFingerprint, p.indexVerifiedAtEpochMillis, s.completedAtEpochMillis, f.envelope, f.envelopeSha256
 FROM AppSyncRecoverySession s JOIN AppSyncRecoveryPayload p USING (sessionId)
+LEFT JOIN AppSyncV2FallbackPayload f USING (sessionId)
 WHERE s.sessionId = ? AND s.phase = 'COMPLETED' AND s.mode = 'SEGMENTED_JOURNAL'
 AND s.indexCommitted = 1 AND p.transportVersion = 3;

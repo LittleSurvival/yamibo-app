@@ -140,6 +140,14 @@ fingerprint，避免誤記 canonical document fingerprint。
 acknowledged 與 causal history，才在同一交易中刪除 canonical／v2 本文並保存 payload-free receipt。
 回收 byte 計數包含 v2 companion 的 UTF-8 bytes；未覆蓋、證據不符或 pending source 均不能提前清理。
 
-跨 session 的 retained-journal 尚未支援保存回退 companion，因此尚未被 checkpoint 回收的 Completed
-回退 session 仍拒絕被下一個 session 取代，保留全部證據。此限制及正式 coordinator／service dispatch、
-多段與裝置中斷驗收仍待完成，不能宣告完整回退流程可上線。
+Migration 59→60 在 retained-journal 增加可空的 fallback envelope／SHA-256；普通 native 歷史維持
+null。建立下一個 session 前，重新檢查固定索引與 companion，將兩份本文和確認證據一併存入
+retained history，核對完整保存內容後才刪除舊 session。交易中斷會一起回復舊 session 與 companion。
+
+Retained cleanup 不依賴當前 writer：它從已保存的 canonical journal 重新轉換 sanitized v2，核對
+完整 bytes、SHA-256、acknowledged checkpoint 與 v2 root index reference，再套用既有完整歷史
+coverage 規則。純轉換入口 encodeFrozen 只用於資料驗證，不提供發布權限；新 session 仍經過
+installation／reader gate。每批最多 8 份 retained journals，未涵蓋的日誌保留 checkpoint cursor，
+新 checkpoint 會重新檢查；成功回收將 companion UTF-8 bytes 加入既有 audit。
+
+正式 coordinator／service dispatch、多段與裝置中斷驗收仍待完成，不能宣告完整回退流程可上線。

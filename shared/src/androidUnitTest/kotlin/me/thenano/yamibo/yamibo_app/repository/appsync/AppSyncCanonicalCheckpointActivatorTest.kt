@@ -1,6 +1,7 @@
 package me.thenano.yamibo.yamibo_app.repository.appsync
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import okio.ByteString.Companion.encodeUtf8
 import kotlinx.coroutines.async
 import kotlin.test.*
 import me.thenano.yamibo.yamibo_app.Database
@@ -311,6 +312,50 @@ class AppSyncCanonicalCheckpointActivatorTest {
         }
     }
 
+    @Test fun fallbackRetainedCompanionMustMatchCanonicalBeforeCoveredPayloadDeletion() = fixture {
+        val id = retainJournalHistory(1, fallback = true).single()
+        val original = db.appSyncRetainedJournalQueries.getBySession(id).executeAsOne()
+        val expectedBytes = original.canonicalEnvelope.encodeToByteArray().size.toLong() +
+            original.indexIntentBody.encodeToByteArray().size + assertNotNull(original.fallbackEnvelope).encodeToByteArray().size
+        val cp = assertNotNull(state.read(account.value)).copy(checkpointId = "covered-fallback")
+        val outboxBytes = cp.coverage.entries.sumOf { (replica, sequence) ->
+            db.appSyncLocalPruneQueries.getCandidates(account.value, replica, sequence, 128).executeAsList().sumOf { it.payloadBytes }
+        }
+        // Even a matching hash cannot authorize a different v2 representation of the journal.
+        val corrupt = assertNotNull(original.fallbackEnvelope) + "tampered"
+        driver.execute(null, "UPDATE AppSyncRetainedJournal SET fallbackEnvelope = ?, fallbackEnvelopeSha256 = ?", 2) {
+            bindString(0, corrupt); bindString(1, corrupt.encodeUtf8().sha256().hex())
+        }
+        assertIs<AppSyncCanonicalActivationResult.NeedsAttention>(activator().activate(verified(cp)))
+        assertEquals(1, store.allOutboxOperations().size)
+        assertNotNull(db.appSyncRetainedJournalQueries.getBySession(id).executeAsOneOrNull())
+        assertTrue(db.appSyncLocalPruneQueries.getAudit(account.value).executeAsList().isEmpty())
+        driver.execute(null, "UPDATE AppSyncRetainedJournal SET fallbackEnvelope = ?, fallbackEnvelopeSha256 = ?", 2) {
+            bindString(0, original.fallbackEnvelope); bindString(1, original.fallbackEnvelopeSha256)
+        }
+        assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(verified(cp)))
+        assertNull(db.appSyncRetainedJournalQueries.getBySession(id).executeAsOneOrNull())
+        val audit = db.appSyncLocalPruneQueries.getAudit(account.value).executeAsOne()
+        assertEquals(1L, audit.removedRetainedJournals)
+        assertEquals(expectedBytes + outboxBytes, audit.removedPayloadBytes)
+    }
+
+    @Test fun retainedFallbackMigrationDoesNotInventCompanionsForNativeHistory() {
+        JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).use { driver ->
+            Database.Schema.migrate(driver, oldVersion = 55, newVersion = 56)
+            driver.execute(null, "ALTER TABLE AppSyncRetainedJournal ADD COLUMN lastCheckedCheckpointFingerprint TEXT", 0)
+            driver.execute(null, """INSERT INTO AppSyncRetainedJournal(sessionId, accountBinding, generationId, payloadIdentity,
+                canonicalEnvelope, envelopeFingerprint, rootBlogId, rootFingerprint, indexIntentBody, indexIntentSha256,
+                verifiedIndexBlogId, verifiedIndexFingerprint, indexVerifiedAtEpochMillis, completedAtEpochMillis)
+                VALUES ('old', 'account', 'generation', 'identity', 'canonical', 'fingerprint', 1, 'root', 'index', 'sha', 2, 'index-fp', 3, 4)""", 0)
+            Database.Schema.migrate(driver, oldVersion = 59, newVersion = 60)
+            val row = Database(driver).appSyncRetainedJournalQueries.getBySession("old").executeAsOne()
+            assertEquals("canonical", row.canonicalEnvelope)
+            assertNull(row.fallbackEnvelope)
+            assertNull(row.fallbackEnvelopeSha256)
+        }
+    }
+
     @Test fun corruptRetainedIndexPreservesPayloadAndRollsBackEarlierOutboxDeletion() = fixture {
         val id = retainJournalHistory(1).single()
         val cp = assertNotNull(state.read(account.value)).copy(checkpointId = "covered-retained")
@@ -322,8 +367,8 @@ class AppSyncCanonicalCheckpointActivatorTest {
         assertTrue(db.appSyncLocalPruneQueries.getAudit(account.value).executeAsList().isEmpty())
     }
 
-    @Test fun retainedJournalCleanupHasBoundedPersistentProgressAndRechecksNewCheckpoints() = fixture {
-        val ids = retainJournalHistory(17)
+    @Test fun retainedJournalCleanupHasBoundedPersistentProgressAndRechecksNewCheckpoints() = listOf(false, true).forEach { fallback -> fixture {
+        val ids = retainJournalHistory(17, fallback)
         val pruner = me.thenano.yamibo.yamibo_app.repository.appsync.cleanup.AppSyncCanonicalLocalPruner(db, state)
         assertTrue(pruner.prune(verified(), now).hasMore)
         assertEquals(8, ids.count { db.appSyncRetainedJournalQueries.getBySession(it).executeAsOne().lastCheckedCheckpointFingerprint != null })
@@ -344,10 +389,10 @@ class AppSyncCanonicalCheckpointActivatorTest {
         assertTrue(audit.removedPayloadBytes > 0)
         assertEquals(0L, restarted.prune(proof, now).removedPayloadBytes)
         assertEquals(audit, db.appSyncLocalPruneQueries.getAudit(account.value).executeAsOne())
-    }
+    } }
 
-    @Test fun retainedCleanupCursorDeletionAndAuditAllRollBackTogether() = fixture {
-        val id = retainJournalHistory(1).single()
+    @Test fun retainedCleanupCursorDeletionAndAuditAllRollBackTogether() = listOf(false, true).forEach { fallback -> fixture {
+        val id = retainJournalHistory(1, fallback).single()
         val pruner = me.thenano.yamibo.yamibo_app.repository.appsync.cleanup.AppSyncCanonicalLocalPruner(db, state)
         assertFailsWith<IllegalStateException> {
             db.transaction {
@@ -369,7 +414,7 @@ class AppSyncCanonicalCheckpointActivatorTest {
         assertTrue(db.appSyncLocalPruneQueries.getAudit(account.value).executeAsList().isEmpty())
         assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activate(verified(cp)))
         assertNull(db.appSyncRetainedJournalQueries.getBySession(id).executeAsOneOrNull())
-    }
+    } }
 
     @Test fun retainedCleanupMigrationCreatesNoImplicitProgress() {
         JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).use { driver ->
@@ -381,17 +426,21 @@ class AppSyncCanonicalCheckpointActivatorTest {
         }
     }
 
-    @Test fun replacingCompletedJournalPreservesFrozenEvidenceOutsideTheActiveSessionSlot() = fixture {
+    @Test fun replacingCompletedJournalPreservesFrozenEvidenceOutsideTheActiveSessionSlot() = listOf(false, true).forEach { fallback -> fixture {
         val first = append()
-        val (recovery, id) = stageNativeJournal(first)
+        val (recovery, id) = stageNativeJournal(first, fallback = fallback)
         val cloud = AppSyncCanonicalCloudPlan.Ready(verified(), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
         activator().activateJournalRecovery(recovery, id, cloud)
         val frozen = db.appSyncOperationQueries.getRecoveryPayload(id).executeAsOne()
+        val companion = db.appSyncV2FallbackPayloadQueries.getForSession(id).executeAsOneOrNull()
         val later = append("22")
         val next = recovery.createOrResumeSegmentedJournal(account, setOf(later.operationId.value), "next-publication", now)
         assertNotEquals(id, next.sessionId)
         assertNull(recovery.session(id))
         val retained = db.appSyncRetainedJournalQueries.getBySession(id).executeAsOne()
+        assertEquals(companion?.envelope, retained.fallbackEnvelope)
+        assertEquals(companion?.envelopeSha256, retained.fallbackEnvelopeSha256)
+        assertFalse(recovery.hasSanitizedV2Payload(id))
         assertEquals(frozen.canonicalEnvelope, retained.canonicalEnvelope)
         assertEquals(frozen.indexIntentBody, retained.indexIntentBody)
         assertEquals(frozen.verifiedIndexFingerprint, retained.verifiedIndexFingerprint)
@@ -403,14 +452,15 @@ class AppSyncCanonicalCheckpointActivatorTest {
         assertEquals(retained, db.appSyncRetainedJournalQueries.getBySession(id).executeAsOne())
         assertEquals(listOf(later), store.pendingOperations())
         assertEquals(next, SqlDelightAppSyncRecoveryStore(db).recoverySession(account))
-    }
+    } }
 
-    @Test fun interruptedSessionReplacementRollsBackPreservationAndOldSessionRemoval() = fixture {
+    @Test fun interruptedSessionReplacementRollsBackPreservationAndOldSessionRemoval() = listOf(false, true).forEach { fallback -> fixture {
         val first = append()
-        val (recovery, id) = stageNativeJournal(first)
+        val (recovery, id) = stageNativeJournal(first, fallback = fallback)
         activator().activateJournalRecovery(recovery, id,
             AppSyncCanonicalCloudPlan.Ready(verified(), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList()))
         val frozen = recovery.nativePayload(id)
+        val companion = if (fallback) recovery.sanitizedV2Payload(id) else null
         assertFailsWith<IllegalStateException> {
             db.transaction {
                 recovery.createOrResumeSegmentedJournal(account, emptySet(), "next-publication", now)
@@ -420,8 +470,9 @@ class AppSyncCanonicalCheckpointActivatorTest {
         }
         assertEquals(AppSyncRecoveryPhase.Completed, recovery.session(id)?.phase)
         assertEquals(frozen, recovery.nativePayload(id))
+        assertEquals(companion, if (fallback) recovery.sanitizedV2Payload(id) else null)
         assertNull(db.appSyncRetainedJournalQueries.getBySession(id).executeAsOneOrNull())
-    }
+    } }
 
     @Test fun invalidCompletedJournalEvidenceCannotBeDiscardedByNextSession() = fixture {
         val first = append()
@@ -1378,11 +1429,11 @@ class AppSyncCanonicalCheckpointActivatorTest {
             val starter = AppSyncNativeJournalStarter(db, store, recovery, state, activator(), { now }, { true })
             return provider to AppSyncNativeRecoveryContinuation(provider, store, recovery, blogs, activator(), { now }, { true }, starter)
         }
-        fun retainJournalHistory(count: Int): List<String> {
+        fun retainJournalHistory(count: Int, fallback: Boolean = false): List<String> {
             val recovery = SqlDelightAppSyncRecoveryStore(db)
             val cloud = AppSyncCanonicalCloudPlan.Ready(verified(), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
             repeat(count) {
-                val (_, id) = stageNativeJournal(append())
+                val (_, id) = stageNativeJournal(append(), fallback = fallback)
                 assertIs<AppSyncCanonicalActivationResult.Applied>(activator().activateJournalRecovery(recovery, id, cloud))
             }
             val placeholder = recovery.createOrResumeSegmentedJournal(account, emptySet(), "next-after-retained", now)

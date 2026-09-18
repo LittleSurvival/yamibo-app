@@ -671,12 +671,14 @@ internal class SqlDelightAppSyncRecoveryStore(
         require(session.phase == AppSyncRecoveryPhase.Completed && shadowOperations(sessionId).isEmpty())
         val payload = queries.getRecoveryPayload(sessionId).executeAsOne()
         val intent = requireNotNull(nativeIndexIntent(sessionId))
-        markNativeIndexCommitted(sessionId, requireNotNull(payload.verifiedIndexBlogId), intent.body,
-            requireNotNull(payload.indexVerifiedAtEpochMillis))
+        markCanonicalIndexCommitted(sessionId, requireNotNull(payload.verifiedIndexBlogId), intent.body,
+            requireNotNull(payload.indexVerifiedAtEpochMillis), hasSanitizedV2Payload(sessionId))
+        val fallback = db.appSyncV2FallbackPayloadQueries.getForSession(sessionId).executeAsOneOrNull()
         val retained = db.appSyncRetainedJournalQueries
         if (retained.getBySession(sessionId).executeAsOneOrNull() == null) retained.preserveCompleted(sessionId)
         val saved = retained.getBySession(sessionId).executeAsOne()
-        require(saved.accountBinding == session.accountBinding.value && saved.generationId == session.generationId &&
+        require(saved.fallbackEnvelope == fallback?.envelope && saved.fallbackEnvelopeSha256 == fallback?.envelopeSha256 &&
+            saved.accountBinding == session.accountBinding.value && saved.generationId == session.generationId &&
             saved.payloadIdentity == payload.payloadIdentity && saved.canonicalEnvelope == payload.canonicalEnvelope &&
             saved.envelopeFingerprint == payload.envelopeFingerprint && saved.rootBlogId == session.rootBlogId &&
             saved.rootFingerprint == session.rootFingerprint && saved.indexIntentBody == intent.body &&

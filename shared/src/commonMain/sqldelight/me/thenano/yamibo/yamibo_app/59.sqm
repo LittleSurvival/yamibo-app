@@ -1,0 +1,2 @@
+ALTER TABLE AppSyncRetainedJournal ADD COLUMN fallbackEnvelope TEXT;
+ALTER TABLE AppSyncRetainedJournal ADD COLUMN fallbackEnvelopeSha256 TEXT;
