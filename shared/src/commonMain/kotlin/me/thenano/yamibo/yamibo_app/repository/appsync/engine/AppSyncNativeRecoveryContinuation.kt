@@ -14,8 +14,8 @@ internal object AppSyncV3FeatureFlagKeys {
     const val BENCHMARKS_APPROVED = "appSyncV3BenchmarksApproved"
 }
 
-/** Service adapter for an existing frozen native session. The engine owns the run lease.
- * This does not create new publications or enqueue work. Committed activation stays readable
+/** Service adapter for native journal creation and frozen recovery. The engine owns the run lease.
+ * This does not enqueue work. Committed activation stays readable
  * when rollout is disabled; every remote write still independently checks the cohort gate.
  */
 internal class AppSyncNativeRecoveryContinuation(
@@ -26,6 +26,7 @@ internal class AppSyncNativeRecoveryContinuation(
     private val activator: AppSyncCanonicalCheckpointActivator,
     private val nowMillis: () -> Long,
     private val canWrite: () -> Boolean = { false },
+    private val journalStarter: AppSyncNativeJournalStarter? = null,
 ) : AppSyncCanonicalRecoveryContinuation {
     override fun hasPending(account: SyncAccountBinding): Boolean = recovery.recoverySession(account)?.let {
         it.phase != AppSyncRecoveryPhase.Completed && recovery.usesNativeTransport(it.sessionId)
@@ -57,18 +58,11 @@ internal class AppSyncNativeRecoveryContinuation(
 
     override suspend fun resume(account: SyncAccountBinding, formHash: FormHash,
         cloud: AppSyncCanonicalCloudPlan.Ready): OperationSyncResult? {
-        if (!hasPending(account)) return null
-        val session = requireNotNull(recovery.recoverySession(account))
-        if (session.phase == AppSyncRecoveryPhase.NeedsAttention)
-            return OperationSyncResult.PausedProvider("Native recovery requires explicit resume")
-        if (!session.indexCommitted && !canWrite()) {
-            block(account, "native-compatibility")
-            return OperationSyncResult.PausedProvider("Native recovery requires compatible readers and approved rollout")
-        }
+        val starting = !hasPending(account)
+        if (starting && (!canWrite() || journalStarter == null)) return null
         return try {
             val installation = requireNotNull(operations.installation())
             require(installation.accountBinding == account)
-            val payload = recovery.nativePayload(session.sessionId)
             // A committed activation performs no remote requests. Its persisted class link is
             // still required so a later phase regression cannot accidentally invent a class.
             val selection = AppSyncBlogClassSelection.Existing(requireNotNull(remoteBlogs.loadClassId(account)))
@@ -80,6 +74,17 @@ internal class AppSyncNativeRecoveryContinuation(
             }.map {
                 SyncOperation.idFor(SyncDeviceId(it.deviceId), SyncDeviceEpoch(it.deviceEpoch), SyncSequence(it.sequence))
             }).distinct().filterNot(operations::isApplied)
+            if (starting && requireNotNull(journalStarter).start(account, cloud).isFailure)
+                return OperationSyncResult.PausedProvider("Native journal could not be prepared from verified cloud history")
+            val session = requireNotNull(recovery.recoverySession(account))
+            if (session.phase == AppSyncRecoveryPhase.NeedsAttention)
+                return OperationSyncResult.PausedProvider("Native recovery requires explicit resume")
+            if (!session.indexCommitted && !canWrite()) {
+                block(account, "native-compatibility")
+                return OperationSyncResult.PausedProvider("Native recovery requires compatible readers and approved rollout")
+            }
+            val payload = recovery.nativePayload(session.sessionId)
+            val coveredAcknowledged = if (starting) pending - operations.pendingOperations().map { it.operationId.value }.toSet() else emptySet()
             val publisher = AppSyncV3SegmentPublisher(provider, recovery, nowMillis, canWrite = { canWrite() },
                 discover = AppSyncV3ArtifactReconciler(provider, selection.classId)::discover)
             val committer = AppSyncV3IndexCommitter(provider, recovery, publisher, nowMillis, { canWrite() })
@@ -88,7 +93,7 @@ internal class AppSyncNativeRecoveryContinuation(
             when (val result = coordinator.commit(session.sessionId, payload.body, payload.identity, selection, formHash, cloud)) {
                 is AppSyncSegmentedJournalCommitResult.Verified -> OperationSyncResult.Converged(
                     appliedRemoteCount = remoteIds.count(operations::isApplied),
-                    acknowledgedLocalCount = result.acknowledgedOperationIds.count { it in pending },
+                    acknowledgedLocalCount = (result.acknowledgedOperationIds + coveredAcknowledged).count { it in pending },
                     quarantineCount = 0, attempts = 1, changes = emptyList())
                 AppSyncSegmentedJournalCommitResult.FormExpired -> {
                     operations.updateState(AppSyncInstallationState.PausedAuth)

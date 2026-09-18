@@ -15,6 +15,113 @@ import me.thenano.yamibo.yamibo_app.store.appsync.*
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 
 class AppSyncCanonicalCheckpointActivatorTest {
+    @Test fun nativeContinuationStartsPublishesAndActivatesWhilePreservingALaterEdit() = fixture {
+        val first = append()
+        val recovery = SqlDelightAppSyncRecoveryStore(db)
+        val provider = AppSyncV3SegmentPublisherTest.Provider().also { it.timeoutAt = 1; it.storeTimedOut = true }
+        val selection = AppSyncBlogClassSelection.Existing(io.github.littlesurvival.dto.value.BlogClassId(7))
+        val form = io.github.littlesurvival.dto.value.FormHash("test")
+        val proof = verified()
+        val index = AppSyncIndexEnvelopeCodec().encode(AppSyncIndexPayload(account,
+            checkpoints = listOf(AppSyncIndexCheckpointReference(checkpoint.checkpointId, 123, proof.fingerprint)), updatedAtEpochMillis = 11))
+        provider.artifacts[124] = AppSyncBlogWriteRequest(io.github.littlesurvival.dto.value.BlogId(124), APP_SYNC_INDEX_TITLE, index, selection, form)
+        provider.artifacts[123] = AppSyncBlogWriteRequest(io.github.littlesurvival.dto.value.BlogId(123),
+            AppSyncJournalDefaults.checkpointTitle(checkpoint.checkpointId), AppSyncV3DocumentCodec().encodeCheckpoint(checkpoint), selection, form)
+        var later: SyncOperation? = null
+        provider.onList = {
+            if (later == null) {
+                later = append("22")
+                state.recordLocalBatch(account.value, listOf(requireNotNull(later)))
+                preferences.values["novelreadersettings.fontsize"] = 22
+            }
+        }
+        val blogs = SqlDelightAppSyncRemoteBlogStore(db).also { it.saveClassId(account, selection.classId) }
+        val starter = AppSyncNativeJournalStarter(db, store, recovery, state, activator(), { now }, { true })
+        val continuation = AppSyncNativeRecoveryContinuation(provider, store, recovery, blogs, activator(), { now }, { true }, starter)
+        val cloud = AppSyncCanonicalCloudPlan.Ready(proof, AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
+        val result = kotlinx.coroutines.runBlocking { continuation.resume(account, form, cloud) }
+        assertEquals(1, assertIs<OperationSyncResult.Converged>(result).acknowledgedLocalCount)
+        val session = assertNotNull(recovery.recoverySession(account))
+        assertEquals(AppSyncRecoveryPhase.Completed, session.phase)
+        assertTrue(session.indexCommitted)
+        assertEquals(setOf(first.operationId.value), session.sourceOperationIds)
+        assertEquals(listOf(assertNotNull(later)), store.pendingOperations())
+        assertEquals(22, preferences.values["novelreadersettings.fontsize"])
+        assertEquals(3, provider.posts.size) // One segment, one root, one index, despite the lost first response.
+        assertEquals(APP_SYNC_INDEX_TITLE, provider.posts.last().title)
+    }
+
+    @Test fun newNativeJournalFreezesSourcesAndTransportBeforeAnyPublication() = fixture {
+        val first = append()
+        val recovery = SqlDelightAppSyncRecoveryStore(db)
+        val cloud = AppSyncCanonicalCloudPlan.Ready(verified(), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
+        val starter = AppSyncNativeJournalStarter(db, store, recovery, state, activator(), { now }, { true })
+        val id = starter.start(account, cloud).getOrThrow()
+        assertEquals(AppSyncRecoveryPhase.Classifying, recovery.session(id)?.phase)
+        assertEquals(setOf(first.operationId.value), recovery.session(id)?.sourceOperationIds)
+        val frozen = recovery.nativePayload(id)
+        val read = assertIs<AppSyncV3DocumentRead.Journal>(AppSyncV3DocumentCodec().discover(frozen.body, account.value, AppSyncV3PayloadKind.Journal))
+        assertEquals(listOf(first.sequence.value), read.document.block.operations.map { it.sequence })
+        assertEquals(3, read.document.protocolWriteVersion)
+        assertEquals(listOf(first), store.pendingOperations())
+        val later = append("22")
+        assertTrue(starter.start(account, cloud).isFailure)
+        assertEquals(frozen, SqlDelightAppSyncRecoveryStore(db).nativePayload(id))
+        assertEquals(listOf(first, later), store.pendingOperations())
+    }
+
+    @Test fun nativeStarterAcknowledgesOnlyTheIndexedCheckpointPrefix() = fixture {
+        val first = append()
+        val cp = assertIs<AppSyncCanonicalPendingMergeResult.Ready>(AppSyncCanonicalPendingMerge()
+            .prepare(checkpoint, listOf(first), "covered", 10)).checkpoint
+        val second = append("22")
+        val recovery = SqlDelightAppSyncRecoveryStore(db)
+        val cloud = AppSyncCanonicalCloudPlan.Ready(verified(cp), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
+        val id = AppSyncNativeJournalStarter(db, store, recovery, state, activator(), { now }, { true }).start(account, cloud).getOrThrow()
+        assertEquals(listOf(second), store.pendingOperations())
+        assertEquals(setOf(second.operationId.value), recovery.session(id)?.sourceOperationIds)
+        val frozen = recovery.nativePayload(id)
+        val journal = assertIs<AppSyncV3DocumentRead.Journal>(AppSyncV3DocumentCodec().discover(frozen.body, account.value, AppSyncV3PayloadKind.Journal)).document
+        assertEquals(listOf(2L), journal.block.operations.map { it.sequence })
+        assertEquals(cp.coverage, journal.acknowledgements.single().coverage)
+    }
+
+    @Test fun nativeStarterRollsBackFrozenSessionWhenAcknowledgementFails() = fixture {
+        val first = append()
+        val cp = assertIs<AppSyncCanonicalPendingMergeResult.Ready>(AppSyncCanonicalPendingMerge()
+            .prepare(checkpoint, listOf(first), "covered", 10)).checkpoint
+        val recovery = SqlDelightAppSyncRecoveryStore(db)
+        val broken = object : AppSyncOperationStore by store {
+            override fun markAcknowledged(operationIds: Set<SyncOperationId>, atEpochMillis: Long) {
+                store.markAcknowledged(operationIds, atEpochMillis)
+                error("interrupted after frozen payload and acknowledgement")
+            }
+        }
+        val cloud = AppSyncCanonicalCloudPlan.Ready(verified(cp), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
+        assertTrue(AppSyncNativeJournalStarter(db, broken, recovery, state, activator(), { now }, { true }).start(account, cloud).isFailure)
+        assertNull(recovery.recoverySession(account))
+        assertEquals(listOf(first), store.pendingOperations())
+        assertNotNull(state.read(account.value))
+        val id = AppSyncNativeJournalStarter(db, store, recovery, state, activator(), { now }, { true }).start(account, cloud).getOrThrow()
+        assertTrue(recovery.usesNativeTransport(id))
+        assertTrue(store.pendingOperations().isEmpty())
+    }
+
+    @Test fun nativeStarterWaitsForSettingsAndRechecksRolloutBeforeFreezing() = fixture {
+        val first = append()
+        val recovery = SqlDelightAppSyncRecoveryStore(db)
+        val cloud = AppSyncCanonicalCloudPlan.Ready(verified(), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList())
+        preferences.fail = true
+        assertTrue(AppSyncNativeJournalStarter(db, store, recovery, state, activator(), { now }, { true }).start(account, cloud).isFailure)
+        assertNull(recovery.recoverySession(account))
+        preferences.fail = false
+        var checks = 0
+        assertTrue(AppSyncNativeJournalStarter(db, store, recovery, state, activator(), { now }, { ++checks < 3 }).start(account, cloud).isFailure)
+        assertEquals(3, checks)
+        assertNull(recovery.recoverySession(account))
+        assertEquals(listOf(first), store.pendingOperations())
+    }
+
     @Test fun nativeCheckpointCompletionPurgesFrozenBodiesAndRetainsReplayReceipt() = fixture {
         val pending = append()
         val (recovery, id) = stageNativeCheckpoint()

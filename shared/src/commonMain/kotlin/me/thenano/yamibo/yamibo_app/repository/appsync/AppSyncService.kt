@@ -386,15 +386,17 @@ class AppSyncService(
     )
     private val nativeRecovery = me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncNativeRecoveryContinuation(
         blogProvider, store, recoveryStore, remoteBlogStore, canonicalActivator, nowMillis,
-        canWrite = {
+        canWrite = ::canWriteNativeJournal,
+        journalStarter = me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncNativeJournalStarter(
+            db, store, recoveryStore, canonicalState, canonicalActivator, nowMillis, ::canWriteNativeJournal),
+    )
+    private fun canWriteNativeJournal(): Boolean =
             store.installation()?.let { installation ->
                 readerCohortStore.canWrite(installation, nowMillis(),
                     settingsStore.getBoolean(me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncV3FeatureFlagKeys.WRITER, false),
                     settingsStore.getBoolean(me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncV3FeatureFlagKeys.READER_READY, false),
                     settingsStore.getBoolean(me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncV3FeatureFlagKeys.BENCHMARKS_APPROVED, false))
             } == true
-        },
-    )
     private var localSnapshotSource: BackupRepositoryImpl? = null
     private val migrationPlanner = BackupSnapshotMigrationPlanner()
     private val localProjectionRepairPlanner = LocalProjectionRepairPlanner()

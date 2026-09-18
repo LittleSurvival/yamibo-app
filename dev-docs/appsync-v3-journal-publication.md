@@ -34,4 +34,10 @@ Migration 47 新增帳號隔離的 reader cohort 證據表。engine 每次取得
 
 `AppSyncCanonicalJournalBaseline` 現在可從通過 cloud planner 的資料重建自身 writer 的發布基礎。planner 保留所有 native／legacy journal 的 metadata 與實體別名；baseline 合併相同 writer 的 observed、published-through、acknowledgement 與尚未被 checkpoint 覆蓋的操作，拒絕 nonce、同序號內容或 acknowledgement coverage 衝突。published-through 不可超過本機已配置序號。
 
-只有 index-verified checkpoint 的 coverage 能取代已裁切或無法匯入的舊前綴；其後的 retained tail 必須逐號連續至 published-through。未覆蓋的 Excluded／NoOp 來源仍拒絕發布，不靠省略操作填補缺口。checkpoint 已涵蓋全部歷史時，可建立 metadata-only 基礎並追加下一序號。此步驟是純計算，不標記 acknowledged、不刪除來源；新 session 的原子凍結與 service 接線尚待完成，writer gate 維持關閉。
+只有 index-verified checkpoint 的 coverage 能取代已裁切或無法匯入的舊前綴；其後的 retained tail 必須逐號連續至 published-through。未覆蓋的 Excluded／NoOp 來源仍拒絕發布，不靠省略操作填補缺口。checkpoint 已涵蓋全部歷史時，可建立 metadata-only 基礎並追加下一序號。此步驟是純計算，不標記 acknowledged、不刪除來源。
+
+`AppSyncNativeJournalStarter` 接入 service 的 native continuation：在 engine lease 內、cloud planner 與 cohort 檢查通過後，先套用 cloud 加上本機操作並完成外部設定重整，再於同一 SQL 交易重讀 installation、canonical head 與 pending sources。準備 journal、建立 session、凍結 transport version 3 的封套一併提交，避免留下可能被 legacy writer 接手的半成品 session。未完成的既有 session 不會被新發布取代；後續本機編輯留給下一次發布。
+
+已被該 indexed checkpoint 覆蓋的 pending 前綴可在上述交易中確認，其餘 source ID 留在 session，直到分段、root、index 回讀及 canonical activation 完成才確認。設定套用失敗或 rollout 在準備途中關閉均不建立新 session；交易失敗會回滾封套、session 與前綴確認。此接線仍使用預設關閉的 writer、reader-ready、benchmark 三個條件，且要求新鮮 cohort；不代表首份 canonical checkpoint/bootstrap、reader v3 宣告或跨平台效能驗收已完成。
+
+回歸情境包含：新 session 凍結後再新增操作不改變封套；checkpoint 覆蓋前綴與未覆蓋來源分開確認；凍結後確認來源時發生例外會整筆回滾；設定重整失敗／第三次 gate 檢查關閉不留下 session。Fake-provider 整合從零 session 開始，故意遺失第一個已成功寫入分段的回應，經 authoritative discovery 找回後接續 root、index 與 activation；期間新增的本機設定仍保留 pending。此測試使用正式 SQLite store、codec、publisher、committer 與 activator，尚不等同真實 provider／WorkManager 裝置端驗收。

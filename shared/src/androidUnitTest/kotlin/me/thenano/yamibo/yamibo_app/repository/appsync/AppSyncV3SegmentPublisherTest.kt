@@ -560,7 +560,7 @@ class AppSyncV3SegmentPublisherTest {
         assertEquals(AppSyncV3ArtifactDiscovery.Unknown, reconciler.discover(title, sha))
     }
 
-    private class Provider : AppSyncBlogProvider {
+    internal class Provider : AppSyncBlogProvider {
         val posts = mutableListOf<AppSyncBlogWriteRequest>()
         val artifacts = linkedMapOf<Int, AppSyncBlogWriteRequest>()
         var timeoutAt: Int? = null
