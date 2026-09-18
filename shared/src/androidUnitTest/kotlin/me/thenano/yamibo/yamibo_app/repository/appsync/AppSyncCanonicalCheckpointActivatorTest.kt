@@ -275,6 +275,105 @@ class AppSyncCanonicalCheckpointActivatorTest {
         assertEquals(listOf(first, later), store.pendingOperations())
     }
 
+    @Test fun fallbackCheckpointCompanionIsImmutableTransactionalAndBoundToCanonicalSource() = fixture {
+        val pending = append()
+        val recovery = SqlDelightAppSyncRecoveryStore(db)
+        val session = recovery.createOrResumeSegmentedCheckpoint(account, checkpoint.checkpointId, "checkpoint-source", now)
+        val id = session.sessionId
+        recovery.pinPayload(id, "Checkpoint", checkpoint.checkpointId, 3) { AppSyncV3DocumentCodec().encodeCheckpoint(checkpoint) }
+        val snapshot = me.thenano.yamibo.yamibo_app.repository.backup.YamiboBackupFile(appVersionCode = 1, createdAt = 10)
+        assertFailsWith<IllegalStateException> { recovery.pinSanitizedV2CheckpointPayload(id, snapshot) { false } }
+        assertFalse(recovery.hasSanitizedV2Payload(id))
+        assertFailsWith<IllegalStateException> {
+            db.transaction {
+                recovery.pinSanitizedV2CheckpointPayload(id, snapshot) { true }
+                error("rollback")
+            }
+        }
+        assertFalse(recovery.hasSanitizedV2Payload(id))
+        val frozen = recovery.pinSanitizedV2CheckpointPayload(id, snapshot) { true }
+        val row = db.appSyncV2FallbackPayloadQueries.getForSession(id).executeAsOne()
+        assertFailsWith<IllegalArgumentException> {
+            recovery.pinSanitizedV2CheckpointPayload(id, snapshot.copy(appVersionCode = 2)) { true }
+        }
+        assertEquals(frozen, SqlDelightAppSyncRecoveryStore(db).sanitizedV2Payload(id))
+        val altered = assertIs<AppSyncCheckpointValidation.Valid>(AppSyncCheckpointEnvelopeCodec().validate(frozen)).envelope.payload
+            .copy(createdAtEpochMillis = 11)
+        val changed = AppSyncCheckpointEnvelopeCodec().encodeSanitizedFallback(altered)
+        db.appSyncV2FallbackPayloadQueries.deleteForSession(id)
+        db.appSyncV2FallbackPayloadQueries.pin(id, row.nativeEnvelopeSha256, changed, changed.encodeUtf8().sha256().hex())
+        assertFailsWith<IllegalArgumentException> { recovery.sanitizedV2Payload(id) }
+        db.appSyncV2FallbackPayloadQueries.deleteForSession(id)
+        db.appSyncV2FallbackPayloadQueries.pin(id, row.nativeEnvelopeSha256, row.envelope, row.envelopeSha256)
+        assertEquals(frozen, recovery.sanitizedV2Payload(id))
+        assertFailsWith<IllegalStateException> {
+            db.transaction {
+                driver.execute(null, "UPDATE AppSyncInstallation SET writerNonce = 'different-writer'", 0)
+                assertFailsWith<IllegalArgumentException> { recovery.sanitizedV2Payload(id) }
+                error("restore writer")
+            }
+        }
+        recovery.startSegmentedJournal(id, now)
+        db.appSyncV2FallbackPayloadQueries.deleteForSession(id)
+        assertFailsWith<IllegalArgumentException> { recovery.pinSanitizedV2CheckpointPayload(id, snapshot) { true } }
+        assertFalse(recovery.hasSanitizedV2Payload(id))
+        db.appSyncV2FallbackPayloadQueries.pin(id, row.nativeEnvelopeSha256, row.envelope, row.envelopeSha256)
+        assertEquals(listOf(pending), store.pendingOperations())
+        recovery.rollbackPreCommit(id)
+        assertFalse(recovery.hasSanitizedV2Payload(id))
+        assertEquals(listOf(pending), store.pendingOperations())
+    }
+
+    @Test fun fallbackCheckpointSegmentsResumeWithoutChangingKindOrCommittingIndex() = fixture {
+        val pending = append()
+        val cp = checkpoint.copy(checkpointId = "fallback-checkpoint")
+        val recovery = SqlDelightAppSyncRecoveryStore(db)
+        val id = recovery.createOrResumeSegmentedCheckpoint(account, cp.checkpointId, "checkpoint-source", now).sessionId
+        val native = AppSyncV3DocumentCodec().encodeCheckpoint(cp)
+        recovery.pinPayload(id, "Checkpoint", cp.checkpointId, 3) { native }
+        val frozen = recovery.pinSanitizedV2CheckpointPayload(id,
+            me.thenano.yamibo.yamibo_app.repository.backup.YamiboBackupFile(appVersionCode = 1, createdAt = 10)) { true }
+        recovery.startSegmentedJournal(id, now)
+        val provider = nativePublishingEnvironment().first
+        val originalArtifacts = provider.artifacts.toMap()
+        val selection = AppSyncBlogClassSelection.Existing(io.github.littlesurvival.dto.value.BlogClassId(7))
+        val form = io.github.littlesurvival.dto.value.FormHash("test")
+        assertIs<AppSyncV3SegmentPublishResult.NeedsAttention>(kotlinx.coroutines.runBlocking {
+            AppSyncV3SegmentPublisher(provider, recovery, { now }, canWrite = { true })
+                .publish(id, native, AppSyncV3PayloadKind.Checkpoint, cp.checkpointId, selection, form)
+        })
+        assertTrue(provider.posts.isEmpty())
+        provider.timeoutAt = 1
+        provider.storeTimedOut = true
+        provider.onList = { provider.listFailureAt = 1 }
+        fun publish() = kotlinx.coroutines.runBlocking {
+            AppSyncSanitizedV2SegmentPublisher(provider, SqlDelightAppSyncRecoveryStore(db), { now }, canWrite = { true },
+                discover = AppSyncV3ArtifactReconciler(provider, selection.classId)::discover).publish(id, selection, form)
+        }
+        assertIs<AppSyncSegmentPublishResult.Retryable>(publish())
+        assertEquals(1, provider.posts.size)
+        provider.timeoutAt = null
+        provider.listFailureAt = null
+        provider.onList = {}
+        val completed = assertIs<AppSyncSegmentPublishResult.ReadyToCommitIndex>(publish())
+        val root = AppSyncSegmentEnvelopeCodec().decodeRoot(completed.rootBody).getOrThrow()
+        assertEquals("checkpoint", root.kind)
+        assertEquals(cp.checkpointId, root.identity)
+        assertEquals(2, provider.posts.size)
+        assertEquals(completed, publish())
+        assertEquals(2, provider.posts.size)
+        assertEquals(frozen, recovery.sanitizedV2Payload(id))
+        assertEquals(AppSyncRecoveryPhase.CommittingIndex, recovery.session(id)?.phase)
+        assertFalse(assertNotNull(recovery.session(id)).indexCommitted)
+        assertEquals(listOf(pending), store.pendingOperations())
+        originalArtifacts.forEach { (key, value) -> assertEquals(value, provider.artifacts[key]) }
+        val remote = YamiboAppSyncJournalRemote(provider, SqlDelightAppSyncRemoteBlogStore(db), nowMillis = { now })
+        val loaded = assertIs<AppSyncJournalLoadResult.Success>(kotlinx.coroutines.runBlocking { remote.loadJournals(account, true) })
+        assertEquals(assertIs<AppSyncCheckpointValidation.Valid>(AppSyncCheckpointEnvelopeCodec().validate(frozen)).envelope.payload,
+            loaded.checkpoints.single().envelope.payload)
+        assertTrue(loaded.verifiedLegacyCheckpoints.isEmpty())
+    }
+
     private fun Fixture.runFallback(provider: AppSyncV3SegmentPublisherTest.Provider, id: String,
         canWrite: Boolean = true, cloud: AppSyncCanonicalCloudPlan.Ready = AppSyncCanonicalCloudPlan.Ready(
             verified(), AppSyncCanonicalOperationBlock(account.value, emptyList()), emptyList()),

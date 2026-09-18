@@ -28,8 +28,12 @@ internal class AppSyncSanitizedV2SegmentPublisher(
         require(session.phase in setOf(AppSyncRecoveryPhase.PublishingSegments, AppSyncRecoveryPhase.PublishingRoot,
             AppSyncRecoveryPhase.CommittingIndex))
         val frozen = recovery.sanitizedV2Payload(sessionId)
-        val identity = recovery.nativePayload(sessionId).identity
-        val kind = AppSyncSegmentPayloadKind.Journal
+        val native = recovery.nativePayload(sessionId)
+        val identity = native.identity
+        val kind = when (native.kind) {
+            AppSyncV3PayloadKind.Journal -> AppSyncSegmentPayloadKind.Journal
+            AppSyncV3PayloadKind.Checkpoint -> AppSyncSegmentPayloadKind.Checkpoint
+        }
         val publicationCodec = recovery.nativeSegmentConfiguration(sessionId)?.let(codec::withConfiguration) ?: codec
         val drafts = publicationCodec.split(frozen, session.accountBinding.value, kind, identity, session.generationId)
         val intents = recovery.segmentWrites(sessionId).associateBy { it.segmentIndex }

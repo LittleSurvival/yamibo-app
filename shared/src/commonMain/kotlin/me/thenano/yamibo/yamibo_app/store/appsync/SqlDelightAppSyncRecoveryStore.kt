@@ -183,20 +183,49 @@ internal class SqlDelightAppSyncRecoveryStore(
         val prepared = me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncSanitizedV2JournalPreparation(canWrite)
             .prepare(installation, journal) as? me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncV2JournalPreparation.Ready
             ?: error("Canonical journal cannot be exported as sanitized v2")
+        pinSanitizedEnvelope(session, native.body, prepared.envelope)
+    }
+
+    /** Freeze checkpoint wire bytes and their snapshot together with the native source. */
+    fun pinSanitizedV2CheckpointPayload(sessionId: String,
+        snapshot: me.thenano.yamibo.yamibo_app.repository.backup.YamiboBackupFile,
+        canWrite: () -> Boolean): String = db.transactionWithResult {
+        check(canWrite()) { "Sanitized v2 reader compatibility changed" }
+        val session = requireSession(sessionId)
+        require(session.mode == AppSyncRecoveryMode.SegmentedCheckpoint)
+        val native = nativePayload(sessionId)
+        require(native.kind == AppSyncV3PayloadKind.Checkpoint)
+        val checkpoint = (AppSyncV3DocumentCodec().discover(native.body, session.accountBinding.value,
+            AppSyncV3PayloadKind.Checkpoint) as? AppSyncV3DocumentRead.Checkpoint)?.document
+            ?: error("Frozen canonical checkpoint is invalid")
+        val installation = requireNotNull(SqlDelightAppSyncOperationStore(db, json).installation())
+        require(installation.accountBinding == session.accountBinding && installation.deviceId == session.targetDeviceId &&
+            installation.deviceEpoch == session.targetDeviceEpoch && installation.writerNonce == session.targetWriterNonce &&
+            installation.state == AppSyncInstallationState.Active)
+        val own = SyncReplicaKey(installation.deviceId, installation.deviceEpoch).stableKey
+        require((checkpoint.coverage[own] ?: 0L) < installation.nextSequence)
+        val prepared = me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncSanitizedV2CheckpointPreparation(canWrite)
+            .prepare(checkpoint, snapshot) as? me.thenano.yamibo.yamibo_app.repository.appsync.engine.AppSyncV2CheckpointPreparation.Ready
+            ?: error("Canonical checkpoint cannot be exported as sanitized v2")
+        pinSanitizedEnvelope(session, native.body, prepared.envelope)
+    }
+
+    private fun pinSanitizedEnvelope(session: AppSyncRecoverySession, nativeBody: String, envelope: String): String {
+        val sessionId = session.sessionId
         val existing = db.appSyncV2FallbackPayloadQueries.getForSession(sessionId).executeAsOneOrNull()
-        val nativeSha = native.body.encodeUtf8().sha256().hex()
-        val wireSha = prepared.envelope.encodeUtf8().sha256().hex()
+        val nativeSha = nativeBody.encodeUtf8().sha256().hex()
+        val wireSha = envelope.encodeUtf8().sha256().hex()
         if (existing != null) {
-            require(existing.nativeEnvelopeSha256 == nativeSha && existing.envelope == prepared.envelope &&
+            require(existing.nativeEnvelopeSha256 == nativeSha && existing.envelope == envelope &&
                 existing.envelopeSha256 == wireSha) { "Frozen sanitized v2 payload changed" }
         } else {
             require(session.phase == AppSyncRecoveryPhase.Classifying && !session.indexCommitted &&
                 session.rootBlogId == null && segmentWrites(sessionId).isEmpty()) {
                 "Cannot convert an already publishing native session"
             }
-            db.appSyncV2FallbackPayloadQueries.pin(sessionId, nativeSha, prepared.envelope, wireSha)
+            db.appSyncV2FallbackPayloadQueries.pin(sessionId, nativeSha, envelope, wireSha)
         }
-        prepared.envelope
+        return envelope
     }
 
     fun sanitizedV2Payload(sessionId: String): String = db.transactionWithResult {
@@ -205,9 +234,15 @@ internal class SqlDelightAppSyncRecoveryStore(
             nativePayload(sessionId).body.encodeUtf8().sha256().hex() == row.nativeEnvelopeSha256) {
             "Frozen sanitized v2 evidence changed"
         }
-        // Re-export against the frozen canonical journal and current writer; no new bytes or
-        // phase changes are allowed. This read does not grant permission for a network write.
-        pinSanitizedV2Payload(sessionId) { true }
+        // Revalidate the frozen canonical source and current writer. Checkpoint snapshots are
+        // recovered from their companion, never recaptured from mutable local projections.
+        // This read grants no permission for a network write.
+        if (nativePayload(sessionId).kind == AppSyncV3PayloadKind.Checkpoint) {
+            val decoded = me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointEnvelopeCodec().validate(row.envelope)
+                as? me.thenano.yamibo.yamibo_app.repository.appsync.remote.AppSyncCheckpointValidation.Valid
+                ?: error("Frozen fallback checkpoint is invalid")
+            pinSanitizedV2CheckpointPayload(sessionId, decoded.envelope.snapshot) { true }
+        } else pinSanitizedV2Payload(sessionId) { true }
     }
 
     /** Freeze the first wire envelope before any remote intent; retries never regenerate it. */

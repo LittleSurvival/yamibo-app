@@ -300,3 +300,20 @@ canonical 身分證據選用 discriminator 與 bounded title；不重算或更�
 
 此處仍是記憶體內準備，尚未接上 durable checkpoint session、遠端 commit、cadence 與 cleanup。
 所有實際發布仍需每次核對 reader cohort；專用 codec 方法本身不構成發布授權。
+
+
+## 回退 checkpoint 凍結與分段發布
+
+`pinSanitizedV2CheckpointPayload` 重用既有 companion table，同交易綁定 native envelope SHA、
+完整 v2 checkpoint envelope 與 SHA。首次凍結只允許 Classifying 且尚無 segment/root/index
+intent；之後只接受完全相同的 bytes。凍結時核對目前帳號、active installation、device/epoch/
+writer nonce，並拒絕 checkpoint 宣告尚未由本機配置的 sequence。
+
+讀取 companion 時先核對兩份 envelope 的 hash，再從已凍結的 checkpoint envelope 取回
+snapshot，重新對 canonical checkpoint 做完整準備與 byte equality 檢查；不重新擷取目前
+本機 projection。即使攻擊者同步修改 companion SHA，與 canonical 證據不符仍拒絕。
+
+分段 publisher 依 native payload kind 選擇 v2 Journal 或 Checkpoint metadata/title，保持
+既有逐段讀回、未知結果探索及由尾至首順序。checkpoint 可恢復到 CommittingIndex；本段
+不實作 checkpoint index commit／activation，coordinator 的 journal-only guard 仍保留，
+來源不提前確認，原 index 與 native checkpoint 不被覆寫。
