@@ -340,7 +340,7 @@ class AppSyncService(
     private val settingsStore: SettingsStore,
     private val authRepository: AuthRepository,
     private val nowMillis: () -> Long = ::currentTimeMillis,
-) {
+) : AppSyncRecoveryWorkLedger {
     private val store = SqlDelightAppSyncOperationStore(db)
     private val readerCohortStore = me.thenano.yamibo.yamibo_app.store.appsync.SqlDelightAppSyncReaderCohortStore(db)
     private val canonicalState = me.thenano.yamibo.yamibo_app.repository.appsync.engine.SqlDelightCanonicalCheckpointState(
@@ -654,19 +654,19 @@ class AppSyncService(
         recoveryStore.resumeRetryExhaustedRecovery(binding, nowMillis())
     }
 
-    fun recoveryWorkRequest(): AppSyncRecoveryWorkRequest? = currentAccountBinding()?.let(recoveryWorkStore::current)
+    override fun recoveryWorkRequest(): AppSyncRecoveryWorkRequest? = currentAccountBinding()?.let(recoveryWorkStore::current)
 
-    fun prepareRecoveryWork(proposedId: String): AppSyncRecoveryWorkRequest? = currentAccountBinding()?.let {
+    override fun prepareRecoveryWork(proposedId: String): AppSyncRecoveryWorkRequest? = currentAccountBinding()?.let {
         recoveryWorkStore.prepare(it, proposedId, nowMillis())
     }
 
-    fun confirmRecoveryWorkEnqueued(requestId: String): Boolean =
+    override fun confirmRecoveryWorkEnqueued(requestId: String): Boolean =
         recoveryWorkRequest()?.requestId == requestId && recoveryWorkStore.markEnqueued(requestId, nowMillis())
 
-    fun beginRecoveryWork(requestId: String): Boolean =
+    override fun beginRecoveryWork(requestId: String): Boolean =
         currentAccountBinding()?.let { recoveryWorkStore.begin(it, requestId, nowMillis()) } == true
 
-    fun retireRecoveryWork(requestId: String) = recoveryWorkStore.retire(requestId, nowMillis())
+    override fun retireRecoveryWork(requestId: String) = recoveryWorkStore.retire(requestId, nowMillis())
     suspend fun synchronizeNow(
         forceDiscovery: Boolean = false,
         trigger: String = "manual",

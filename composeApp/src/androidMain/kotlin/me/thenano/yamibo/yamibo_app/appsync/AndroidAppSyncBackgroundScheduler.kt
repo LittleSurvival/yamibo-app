@@ -16,9 +16,11 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
 import me.thenano.yamibo.yamibo_app.util.time.FixedScheduleInterval
-import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncService
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncRecoveryWorkLedger
 
 class AndroidAppSyncBackgroundScheduler(context: Context) : AppSyncBackgroundScheduler {
     private val workManager = WorkManager.getInstance(context.applicationContext)
@@ -66,7 +68,11 @@ class AndroidAppSyncBackgroundScheduler(context: Context) : AppSyncBackgroundSch
         }
     }
 
-    suspend fun continueRecovery(service: AppSyncService): Unit = withContext(Dispatchers.IO) {
+    suspend fun continueRecovery(service: AppSyncRecoveryWorkLedger): Unit = recoverySchedulingMutex.withLock {
+        enqueueRecovery(service)
+    }
+
+    private suspend fun enqueueRecovery(service: AppSyncRecoveryWorkLedger): Unit = withContext(Dispatchers.IO) {
         var evidence = service.prepareRecoveryWork(UUID.randomUUID().toString()) ?: return@withContext
         var known = workManager.getWorkInfoById(UUID.fromString(evidence.requestId)).get()
         if (known?.state?.isFinished == true) {
@@ -107,7 +113,11 @@ class AndroidAppSyncBackgroundScheduler(context: Context) : AppSyncBackgroundSch
         return@withContext
     }
 
-    override suspend fun reconcileRecoveryWork(service: AppSyncService): Unit = withContext(Dispatchers.IO) {
+    override suspend fun reconcileRecoveryWork(service: AppSyncRecoveryWorkLedger): Unit = recoverySchedulingMutex.withLock {
+        reconcileRecoveryEvidence(service)
+    }
+
+    private suspend fun reconcileRecoveryEvidence(service: AppSyncRecoveryWorkLedger): Unit = withContext(Dispatchers.IO) {
         val evidence = service.recoveryWorkRequest() ?: return@withContext
         val info = workManager.getWorkInfoById(UUID.fromString(evidence.requestId)).get()
         when {
@@ -125,6 +135,10 @@ class AndroidAppSyncBackgroundScheduler(context: Context) : AppSyncBackgroundSch
         .build()
 
     companion object {
+        // WorkManager APPEND_OR_REPLACE is not idempotent for the same UUID: concurrent
+        // check/enqueue calls can create a self-dependency. All scheduler instances in
+        // the app process must serialize the lookup, append and evidence confirmation.
+        private val recoverySchedulingMutex = Mutex()
         internal const val RECOVERY_REQUEST_ID = "appsync-recovery-request-id"
         private const val WORK_TAG = "yamibo-app-sync"
         private const val PERIODIC_WORK = "yamibo-app-sync-periodic"

@@ -36,8 +36,10 @@ val yamiboIosBundleId = iosIdentifiers.getProperty("YAMIBO_IOS_BUNDLE_ID")
 fun localProperty(name: String): String? =
     localProperties.getProperty(name)?.takeIf { it.isNotBlank() }
 
-val debugWafEnvironment =
-    localProperty("debugWafEnvironment")?.toBooleanStrictOrNull() ?: false
+// Reproducible emulator QA must not depend on private signing or local WAF setup.
+val isolatedDebug = providers.gradleProperty("yamibo.isolatedDebug").orNull?.toBooleanStrictOrNull() ?: false
+val debugWafEnvironment = !isolatedDebug &&
+    (localProperty("debugWafEnvironment")?.toBooleanStrictOrNull() ?: false)
 
 val releaseRunSigningValues = listOf(
     localProperty("yamibo.releaseRun.storeFile"),
@@ -46,7 +48,7 @@ val releaseRunSigningValues = listOf(
     localProperty("yamibo.releaseRun.keyPassword"),
 )
 val hasReleaseRunSigning = releaseRunSigningValues.all { it != null }
-val useReleaseSignatureForDebugRun = localProperty("yamibo.debug.useReleaseSignature") == "true"
+val useReleaseSignatureForDebugRun = !isolatedDebug && localProperty("yamibo.debug.useReleaseSignature") == "true"
 val yamiboAppReleaseRunApplicationId =
     if (hasReleaseRunSigning) yamiboAppApplicationId else "$yamiboAppApplicationId.run"
 require(releaseRunSigningValues.all { it == null } || hasReleaseRunSigning) {
@@ -107,6 +109,10 @@ kotlin {
             implementation(projects.shared)
         }
         commonTest.dependencies { implementation(libs.kotlin.test) }
+        androidInstrumentedTest.dependencies {
+            implementation(libs.androidx.test.runner)
+            implementation(libs.androidx.test.junit)
+        }
     }
 }
 
@@ -193,6 +199,7 @@ android {
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         versionCode = yamiboAppVersionCode
         versionName = yamiboAppVersionName
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
     signingConfigs {

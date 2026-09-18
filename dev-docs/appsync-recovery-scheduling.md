@@ -10,4 +10,23 @@ Android worker 在同步結束後，先保存 request，再以該 UUID 建立 Wo
 
 UI 只有在 retry deadline 對應目前 request、enqueued 已確認且尚未 started 時，才顯示已排程的重試時間。Android UI 定期查 WorkManager：已完成、取消或原本確認過但已消失的紀錄會撤銷排程證據；尚未確認的 request 不會因 enqueue 途中的短暫查無紀錄而被取消。手動同步仍可使用。
 
-SQLite 測試涵蓋重啟／重複確認、舊 UUID、重試期限改變、人工恢復、終態、撤銷及交易回滾；migration 測試確認既有 recovery evidence 保留。UI 測試區分期限與真正 enqueue 證據。WorkManager 程序死亡／重開機／取消時序的 emulator 驗收仍待完成；iOS 背景排程接線亦不由這份 Android 實作宣告完成。
+SQLite 測試涵蓋重啟／重複確認、舊 UUID、重試期限改變、人工恢復、終態、撤銷及交易回滾；migration 測試確認既有 recovery evidence 保留。UI 測試區分期限與真正 enqueue 證據。
+
+## Android WorkManager 回歸
+
+`AndroidRecoverySchedulingTest` 使用真正的 WorkManager 資料庫，搭配合成的 `AppSyncRecoveryWorkLedger`。期限設為一天後，避免測試執行 provider 操作。測試涵蓋八個不同 scheduler instance 並行追加同一 UUID、重建 scheduler、重複手動觸發、停用自動同步、取消後恢復，以及 enqueue 前後查無紀錄的對帳。SQL ledger 的帳號與 session 驗證仍由 shared 資料庫測試負責。
+
+首次在 Android 15 x86_64 模擬器執行，發現同一 UUID 的並行 `APPEND_OR_REPLACE` 會產生 `Dependency.work_spec_id == prerequisite_id`，導致取消工作逾時。單靠 UUID 與 enqueue exception 對帳不足以保證冪等。正式 scheduler 現在用 process-wide mutex 序列化 prepare、查詢、追加與確認；UI 對帳使用同一把鎖。現有 app 與 worker 都在同一程序，若未來引入多程序 worker，必須另行提供跨程序協調。
+
+隔離建置不使用本機正式簽章或 WAF 設定，套件名稱為 `me.thenano.yamibo.yamibo_app.debug`。只在獨立、沒有使用者資料的 emulator 上執行：
+
+```powershell
+.\gradlew.bat --no-daemon '-Pyamibo.isolatedDebug=true' :composeApp:assembleDebug :composeApp:assembleDebugAndroidTest
+adb -s <isolated-serial> install -r composeApp/build/outputs/apk/debug/composeApp-debug.apk
+adb -s <isolated-serial> install -r composeApp/build/outputs/apk/androidTest/debug/composeApp-debug-androidTest.apk
+adb -s <isolated-serial> shell am instrument -w -e class me.thenano.yamibo.yamibo_app.appsync.AndroidRecoverySchedulingTest me.thenano.yamibo.yamibo_app.debug.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+這組測試不是完整雲端 recovery E2E；WorkManager 程序死亡／重開機、`1 / total` 到 index 與 cleanup 的端對端驗收仍待完成，iOS 背景排程亦未由這份 Android 實作涵蓋。
+
+2026-09-18 驗證：隔離 Android 15 x86_64 emulator 上 4 項 instrumentation 測試全部通過；743 項 shared、15 項 CloudSyncUiState 測試亦全部通過，零失敗、錯誤或略過。
