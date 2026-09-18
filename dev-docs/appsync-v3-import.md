@@ -32,3 +32,11 @@ Excluded/NoOp 仍有來源 sequence，未來 journal／recovery adapter 必須�
 materializer 的內部輸入將本機值與勝出操作 ID／時間分開；還原補值不會製造假的操作。原有 legacy apply 也轉為同一內部表示。canonical 空主體刪除與關聯移除由 key 定位；重複套用保持冪等，更新既有項目保留本機封面。
 
 此入口只套用資料庫 projection，不代表 checkpoint activation。`SqlDelightCanonicalCheckpointState` 已提供 canonical provenance 與 projection 的交易式持久化替換，詳見 [本機狀態](appsync-v3-state.md)。外部 settings reconciliation、正式 engine／reader 呼叫、完整 resolved-state 預檢、本機 pending operations 合併、序號 coverage 整合，以及上述 ambiguous identity 支援仍未完成。沒有因此清除舊 journal 或啟用 v3 writer；tasks 2.5／2.7 保持未完成。
+
+## Legacy resolved projection 轉換
+
+`AppSyncCanonicalProjectionImporter` 提供純資料轉換，逐欄保留 legacy resolved projection 的勝出關係；不把欄位來源中的完整舊 Put 重新重播，避免舊值重新勝出。它核對 account、entity/generation、operation ID、欄位值與来源值、coverage 及 causal dependencies；重複實體、多 generation、同操作 ID 的不同內容或無法匯入的必要值會回傳不含使用者內容的 NeedsAttention 分類。
+
+來源經既有 operation importer 與 canonical registry 正規化。未知 domain／setting 明確排除但仍核對其 account 與 coverage；derived/cache 欄位不進入 canonical field references。刪除維持 tombstone，關聯移除不攜帶舊欄位主體，刪除 proof 依身分合併並只保留仍被引用的證據。最後經 checkpoint codec 往返與共用 canonical reducer 的空輸入驗證，輸出確定性 canonical projection。
+
+限制為 100,000 個實體／不同來源、250,000 個 provenance references、64 MiB 來源欄位資料，另受既有 canonical codec 預算約束。此轉換器尚未宣告 legacy checkpoint 的遠端可信度，不比對 encoded snapshot，也不授權發布、ack 或清理；legacy index 綁定、snapshot 與 resolved state 一致性及正式 migration 接線仍須完成。既有 canonical cloud 的 activation／pending merge／外部設定重整已另行接入 service，不代表純 legacy migration 已驗收。
