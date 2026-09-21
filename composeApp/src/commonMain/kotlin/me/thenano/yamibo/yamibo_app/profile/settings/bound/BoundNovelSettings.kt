@@ -41,7 +41,7 @@ import me.thenano.yamibo.yamibo_app.util.state
 import kotlin.math.roundToInt
 
 private val PREVIEW_TEXT: String
-    get() = i18n("我是YamiboApp的作者TheNano，這是一個個人獨立開發的第三方開源App<br>")
+    get() = i18n("<p>這是小說閱讀器的段落排版預覽。</p><p>調整設定後，可以在這裡立即查看顯示效果。</p>")
 
 @Composable
 fun NovelReaderPreviewSetting() {
@@ -119,6 +119,19 @@ fun NovelDefaultItalicSetting() {
         subtitle = i18n("將閱讀器正文預設顯示為斜體"),
         checked = enabled,
         onCheckedChange = { novelSettingsRepo.defaultItalic.setValue(it) },
+    )
+}
+
+@Composable
+fun NovelFirstLineIndentSetting() {
+    val novelSettingsRepo = LocalNovelReaderSettingsRepository.current
+    val enabled = novelSettingsRepo.firstLineIndent.state()
+
+    SettingsToggleRow(
+        title = i18n("首行縮排"),
+        subtitle = i18n("將閱讀器正文段落首行縮排兩個字元"),
+        checked = enabled,
+        onCheckedChange = { novelSettingsRepo.firstLineIndent.setValue(it) },
     )
 }
 

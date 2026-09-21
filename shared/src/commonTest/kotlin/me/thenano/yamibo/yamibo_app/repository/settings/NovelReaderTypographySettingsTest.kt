@@ -7,25 +7,30 @@ import kotlin.test.assertTrue
 
 class NovelReaderTypographySettingsTest {
     @Test
-    fun defaultTextStylesStartDisabledAndPersistIndependently() {
+    fun typographySettingsStartDisabledAndPersistIndependently() {
         val store = TypographyMemoryStore()
         val repository = NovelReaderSettingsRepository(store)
 
         assertFalse(repository.defaultBold.getValue())
         assertFalse(repository.defaultItalic.getValue())
+        assertFalse(repository.firstLineIndent.getValue())
         assertFalse(store.hasKey(repository.defaultBold.storageKey))
         assertFalse(store.hasKey(repository.defaultItalic.storageKey))
+        assertFalse(store.hasKey(repository.firstLineIndent.storageKey))
 
         repository.defaultBold.setValue(true)
         assertTrue(NovelReaderSettingsRepository(store).defaultBold.getValue())
         assertFalse(NovelReaderSettingsRepository(store).defaultItalic.getValue())
 
         repository.defaultItalic.setValue(true)
+        repository.firstLineIndent.setValue(true)
         val restored = NovelReaderSettingsRepository(store)
         assertTrue(restored.defaultBold.getValue())
         assertTrue(restored.defaultItalic.getValue())
+        assertTrue(restored.firstLineIndent.getValue())
         assertTrue(restored.defaultBold.storageKey in restored.exportableSettingItems.map { it.storageKey })
         assertTrue(restored.defaultItalic.storageKey in restored.exportableSettingItems.map { it.storageKey })
+        assertTrue(restored.firstLineIndent.storageKey in restored.exportableSettingItems.map { it.storageKey })
     }
 }
 

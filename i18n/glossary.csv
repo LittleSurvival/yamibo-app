@@ -877,3 +877,6 @@ App 啟動時同步,Sync on app start,App 啟動時同步,App 启动时同步
 將閱讀器正文預設顯示為粗體,Show reader body text in bold by default,將閱讀器正文預設顯示為粗體,将阅读器正文默认显示为粗体
 預設斜體,Default italic,預設斜體,默认斜体
 將閱讀器正文預設顯示為斜體,Show reader body text in italic by default,將閱讀器正文預設顯示為斜體,将阅读器正文默认显示为斜体
+首行縮排,First-line indent,首行縮排,首行缩进
+將閱讀器正文段落首行縮排兩個字元,Indent the first line of reader body paragraphs by two characters,將閱讀器正文段落首行縮排兩個字元,将阅读器正文段落首行缩进两个字符
+<p>這是小說閱讀器的段落排版預覽。</p><p>調整設定後，可以在這裡立即查看顯示效果。</p>,<p>This is a paragraph layout preview for the novel reader.</p><p>Changes to the settings are shown here immediately.</p>,<p>這是小說閱讀器的段落排版預覽。</p><p>調整設定後，可以在這裡立即查看顯示效果。</p>,<p>这是小说阅读器的段落排版预览。</p><p>调整设置后，可以在这里立即查看显示效果。</p>

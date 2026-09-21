@@ -58,6 +58,20 @@ class ReaderTextSegmentationTest {
     }
 
     @Test
+    fun splittingOneParagraphDoesNotIndentContinuationSegments() {
+        val block = HtmlBlock.Text(
+            annotatedString = AnnotatedString("甲".repeat(MAX_READER_TEXT_SEGMENT_CHARS + 100)),
+            anchorId = "source",
+        )
+
+        val segments = splitLongReaderTextBlock(block)
+
+        assertTrue(segments.size > 1)
+        assertEquals(listOf(0), segments.first().paragraphStartOffsets)
+        assertTrue(segments.drop(1).all { it.paragraphStartOffsets.isEmpty() })
+    }
+
+    @Test
     fun shortTextKeepsOriginalBlock() {
         val block = HtmlBlock.Text(AnnotatedString("短內容"), anchorId = "source")
 

@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.ParagraphStyle
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
@@ -36,12 +37,14 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.TextUnitType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import io.github.littlesurvival.dto.value.ThreadId
@@ -86,6 +89,7 @@ internal fun normalizeHtmlBlocks(rawBlocks: List<HtmlBlock>): List<HtmlBlock> {
     var pendingTextAlign: TextAlign? = null
     var pendingTextAnchorId: String? = null
     val pendingRubies = mutableListOf<HtmlBlock.RubyText>()
+    val pendingParagraphStartOffsets = mutableListOf<Int>()
 
     fun flushPendingText() {
         val builder = pendingTextBuilder ?: return
@@ -95,6 +99,7 @@ internal fun normalizeHtmlBlocks(rawBlocks: List<HtmlBlock>): List<HtmlBlock> {
                 annotatedString = text,
                 textAlign = pendingTextAlign ?: TextAlign.Start,
                 rubies = pendingRubies.toList(),
+                paragraphStartOffsets = pendingParagraphStartOffsets.toList(),
                 anchorId = pendingTextAnchorId.orEmpty(),
             )
         }
@@ -102,6 +107,7 @@ internal fun normalizeHtmlBlocks(rawBlocks: List<HtmlBlock>): List<HtmlBlock> {
         pendingTextAlign = null
         pendingTextAnchorId = null
         pendingRubies.clear()
+        pendingParagraphStartOffsets.clear()
     }
 
     fun appendTextBlock(block: HtmlBlock.Text) {
@@ -132,6 +138,7 @@ internal fun normalizeHtmlBlocks(rawBlocks: List<HtmlBlock>): List<HtmlBlock> {
                 end = ruby.end + appendOffset,
             )
         }
+        pendingParagraphStartOffsets += block.paragraphStartOffsets.map { it + appendOffset }
     }
 
     fun splitLongTextBlock(block: HtmlBlock.Text): List<HtmlBlock.Text> {
@@ -161,6 +168,7 @@ internal fun normalizeHtmlBlocks(rawBlocks: List<HtmlBlock>): List<HtmlBlock> {
                 chunks += block.copy(
                     annotatedString = chunk,
                     rubies = chunkRubies,
+                    paragraphStartOffsets = block.paragraphStartOffsets.sliceParagraphStartOffsets(start, end),
                     anchorId = if (start == 0) block.anchorId else "${block.anchorId}-$start",
                 )
             }
@@ -309,6 +317,23 @@ private fun TextUnit.toAbsoluteSpOrNull(baseFontSizeSp: Float): Float? {
 
 private fun String.isHtmlBlankText(): Boolean {
     return all { it.isWhitespace() || it == '\u3000' }
+}
+
+internal fun applyFirstLineIndent(
+    text: AnnotatedString,
+    paragraphStartOffsets: List<Int>,
+    enabled: Boolean,
+): AnnotatedString {
+    if (!enabled || text.isEmpty() || paragraphStartOffsets.isEmpty()) return text
+
+    val builder = AnnotatedString.Builder(text)
+    val indentStyle = ParagraphStyle(textIndent = TextIndent(firstLine = 2.em))
+    paragraphStartOffsets.forEach { start ->
+        if (start !in text.indices || text[start].isWhitespace() || text[start] == '\u3000') return@forEach
+        val end = text.text.indexOf('\n', start).takeIf { it >= 0 } ?: text.length
+        if (end > start) builder.addStyle(indentStyle, start, end)
+    }
+    return builder.toAnnotatedString()
 }
 
 @Composable
@@ -564,6 +589,7 @@ private fun HtmlBlockRenderer(
     val lineSpacing = novelSettingsRepo.lineSpacing.state()
     val defaultBold = novelSettingsRepo.defaultBold.state()
     val defaultItalic = novelSettingsRepo.defaultItalic.state()
+    val firstLineIndent = novelSettingsRepo.firstLineIndent.state()
     val defaultFontWeight = if (defaultBold) FontWeight.Bold else FontWeight.Normal
     val defaultFontStyle = if (defaultItalic) FontStyle.Italic else FontStyle.Normal
     @Suppress("DEPRECATION") val clipboardManager = LocalClipboardManager.current
@@ -604,12 +630,15 @@ private fun HtmlBlockRenderer(
             val linkedAnnotatedString = remember(baseAdjustedAnnotatedString, colors.htmlTextDark) {
                 applyThemedLinkStyle(baseAdjustedAnnotatedString, colors.htmlTextDark)
             }
-            val adjustedAnnotatedString = remember(linkedAnnotatedString, revealedSpoilerKeys, colors.htmlTextDark) {
+            val spoilerAnnotatedString = remember(linkedAnnotatedString, revealedSpoilerKeys, colors.htmlTextDark) {
                 applySpoilerAnnotations(
                     text = linkedAnnotatedString,
                     revealedKeys = revealedSpoilerKeys,
                     defaultTextColor = colors.htmlTextDark,
                 )
+            }
+            val adjustedAnnotatedString = remember(spoilerAnnotatedString, block.paragraphStartOffsets, firstLineIndent) {
+                applyFirstLineIndent(spoilerAnnotatedString, block.paragraphStartOffsets, firstLineIndent)
             }
             val lineHeightSp = remember(adjustedAnnotatedString, fontSize, lineSpacing) {
                 htmlTextLineHeightSp(

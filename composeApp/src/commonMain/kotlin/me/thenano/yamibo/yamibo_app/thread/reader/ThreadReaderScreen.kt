@@ -85,6 +85,7 @@ import me.thenano.yamibo.yamibo_app.thread.reader.components.post.PostRenderer
 import me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl.HtmlBlock
 import me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl.HtmlParser
 import me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl.normalizeHtmlBlocks
+import me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl.sliceParagraphStartOffsets
 import me.thenano.yamibo.yamibo_app.thread.reader.components.tag.ITagListScreen
 import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.*
 import me.thenano.yamibo.yamibo_app.thread.reader.debug.DebugRecomposeProbe
@@ -416,6 +417,7 @@ internal fun splitLongReaderTextBlock(block: HtmlBlock.Text): List<HtmlBlock.Tex
             add(
                 block.copy(
                     annotatedString = block.annotatedString.subSequence(start, end),
+                    paragraphStartOffsets = block.paragraphStartOffsets.sliceParagraphStartOffsets(start, end),
                     anchorId = "${block.anchorId}-$chunkIndex",
                 )
             )
