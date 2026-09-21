@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
@@ -42,6 +43,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.TextUnitType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import io.github.littlesurvival.dto.value.ThreadId
@@ -86,6 +88,7 @@ internal fun normalizeHtmlBlocks(rawBlocks: List<HtmlBlock>): List<HtmlBlock> {
     var pendingTextAlign: TextAlign? = null
     var pendingTextAnchorId: String? = null
     val pendingRubies = mutableListOf<HtmlBlock.RubyText>()
+    val pendingParagraphStartOffsets = mutableListOf<Int>()
 
     fun flushPendingText() {
         val builder = pendingTextBuilder ?: return
@@ -95,6 +98,7 @@ internal fun normalizeHtmlBlocks(rawBlocks: List<HtmlBlock>): List<HtmlBlock> {
                 annotatedString = text,
                 textAlign = pendingTextAlign ?: TextAlign.Start,
                 rubies = pendingRubies.toList(),
+                paragraphStartOffsets = pendingParagraphStartOffsets.toList(),
                 anchorId = pendingTextAnchorId.orEmpty(),
             )
         }
@@ -102,6 +106,7 @@ internal fun normalizeHtmlBlocks(rawBlocks: List<HtmlBlock>): List<HtmlBlock> {
         pendingTextAlign = null
         pendingTextAnchorId = null
         pendingRubies.clear()
+        pendingParagraphStartOffsets.clear()
     }
 
     fun appendTextBlock(block: HtmlBlock.Text) {
@@ -132,6 +137,7 @@ internal fun normalizeHtmlBlocks(rawBlocks: List<HtmlBlock>): List<HtmlBlock> {
                 end = ruby.end + appendOffset,
             )
         }
+        pendingParagraphStartOffsets += block.paragraphStartOffsets.map { it + appendOffset }
     }
 
     fun splitLongTextBlock(block: HtmlBlock.Text): List<HtmlBlock.Text> {
@@ -161,6 +167,7 @@ internal fun normalizeHtmlBlocks(rawBlocks: List<HtmlBlock>): List<HtmlBlock> {
                 chunks += block.copy(
                     annotatedString = chunk,
                     rubies = chunkRubies,
+                    paragraphStartOffsets = block.paragraphStartOffsets.sliceParagraphStartOffsets(start, end),
                     anchorId = if (start == 0) block.anchorId else "${block.anchorId}-$start",
                 )
             }
@@ -310,6 +317,75 @@ private fun TextUnit.toAbsoluteSpOrNull(baseFontSizeSp: Float): Float? {
 private fun String.isHtmlBlankText(): Boolean {
     return all { it.isWhitespace() || it == '\u3000' }
 }
+
+internal fun applyFirstLineIndent(
+    block: HtmlBlock.Text,
+    enabled: Boolean,
+    indentChars: Float,
+): HtmlBlock.Text {
+    val text = block.annotatedString
+    if (!enabled || text.isEmpty() || block.paragraphStartOffsets.isEmpty()) return block
+
+    // Transform only the display copy; source offsets remain stable for progress and pagination.
+    val removed = BooleanArray(text.length)
+    block.paragraphStartOffsets.forEach { start ->
+        var end = start
+        while (end in text.indices && text[end] != '\n' && text[end] != '\r' && text[end].isWhitespace()) {
+            removed[end++] = true
+        }
+    }
+    val offsets = IntArray(text.length + 1)
+    val builder = AnnotatedString.Builder()
+    var start = 0
+    while (start < text.length) {
+        var end = start + 1
+        while (end < text.length && removed[end] == removed[start]) end++
+        for (index in start until end) {
+            offsets[index + 1] = offsets[index] + if (removed[index]) 0 else 1
+        }
+        if (!removed[start]) builder.append(text.subSequence(start, end))
+        start = end
+    }
+    val normalized = builder.toAnnotatedString()
+    val starts = block.paragraphStartOffsets.map { offsets[it] }.distinct()
+    val width = if (indentChars.isFinite()) indentChars.coerceIn(0f, 8f) else 2f
+    val insertions = starts.filter { width > 0f && it < normalized.length && normalized[it] != '\n' }
+    val styled = AnnotatedString.Builder()
+    var cursor = 0
+    insertions.forEach { paragraphStart ->
+        if (cursor < paragraphStart) styled.append(normalized.subSequence(cursor, paragraphStart))
+        // A zero-height inline spacer changes horizontal layout only. ParagraphStyle ranges
+        // split Compose paragraphs and can add empty lines around existing newline separators.
+        styled.appendInlineContent(FIRST_LINE_INDENT_ID, "\u00a0")
+        styled.addStringAnnotation(FIRST_LINE_INDENT_ID, width.toString(), styled.length - 1, styled.length)
+        cursor = paragraphStart
+    }
+    styled.append(normalized.subSequence(cursor, normalized.length))
+    fun displayStart(offset: Int) = offsets[offset] + insertions.count { it <= offsets[offset] }
+    fun displayEnd(offset: Int) = offsets[offset] + insertions.count { it < offsets[offset] }
+    return block.copy(
+        annotatedString = styled.toAnnotatedString(),
+        paragraphStartOffsets = starts.map { start -> start + insertions.count { it < start } },
+        rubies = block.rubies.filter { it.start >= 0 && it.end <= text.length && it.start < it.end }
+            .map { it.copy(start = displayStart(it.start), end = displayEnd(it.end)) },
+    )
+}
+
+private const val FIRST_LINE_INDENT_ID = "reader-first-line-indent"
+
+internal fun firstLineIndentPlaceholders(text: AnnotatedString): List<AnnotatedString.Range<Placeholder>> =
+    text.getStringAnnotations(FIRST_LINE_INDENT_ID, 0, text.length).map { range ->
+        AnnotatedString.Range(
+            Placeholder(range.item.toFloat().em, 0.em, PlaceholderVerticalAlign.AboveBaseline),
+            range.start,
+            range.end,
+        )
+    }
+
+private fun firstLineIndentContent(text: AnnotatedString): Map<String, InlineTextContent> =
+    firstLineIndentPlaceholders(text).firstOrNull()?.let {
+        mapOf(FIRST_LINE_INDENT_ID to InlineTextContent(it.item) {})
+    }.orEmpty()
 
 @Composable
 fun HtmlRenderer(
@@ -530,7 +606,7 @@ private fun RubyTextBlock(
                 textAlign = textAlign,
             ),
             modifier = Modifier.fillMaxWidth(),
-            inlineContent = inlineContent,
+            inlineContent = inlineContent + firstLineIndentContent(inlineLayout.text),
             onTextLayout = onTextLayout,
         )
     }
@@ -564,6 +640,8 @@ private fun HtmlBlockRenderer(
     val lineSpacing = novelSettingsRepo.lineSpacing.state()
     val defaultBold = novelSettingsRepo.defaultBold.state()
     val defaultItalic = novelSettingsRepo.defaultItalic.state()
+    val firstLineIndent = novelSettingsRepo.firstLineIndent.state()
+    val firstLineIndentChars = novelSettingsRepo.firstLineIndentChars.state()
     val defaultFontWeight = if (defaultBold) FontWeight.Bold else FontWeight.Normal
     val defaultFontStyle = if (defaultItalic) FontStyle.Italic else FontStyle.Normal
     @Suppress("DEPRECATION") val clipboardManager = LocalClipboardManager.current
@@ -600,7 +678,10 @@ private fun HtmlBlockRenderer(
                 mutableStateOf(emptySet<String>())
             }
             val layoutResult = remember { mutableStateOf<TextLayoutResult?>(null) }
-            val baseAdjustedAnnotatedString = adjustAnnotatedString(block.annotatedString)
+            val displayBlock = remember(block, firstLineIndent, firstLineIndentChars) {
+                applyFirstLineIndent(block, firstLineIndent, firstLineIndentChars)
+            }
+            val baseAdjustedAnnotatedString = adjustAnnotatedString(displayBlock.annotatedString)
             val linkedAnnotatedString = remember(baseAdjustedAnnotatedString, colors.htmlTextDark) {
                 applyThemedLinkStyle(baseAdjustedAnnotatedString, colors.htmlTextDark)
             }
@@ -622,7 +703,7 @@ private fun HtmlBlockRenderer(
             val isBlankText = remember(adjustedAnnotatedString) {
                 adjustedAnnotatedString.text.isHtmlBlankText()
             }
-            val inlineContent = remember { emptyMap<String, InlineTextContent>() }
+            val inlineContent = remember(adjustedAnnotatedString) { firstLineIndentContent(adjustedAnnotatedString) }
             val hasLinks = remember(adjustedAnnotatedString) {
                 adjustedAnnotatedString.getStringAnnotations("URL", 0, adjustedAnnotatedString.length).isNotEmpty()
             }
@@ -721,7 +802,7 @@ private fun HtmlBlockRenderer(
             } else if (block.rubies.isNotEmpty()) {
                 RubyTextBlock(
                     text = adjustedAnnotatedString,
-                    rubies = block.rubies,
+                    rubies = displayBlock.rubies,
                     textAlign = block.textAlign,
                     fontFamily = fontFamily,
                     fontSizeSp = fontSize.toFloat(),

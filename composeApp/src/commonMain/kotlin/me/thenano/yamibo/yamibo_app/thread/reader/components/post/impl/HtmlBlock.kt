@@ -11,6 +11,7 @@ sealed class HtmlBlock {
         val annotatedString: AnnotatedString,
         val textAlign: TextAlign = TextAlign.Start,
         val rubies: List<RubyText> = emptyList(),
+        val paragraphStartOffsets: List<Int> = findParagraphStartOffsets(annotatedString.text),
         override val anchorId: String = ""
     ) : HtmlBlock()
     data class RubyText(
@@ -46,3 +47,17 @@ sealed class HtmlBlock {
     data class TableRow(val cells: List<TableCell>)
     data class TableCell(val blocks: List<HtmlBlock>, val isHeader: Boolean = false)
 }
+
+internal fun findParagraphStartOffsets(text: String): List<Int> = buildList {
+    if (text.isNotEmpty() && text.first() != '\n') add(0)
+    text.forEachIndexed { index, char ->
+        val next = index + 1
+        if (char == '\n' && next < text.length && text[next] != '\n') add(next)
+    }
+}
+
+internal fun List<Int>.sliceParagraphStartOffsets(start: Int, end: Int): List<Int> =
+    asSequence()
+        .filter { it in start until end }
+        .map { it - start }
+        .toList()

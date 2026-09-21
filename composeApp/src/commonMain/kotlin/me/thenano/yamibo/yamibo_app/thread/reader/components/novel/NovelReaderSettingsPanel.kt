@@ -25,6 +25,7 @@ import me.thenano.yamibo.yamibo_app.profile.settings.components.ThemeSelectorCon
 import me.thenano.yamibo.yamibo_app.profile.settings.bound.NovelChineseConversionSetting
 import me.thenano.yamibo.yamibo_app.profile.settings.bound.NovelDefaultBoldSetting
 import me.thenano.yamibo.yamibo_app.profile.settings.bound.NovelDefaultItalicSetting
+import me.thenano.yamibo.yamibo_app.profile.settings.bound.NovelFirstLineIndentSetting
 import me.thenano.yamibo.yamibo_app.profile.settings.bound.NovelFontSizeSetting
 import me.thenano.yamibo.yamibo_app.profile.settings.bound.NovelLineSpacingSetting
 import me.thenano.yamibo.yamibo_app.profile.settings.bound.NovelPageProgressHintSetting
@@ -92,6 +93,8 @@ fun NovelReaderSettingsPanel(
                     NovelDefaultBoldSetting()
 
                     NovelDefaultItalicSetting()
+
+                    NovelFirstLineIndentSetting()
 
                     Spacer(Modifier.height(16.dp))
                     NovelSystemBarsBackgroundSetting()

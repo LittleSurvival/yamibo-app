@@ -5,6 +5,7 @@ import me.thenano.yamibo.yamibo_app.repository.settings.TouchZoneLayout
 import me.thenano.yamibo.yamibo_app.thread.reader.components.manga.TouchAction
 import me.thenano.yamibo.yamibo_app.thread.reader.components.manga.getTouchAction
 import me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl.HtmlBlock
+import me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl.sliceParagraphStartOffsets
 import kotlin.math.roundToInt
 
 internal enum class SinglePageTapAction {
@@ -401,6 +402,7 @@ internal fun sliceHtmlBlocksForPage(
 private fun HtmlBlock.sliceForPage(slice: ThreadReaderPageSlice): HtmlBlock? = when {
     this is HtmlBlock.Text && slice is ThreadReaderPageSlice.Text && anchorId == slice.blockId -> copy(
         annotatedString = annotatedString.subSequence(slice.startOffset, slice.endOffset),
+        paragraphStartOffsets = paragraphStartOffsets.sliceParagraphStartOffsets(slice.startOffset, slice.endOffset),
         rubies = rubies.filter { ruby ->
             ruby.start >= slice.startOffset && ruby.end <= slice.endOffset
         }.map { ruby ->
@@ -1063,7 +1065,9 @@ private fun planFixedHeightReaderPagesCore(
                         strategy = strategy,
                         metrics = metrics,
                     )
-                    if (current.isNotEmpty() && measuredBreak != null && !measuredBreak.isSemanticBoundary) {
+                    // Retry on a fresh page before the one-character fallback. Otherwise a
+                    // full page strands that character in its own rendered text slice.
+                    if (current.isNotEmpty() && (measuredBreak == null || !measuredBreak.isSemanticBoundary)) {
                         flush()
                         continue
                     }

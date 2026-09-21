@@ -40,6 +40,27 @@ import kotlin.test.assertTrue
 
 class ReaderTextSegmentationTest {
     @Test
+    fun insufficientRemainingHeightRetriesWholeTextOnFreshPage() {
+        val intro = HtmlBlock.Text(AnnotatedString("前文。".repeat(20)), anchorId = "intro")
+        val body = HtmlBlock.Text(AnnotatedString("值得慶幸的是，我們的交流沒有因此而中斷。".repeat(3)), anchorId = "body")
+        val pages = planFixedHeightReaderPages(
+            ThreadReaderPaginationInput(
+                postId = 10,
+                blocks = listOf(intro, body),
+                viewportHeightPx = 100,
+                estimatedCharsPerLine = 30,
+                estimatedLineHeightPx = 60,
+                textHeightFor = { block, _, _ -> if (block.anchorId == "intro") 70 else 60 },
+            )
+        )
+
+        assertEquals(2, pages.size)
+        val rendered = sliceHtmlBlocksForPage(listOf(intro, body), pages.last().slices)
+        assertEquals(body.annotatedString, (rendered.single() as HtmlBlock.Text).annotatedString)
+        assertEquals(listOf(0), (rendered.single() as HtmlBlock.Text).paragraphStartOffsets)
+    }
+
+    @Test
     fun longAnnotatedTextIsSplitWithoutLosingTextOrStyles() {
         val source = AnnotatedString.Builder().apply {
             pushStyle(SpanStyle(fontWeight = FontWeight.Bold))
@@ -55,6 +76,20 @@ class ReaderTextSegmentationTest {
         assertEquals(source.text, segments.joinToString(separator = "") { it.annotatedString.text })
         assertTrue(segments.all { it.annotatedString.spanStyles.isNotEmpty() })
         assertEquals(segments.size, segments.map { it.anchorId }.distinct().size)
+    }
+
+    @Test
+    fun splittingOneParagraphDoesNotIndentContinuationSegments() {
+        val block = HtmlBlock.Text(
+            annotatedString = AnnotatedString("甲".repeat(MAX_READER_TEXT_SEGMENT_CHARS + 100)),
+            anchorId = "source",
+        )
+
+        val segments = splitLongReaderTextBlock(block)
+
+        assertTrue(segments.size > 1)
+        assertEquals(listOf(0), segments.first().paragraphStartOffsets)
+        assertTrue(segments.drop(1).all { it.paragraphStartOffsets.isEmpty() })
     }
 
     @Test
