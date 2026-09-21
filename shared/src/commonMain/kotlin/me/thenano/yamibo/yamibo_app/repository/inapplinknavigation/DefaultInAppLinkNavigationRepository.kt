@@ -55,6 +55,7 @@ class DefaultInAppLinkNavigationRepository(
             ?: return unsupported(fullUrl, "missing tid")
         val pid = extractInt(pathAndQuery, "pid")?.let(::PostId)
             ?: return unsupported(fullUrl, "missing pid")
+        val targetContext = context.takeIf { it.currentTid == tid }
 
         val fullPage = when (val result = threadRepository.fetchFindPost(tid, pid)) {
             is YamiboResult.Success -> result.value
@@ -62,7 +63,7 @@ class DefaultInAppLinkNavigationRepository(
         }
 
         val currentPage = fullPage.resolvedCurrentPage()
-        val title = fullPage.thread.title.ifBlank { context.currentTitle ?: "Thread ${tid.value}" }
+        val title = fullPage.thread.title.ifBlank { targetContext?.currentTitle ?: "Thread ${tid.value}" }
         val forumId = fullPage.thread.forum.fid
         onProgress(i18n("判斷討論區類型"))
 
@@ -81,7 +82,7 @@ class DefaultInAppLinkNavigationRepository(
 
         novelCacheRepository.setCachedFullPage(tid, currentPage, fullPage)
         onProgress(i18n("取得小說作者資訊"))
-        val authorId = context.currentAuthorId ?: findNovelAuthorId(tid, currentPage, fullPage)
+        val authorId = targetContext?.currentAuthorId ?: findNovelAuthorId(tid, currentPage, fullPage)
         ?: return InAppLinkResolveResult.Failed(InAppLinkTarget.WebOnlyTarget(fullUrl), "missing author id")
         val targetPost = fullPage.posts.firstOrNull { it.pid == pid }
             ?: return InAppLinkResolveResult.Failed(
@@ -257,14 +258,15 @@ class DefaultInAppLinkNavigationRepository(
             ?: return unsupported(fullUrl, "missing tid")
         val pid = extractInt(pathAndQuery, "pid")?.let(::PostId)
         if (pid != null) {
-            return resolveFindPost(pathAndQuery, fullUrl, context.copy(currentTid = tid), onProgress)
+            return resolveFindPost(pathAndQuery, fullUrl, context, onProgress)
         }
 
         val page = extractInt(pathAndQuery, "page") ?: extractDashPage(pathAndQuery) ?: 1
-        context.currentFid?.let { fid ->
-            if (YamiboForum.isNovelForum(fid) || context.currentThreadType == ReadHistoryRepository.ThreadEntryType.Novel) {
+        val targetContext = context.takeIf { it.currentTid == tid }
+        targetContext?.currentFid?.let { fid ->
+            if (YamiboForum.isNovelForum(fid) || targetContext.currentThreadType == ReadHistoryRepository.ThreadEntryType.Novel) {
                 return InAppLinkResolveResult.Resolved(
-                    InAppLinkTarget.NovelDetailTarget(tid, context.currentTitle ?: "Thread ${tid.value}", context.currentAuthorId),
+                    InAppLinkTarget.NovelDetailTarget(tid, targetContext.currentTitle ?: "Thread ${tid.value}", targetContext.currentAuthorId),
                 )
             }
         }
