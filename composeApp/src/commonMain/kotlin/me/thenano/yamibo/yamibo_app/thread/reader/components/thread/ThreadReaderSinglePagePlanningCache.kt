@@ -21,6 +21,8 @@ internal data class SinglePagePlanningGenerationKey(
     val isNovelThread: Boolean,
     val showRegularFirstPostTagBanner: Boolean,
     val showNovelFirstPostTagBanner: Boolean,
+    val firstLineIndent: Boolean = false,
+    val firstLineIndentChars: Float = 2f,
 )
 
 internal data class SinglePageNormalizedBlocksKey(

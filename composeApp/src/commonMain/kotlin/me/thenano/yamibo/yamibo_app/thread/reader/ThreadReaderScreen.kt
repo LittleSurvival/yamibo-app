@@ -86,6 +86,8 @@ import me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl.HtmlBlock
 import me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl.HtmlParser
 import me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl.normalizeHtmlBlocks
 import me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl.sliceParagraphStartOffsets
+import me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl.applyFirstLineIndent
+import me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl.firstLineIndentPlaceholders
 import me.thenano.yamibo.yamibo_app.thread.reader.components.tag.ITagListScreen
 import me.thenano.yamibo.yamibo_app.thread.reader.components.thread.*
 import me.thenano.yamibo.yamibo_app.thread.reader.debug.DebugRecomposeProbe
@@ -627,6 +629,8 @@ internal fun ThreadReaderScreen(
     val readerFontSize = novelSettingsRepository.fontSize.state()
     val favoriteAddDownloadPromptEnabled = appSettingsRepository.favoriteAddDownloadPromptEnabled.state()
     val readerLineSpacing = novelSettingsRepository.lineSpacing.state()
+    val readerFirstLineIndent = novelSettingsRepository.firstLineIndent.state()
+    val readerFirstLineIndentChars = novelSettingsRepository.firstLineIndentChars.state()
     val readerFontId = novelSettingsRepository.readerFontId.state()
     val readerContentWidthFraction = novelSettingsRepository.contentWidthFraction.state()
     val scrollButtonDisplayMode = novelSettingsRepository.scrollButtonDisplayMode.state()
@@ -1351,6 +1355,8 @@ internal fun ThreadReaderScreen(
         singlePageContentHeightPx,
         readerFontSize,
         readerLineSpacing,
+        readerFirstLineIndent,
+        readerFirstLineIndentChars,
         readerFontId,
         readerContentWidthFraction,
         convertedContentVersion,
@@ -1396,6 +1402,8 @@ internal fun ThreadReaderScreen(
                 contentWidthFraction = readerContentWidthFraction,
                 fontSize = readerFontSize,
                 lineSpacing = readerLineSpacing,
+                firstLineIndent = readerFirstLineIndent,
+                firstLineIndentChars = readerFirstLineIndentChars,
                 readerFontId = readerFontId,
                 textMeasurerIdentity = textMeasurer.hashCode(),
                 localeEngineId = "platform-default-v1",
@@ -1493,9 +1501,18 @@ internal fun ThreadReaderScreen(
                                     activeImageGeometrySnapshot[normalizeImageUrl(block.url)]
                                 },
                                 textHeightFor = { block, start, end ->
-                                    val text = block.annotatedString.subSequence(start, end)
+                                    val text = applyFirstLineIndent(
+                                        block.copy(
+                                            annotatedString = block.annotatedString.subSequence(start, end),
+                                            paragraphStartOffsets = block.paragraphStartOffsets.sliceParagraphStartOffsets(start, end),
+                                            rubies = emptyList(),
+                                        ),
+                                        readerFirstLineIndent,
+                                        readerFirstLineIndentChars,
+                                    ).annotatedString
                                     val measuredHeight = textMeasurer.measure(
                                         text = text,
+                                        placeholders = firstLineIndentPlaceholders(text),
                                         style = measuredTextStyle.copy(textAlign = block.textAlign),
                                         constraints = Constraints(maxWidth = measuredTextWidthPx),
                                     ).size.height

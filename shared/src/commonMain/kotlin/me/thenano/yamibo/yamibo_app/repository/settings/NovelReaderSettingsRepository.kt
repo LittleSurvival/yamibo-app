@@ -71,6 +71,14 @@ class NovelReaderSettingsRepository(store: SettingsStore) : SettingsRegistry(sto
         default = false,
     )
 
+    val firstLineIndentChars by floatSetting(
+        name = "first_line_indent_chars",
+        default = 2f,
+        min = 0f,
+        max = 8f,
+        interval = 0.5f,
+    )
+
     val contentWidthFraction by floatSetting(
         name = "content_width",
         description = "novel_reader_content_width",

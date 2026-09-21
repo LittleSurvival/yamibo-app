@@ -20,7 +20,7 @@ internal fun buildRubyInlineLayout(
     text: AnnotatedString,
     rubies: List<HtmlBlock.RubyText>,
 ): RubyInlineLayout {
-    val builder = AnnotatedString.Builder()
+    val builder = AnnotatedString.Builder(text)
     val contents = mutableListOf<RubyInlineContent>()
     var cursor = 0
 
@@ -40,12 +40,14 @@ internal fun buildRubyInlineLayout(
         val baseText = text.subSequence(start, end)
         if (baseText.text.isBlank()) return@forEach
 
-        if (cursor < start) {
-            builder.append(text.subSequence(cursor, start))
-        }
-
         val inlineId = "ruby-inline-${contents.size}-${ruby.id}-$start-$end"
-        builder.appendInlineContent(inlineId, baseText.text)
+        // Add the inline annotation without slicing paragraph styles at ruby boundaries.
+        val inline = AnnotatedString.Builder().apply {
+            appendInlineContent(inlineId, baseText.text)
+        }.toAnnotatedString()
+        inline.getStringAnnotations(0, inline.length).forEach {
+            builder.addStringAnnotation(it.tag, it.item, start + it.start, start + it.end)
+        }
         contents += RubyInlineContent(
             id = inlineId,
             baseText = baseText,
@@ -54,10 +56,6 @@ internal fun buildRubyInlineLayout(
             sourceEnd = end,
         )
         cursor = end
-    }
-
-    if (cursor < text.length) {
-        builder.append(text.subSequence(cursor, text.length))
     }
 
     return RubyInlineLayout(

@@ -4,6 +4,7 @@ import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.test.assertEquals
 
 class NovelReaderTypographySettingsTest {
     @Test
@@ -14,6 +15,7 @@ class NovelReaderTypographySettingsTest {
         assertFalse(repository.defaultBold.getValue())
         assertFalse(repository.defaultItalic.getValue())
         assertFalse(repository.firstLineIndent.getValue())
+        assertEquals(2f, repository.firstLineIndentChars.getValue())
         assertFalse(store.hasKey(repository.defaultBold.storageKey))
         assertFalse(store.hasKey(repository.defaultItalic.storageKey))
         assertFalse(store.hasKey(repository.firstLineIndent.storageKey))
@@ -24,13 +26,16 @@ class NovelReaderTypographySettingsTest {
 
         repository.defaultItalic.setValue(true)
         repository.firstLineIndent.setValue(true)
+        repository.firstLineIndentChars.setValue(2.5f)
         val restored = NovelReaderSettingsRepository(store)
         assertTrue(restored.defaultBold.getValue())
         assertTrue(restored.defaultItalic.getValue())
         assertTrue(restored.firstLineIndent.getValue())
+        assertEquals(2.5f, restored.firstLineIndentChars.getValue())
         assertTrue(restored.defaultBold.storageKey in restored.exportableSettingItems.map { it.storageKey })
         assertTrue(restored.defaultItalic.storageKey in restored.exportableSettingItems.map { it.storageKey })
         assertTrue(restored.firstLineIndent.storageKey in restored.exportableSettingItems.map { it.storageKey })
+        assertTrue(restored.firstLineIndentChars.storageKey in restored.exportableSettingItems.map { it.storageKey })
     }
 }
 

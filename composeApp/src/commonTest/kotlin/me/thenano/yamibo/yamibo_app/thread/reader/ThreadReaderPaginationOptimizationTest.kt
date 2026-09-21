@@ -205,6 +205,8 @@ class ThreadReaderPaginationOptimizationTest {
             base.copy(contentWidthFraction = 0.91f),
             base.copy(fontSize = 17),
             base.copy(lineSpacing = 1.6f),
+            base.copy(firstLineIndent = true),
+            base.copy(firstLineIndentChars = 2.5f),
             base.copy(readerFontId = "serif"),
             base.copy(textMeasurerIdentity = 2),
             base.copy(localeEngineId = "platform-v2"),

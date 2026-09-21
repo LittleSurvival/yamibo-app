@@ -126,13 +126,24 @@ fun NovelDefaultItalicSetting() {
 fun NovelFirstLineIndentSetting() {
     val novelSettingsRepo = LocalNovelReaderSettingsRepository.current
     val enabled = novelSettingsRepo.firstLineIndent.state()
+    val indentChars = novelSettingsRepo.firstLineIndentChars.state()
 
     SettingsToggleRow(
         title = i18n("首行縮排"),
-        subtitle = i18n("將閱讀器正文段落首行縮排兩個字元"),
+        subtitle = i18n("統一段首縮排，取代原文的段首空白"),
         checked = enabled,
         onCheckedChange = { novelSettingsRepo.firstLineIndent.setValue(it) },
     )
+    if (enabled) {
+        SettingsSlider(
+            label = i18n("縮排字元寬度"),
+            value = indentChars,
+            valueRange = 0f..8f,
+            steps = 15,
+            valueDisplay = { "$it ${i18n("字")}" },
+            onValueChange = { novelSettingsRepo.firstLineIndentChars.setValue(it) },
+        )
+    }
 }
 
 @Composable
