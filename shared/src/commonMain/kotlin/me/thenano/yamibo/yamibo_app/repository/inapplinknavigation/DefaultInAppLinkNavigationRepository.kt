@@ -50,7 +50,7 @@ class DefaultInAppLinkNavigationRepository(
         onProgress: (String) -> Unit,
     ): InAppLinkResolveResult {
         onProgress(i18n("讀取 findpost 定位頁"))
-        val tid = extractInt(pathAndQuery, "ptid", "tid")?.let(::ThreadId)
+        val tid = (extractInt(pathAndQuery, "ptid", "tid") ?: extractThreadId(pathAndQuery))?.let(::ThreadId)
             ?: context.currentTid
             ?: return unsupported(fullUrl, "missing tid")
         val pid = extractInt(pathAndQuery, "pid")?.let(::PostId)
@@ -278,7 +278,7 @@ class DefaultInAppLinkNavigationRepository(
         }
         val isNovel = YamiboForum.isNovelForum(threadPage.thread.forum.fid)
         return if (isNovel) {
-            val authorId = threadPage.posts.firstOrNull()?.author?.uid
+            val authorId = findNovelAuthorId(tid, threadPage.resolvedCurrentPage(), threadPage)
             InAppLinkResolveResult.Resolved(
                 InAppLinkTarget.NovelDetailTarget(tid, threadPage.thread.title, authorId),
             )

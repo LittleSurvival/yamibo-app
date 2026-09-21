@@ -79,6 +79,45 @@ class DefaultInAppLinkNavigationRepositoryTest {
         assertEquals(9, threads.fetchCalls.last().authorId)
     }
 
+    @Test
+    fun staticPostLinkUsesTargetIdWithoutChangingSourceContext() = runBlocking {
+        val threads = FakeThreadRepository(page(200, "Target title", 9, pid = 22))
+        val repository = DefaultInAppLinkNavigationRepository(threads, FakeNovelCacheRepository())
+
+        val result = repository.resolve("https://bbs.yamibo.com/thread-200-1-1.html?pid=22", sourceContext()) {}
+
+        val target = (result as InAppLinkResolveResult.Resolved).target as InAppLinkTarget.ThreadReaderTarget
+        assertEquals(listOf(200 to 22), threads.findPostCalls)
+        assertEquals(ThreadId(200), target.tid)
+        assertEquals(UserId(9), target.authorId)
+    }
+
+    @Test
+    fun laterNovelPageFindsOwnerOnFirstPageRatherThanUsingFirstReply() = runBlocking {
+        val firstPage = page(200, "Target title", 9)
+        val laterPage = page(200, "Target title", 42).copy(pageNav = PageNav(currentPage = 2, totalPages = 2))
+        val threads = FakeThreadRepository(laterPage, firstPage)
+        val repository = DefaultInAppLinkNavigationRepository(threads, FakeNovelCacheRepository())
+
+        val result = repository.resolve("https://bbs.yamibo.com/thread-200-2-1.html", sourceContext()) {}
+
+        val target = (result as InAppLinkResolveResult.Resolved).target as InAppLinkTarget.NovelDetailTarget
+        assertEquals(UserId(9), target.authorId)
+        assertEquals(listOf(FetchCall(200, null, 2, false), FetchCall(200, null, 1, false)), threads.fetchCalls)
+    }
+
+    @Test
+    fun unavailableOwnerDoesNotFallBackToReplyOrSourceAuthor() = runBlocking {
+        val laterPage = page(200, "Target title", 42).copy(pageNav = PageNav(currentPage = 2, totalPages = 2))
+        val threads = FakeThreadRepository(laterPage, failFirstPage = true)
+        val repository = DefaultInAppLinkNavigationRepository(threads, FakeNovelCacheRepository())
+
+        val result = repository.resolve("https://bbs.yamibo.com/forum.php?mod=viewthread&tid=200&page=2", sourceContext()) {}
+
+        val target = (result as InAppLinkResolveResult.Resolved).target as InAppLinkTarget.NovelDetailTarget
+        assertEquals(null, target.authorId)
+    }
+
     private fun sourceContext() = InAppLinkContext(
         currentTid = ThreadId(100),
         currentTitle = "Source title",
@@ -113,16 +152,27 @@ class DefaultInAppLinkNavigationRepositoryTest {
 
     private data class FetchCall(val tid: Int, val authorId: Int?, val page: Int, val reverse: Boolean)
 
-    private class FakeThreadRepository(private val targetPage: ThreadPage) : ThreadRepository {
+    private class FakeThreadRepository(
+        private val targetPage: ThreadPage,
+        private val firstPage: ThreadPage = targetPage,
+        private val failFirstPage: Boolean = false,
+    ) : ThreadRepository {
         val fetchCalls = mutableListOf<FetchCall>()
+        val findPostCalls = mutableListOf<Pair<Int, Int>>()
 
         override suspend fun fetchThread(tid: ThreadId, authorId: UserId?, page: Int, reverse: Boolean): YamiboResult<ThreadPage> {
             fetchCalls += FetchCall(tid.value, authorId?.value, page, reverse)
-            return YamiboResult.Success(targetPage)
+            return when {
+                page == 1 && failFirstPage -> YamiboResult.Failure("offline")
+                page == 1 -> YamiboResult.Success(firstPage)
+                else -> YamiboResult.Success(targetPage)
+            }
         }
 
-        override suspend fun fetchFindPost(tid: ThreadId, postId: PostId, authorId: UserId?): YamiboResult<ThreadPage> =
-            YamiboResult.Success(targetPage)
+        override suspend fun fetchFindPost(tid: ThreadId, postId: PostId, authorId: UserId?): YamiboResult<ThreadPage> {
+            findPostCalls += tid.value to postId.value
+            return YamiboResult.Success(targetPage)
+        }
 
         override fun getCachedThread(tid: ThreadId, authorId: UserId?, page: Int): ThreadPage? = null
         override fun setCachedThread(tid: ThreadId, authorId: UserId?, page: Int, threadPage: ThreadPage) = Unit
