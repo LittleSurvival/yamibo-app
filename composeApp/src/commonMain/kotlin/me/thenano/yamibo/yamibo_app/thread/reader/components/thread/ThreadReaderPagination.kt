@@ -1065,7 +1065,9 @@ private fun planFixedHeightReaderPagesCore(
                         strategy = strategy,
                         metrics = metrics,
                     )
-                    if (current.isNotEmpty() && measuredBreak != null && !measuredBreak.isSemanticBoundary) {
+                    // Retry on a fresh page before the one-character fallback. Otherwise a
+                    // full page strands that character in its own rendered text slice.
+                    if (current.isNotEmpty() && (measuredBreak == null || !measuredBreak.isSemanticBoundary)) {
                         flush()
                         continue
                     }
