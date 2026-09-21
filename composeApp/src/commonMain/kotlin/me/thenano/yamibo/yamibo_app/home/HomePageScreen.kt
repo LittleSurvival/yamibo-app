@@ -59,10 +59,15 @@ import yamibo_app.composeapp.generated.resources.logo_homepage
 import kotlin.time.Duration.Companion.milliseconds
 
 /** Sealed state for the home page */
-private sealed interface HomeState {
+internal sealed interface HomeState {
     data object Loading : HomeState
     data class Success(val page: HomePage) : HomeState
     data class Error(val message: String) : HomeState
+}
+
+internal fun HomeState.afterRefresh(result: YamiboResult<HomePage>): HomeState = when (result) {
+    is YamiboResult.Success -> HomeState.Success(result.value)
+    else -> if (this is HomeState.Success) this else HomeState.Error(i18n(result.message()))
 }
 
 /** Main Entry */
@@ -107,11 +112,18 @@ fun HomePageScreen(
         AppEventBus.events.collect { event ->
             if (event == LoginSuccessEvent) {
                 isRefreshing = true
-                val result = forumRepository.fetchHomePage()
-                if (result is YamiboResult.Success) {
-                    state = HomeState.Success(result.value)
+                try {
+                    val result = forumRepository.fetchHomePage()
+                    state = state.afterRefresh(result)
+                    if (result !is YamiboResult.Success && state is HomeState.Success) {
+                        feedbackController.post(
+                            message = i18n(result.message()),
+                            duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short,
+                        )
+                    }
+                } finally {
+                    isRefreshing = false
                 }
-                isRefreshing = false
             }
         }
     }
