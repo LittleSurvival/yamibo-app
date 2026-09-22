@@ -110,6 +110,7 @@ fun ImageViewer(
     imageVerticalPadding: Dp = 1.dp,
     showLoadingPlaceholder: Boolean = true,
     suppressLoadingPlaceholderWhenCached: Boolean = false,
+    reuseCachedPainterWhileLoading: Boolean = false,
     onRenderedHeightChanged: ((Int) -> Unit)? = null,
     onRenderedAspectRatioChanged: ((Float) -> Unit)? = null,
 ) {
@@ -226,7 +227,7 @@ fun ImageViewer(
                 when (val state = painterState) {
                     is AsyncImagePainter.State.Loading, is AsyncImagePainter.State.Empty -> {
                         val cachedPainter = lastSuccessfulPainter
-                        if (suppressLoadingPlaceholderWhenCached && cachedPainter != null) {
+                        if ((suppressLoadingPlaceholderWhenCached || reuseCachedPainterWhileLoading) && cachedPainter != null) {
                             Image(
                                 painter = cachedPainter,
                                 contentDescription = contentDescription ?: "Yamibo Image",
