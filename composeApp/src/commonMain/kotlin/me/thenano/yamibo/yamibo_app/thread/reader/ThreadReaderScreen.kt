@@ -679,6 +679,8 @@ internal fun ThreadReaderScreen(
     var isLoadingNextPage by remember { mutableStateOf(false) }
 
     val loadedPostsByPage = remember { mutableStateMapOf<Int, List<Post>>() }
+    // Catalog browsing must not insert pages into the reader or move its anchor.
+    val catalogPostsByPage = remember(tid, authorId) { mutableStateMapOf<Int, List<Post>>() }
     val postHeightCache = remember(tid) { mutableStateMapOf<Long, Int>() }
     val imageHeightCache = remember(tid) { mutableStateMapOf<String, Int>() }
     val imageAspectRatioCache = remember(tid) { mutableStateMapOf<String, Float>() }
@@ -718,7 +720,9 @@ internal fun ThreadReaderScreen(
     val confirmationController = LocalAppConfirmationController.current
     val appTaskManager = LocalAppTaskManager.current
 
-    val readerUsesBrownSystemBar = showMenu || showSettingsPanel || drawerState.isOpen
+    // isOpen changes only after the animation; cover the status bar from its start.
+    val catalogVisible = drawerState.isOpen || drawerState.targetValue == DrawerValue.Open
+    val readerUsesBrownSystemBar = showMenu || showSettingsPanel || catalogVisible
     SystemBarsEffect(
         statusBarColor = if (readerUsesBrownSystemBar) colors.brownDeep else colors.creamBackground,
         navigationBarColor = colors.creamBackground,
@@ -3392,67 +3396,82 @@ internal fun ThreadReaderScreen(
                     drawerContainerColor = colors.creamBackground,
                     modifier = Modifier.fillMaxWidth(0.7f)
                 ) {
-                    ReaderCatalogPanelWithPosition(
-                        listState = listState,
-                        readerEntries = readerEntries,
-                        pageByPid = pageByPid,
-                        initialPage = initialPage,
-                        singlePageCurrentPosition = currentSinglePageState?.let { state ->
-                            ReaderCatalogCurrentPosition(
-                                page = state.forumPage,
-                                pid = singlePageEntries.getOrNull(singlePageModelIndex)?.sourceEntry?.post?.pid,
-                            )
-                        },
-                        totalPages = totalPages,
-                        loadedPostsByPage = loadedPostsByPage,
-                        bookmarkedPostIds = postBookMarkEntries.values
-                            .filter { it.bookmarked }
-                            .mapTo(mutableSetOf()) { it.targetId },
-                        readPostIds = emptySet(),
-                        chapterStates = progressCoordinator.chapterStates,
-                        onPageOrPostClick = { page, post ->
-                            scope.launch {
-                                val activeGeneration = readerScrollSession.activeGeneration()
-                                if (activeGeneration != null) {
-                                    latestFinishScrollSession.value(activeGeneration)
-                                    persistenceCoordinator.flush()
+                    key(tid, authorId) {
+                        ReaderCatalogPanelWithPosition(
+                            listState = listState,
+                            readerEntries = readerEntries,
+                            pageByPid = pageByPid,
+                            initialPage = initialPage,
+                            singlePageCurrentPosition = currentSinglePageState?.let { state ->
+                                ReaderCatalogCurrentPosition(
+                                    page = state.forumPage,
+                                    pid = singlePageEntries.getOrNull(singlePageModelIndex)?.sourceEntry?.post?.pid,
+                                )
+                            },
+                            totalPages = totalPages,
+                            loadedPostsByPage = catalogPostsByPage + loadedPostsByPage,
+                            onLoadPage = { page ->
+                                if (page in loadedPostsByPage || page in catalogPostsByPage) {
+                                    true
                                 } else {
-                                    persistCurrentReadingState(flush = true)
+                                    val downloaded = downloadRepository.getDownloadedPage(
+                                        ThreadPageDownloadKey(tid.value, page, authorId?.value),
+                                    )
+                                    val cached = downloaded ?: threadRepository.getCachedThread(tid, authorId, page)
+                                    val result = cached ?: (threadRepository.fetchThread(tid, authorId, page) as? YamiboResult.Success)?.value
+                                    if (result != null) catalogPostsByPage[page] = result.posts
+                                    result != null
                                 }
-                                if (post != null) {
+                            },
+                            bookmarkedPostIds = postBookMarkEntries.values
+                                .filter { it.bookmarked }
+                                .mapTo(mutableSetOf()) { it.targetId },
+                            readPostIds = emptySet(),
+                            chapterStates = progressCoordinator.chapterStates,
+                            onPageOrPostClick = { page, post ->
+                                scope.launch {
+                                    val activeGeneration = readerScrollSession.activeGeneration()
+                                    if (activeGeneration != null) {
+                                        latestFinishScrollSession.value(activeGeneration)
+                                        persistenceCoordinator.flush()
+                                    } else {
+                                        persistCurrentReadingState(flush = true)
+                                    }
+                                    if (post != null) {
+                                        drawerState.close()
+                                        if (page !in loadedPages) {
+                                            loadPage(page)
+                                            delay(50.milliseconds) // Wait briefly for Compose to layout the new items
+                                        }
+                                        val targetIndex = entryIndexByPid[post.pid.value.toLong()] ?: -1
+                                        if (targetIndex >= 0) scrollToChapterTarget(targetIndex, post.pid.value.toLong())
+                                    } else {
+                                        // User just clicked the page header to expand catalog, load the page, don't close drawer
+                                        if (page !in loadedPages) {
+                                            loadPage(page)
+                                        }
+                                    }
+                                }
+                            },
+                            onDownload = {
+                                scope.launch {
+                                    downloadSheetPage = currentVisiblePageForAction()
                                     drawerState.close()
-                                    if (page !in loadedPages) {
-                                        loadPage(page)
-                                        delay(50.milliseconds) // Wait briefly for Compose to layout the new items
-                                    }
-                                    val targetIndex = entryIndexByPid[post.pid.value.toLong()] ?: -1
-                                    if (targetIndex >= 0) scrollToChapterTarget(targetIndex, post.pid.value.toLong())
-                                } else {
-                                    // User just clicked the page header to expand catalog, load the page, don't close drawer
-                                    if (page !in loadedPages) {
-                                        loadPage(page)
-                                    }
+                                    withFrameNanos { }
+                                    downloadSheetOpenedAfterFavorite = false
+                                    showDownloadSheet = true
                                 }
-                            }
-                        },
-                        onDownload = {
-                            scope.launch {
-                                downloadSheetPage = currentVisiblePageForAction()
-                                drawerState.close()
-                                withFrameNanos { }
-                                downloadSheetOpenedAfterFavorite = false
-                                showDownloadSheet = true
-                            }
-                        },
-                        downloadEntriesByPage = downloadQueue
-                            .mapNotNull {
-                                val key = it.key as? ThreadPageDownloadKey ?: return@mapNotNull null
-                                if (key.tid == tid.value && key.authorId == authorId?.value) key.page to it else null
-                            }
-                            .toMap(),
-                        onPostLongPress = { post -> catalogActionPost = post },
-                        drawerOpen = drawerState.isOpen,
-                    )
+                            },
+                            downloadEntriesByPage = downloadQueue
+                                .mapNotNull {
+                                    val key = it.key as? ThreadPageDownloadKey ?: return@mapNotNull null
+                                    if (key.tid == tid.value && key.authorId == authorId?.value) key.page to it else null
+                                }
+                                .toMap(),
+                            onPostLongPress = { post -> catalogActionPost = post },
+                            drawerOpen = drawerState.isOpen,
+                        )
+                    }
                 }
             }
         ) {
@@ -4799,7 +4818,7 @@ internal fun ThreadReaderScreen(
                 }
             }
         }
-        if (drawerState.isOpen) {
+        if (catalogVisible) {
             Spacer(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
@@ -5262,6 +5281,7 @@ private fun ReaderCatalogPanelWithPosition(
     downloadEntriesByPage: Map<Int, me.thenano.yamibo.yamibo_app.repository.download.DownloadQueueEntry>,
     onPostLongPress: (Post) -> Unit,
     drawerOpen: Boolean,
+    onLoadPage: suspend (Int) -> Boolean,
 ) {
     val currentChapterStates by chapterStates.collectAsState()
     val currentPosition by remember(listState, readerEntries, pageByPid, initialPage, singlePageCurrentPosition) {
@@ -5288,6 +5308,7 @@ private fun ReaderCatalogPanelWithPosition(
         onDownload = onDownload,
         onPostLongPress = onPostLongPress,
         drawerOpen = drawerOpen,
+        onLoadPage = onLoadPage,
     )
 }
 

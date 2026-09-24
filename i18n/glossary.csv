@@ -1,4 +1,12 @@
 source,en,zh-tw,zh-cn
+搜尋目錄或輸入樓層#,Search catalog or floor#,搜尋目錄或輸入樓層#,搜索目录或输入楼层#
+清除搜尋,Clear search,清除搜尋,清除搜索
+跳至頁碼,Go to page,跳至頁碼,跳至页码
+已載入的目錄中沒有符合項目,No matches in loaded catalog entries,已載入的目錄中沒有符合項目,已加载的目录中没有符合项目
+找不到此樓層,Floor not found,找不到此樓層,找不到此楼层
+此頁找不到此樓層,Floor not found on this page,此頁找不到此樓層,此页找不到此楼层
+載入失敗，點擊重試,Loading failed. Tap to retry.,載入失敗，點擊重試,加载失败，点击重试
+載入此頁,Load this page,載入此頁,加载此页
 首頁資料不完整，請重試；若持續發生，請回報下方診斷代碼。,Homepage data is incomplete. Retry; if it persists please report the diagnostic code below.,首頁資料不完整，請重試；若持續發生，請回報下方診斷代碼。,首页数据不完整，请重试；若持续发生，请反馈下方诊断代码。
 Login,Login,登入,登录
 Save,Save,儲存,保存
