@@ -107,7 +107,7 @@ private fun PageButton(text: String, enabled: Boolean, onClick: () -> Unit) {
 
 /** Dialog popup for page selection */
 @Composable
-private fun PagePickerDialog(
+internal fun PagePickerDialog(
     currentPage: Int,
     totalPages: Int,
     onPageSelected: (Int) -> Unit,
