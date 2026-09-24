@@ -32,3 +32,4 @@ node_modules/
 /.codex
 /data/
 /openspec
+/.gradle-temp
