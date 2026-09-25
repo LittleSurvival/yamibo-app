@@ -1,8 +1,8 @@
 {
   "channel": "stable",
-  "versionName": "0.0.7",
-  "versionCode": 8,
+  "versionName": "0.0.8",
+  "versionCode": 9,
   "isReady": false,
-  "releaseNotes": "新增我的消息定時通知與首次收藏下載選項，修復更新檢查並優化收藏與閱讀紀錄載入",
+  "releaseNotes": "新增閱讀器預設粗體／斜體、自訂首行縮排與目錄搜尋跳頁，修復帖子跳轉、小說分頁、首頁載入、圖片翻頁動畫及系統欄對比問題",
   "assets": []
 }
