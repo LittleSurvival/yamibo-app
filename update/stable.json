@@ -1,0 +1,17 @@
+{
+  "channel": "stable",
+  "versionName": "0.0.8",
+  "versionCode": 9,
+  "isReady": true,
+  "releaseNotes": "# stable-v0.0.8\n\n喜歡這個App的話，歡迎到github上幫我打顆星星 ⭐ ~\n\n新增 :\n- 閱讀設定中新增\"預設粗體/斜體\"\n- 閱讀設定中新增自訂義\"首行縮排\"\n- 閱讀器中目錄新增搜索和跳轉頁數功能\n修復 :\n- 修復帖子內跳轉到其他帖子時，錯用原帖上下文、樓層定位或小說帖主識別錯誤的問題\n- 修復小說分頁時，頁面剩餘高度不足導致文字被拆成單字片段的問題\n- 修復首頁收到空白或不完整資料時仍視為載入成功，並將無效資料寫入快取的問題\n- 修復圖片閱讀器連續滑動翻頁時動畫互相干擾，以及翻頁銜接時畫面閃爍的問題\n- 頂部系統欄和App背景衝突問題\n更改 :\n- 優化首頁載入錯誤時的報錯提示；登入後重新載入失敗時保留已有內容並顯示提示\n\n將來預計的更新 :\n\n",
+  "assets": [
+    {
+      "platform": "android",
+      "type": "universal-apk",
+      "url": "https://github.com/LittleSurvival/yamibo-app/releases/download/9/yamibo-stable-v0.0.8.apk",
+      "sha256": "c91f0af6aa60773afba6abdd73a602ebe0f6a3c050207039f2bd9cf25e59e7b8",
+      "size": 19383210
+    }
+  ],
+  "releaseUrl": "https://github.com/LittleSurvival/yamibo-app/releases/tag/9"
+}
