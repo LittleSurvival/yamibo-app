@@ -8,10 +8,10 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.view.WindowInsetsControllerCompat
+import java.util.WeakHashMap
 
 @Composable
 actual fun SystemBarsEffect(
@@ -21,10 +21,12 @@ actual fun SystemBarsEffect(
     darkStatusBarIcons: Boolean?,
     darkNavigationBarIcons: Boolean?,
 ) {
+    if (!LocalSystemBarsActive.current) return
     val activity = LocalContext.current.findActivity() ?: return
-    val key = remember { Any() }
+    val registry = remember(activity) { registries.getOrPut(activity) { SystemBarRequestRegistry() } }
+    val key = remember(activity) { Any() }
     SideEffect {
-        SystemBarRequestRegistry.update(
+        registry.update(
             key = key,
             activity = activity,
             statusBarColor = statusBarColor,
@@ -34,9 +36,9 @@ actual fun SystemBarsEffect(
             darkNavigationBarIcons = darkNavigationBarIcons,
         )
     }
-    DisposableEffect(key) {
+    DisposableEffect(key, activity) {
         onDispose {
-            SystemBarRequestRegistry.remove(key, activity)
+            registry.remove(key, activity)
         }
     }
 }
@@ -47,7 +49,10 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
     else -> null
 }
 
-private object SystemBarRequestRegistry {
+// Values never retain their Activity key; each window has its own requests and defaults.
+private val registries = WeakHashMap<Activity, SystemBarRequestRegistry>()
+
+private class SystemBarRequestRegistry {
     private data class Request(
         val statusBarColor: Color,
         val navigationBarColor: Color,
@@ -107,8 +112,8 @@ private object SystemBarRequestRegistry {
         @Suppress("DEPRECATION")
         activity.window.navigationBarColor = request.navigationBarColor.toArgb()
         WindowInsetsControllerCompat(activity.window, activity.window.decorView).apply {
-            isAppearanceLightStatusBars = request.darkStatusBarIcons ?: (request.statusBarColor.luminance() > 0.5f)
-            isAppearanceLightNavigationBars = request.darkNavigationBarIcons ?: (request.navigationBarColor.luminance() > 0.5f)
+            isAppearanceLightStatusBars = request.darkStatusBarIcons ?: useDarkSystemBarIcons(request.statusBarColor)
+            isAppearanceLightNavigationBars = request.darkNavigationBarIcons ?: useDarkSystemBarIcons(request.navigationBarColor)
         }
     }
 

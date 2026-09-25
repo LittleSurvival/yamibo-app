@@ -727,8 +727,6 @@ internal fun ThreadReaderScreen(
         statusBarColor = if (readerUsesBrownSystemBar) colors.brownDeep else colors.creamBackground,
         navigationBarColor = colors.creamBackground,
         priority = 20,
-        darkStatusBarIcons = !readerUsesBrownSystemBar,
-        darkNavigationBarIcons = true,
     )
 
     var hasRestoredPosition by remember { mutableStateOf(false) }

@@ -65,8 +65,6 @@ fun YamiboTopBar(
         statusBarColor = colors.brownDeep,
         navigationBarColor = navigationBarColor ?: colors.creamBackground,
         priority = systemBarsPriority,
-        darkStatusBarIcons = false,
-        darkNavigationBarIcons = navigationBarColor == null,
     )
     Column(
         modifier = modifier
