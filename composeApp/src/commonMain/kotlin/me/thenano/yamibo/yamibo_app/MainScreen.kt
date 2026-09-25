@@ -39,6 +39,7 @@ import me.thenano.yamibo.yamibo_app.navigation.*
 import me.thenano.yamibo.yamibo_app.profile.ProfilePage
 import me.thenano.yamibo.yamibo_app.updates.UpdatesPage
 import me.thenano.yamibo.yamibo_app.components.systembars.SystemBarsEffect
+import me.thenano.yamibo.yamibo_app.components.systembars.SystemBarsScope
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -109,8 +110,6 @@ fun MainScreen(initialTab: MainTab = MainTab.Home) {
     SystemBarsEffect(
         statusBarColor = statusBarColor,
         navigationBarColor = colors.navBarBg,
-        darkStatusBarIcons = currentTab != MainTab.Home,
-        darkNavigationBarIcons = true,
     )
     DisposableEffect(currentTab) {
         val handler = {
@@ -195,7 +194,9 @@ fun MainScreen(initialTab: MainTab = MainTab.Home) {
                             .graphicsLayer { alpha = updatesTabAlpha }
                             .zIndex(if (currentTab == MainTab.Updates) 1f else -1f)
                     ) {
-                        UpdatesPage()
+                        SystemBarsScope(active = currentTab == MainTab.Updates) {
+                            UpdatesPage()
+                        }
                     }
                 }
             }
@@ -223,23 +224,25 @@ fun MainScreen(initialTab: MainTab = MainTab.Home) {
                     return@AnimatedContent
                 }
                 tabStateHolder.SaveableStateProvider(tab.name) {
-                    Box(modifier = Modifier.fillMaxSize()) {
-                        when (tab) {
-                            MainTab.Home -> HomeScreenContent(
-                                onNewMessageStatusChange = { hasNewMessage = it },
-                            )
-                            MainTab.History -> ReadHistoryPage(reTapHistoryToken)
-                            MainTab.Updates -> Unit
-                            MainTab.Message -> MessageCenterScreen(
-                                initialTab = MessageCenterTab.PrivateMessages,
-                                mainTabTopBar = true,
-                                onPrivateMessageUnreadChange = { hasNewMessage = it },
-                            )
-                            MainTab.Favorite -> FavoritePage()
-                            MainTab.Profile -> ProfilePage(
-                                hasNewMessage = hasNewMessage,
-                                onNewMessageStatusChange = { hasNewMessage = it },
-                            )
+                    SystemBarsScope(active = tab == currentTab) {
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            when (tab) {
+                                MainTab.Home -> HomeScreenContent(
+                                    onNewMessageStatusChange = { hasNewMessage = it },
+                                )
+                                MainTab.History -> ReadHistoryPage(reTapHistoryToken)
+                                MainTab.Updates -> Unit
+                                MainTab.Message -> MessageCenterScreen(
+                                    initialTab = MessageCenterTab.PrivateMessages,
+                                    mainTabTopBar = true,
+                                    onPrivateMessageUnreadChange = { hasNewMessage = it },
+                                )
+                                MainTab.Favorite -> FavoritePage()
+                                MainTab.Profile -> ProfilePage(
+                                    hasNewMessage = hasNewMessage,
+                                    onNewMessageStatusChange = { hasNewMessage = it },
+                                )
+                            }
                         }
                     }
                 }

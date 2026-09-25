@@ -51,8 +51,6 @@ fun YamiboMainTabTopBar(
         statusBarColor = colors.creamBackground,
         navigationBarColor = colors.navBarBg,
         priority = 10,
-        darkStatusBarIcons = true,
-        darkNavigationBarIcons = true,
     )
     Column(
         modifier = modifier
@@ -106,8 +104,6 @@ fun YamiboHomeTopBar(
         statusBarColor = colors.brownDeep,
         navigationBarColor = colors.navBarBg,
         priority = 10,
-        darkStatusBarIcons = false,
-        darkNavigationBarIcons = true,
     )
     Column(
         modifier = modifier

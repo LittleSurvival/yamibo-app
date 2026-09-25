@@ -40,6 +40,8 @@ import kotlinx.coroutines.launch
 import me.thenano.yamibo.yamibo_app.components.font.getFontFamily
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
+import me.thenano.yamibo.yamibo_app.components.systembars.SystemBarsScope
+import me.thenano.yamibo.yamibo_app.components.systembars.SystemBarsEffect
 import me.thenano.yamibo.yamibo_app.confirmation.AppConfirmationController
 import me.thenano.yamibo.yamibo_app.confirmation.AppConfirmationDelivery
 import me.thenano.yamibo.yamibo_app.confirmation.AppConfirmationResult
@@ -217,6 +219,12 @@ fun App() {
                 color = YamiboTheme.colors.creamBackground
             ) {
             Box(modifier = Modifier.fillMaxSize()) {
+                // Cover loading/transition screens that do not yet provide their own chrome.
+                SystemBarsEffect(
+                    statusBarColor = YamiboTheme.colors.creamBackground,
+                    navigationBarColor = YamiboTheme.colors.navBarBg,
+                    priority = -1,
+                )
                 val topIndex = stack.lastIndex
                 val topId = stack.lastOrNull()?.id
                 val renderPreviousForPush =
@@ -268,7 +276,9 @@ fun App() {
                                     .blockPointerPassthrough(isTop || isPopping)
                                     .zIndex(index.toFloat())
                             ) {
-                                navigatable.Content()
+                                SystemBarsScope(active = index == if (poppingIdx >= 0) poppingIdx - 1 else topIndex) {
+                                    navigatable.Content()
+                                }
                             }
                         }
 
