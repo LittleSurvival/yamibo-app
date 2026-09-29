@@ -18,13 +18,13 @@ class FavoriteUpdateRunner(
     private val repository: FavoriteUpdateRepository,
     private val scheduler: FavoriteUpdateScheduler,
     private val prepareRemoteAccess: suspend () -> String? = { null },
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {
     sealed interface LaunchResult {
         data class Started(val runId: String) : LaunchResult
         data class Rejected(val reason: String, val runId: String? = null) : LaunchResult
     }
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val stateFlow = MutableStateFlow<FavoriteUpdateRepository.RunState>(FavoriteUpdateRepository.RunState.Idle)
     private var syncJob: Job? = null
 

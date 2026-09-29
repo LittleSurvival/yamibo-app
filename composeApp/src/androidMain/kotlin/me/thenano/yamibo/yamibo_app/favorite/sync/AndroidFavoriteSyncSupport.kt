@@ -6,8 +6,8 @@ import me.thenano.yamibo.yamibo_app.core.cache.DiskCacheFactory
 import me.thenano.yamibo.yamibo_app.db.DatabaseFactory
 import me.thenano.yamibo.yamibo_app.network.AndroidYamiboClientProvider
 import me.thenano.yamibo.yamibo_app.repository.AndroidAuthRepository
-import me.thenano.yamibo.yamibo_app.repository.AndroidFavoriteRepository
-import me.thenano.yamibo.yamibo_app.repository.AndroidThreadRepository
+import me.thenano.yamibo.yamibo_app.repository.DefaultFavoriteRepository
+import me.thenano.yamibo.yamibo_app.repository.DefaultThreadRepository
 import me.thenano.yamibo.yamibo_app.repository.FavoriteSyncRepository
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncService
 import me.thenano.yamibo.yamibo_app.repository.favorite.FavoriteSyncRepositoryImpl
@@ -36,9 +36,9 @@ internal object AndroidFavoriteSyncSupport {
         return FavoriteSyncRepositoryImpl(
             db = db,
             authRepository = authRepository,
-            favoriteRepository = AndroidFavoriteRepository(cookieStore, yamiboClient),
+            favoriteRepository = DefaultFavoriteRepository(cookieStore, yamiboClient),
             localFavoriteRepository = appSyncService.favoriteStoreRepository(db),
-            threadRepository = AndroidThreadRepository(cookieStore, yamiboClient, diskCacheFactory),
+            threadRepository = DefaultThreadRepository(cookieStore, yamiboClient, diskCacheFactory),
         )
     }
 }

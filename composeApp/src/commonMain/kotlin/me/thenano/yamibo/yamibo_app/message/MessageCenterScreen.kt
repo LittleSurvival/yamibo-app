@@ -1,11 +1,12 @@
 package me.thenano.yamibo.yamibo_app.message
 
 import YamiboIcons
+import me.thenano.yamibo.yamibo_app.components.controls.launchRefresh
+import me.thenano.yamibo.yamibo_app.components.controls.AppPullToRefreshBox as PullToRefreshBox
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -155,9 +156,11 @@ fun MessageCenterScreen(
                         isRefreshing = isRefreshing,
                         onRefresh = {
                             isRefreshing = true
-                            scope.launch {
+                            scope.launchRefresh(
+                                onFinished = { isRefreshing = false },
+                                onFailure = { feedbackController.post(i18n("載入失敗")) },
+                            ) {
                                 loadTab(selectedTab, currentPage, preferCache = false)
-                                isRefreshing = false
                             }
                         },
                         modifier = Modifier.fillMaxSize(),

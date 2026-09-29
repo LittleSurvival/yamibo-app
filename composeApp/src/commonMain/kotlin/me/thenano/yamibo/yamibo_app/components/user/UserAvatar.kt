@@ -1,6 +1,7 @@
 package me.thenano.yamibo.yamibo_app.components.user
 
 import YamiboIcons
+import me.thenano.yamibo.yamibo_app.thread.image.platformImageAnimation
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
@@ -52,7 +53,7 @@ fun UserAvatar(
             tint = colors.textDark.copy(alpha = 0.45f),
         )
         if (!url.isNullOrBlank()) {
-            SubcomposeAsyncImage(
+            SubcomposeAsyncImage(transform = ::platformImageAnimation,
                 model = rememberImageRequest(url),
                 contentDescription = contentDescription,
                 contentScale = ContentScale.Crop,

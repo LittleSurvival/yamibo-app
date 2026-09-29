@@ -1,6 +1,7 @@
 package me.thenano.yamibo.yamibo_app.updates.components
 
 import androidx.compose.foundation.border
+import me.thenano.yamibo.yamibo_app.thread.image.platformImageAnimation
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -72,7 +73,7 @@ internal fun FavoriteUpdateCard(
             ) {
                 val coverUrl = resolvedContentCoverUrl(event.targetType, event.targetId, event.coverUrl)
                 if (!coverUrl.isNullOrBlank()) {
-                    AsyncImage(
+                    AsyncImage(transform = ::platformImageAnimation,
                         model = rememberImageRequest(url = coverUrl),
                         contentDescription = null,
                         modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(14.dp)),

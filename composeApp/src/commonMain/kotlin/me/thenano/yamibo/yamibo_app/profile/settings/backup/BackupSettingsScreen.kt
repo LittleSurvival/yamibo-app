@@ -1,12 +1,12 @@
 package me.thenano.yamibo.yamibo_app.profile.settings.backup
 
 import androidx.compose.foundation.background
+import me.thenano.yamibo.yamibo_app.components.controls.appVerticalScroll as verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -18,6 +18,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import me.thenano.yamibo.yamibo_app.components.controls.launchRefresh
 import me.thenano.yamibo.yamibo_app.LocalAppSettingsRepository
 import me.thenano.yamibo.yamibo_app.LocalBackupRepository
 import me.thenano.yamibo.yamibo_app.LocalBackupScheduler
@@ -33,6 +34,23 @@ import me.thenano.yamibo.yamibo_app.repository.settings.BackupInterval
 import me.thenano.yamibo.yamibo_app.util.formatStorageSize
 import me.thenano.yamibo.yamibo_app.util.state
 import kotlin.math.roundToInt
+import kotlinx.coroutines.CancellationException
+
+internal data class BackupStorageSnapshot(
+    val folderLabel: String?,
+    val files: List<BackupRepository.BackupFileInfo>,
+) {
+    val bytes: Long get() = files.sumOf { it.bytes }
+}
+
+/** A single listing keeps the displayed count and size consistent during background backups. */
+internal suspend fun BackupRepository.readStorageSnapshot(): Result<BackupStorageSnapshot> = try {
+    Result.success(BackupStorageSnapshot(getSelectedFolderLabel(), listBackupFiles()))
+} catch (cancelled: CancellationException) {
+    throw cancelled
+} catch (error: Exception) {
+    Result.failure(error)
+}
 
 @Composable
 internal fun BackupSettingsScreen() {
@@ -45,6 +63,7 @@ internal fun BackupSettingsScreen() {
     val coroutineScope = rememberCoroutineScope()
     val backupInterval = appSettingsRepository.backupInterval.state()
     val maxAutoFiles = appSettingsRepository.backupMaxAutoFiles.state()
+    val selectedFolder = appSettingsRepository.backupFolderUri.state()
 
     var folderLabel by remember { mutableStateOf<String?>(null) }
     var storageBytes by remember { mutableLongStateOf(0L) }
@@ -54,9 +73,14 @@ internal fun BackupSettingsScreen() {
     var showCreateBackupDialog by remember { mutableStateOf(false) }
 
     suspend fun refresh() {
-        folderLabel = repository.getSelectedFolderLabel()
-        storageBytes = repository.getBackupStorageBytes()
-        backupFiles = repository.listBackupFiles()
+        repository.readStorageSnapshot().onSuccess {
+            folderLabel = it.folderLabel
+            storageBytes = it.bytes
+            backupFiles = it.files
+        }.onFailure {
+            Logger.e("BackupSettingsScreen", "Failed to list backups", it)
+            feedbackController.post(i18n("載入失敗"))
+        }
     }
 
     val fileActions = rememberBackupFileActions(
@@ -64,7 +88,7 @@ internal fun BackupSettingsScreen() {
         onBackupPicked = { uri -> pendingRestoreUri = uri },
     )
 
-    LaunchedEffect(Unit) { refresh() }
+    LaunchedEffect(repository, selectedFolder) { refresh() }
 
     Scaffold(
         topBar = {
@@ -125,18 +149,20 @@ internal fun BackupSettingsScreen() {
             onDismiss = { pendingRestoreUri = null },
             onSelect = { mode ->
                 pendingRestoreUri = null
-                coroutineScope.launch {
+                coroutineScope.launchRefresh(
+                    onFinished = { working = false },
+                    onFailure = { feedbackController.post(i18n("還原備份失敗")) },
+                ) {
                     working = true
                     repository.restoreBackup(uri, mode)
                         .onSuccess {
-                            refresh()
                             feedbackController.post(restoreSummaryText(it))
+                            refresh()
                         }
                         .onFailure { error ->
                             Logger.e("BackupSettingsScreen", "Failed to restore backup", error)
                             feedbackController.post(error.message ?: i18n("還原備份失敗"))
                         }
-                    working = false
                 }
             },
         )
@@ -147,18 +173,20 @@ internal fun BackupSettingsScreen() {
             onDismiss = { showCreateBackupDialog = false },
             onConfirm = { name ->
                 showCreateBackupDialog = false
-                coroutineScope.launch {
+                coroutineScope.launchRefresh(
+                    onFinished = { working = false },
+                    onFailure = { feedbackController.post(i18n("建立備份失敗")) },
+                ) {
                     working = true
                     repository.createBackup(automatic = false, customName = name.takeIf { it.isNotBlank() })
                         .onSuccess {
-                            refresh()
                             feedbackController.post(i18n("已建立備份：{}", it.name))
+                            refresh()
                         }
                         .onFailure { error ->
                             Logger.e("BackupSettingsScreen", "Failed to create backup", error)
                             feedbackController.post(error.message ?: i18n("建立備份失敗"))
                         }
-                    working = false
                 }
             },
         )

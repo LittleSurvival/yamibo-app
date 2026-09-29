@@ -1,6 +1,7 @@
 package me.thenano.yamibo.yamibo_app.thread.detail.components
 
 import YamiboIcons
+import me.thenano.yamibo.yamibo_app.thread.image.platformImageAnimation
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -73,7 +74,7 @@ fun CatalogDetailHeaderCard(
                         )
                     ) {
                         if (coverUrl != null) {
-                            SubcomposeAsyncImage(
+                            SubcomposeAsyncImage(transform = ::platformImageAnimation,
                                 model = rememberImageRequest(url = coverUrl),
                                 contentDescription = "cover",
                                 contentScale = ContentScale.Crop,

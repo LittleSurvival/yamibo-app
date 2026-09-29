@@ -1,6 +1,7 @@
 package me.thenano.yamibo.yamibo_app
 
 import androidx.compose.animation.*
+import me.thenano.yamibo.yamibo_app.components.controls.appVerticalScroll as verticalScroll
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -8,7 +9,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
@@ -31,6 +31,7 @@ import coil3.compose.setSingletonImageLoaderFactory
 import coil3.memory.MemoryCache
 import coil3.network.ktor3.KtorNetworkFetcherFactory
 import coil3.svg.SvgDecoder
+import me.thenano.yamibo.yamibo_app.thread.image.addPlatformImageDecoders
 import io.github.littlesurvival.YamiboClient
 import io.github.littlesurvival.waf.YamiboWafChallengeHost
 import kotlinx.coroutines.coroutineScope
@@ -134,6 +135,7 @@ fun App() {
                         .build()
                 }
                 .components {
+                    addPlatformImageDecoders()
                     // Coil lazily retains this client for the singleton ImageLoader, allowing the
                     // in-memory WAF cookie to be reused without another app-level singleton.
                     add(KtorNetworkFetcherFactory(httpClient = { HttpClientFactory.create() }))

@@ -1,6 +1,7 @@
 package me.thenano.yamibo.yamibo_app.profile.about
 
 import YamiboIcons
+import me.thenano.yamibo.yamibo_app.components.controls.appVerticalScroll as verticalScroll
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape

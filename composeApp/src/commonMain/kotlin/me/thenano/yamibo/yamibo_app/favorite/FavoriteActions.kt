@@ -1,6 +1,7 @@
 package me.thenano.yamibo.yamibo_app.favorite
 
 import me.thenano.yamibo.yamibo_app.i18n.i18n
+import me.thenano.yamibo.yamibo_app.components.controls.AppLazyColumn as LazyColumn
 import me.thenano.yamibo.yamibo_app.components.navigation.NavigationBackSymbol
 
 
@@ -9,7 +10,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape

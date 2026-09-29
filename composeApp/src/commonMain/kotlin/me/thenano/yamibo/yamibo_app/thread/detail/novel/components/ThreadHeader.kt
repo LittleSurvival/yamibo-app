@@ -1,6 +1,7 @@
 ﻿package me.thenano.yamibo.yamibo_app.thread.detail.novel.components
 
 import YamiboIcons
+import me.thenano.yamibo.yamibo_app.thread.image.platformImageAnimation
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -100,7 +101,7 @@ internal fun ThreadHeader(
                         )
                     ) {
                         if (coverUrl != null) {
-                            SubcomposeAsyncImage(
+                            SubcomposeAsyncImage(transform = ::platformImageAnimation,
                                 model = rememberImageRequest(url = coverUrl),
                                 contentDescription = "cover",
                                 contentScale = ContentScale.Crop,

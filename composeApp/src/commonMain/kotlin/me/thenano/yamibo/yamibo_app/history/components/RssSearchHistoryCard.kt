@@ -1,6 +1,7 @@
 ﻿package me.thenano.yamibo.yamibo_app.history.components
 
 import androidx.compose.animation.core.animateFloatAsState
+import me.thenano.yamibo.yamibo_app.thread.image.platformImageAnimation
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -97,7 +98,7 @@ fun RssSearchHistoryCard(
                 colors = CardDefaults.cardColors(containerColor = colors.brownLight.copy(alpha = 0.2f)),
             ) {
                 if (!resolvedCoverUrl.isNullOrEmpty()) {
-                    SubcomposeAsyncImage(
+                    SubcomposeAsyncImage(transform = ::platformImageAnimation,
                         model = rememberImageRequest(url = resolvedCoverUrl),
                         contentDescription = "Cover Image",
                         modifier = Modifier.fillMaxSize(),

@@ -1,10 +1,10 @@
 package me.thenano.yamibo.yamibo_app.userspace.blog
 
 import YamiboIcons
+import me.thenano.yamibo.yamibo_app.components.controls.AppLazyColumn as LazyColumn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedTextField
@@ -409,4 +409,3 @@ private fun BlogReaderLoading() {
 private fun BlogReaderError(message: String, onRetry: () -> Unit) {
     YamiboErrorContent(message = message, onRetry = onRetry)
 }
-

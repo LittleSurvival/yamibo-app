@@ -1,10 +1,10 @@
 package me.thenano.yamibo.yamibo_app.profile.settings.access
 
 import androidx.compose.foundation.background
+import me.thenano.yamibo.yamibo_app.components.controls.appVerticalScroll as verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Scaffold

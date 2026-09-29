@@ -214,18 +214,18 @@ class MainActivity : ComponentActivity() {
             }
             
             val forumRepository = remember {
-                AndroidForumRepository(cookieStore, yamiboClient, diskCacheFactory, forumFavoriteStore)
+                DefaultForumRepository(cookieStore, yamiboClient, diskCacheFactory, forumFavoriteStore)
             }
-            val threadRepository = remember { AndroidThreadRepository(cookieStore, yamiboClient, diskCacheFactory) }
+            val threadRepository = remember { DefaultThreadRepository(cookieStore, yamiboClient, diskCacheFactory) }
             val userSpaceRepository = remember { UserSpaceRepositoryImpl(cookieStore, yamiboClient, diskCacheFactory) }
             val blogRepository = remember { BlogRepositoryImpl(cookieStore, yamiboClient, diskCacheFactory) }
             val chineseConversionRepository = remember { createChineseConversionRepository() }
-            val tagRepository = remember { AndroidTagRepository(cookieStore, yamiboClient, diskCacheFactory) }
+            val tagRepository = remember { DefaultTagRepository(cookieStore, yamiboClient, diskCacheFactory) }
             val favoriteRepository = remember { appSyncService.favoriteStoreRepository(appDatabase) }
             val detailNoteRepository = remember { appSyncService.detailNoteRepository(appDatabase) }
             val bookMarkRepository = remember { appSyncService.bookMarkRepository(appDatabase) }
             val chapterStateRepository = remember { AndroidLocalChapterStateRepository(dbFactory) }
-            val remoteFavoriteRepository = remember { AndroidFavoriteRepository(cookieStore, yamiboClient) }
+            val remoteFavoriteRepository = remember { DefaultFavoriteRepository(cookieStore, yamiboClient) }
             val favoriteSyncDatabase = appDatabase
             val favoriteSyncRepository = remember {
                 FavoriteSyncRepositoryImpl(
@@ -341,12 +341,12 @@ class MainActivity : ComponentActivity() {
                 diskCacheFactory.backupStorageUsageProvider = { backupRepository.getBackupStorageBytes() }
             }
             val backgroundAccessRepository = remember { AndroidBackgroundAccessRepository(context) }
-            val novelCacheRepository = remember { AndroidNovelThreadCacheRepository(diskCacheFactory) }
+            val novelCacheRepository = remember { DefaultNovelThreadCacheRepository(diskCacheFactory) }
             val inAppLinkNavigationRepository = remember {
                 DefaultInAppLinkNavigationRepository(threadRepository, novelCacheRepository)
             }
             val readHistoryRepository = remember {
-                appSyncService.readHistoryRepository(AndroidReadHistoryRepository(appDatabase))
+                appSyncService.readHistoryRepository(DefaultReadHistoryRepository(appDatabase))
             }
             val contentCoverRepository = remember {
                 ContentCoverRepositoryImpl(Database(dbFactory.createDriver()))
@@ -359,7 +359,7 @@ class MainActivity : ComponentActivity() {
                     yamiboClient = yamiboClient,
                 )
             }
-            val themeRepository = remember { AndroidThemeRepository() }
+            val themeRepository = remember { DefaultThemeRepository() }
             val appUpdateRepository = remember {
                 DefaultAppUpdateRepository(
                     appSettingsRepository = appSettingsRepository,

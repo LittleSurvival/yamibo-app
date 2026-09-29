@@ -1,14 +1,15 @@
 package me.thenano.yamibo.yamibo_app.updates
 
 import YamiboIcons
+import me.thenano.yamibo.yamibo_app.components.controls.launchRefresh
+import me.thenano.yamibo.yamibo_app.components.controls.AppLazyColumn as LazyColumn
+import me.thenano.yamibo.yamibo_app.components.controls.AppPullToRefreshBox as PullToRefreshBox
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -349,9 +350,11 @@ fun UpdatesScreen() {
                         isRefreshing = isRefreshing,
                         onRefresh = {
                             isRefreshing = true
-                            scope.launch {
+                            scope.launchRefresh(
+                                onFinished = { isRefreshing = false },
+                                onFailure = { feedbackController.post(i18n("載入失敗")) },
+                            ) {
                                 loadUpdates()
-                                isRefreshing = false
                             }
                         },
                         modifier = Modifier.fillMaxSize(),

@@ -1,12 +1,13 @@
 package me.thenano.yamibo.yamibo_app.thread.detail.rss
 
 import androidx.compose.foundation.background
+import me.thenano.yamibo.yamibo_app.components.controls.launchRefresh
+import me.thenano.yamibo.yamibo_app.components.controls.AppPullToRefreshBox as PullToRefreshBox
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import coil3.compose.LocalPlatformContext
@@ -370,10 +371,15 @@ fun RssSearchSubscriptionDetailScreen(
                     isRefreshing = isRefreshing,
                     onRefresh = {
                         isRefreshing = true
-                        scope.launch {
+                        scope.launchRefresh(
+                            onFinished = { isRefreshing = false },
+                            onFailure = {
+                                state = currentState
+                                feedbackController.post(i18n("載入失敗"))
+                            },
+                        ) {
                             loadPage(currentPage, preferCache = false)
-                            isRefreshing = false
-                            feedbackController.post(i18n("RSS 已刷新"))
+                            if (state is RssDetailState.Success) feedbackController.post(i18n("RSS 已刷新"))
                         }
                     },
                     modifier = Modifier.fillMaxSize(),

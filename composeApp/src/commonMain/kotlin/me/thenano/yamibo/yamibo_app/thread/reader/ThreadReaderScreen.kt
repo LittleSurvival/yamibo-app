@@ -1,6 +1,10 @@
 package me.thenano.yamibo.yamibo_app.thread.reader
 
+import me.thenano.yamibo.yamibo_app.thread.reader.components.readerDesktopInput
+import me.thenano.yamibo.yamibo_app.thread.reader.components.ReaderDownloadSheet
+
 import YamiboIcons
+import me.thenano.yamibo.yamibo_app.components.controls.AppLazyColumn as LazyColumn
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -13,11 +17,11 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -2781,18 +2785,28 @@ internal fun ThreadReaderScreen(
         }
     }
 
-    suspend fun restoreSavedListOffset(index: Int, offset: Int) {
+    suspend fun restoreSavedListOffset(index: Int, offset: Int, anchorRatio: Float? = null) {
         if (isSinglePageMode) {
             setSinglePageEntryIndex(index)
             listState.scrollToItem(0)
             return
         }
+        suspend fun restoreMeasuredOffset() {
+            val layout = listState.layoutInfo
+            val item = layout.visibleItemsInfo.firstOrNull { it.index == index }
+            val measuredOffset = if (anchorRatio != null && item != null) {
+                // The persisted block ratio describes the viewport center, not its top.
+                (item.size * anchorRatio.coerceIn(0f, 1f) -
+                    (layout.viewportStartOffset + layout.viewportEndOffset) / 2f).toInt()
+            } else offset
+            listState.scrollToItem(index, measuredOffset)
+        }
         listState.scrollToItem(index, offset)
         withFrameNanos { }
         delay(120.milliseconds)
-        listState.scrollToItem(index, offset)
+        restoreMeasuredOffset()
         delay(300.milliseconds)
-        listState.scrollToItem(index, offset)
+        restoreMeasuredOffset()
     }
 
     suspend fun restoreSavedPosition(savedPosition: ThreadReadingHistory) {
@@ -2833,7 +2847,7 @@ internal fun ThreadReaderScreen(
                     setSinglePageEntryIndex(blockIndex)
                     listState.scrollToItem(0)
                 } else {
-                    listState.scrollToItem(blockIndex)
+                    restoreSavedListOffset(blockIndex, 0, savedPosition.anchorBlockRatio)
                 }
                 return
             }
@@ -3087,6 +3101,19 @@ internal fun ThreadReaderScreen(
         mutableStateOf<() -> ReaderPersistenceSnapshot?>({ null })
     }
     latestCaptureReadingSnapshot.value = { captureCurrentReadingSnapshot() }
+    // Wheel and keyboard scrolling have no pointer-down/up gesture. Persist their
+    // settled viewport too; the existing coordinator coalesces touch/idle saves.
+    LaunchedEffect(listState, isSinglePageMode) {
+        if (isSinglePageMode) return@LaunchedEffect
+        snapshotFlow {
+            Triple(listState.isScrollInProgress, listState.firstVisibleItemIndex,
+                listState.firstVisibleItemScrollOffset)
+        }.collect { (scrolling, _, _) ->
+            if (!scrolling && canPersistReadingState && !isRestoringSavedPosition) {
+                latestPersistCurrentReadingState.value()
+            }
+        }
+    }
     val latestUntitledLabel = rememberUpdatedState(i18n("（無標題）"))
     val readerScrollSession = remember(listState) { ReaderScrollSession() }
     fun recordCrossedIndices(indices: IntRange?) {
@@ -3365,6 +3392,20 @@ internal fun ThreadReaderScreen(
                 if (size.width > 0) readerViewportWidthPx = size.width
                 if (size.height > 0) readerViewportHeightPx = size.height
             }
+            .then(readerDesktopInput(
+                enabled = state == ReaderState.Success && !showMenu && !showSettingsPanel && !catalogVisible &&
+                    !showFavoriteDialog && !showFavoriteMultiPathDialog && !showRefreshDownloadedDialog,
+                paged = isSinglePageMode,
+                rightToLeft = threadReaderMode == ThreadReaderMode.SINGLE_RTL,
+                onMove = { delta ->
+                    if (isSinglePageMode) {
+                        animateSinglePageMove(delta, if (threadReaderMode == ThreadReaderMode.SINGLE_TTB)
+                            readerViewportHeightPx.toFloat() else readerViewportWidthPx.toFloat())
+                    } else {
+                        scope.launch { listState.animateScrollBy(delta * readerViewportHeightPx * 0.85f) }
+                    }
+                },
+            ))
     ) {
         if (isSinglePageMode) {
             ThreadReaderMeasureHost(
@@ -3477,9 +3518,9 @@ internal fun ThreadReaderScreen(
                 val post = posts.firstOrNull { p -> p.images.any { it.url.endsWith(url) || url.endsWith(it.url) } }
                 if (post != null) {
                     val imageList = post.images.map { img ->
-                        if (img.url.startsWith("http")) img.url else "${YamiboRoute.Domain.build()}${img.url}"
+                        normalizeImageUrl(img.url)
                     }
-                    val cleanUrl = if (url.startsWith("http")) url else "${YamiboRoute.Domain.build()}$url"
+                    val cleanUrl = normalizeImageUrl(url)
                     val initialIndex = imageList.indexOfFirst { it == cleanUrl }.coerceAtLeast(0)
 
                     navigator.navigate(

@@ -15,6 +15,7 @@ class FavoriteSyncRunner(
     private val repository: FavoriteSyncRepository,
     private val backgroundTaskRepository: BackgroundTaskRepository,
     private val prepareRemoteAccess: suspend () -> String? = { null },
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {
     sealed interface LaunchResult {
         data class Started(val runId: String) : LaunchResult
@@ -25,7 +26,6 @@ class FavoriteSyncRunner(
         ) : LaunchResult
     }
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val dismissedFavoritePageRuns = MutableStateFlow<Set<String>>(emptySet())
     private val pendingActivationStartedAt = linkedMapOf<String, Long>()
     private val stateFlow = MutableStateFlow<FavoriteSyncState>(FavoriteSyncState.Idle)

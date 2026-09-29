@@ -1,9 +1,9 @@
 package me.thenano.yamibo.yamibo_app.components.theme
 
 import androidx.compose.foundation.layout.BoxWithConstraints
+import me.thenano.yamibo.yamibo_app.components.controls.appVerticalScroll as verticalScroll
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost

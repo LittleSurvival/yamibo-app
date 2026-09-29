@@ -6,9 +6,9 @@ import java.util.Locale
 
 internal actual fun createPlatformTextBoundarySegmenter(
     fallback: TextBoundarySegmenter,
-): TextBoundarySegmenter = AndroidBreakIteratorTextBoundarySegmenter(fallback)
+): TextBoundarySegmenter = JvmBreakIteratorTextBoundarySegmenter(fallback)
 
-private class AndroidBreakIteratorTextBoundarySegmenter(
+private class JvmBreakIteratorTextBoundarySegmenter(
     private val fallback: TextBoundarySegmenter,
 ) : TextBoundarySegmenter {
     override fun sentenceBoundaries(text: String, locale: String?): IntArray =

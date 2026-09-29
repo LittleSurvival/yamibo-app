@@ -60,6 +60,8 @@ require(!useReleaseSignatureForDebugRun || hasReleaseRunSigning) {
 
 kotlin {
     androidTarget { compilerOptions { jvmTarget.set(JvmTarget.JVM_11) } }
+    jvm("desktop") { compilerOptions { jvmTarget.set(JvmTarget.JVM_11) } }
+    applyDefaultHierarchyTemplate()
 
     listOf(iosArm64(), iosSimulatorArm64()).forEach { iosTarget ->
         iosTarget.binaries.framework {
@@ -70,6 +72,9 @@ kotlin {
     }
 
     sourceSets {
+        val jvmSharedMain by creating { dependsOn(commonMain.get()) }
+        androidMain.get().dependsOn(jvmSharedMain)
+        getByName("desktopMain").dependsOn(jvmSharedMain)
         val generatedRestorableRegistryDir = layout.buildDirectory.dir("generated/restorableScreenRegistry/commonMain/kotlin")
         val generatedI18nKotlinDir = layout.buildDirectory.dir("generated/i18n/kotlin")
         val generatedAppVersionKotlinDir = layout.buildDirectory.dir("generated/appVersion/commonMain/kotlin")
@@ -83,6 +88,7 @@ kotlin {
         }
 
         androidMain.dependencies {
+            implementation(libs.coil3.gif)
             implementation(compose.preview)
             implementation(libs.androidx.activity.compose)
             implementation(libs.androidx.work.runtime.ktx)
@@ -98,7 +104,6 @@ kotlin {
             implementation(libs.androidx.lifecycle.viewmodelCompose)
             implementation(libs.androidx.lifecycle.runtimeCompose)
             implementation(libs.coil3.compose)
-            implementation(libs.coil3.gif)
             implementation(libs.coil3.network.ktor3)
             implementation(libs.coil3.svg)
             implementation(libs.kotlinx.serialization.json)
@@ -106,7 +111,50 @@ kotlin {
             implementation(libs.ksoup)
             implementation(projects.shared)
         }
-        commonTest.dependencies { implementation(libs.kotlin.test) }
+        commonTest.dependencies {
+            implementation(libs.kotlin.test)
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:${libs.versions.kotlinx.coroutines.get()}")
+        }
+        getByName("desktopTest").dependencies { implementation(compose.desktop.uiTestJUnit4) }
+        val desktopMain by getting {
+            resources.srcDir(tasks.register<Sync>("prepareDesktopIcon") {
+                from("src/androidMain/res/mipmap-xxxhdpi") {
+                    include("ic_launcher.png")
+                    rename { "yamibo-icon.png" }
+                }
+                into(layout.buildDirectory.dir("generated/desktopIcon"))
+            })
+            dependencies {
+                implementation(compose.desktop.currentOs)
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:${libs.versions.kotlinx.coroutines.get()}")
+                implementation("me.friwi:jcefmaven:146.0.10")
+                implementation("net.java.dev.jna:jna-platform:5.13.0")
+            }
+        }
+    }
+}
+
+compose.desktop {
+    application {
+        mainClass = "me.thenano.yamibo.yamibo_app.DesktopMainKt"
+        jvmArgs += listOf("--add-opens=java.desktop/sun.awt=ALL-UNNAMED")
+        if (System.getProperty("os.name").startsWith("Mac", ignoreCase = true)) {
+            jvmArgs += listOf(
+                "--add-opens=java.desktop/sun.lwawt=ALL-UNNAMED",
+                "--add-opens=java.desktop/sun.lwawt.macosx=ALL-UNNAMED",
+            )
+        }
+    }
+}
+
+tasks.withType<Test>().matching { it.name == "desktopTest" }.configureEach {
+    systemProperty("yamibo.test.nativeBrowser", providers.gradleProperty("desktopNativeBrowserTest").orElse("false").get())
+    jvmArgs("--add-opens=java.desktop/sun.awt=ALL-UNNAMED")
+    if (System.getProperty("os.name").startsWith("Mac", ignoreCase = true)) {
+        jvmArgs(
+            "--add-opens=java.desktop/sun.lwawt=ALL-UNNAMED",
+            "--add-opens=java.desktop/sun.lwawt.macosx=ALL-UNNAMED",
+        )
     }
 }
 

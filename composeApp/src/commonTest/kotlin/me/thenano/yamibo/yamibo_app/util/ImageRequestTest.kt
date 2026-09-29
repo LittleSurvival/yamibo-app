@@ -10,6 +10,9 @@ class ImageRequestTest {
 
     @Test
     fun preservesLocalImageSchemes() {
+        val desktopImage = "file:///C:/Yamibo/YamiboDownloads/thread_577047_page_1_author_all/images/0003.jpg"
+        assertEquals(desktopImage, normalizeImageUrl(desktopImage))
+        assertEquals(desktopImage, normalizeImageUrl("https://bbs.yamibo.com/$desktopImage"))
         assertEquals("content://downloads/image.jpg", normalizeImageUrl("content://downloads/image.jpg"))
         assertEquals("file:///tmp/image.jpg", normalizeImageUrl("file:///tmp/image.jpg"))
         assertEquals(

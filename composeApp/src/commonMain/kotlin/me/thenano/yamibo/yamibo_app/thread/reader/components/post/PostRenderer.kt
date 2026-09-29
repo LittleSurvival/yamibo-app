@@ -1,12 +1,13 @@
 ﻿package me.thenano.yamibo.yamibo_app.thread.reader.components.post
 
 import me.thenano.yamibo.yamibo_app.i18n.i18n
+import me.thenano.yamibo.yamibo_app.components.controls.AppLazyColumn as LazyColumn
+import me.thenano.yamibo.yamibo_app.thread.image.platformImageAnimation
 
 import YamiboIcons
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -243,7 +244,7 @@ fun PostRenderer(
                                 tint = YamiboTheme.colors.textDark.copy(alpha = 0.5f)
                             )
                             if (!avatarUrl.isNullOrEmpty()) {
-                                AsyncImage(
+                                AsyncImage(transform = ::platformImageAnimation,
                                     model = rememberImageRequest(url = avatarUrl, enableCrossfade = false),
                                     contentDescription = "Avatar",
                                     modifier = Modifier.matchParentSize(),

@@ -1,6 +1,7 @@
 package me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl
 
 import androidx.compose.animation.AnimatedVisibility
+import me.thenano.yamibo.yamibo_app.thread.image.platformImageAnimation
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.*
@@ -910,7 +911,7 @@ private fun HtmlBlockRenderer(
         is HtmlBlock.Image -> {
             val url = normalizeImageUrl(block.url)
             if (block.isEmoticon) {
-                AsyncImage(
+                AsyncImage(transform = ::platformImageAnimation,
                     model = rememberImageRequest(url, enableCrossfade = false),
                     contentDescription = block.alt,
                     modifier = Modifier
@@ -978,7 +979,7 @@ private fun HtmlBlockRenderer(
                         contentAlignment = Alignment.Center,
                     ) {
                         if (iconUrl != null) {
-                            AsyncImage(
+                            AsyncImage(transform = ::platformImageAnimation,
                                 model = rememberImageRequest(iconUrl, enableCrossfade = false),
                                 contentDescription = block.fileName,
                                 modifier = Modifier.size(30.dp),

@@ -1,9 +1,9 @@
 package me.thenano.yamibo.yamibo_app.thread.detail.novel.components
 
 import androidx.compose.animation.core.*
+import me.thenano.yamibo.yamibo_app.components.controls.AppLazyColumn as LazyColumn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue

@@ -1,6 +1,7 @@
 ﻿package me.thenano.yamibo.yamibo_app.favorite.components
 
 import androidx.compose.animation.*
+import me.thenano.yamibo.yamibo_app.thread.image.platformImageAnimation
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -105,7 +106,7 @@ internal fun PreviewGrid(items: List<FavoriteItem>, colorKey: String) {
                             resolvedContentCoverUrl(it.targetType, it.targetId, it.coverUrl)
                         }
                         if (coverUrl != null) {
-                            AsyncImage(model = rememberImageRequest(coverUrl), contentDescription = item.title, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                            AsyncImage(transform = ::platformImageAnimation,model = rememberImageRequest(coverUrl), contentDescription = item.title, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                         } else if (item != null) {
                             CoverTextFallback(title = item.title, color = collectionColor(colorKey))
                         }
@@ -271,7 +272,7 @@ private fun FavoriteItemCover(item: FavoriteItem) {
     val colors = YamiboTheme.colors
     val coverUrl = resolvedContentCoverUrl(item.targetType, item.targetId, item.coverUrl)
     if (coverUrl != null) {
-        AsyncImage(
+        AsyncImage(transform = ::platformImageAnimation,
             model = rememberImageRequest(coverUrl),
             contentDescription = item.title,
             modifier = Modifier.fillMaxSize(),

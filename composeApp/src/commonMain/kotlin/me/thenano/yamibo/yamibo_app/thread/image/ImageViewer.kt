@@ -22,6 +22,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil3.ComponentRegistry
 import coil3.compose.AsyncImagePainter
 import coil3.compose.rememberAsyncImagePainter
 import coil3.compose.rememberConstraintsSizeResolver
@@ -36,6 +37,9 @@ import me.thenano.yamibo.yamibo_app.util.rememberImageRequest
 import org.jetbrains.compose.resources.painterResource
 import yamibo_app.composeapp.generated.resources.Res
 import yamibo_app.composeapp.generated.resources.image_icon
+
+internal expect fun ComponentRegistry.Builder.addPlatformImageDecoders()
+internal expect fun platformImageAnimation(state: AsyncImagePainter.State): AsyncImagePainter.State
 
 val LocalReaderOverlayVisible = compositionLocalOf { false }
 internal interface ReaderImagePainterCache {
@@ -113,6 +117,7 @@ fun ImageViewer(
     reuseCachedPainterWhileLoading: Boolean = false,
     onRenderedHeightChanged: ((Int) -> Unit)? = null,
     onRenderedAspectRatioChanged: ((Float) -> Unit)? = null,
+    onIntrinsicSizeChanged: ((androidx.compose.ui.geometry.Size) -> Unit)? = null,
 ) {
     val fullUrl = normalizeImageUrl(url)
     val diagnosticUrl = imageSourceForDiagnostics(fullUrl)
@@ -153,7 +158,7 @@ fun ImageViewer(
             .size(sizeResolver)
             .build()
     }
-    val painter = rememberAsyncImagePainter(model = sizedImageRequest)
+    val painter = rememberAsyncImagePainter(transform = ::platformImageAnimation,model = sizedImageRequest)
     val painterState by painter.state.collectAsState()
     val sharedPainterCache = LocalReaderImagePainterCache.current
     var lastSuccessfulPainter by remember(fullUrl) {
@@ -167,6 +172,9 @@ fun ImageViewer(
     BoxWithConstraints(
         modifier = modifier
             .then(sizeResolver)
+            .imageContextMenuInput(hasGestures && enableContextMenu && !isOverlayOpen) {
+                showMenu = true
+            }
             .then(
                 if (hasGestures) {
                     Modifier.pointerInput(hasGestures, enableContextMenu) {
@@ -228,6 +236,7 @@ fun ImageViewer(
                     is AsyncImagePainter.State.Loading, is AsyncImagePainter.State.Empty -> {
                         val cachedPainter = lastSuccessfulPainter
                         if ((suppressLoadingPlaceholderWhenCached || reuseCachedPainterWhileLoading) && cachedPainter != null) {
+                            SideEffect { onIntrinsicSizeChanged?.invoke(cachedPainter.intrinsicSize) }
                             Image(
                                 painter = cachedPainter,
                                 contentDescription = contentDescription ?: "Yamibo Image",
@@ -278,6 +287,7 @@ fun ImageViewer(
 
                     is AsyncImagePainter.State.Success -> {
                         SideEffect {
+                            onIntrinsicSizeChanged?.invoke(state.painter.intrinsicSize)
                             lastSuccessfulPainter = state.painter
                             sharedPainterCache?.put(fullUrl, state.painter)
                             ReaderImagePainterMemoryCache.put(fullUrl, state.painter)

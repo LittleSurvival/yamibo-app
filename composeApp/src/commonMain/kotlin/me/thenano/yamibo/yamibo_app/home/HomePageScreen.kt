@@ -1,6 +1,9 @@
 package me.thenano.yamibo.yamibo_app.home
 
 import YamiboIcons
+import me.thenano.yamibo.yamibo_app.components.controls.AppLazyColumn as LazyColumn
+import me.thenano.yamibo.yamibo_app.components.controls.AppPullToRefreshBox
+import me.thenano.yamibo.yamibo_app.thread.image.platformImageAnimation
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Image
@@ -9,12 +12,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -39,6 +42,8 @@ import io.github.littlesurvival.dto.page.ForumCategory
 import io.github.littlesurvival.dto.page.HomePage
 import io.github.littlesurvival.dto.page.SwiperImages
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import me.thenano.yamibo.yamibo_app.LocalAppSettingsRepository
 import me.thenano.yamibo.yamibo_app.LocalForumRepository
 import me.thenano.yamibo.yamibo_app.components.feedback.YamiboDetailedErrorContent
@@ -83,14 +88,30 @@ fun HomePageScreen(
 
     var state by remember { mutableStateOf<HomeState>(HomeState.Loading) }
     var isRefreshing by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    var refreshJob by remember { mutableStateOf<Job?>(null) }
+    var refreshGeneration by remember { mutableIntStateOf(0) }
 
-    suspend fun mapFetchResultState() {
-        val result = forumRepository.fetchHomePage()
-        state =
-            when (result) {
-                is YamiboResult.Success -> HomeState.Success(result.value)
-                else -> HomeState.Error(i18n(result.message()))
+    fun refresh(replacePending: Boolean = false) {
+        if (refreshJob?.isActive == true && !replacePending) return
+        refreshJob?.cancel()
+        val generation = ++refreshGeneration
+        isRefreshing = true
+        refreshJob = scope.launch {
+            try {
+                val result = try { forumRepository.fetchHomePage() }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { YamiboResult.Failure("首頁載入失敗，請重試") }
+                if (generation != refreshGeneration) return@launch
+                state = state.afterRefresh(result)
+                if (result !is YamiboResult.Success && state is HomeState.Success) {
+                    feedbackController.post(message = i18n(result.message()),
+                        duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
+                }
+            } finally {
+                if (generation == refreshGeneration) isRefreshing = false
             }
+        }
     }
 
     /** Initial load: show cache immediately, then refresh once so message badge is current. */
@@ -98,32 +119,15 @@ fun HomePageScreen(
         val cached = forumRepository.getCachedHomePage()
         if (cached != null) {
             state = HomeState.Success(cached)
-            when (val result = forumRepository.fetchHomePage()) {
-                is YamiboResult.Success -> state = HomeState.Success(result.value)
-                else -> Unit
-            }
-        } else {
-            mapFetchResultState()
         }
+        refresh()
     }
 
     /** Event listening */
     LaunchedEffect(Unit) {
         AppEventBus.events.collect { event ->
             if (event == LoginSuccessEvent) {
-                isRefreshing = true
-                try {
-                    val result = forumRepository.fetchHomePage()
-                    state = state.afterRefresh(result)
-                    if (result !is YamiboResult.Success && state is HomeState.Success) {
-                        feedbackController.post(
-                            message = i18n(result.message()),
-                            duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short,
-                        )
-                    }
-                } finally {
-                    isRefreshing = false
-                }
+                refresh(replacePending = true)
             }
         }
     }
@@ -133,7 +137,8 @@ fun HomePageScreen(
         onNewMessageStatusChange(page.hasNewMessage)
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(colors.creamBackground)) {
+    AppPullToRefreshBox(isRefreshing, onRefresh = { refresh() },
+        modifier = Modifier.fillMaxSize().background(colors.creamBackground)) {
         when (val currentState = state) {
             is HomeState.Loading -> LoadingSkeleton()
             is HomeState.Error ->
@@ -141,34 +146,12 @@ fun HomePageScreen(
                     message = currentState.message,
                     onRetry = {
                         state = HomeState.Loading
-                        scope.launch { mapFetchResultState() }
+                        refresh()
                     }
                 )
 
-            is HomeState.Success ->
-                PullToRefreshBox(
-                    isRefreshing = isRefreshing,
-                    onRefresh = {
-                        isRefreshing = true
-                        scope.launch {
-                            when (val result = forumRepository.fetchHomePage()) {
-                                is YamiboResult.Success ->
-                                    state = HomeState.Success(result.value)
-
-                                else -> {
-                                    feedbackController.post(
-                                        message = i18n(result.message()),
-                                        duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short
-                                    )
-                                }
-                            }
-                            isRefreshing = false
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    HomeContent(homePage = currentState.page, onSearch = { navigator.navigate(ISearchScreen()) })
-                }
+            is HomeState.Success -> HomeContent(homePage = currentState.page, listState = listState,
+                onSearch = { navigator.navigate(ISearchScreen()) })
         }
 
     }
@@ -176,11 +159,11 @@ fun HomePageScreen(
 
 /** Success Content */
 @Composable
-private fun HomeContent(homePage: HomePage, onSearch: () -> Unit) {
+private fun HomeContent(homePage: HomePage, listState: LazyListState, onSearch: () -> Unit) {
     val appSettingsRepo = LocalAppSettingsRepository.current
     val showSwiperImages = appSettingsRepo.showHomeSwiperImages.state()
 
-    LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+    LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
         /** header banner */
         item { HomeHeader(onSearch = onSearch) }
 
@@ -247,7 +230,7 @@ private fun HomeSwiper(images: List<SwiperImages>) {
             ) { index ->
                 val target = images.getOrNull(index) ?: current
                 key(target.imageUrl) {
-                    SubcomposeAsyncImage(
+                    SubcomposeAsyncImage(transform = ::platformImageAnimation,
                         model = rememberImageRequest(target.imageUrl),
                         contentDescription = i18n("首頁輪播圖"),
                         contentScale = ContentScale.Crop,

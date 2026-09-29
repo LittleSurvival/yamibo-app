@@ -1,6 +1,7 @@
 package me.thenano.yamibo.yamibo_app.thread.reader.components.manga
 
 import me.thenano.yamibo.yamibo_app.i18n.i18n
+import me.thenano.yamibo.yamibo_app.components.controls.appVerticalScroll as verticalScroll
 
 import me.thenano.yamibo.yamibo_app.i18n.localizedLabel
 
@@ -13,7 +14,6 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Surface

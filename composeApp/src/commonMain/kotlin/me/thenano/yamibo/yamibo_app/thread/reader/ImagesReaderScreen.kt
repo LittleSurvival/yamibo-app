@@ -1,6 +1,8 @@
 package me.thenano.yamibo.yamibo_app.thread.reader
 
 import YamiboIcons
+import me.thenano.yamibo.yamibo_app.thread.reader.components.readerDesktopInput
+import me.thenano.yamibo.yamibo_app.components.controls.AppLazyColumn as LazyColumn
 import androidx.compose.animation.*
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.exponentialDecay
@@ -10,7 +12,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.*
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -19,6 +20,7 @@ import androidx.compose.material3.ButtonDefaults.outlinedButtonColors
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -70,6 +72,7 @@ import me.thenano.yamibo.yamibo_app.task.AppTaskDuplicatePolicy
 import me.thenano.yamibo.yamibo_app.task.AppTaskKey
 import me.thenano.yamibo.yamibo_app.thread.detail.novel.INovelThreadDetailScreen
 import me.thenano.yamibo.yamibo_app.thread.image.ImageContextMenu
+import me.thenano.yamibo.yamibo_app.thread.image.imageContextMenuInput
 import me.thenano.yamibo.yamibo_app.thread.image.ImageViewer
 import me.thenano.yamibo.yamibo_app.thread.reader.components.manga.*
 import me.thenano.yamibo.yamibo_app.util.buildImageRequest
@@ -672,6 +675,9 @@ fun ImagesReaderScreen(
     val offsetXAnim = remember { Animatable(0f) }
     val offsetYAnim = remember { Animatable(0f) }
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
+    val imageSizes = remember { mutableStateMapOf<String, androidx.compose.ui.geometry.Size>() }
+    fun zoomBounds(scale: Float): Offset = imageZoomBounds(containerSize,
+        if (isScrollMode) null else actualImageList.getOrNull(currentPage)?.let { imageSizes[it] }, scale)
     var pageDragOffset by remember { mutableFloatStateOf(0f) }
     var pageDragTarget by remember { mutableStateOf<Int?>(null) }
     var isPageDragSettling by remember { mutableStateOf(false) }
@@ -946,9 +952,12 @@ fun ImagesReaderScreen(
                 val centerX = containerSize.width / 2f
                 val centerY = containerSize.height / 2f
                 val targetScale = 2.0f
+                val bounds = zoomBounds(targetScale)
+                offsetXAnim.updateBounds(-bounds.x, bounds.x)
+                offsetYAnim.updateBounds(-bounds.y, bounds.y)
                 launch { scaleAnim.animateTo(targetScale, tween(280)) }
-                launch { offsetXAnim.animateTo((centerX - tapOffset.x) * (targetScale - 1f), tween(280)) }
-                launch { offsetYAnim.animateTo((centerY - tapOffset.y) * (targetScale - 1f), tween(280)) }
+                launch { offsetXAnim.animateTo(((centerX - tapOffset.x) * (targetScale - 1f)).coerceIn(-bounds.x, bounds.x), tween(280)) }
+                launch { offsetYAnim.animateTo(((centerY - tapOffset.y) * (targetScale - 1f)).coerceIn(-bounds.y, bounds.y), tween(280)) }
             }
         }
     }
@@ -994,6 +1003,26 @@ fun ImagesReaderScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
+            .then(readerDesktopInput(
+                enabled = !showCatalog && !showSettings && !showOverlay && !showTouchZonePreview && !showContextMenu &&
+                    !isLoadingImages && scaleAnim.value <= 1.01f,
+                paged = !isScrollMode,
+                rightToLeft = isRtl,
+                onMove = { delta ->
+                    if (isScrollMode) {
+                        scope.launch {
+                            scrollListState.animateScrollBy(delta * containerSize.height * 0.85f)
+                        }
+                    } else if (!isPageDragSettling) {
+                        val target = currentPage + delta
+                        when {
+                            target < minPage() && hasPrevChapter -> launchPrevChapter()
+                            target > maxPage() && hasNextChapter -> launchNextChapter()
+                            target in minPage()..maxPage() -> { setReaderPage(target); resetZoom() }
+                        }
+                    }
+                },
+            ))
     ) {
         // Zoomable Content Box
         Box(
@@ -1004,6 +1033,11 @@ fun ImagesReaderScreen(
                     containerSize = it
                 }
                 // 1. Unified Tap Handler
+                .imageContextMenuInput(!showCatalog && !showSettings && !showOverlay &&
+                    !showTouchZonePreview && !showContextMenu && !isLoadingImages) {
+                    contextMenuImageUrl = actualImageList.getOrElse(currentPage) { "" }
+                    showContextMenu = contextMenuImageUrl.isNotEmpty()
+                }
                 .pointerInput(touchZoneLayout, reverseTouchZones, readingMode, actualImageList.size) {
                     detectTapGestures(
                         onTap = { offset ->
@@ -1204,8 +1238,9 @@ fun ImagesReaderScreen(
                                     currentOffsetX = locCentroidX - (locCentroidX - currentOffsetX) * effectiveZoom + panChange.x
                                     currentOffsetY = locCentroidY - (locCentroidY - currentOffsetY) * effectiveZoom + panChange.y
                                     
-                                    boundX = if (currentScale > 1f) (containerSize.width * (currentScale - 1f)) / 2f else 0f
-                                    boundY = if (currentScale > 1f) (containerSize.height * (currentScale - 1f)) / 2f else 0f
+                                    val bounds = zoomBounds(currentScale)
+                                    boundX = bounds.x
+                                    boundY = bounds.y
                                     offsetXAnim.updateBounds(-boundX, boundX)
                                     offsetYAnim.updateBounds(-boundY, boundY)
                                     
@@ -1223,8 +1258,9 @@ fun ImagesReaderScreen(
                                 val change = event.changes[0]
                                 pan = change.position - change.previousPosition
                                 
-                                boundX = if (currentScale > 1f) (containerSize.width * (currentScale - 1f)) / 2f else 0f
-                                boundY = if (currentScale > 1f) (containerSize.height * (currentScale - 1f)) / 2f else 0f
+                                val bounds = zoomBounds(currentScale)
+                                boundX = bounds.x
+                                boundY = bounds.y
                                 offsetXAnim.updateBounds(-boundX, boundX)
                                 offsetYAnim.updateBounds(-boundY, boundY)
                                 
@@ -1275,8 +1311,9 @@ fun ImagesReaderScreen(
                 .graphicsLayer {
                     scaleX = scaleAnim.value
                     scaleY = scaleAnim.value
-                    translationX = offsetXAnim.value
-                    translationY = offsetYAnim.value
+                    val bounds = zoomBounds(scaleAnim.value)
+                    translationX = offsetXAnim.value.coerceIn(-bounds.x, bounds.x)
+                    translationY = offsetYAnim.value.coerceIn(-bounds.y, bounds.y)
                 }
         ) {
             if (isScrollMode) {
@@ -1441,6 +1478,7 @@ fun ImagesReaderScreen(
                                             enableCrossfade = false,
                                             showLoadingPlaceholder = showLoadingPlaceholder,
                                             reuseCachedPainterWhileLoading = true,
+                                            onIntrinsicSizeChanged = { imageSizes[imageUrl] = it },
                                         )
                                     }
                                 }

@@ -1,6 +1,7 @@
 package me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl
 
 import me.thenano.yamibo.yamibo_app.i18n.i18n
+import me.thenano.yamibo.yamibo_app.thread.image.platformImageAnimation
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
@@ -60,7 +61,7 @@ fun CommentRenderer(
                     // Avatar
                     val avatarUrl = comment.user.avatarUrl ?: ""
                     if (avatarUrl.isNotEmpty()) {
-                        AsyncImage(
+                        AsyncImage(transform = ::platformImageAnimation,
                             model = avatarUrl,
                             contentDescription = "Avatar",
                             modifier = Modifier

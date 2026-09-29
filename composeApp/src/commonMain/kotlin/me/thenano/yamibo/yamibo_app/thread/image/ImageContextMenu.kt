@@ -18,6 +18,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -39,6 +43,23 @@ import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 expect fun imageContextMenuDialogProperties(): DialogProperties
 
 private val MenuScrimColor = Color.Black.copy(alpha = 0.08f)
+
+@Composable
+internal fun Modifier.imageContextMenuInput(enabled: Boolean, onOpen: () -> Unit): Modifier {
+    val latestOpen = rememberUpdatedState(onOpen)
+    return pointerInput(enabled) {
+        if (!enabled) return@pointerInput
+        awaitPointerEventScope {
+            while (true) {
+                val event = awaitPointerEvent()
+                if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
+                    event.changes.forEach { it.consume() }
+                    latestOpen.value()
+                }
+            }
+        }
+    }
+}
 
 @Composable
 fun ImageContextMenu(

@@ -28,7 +28,7 @@ class FavoritePostAddDownloadUiContractTest {
     @Test
     fun automaticSheetsExposeSuppressionButManualSheetsDoNot() {
         val suppression = source("thread/detail/components/DownloadPromptSuppression.kt")
-        val readerSheet = source("thread/reader/ReaderDownloadSheet.kt")
+        val readerSheet = source("thread/reader/components/ReaderDownloadSheet.kt")
         val catalogSheet = source("thread/detail/components/CatalogActions.kt")
         val threadSource = source("thread/reader/ThreadReaderScreen.kt")
         val tagSource = source("thread/detail/tag/TagDetailScreen.kt")
@@ -48,7 +48,7 @@ class FavoritePostAddDownloadUiContractTest {
 
     @Test
     fun existingManualDownloadLabelsAndOrderingRemainInSharedComponents() {
-        val reader = source("thread/reader/ReaderDownloadSheet.kt")
+        val reader = source("thread/reader/components/ReaderDownloadSheet.kt")
         assertInOrder(
             reader,
             "下載目前頁",

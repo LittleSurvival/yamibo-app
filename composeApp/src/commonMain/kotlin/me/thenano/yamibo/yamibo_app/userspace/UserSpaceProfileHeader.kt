@@ -1,6 +1,7 @@
 ﻿package me.thenano.yamibo.yamibo_app.userspace
 
 import me.thenano.yamibo.yamibo_app.i18n.i18n
+import me.thenano.yamibo.yamibo_app.thread.image.platformImageAnimation
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -57,7 +58,7 @@ internal fun UserSpaceProfileHeader(
         ) {
             val backgroundUrl = profile.avatarBackgroundUrl
             if (!backgroundUrl.isNullOrBlank()) {
-                SubcomposeAsyncImage(
+                SubcomposeAsyncImage(transform = ::platformImageAnimation,
                     model = rememberImageRequest(backgroundUrl),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,

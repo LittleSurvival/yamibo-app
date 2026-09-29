@@ -6,9 +6,9 @@ import me.thenano.yamibo.yamibo_app.core.cache.DiskCacheFactory
 import me.thenano.yamibo.yamibo_app.db.DatabaseFactory
 import me.thenano.yamibo.yamibo_app.network.AndroidYamiboClientProvider
 import me.thenano.yamibo.yamibo_app.repository.AndroidAuthRepository
-import me.thenano.yamibo.yamibo_app.repository.AndroidForumRepository
-import me.thenano.yamibo.yamibo_app.repository.AndroidTagRepository
-import me.thenano.yamibo.yamibo_app.repository.AndroidThreadRepository
+import me.thenano.yamibo.yamibo_app.repository.DefaultForumRepository
+import me.thenano.yamibo.yamibo_app.repository.DefaultTagRepository
+import me.thenano.yamibo.yamibo_app.repository.DefaultThreadRepository
 import me.thenano.yamibo.yamibo_app.repository.FavoriteUpdateRepository
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncService
 import me.thenano.yamibo.yamibo_app.repository.rss.RssSearchSubscriptionRepositoryImpl
@@ -36,7 +36,7 @@ internal object AndroidFavoriteUpdateSupport {
             settingsStore = AndroidSettingsStore(appContext),
             authRepository = authRepository,
         )
-        val forumRepository = AndroidForumRepository(
+        val forumRepository = DefaultForumRepository(
             cookieStore,
             yamiboClient,
             diskCacheFactory,
@@ -45,8 +45,8 @@ internal object AndroidFavoriteUpdateSupport {
         return appSyncService.favoriteUpdateRepository(
             db = db,
             localFavoriteRepository = appSyncService.favoriteStoreRepository(db),
-            threadRepository = AndroidThreadRepository(cookieStore, yamiboClient, diskCacheFactory),
-            tagRepository = AndroidTagRepository(cookieStore, yamiboClient, diskCacheFactory),
+            threadRepository = DefaultThreadRepository(cookieStore, yamiboClient, diskCacheFactory),
+            tagRepository = DefaultTagRepository(cookieStore, yamiboClient, diskCacheFactory),
             rssSearchSubscriptionRepository = appSyncService.rssSearchSubscriptionRepository(
                 db = db,
                 authRepository = authRepository,

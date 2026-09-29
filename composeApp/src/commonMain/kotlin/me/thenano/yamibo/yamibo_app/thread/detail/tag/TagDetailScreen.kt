@@ -1,11 +1,12 @@
 package me.thenano.yamibo.yamibo_app.thread.detail.tag
 
 import androidx.compose.foundation.background
+import me.thenano.yamibo.yamibo_app.components.controls.launchRefresh
+import me.thenano.yamibo.yamibo_app.components.controls.AppPullToRefreshBox as PullToRefreshBox
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import coil3.compose.LocalPlatformContext
@@ -457,7 +458,10 @@ internal fun TagDetailScreen(
                         isRefreshing = isRefreshing,
                         onRefresh = {
                             isRefreshing = true
-                            scope.launch {
+                            scope.launchRefresh(
+                                onFinished = { isRefreshing = false },
+                                onFailure = { feedbackController.post(i18n("載入失敗")) },
+                            ) {
                                 when (val result =
                                     tagRepository.fetchTagPage(tagId, currentPage)
                                 ) {
@@ -479,7 +483,6 @@ internal fun TagDetailScreen(
                                         )
                                     }
                                 }
-                                isRefreshing = false
                             }
                         },
                         modifier = Modifier.fillMaxSize()

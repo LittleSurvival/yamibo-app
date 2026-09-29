@@ -1,14 +1,15 @@
 package me.thenano.yamibo.yamibo_app.thread.reader.components.tag
 
 import me.thenano.yamibo.yamibo_app.i18n.i18n
+import me.thenano.yamibo.yamibo_app.components.controls.launchRefresh
+import me.thenano.yamibo.yamibo_app.components.controls.appVerticalScroll as verticalScroll
+import me.thenano.yamibo.yamibo_app.components.controls.AppPullToRefreshBox as PullToRefreshBox
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,6 +41,7 @@ internal fun TagListScreen(
     val colors = YamiboTheme.colors
     val navigator = LocalNavigator.current
     val tagRepository = LocalTagRepository.current
+    val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
     val scope = rememberCoroutineScope()
 
     var tags by remember { mutableStateOf(initialTags) }
@@ -50,13 +52,20 @@ internal fun TagListScreen(
         if (!forceRefresh) state = TagListState.Loading
         else isRefreshing = true
 
-        scope.launch {
+        scope.launchRefresh(
+            onFinished = { isRefreshing = false },
+            onFailure = {
+                if (!forceRefresh) state = TagListState.Error(i18n("載入失敗"))
+                else feedbackController.post(i18n("載入失敗"))
+            },
+        ) {
             when (val result = tagRepository.fetchExtractTags(tid)) {
                 is YamiboResult.Success -> {
                     tags = result.value.value
                     state = TagListState.Success
                 }
                 else -> {
+                    if (forceRefresh) feedbackController.post(i18n(result.message()))
                     state = if (!forceRefresh) {
                         TagListState.Error(i18n(result.message()))
                     } else {
@@ -64,7 +73,6 @@ internal fun TagListScreen(
                     }
                 }
             }
-            if (forceRefresh) isRefreshing = false
         }
     }
 

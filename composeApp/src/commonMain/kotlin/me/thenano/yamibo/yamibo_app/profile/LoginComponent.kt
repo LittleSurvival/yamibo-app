@@ -1,6 +1,7 @@
 package me.thenano.yamibo.yamibo_app.profile
 
 import androidx.compose.animation.*
+import me.thenano.yamibo.yamibo_app.thread.image.platformImageAnimation
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -346,7 +347,7 @@ private fun AvatarPlaceholder(
     avatarUrl: String,
     modifier: Modifier = Modifier,
 ) {
-    SubcomposeAsyncImage(
+    SubcomposeAsyncImage(transform = ::platformImageAnimation,
         model = rememberImageRequest(url = avatarUrl),
         contentDescription = null,
         modifier = modifier.clip(CircleShape),

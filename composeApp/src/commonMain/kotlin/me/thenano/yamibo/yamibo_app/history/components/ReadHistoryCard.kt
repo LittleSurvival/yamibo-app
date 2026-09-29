@@ -1,6 +1,7 @@
 ﻿package me.thenano.yamibo.yamibo_app.history.components
 
 import YamiboIcons
+import me.thenano.yamibo.yamibo_app.thread.image.platformImageAnimation
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.border
@@ -117,7 +118,7 @@ fun ReadHistoryCard(
                 colors = CardDefaults.cardColors(containerColor = colors.brownLight.copy(alpha = 0.2f))
             ) {
                 if (!resolvedCoverUrl.isNullOrEmpty()) {
-                    SubcomposeAsyncImage(
+                    SubcomposeAsyncImage(transform = ::platformImageAnimation,
                         model = rememberImageRequest(url = resolvedCoverUrl),
                         contentDescription = "thread cover",
                         modifier = Modifier
