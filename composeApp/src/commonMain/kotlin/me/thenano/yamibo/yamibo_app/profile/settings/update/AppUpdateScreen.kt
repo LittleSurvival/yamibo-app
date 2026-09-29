@@ -1,6 +1,7 @@
 package me.thenano.yamibo.yamibo_app.profile.settings.update
 
 import androidx.compose.foundation.*
+import androidx.compose.foundation.text.selection.SelectionContainer
 import me.thenano.yamibo.yamibo_app.components.controls.appVerticalScroll as verticalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -9,6 +10,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -36,6 +39,7 @@ internal fun AppUpdateScreen() {
     val repository = LocalAppUpdateRepository.current
     val appSettingsRepository = LocalAppSettingsRepository.current
     val coroutineScope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
     val downloadState by repository.downloadState.collectAsState()
     val launchCheckThreshold = appSettingsRepository.appUpdateLaunchCheckThreshold.state()
 
@@ -61,6 +65,7 @@ internal fun AppUpdateScreen() {
                 .fillMaxSize()
                 .background(colors.creamBackground)
                 .padding(padding)
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -71,6 +76,19 @@ internal fun AppUpdateScreen() {
                 release = release,
             )
 
+            repository.manualDownloadUrl?.let { url ->
+                if (result is AppUpdateCheckResult.Failed || downloadState is AppUpdateDownloadState.Failed) {
+                    Text(i18n("無法從 GitHub 取得更新，請重試或使用瀏覽器手動下載。"), color = colors.textDark)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { repository.openManualDownloadPage() }) { Text(i18n("手動下載")) }
+                    OutlinedButton(onClick = { clipboard.setText(AnnotatedString(url)) }) { Text(i18n("複製下載連結")) }
+                }
+                SelectionContainer { Text(url, color = colors.textDark, fontSize = 12.sp) }
+                if (downloadState is AppUpdateDownloadState.Running) {
+                    OutlinedButton(onClick = repository::cancelDownload) { Text(i18n("取消")) }
+                }
+            }
             AppUpdateLaunchThresholdCard(
                 selected = launchCheckThreshold,
                 onClick = { showThresholdDialog = true },

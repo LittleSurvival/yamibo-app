@@ -1,5 +1,11 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.util.Properties
+import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import java.awt.image.BufferedImage
+import javax.imageio.ImageIO
+import java.io.ByteArrayOutputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
@@ -134,10 +140,75 @@ kotlin {
     }
 }
 
+val desktopPackageResources = layout.buildDirectory.dir("generated/desktopPackageResources")
+val desktopPackageIcons = layout.buildDirectory.dir("generated/desktopPackageIcons")
+val prepareDesktopPackageIcons by tasks.registering {
+    val source = layout.projectDirectory.file("src/androidMain/res/mipmap-xxxhdpi/ic_launcher.png")
+    val iconOutput = desktopPackageIcons.get().asFile
+    inputs.file(source)
+    outputs.dir(desktopPackageIcons)
+    doLast {
+        val output = iconOutput.apply { mkdirs() }
+        val original = ImageIO.read(source.asFile)
+        val scaled = BufferedImage(256, 256, BufferedImage.TYPE_INT_ARGB)
+        scaled.createGraphics().let { graphics ->
+            try { graphics.drawImage(original, 0, 0, 256, 256, null) } finally { graphics.dispose() }
+        }
+        val png = ByteArrayOutputStream().also { ImageIO.write(scaled, "png", it) }.toByteArray()
+        output.resolve("yamibo.png").writeBytes(png)
+        val ico = ByteBuffer.allocate(22 + png.size).order(ByteOrder.LITTLE_ENDIAN)
+        ico.putShort(0).putShort(1).putShort(1).put(0).put(0).put(0).put(0)
+            .putShort(1).putShort(32).putInt(png.size).putInt(22).put(png)
+        output.resolve("yamibo.ico").writeBytes(ico.array())
+        val icns = ByteBuffer.allocate(16 + png.size).order(ByteOrder.BIG_ENDIAN)
+        icns.put("icns".toByteArray()).putInt(16 + png.size).put("ic08".toByteArray()).putInt(8 + png.size).put(png)
+        output.resolve("yamibo.icns").writeBytes(icns.array())
+    }
+}
+val prepareDesktopBrowser by tasks.registering(JavaExec::class) {
+    dependsOn("desktopMainClasses")
+    val compilation = kotlin.targets.getByName("desktop").compilations.getByName("main")
+    classpath = compilation.output.allOutputs + compilation.runtimeDependencyFiles!!
+    mainClass.set("me.thenano.yamibo.yamibo_app.DesktopMainKt")
+    jvmArgs("-Dfile.encoding=UTF-8", "-Dsun.stdout.encoding=UTF-8", "-Dsun.stderr.encoding=UTF-8")
+    val output = desktopPackageResources.map { it.dir("common/chromium-146.0.10") }
+    outputs.dir(output)
+    args("--prepare-browser", output.get().asFile.absolutePath)
+}
+
 compose.desktop {
     application {
         mainClass = "me.thenano.yamibo.yamibo_app.DesktopMainKt"
+        nativeDistributions {
+            targetFormats(TargetFormat.Msi, TargetFormat.Dmg, TargetFormat.Deb, TargetFormat.Rpm)
+            packageName = "Yamibo"
+            // Monotonic installer version, independent of the displayed semantic version.
+            require(yamiboAppVersionCode in 1..65535)
+            packageVersion = "1.0.$yamiboAppVersionCode"
+            description = "Yamibo forum client"
+            vendor = "TheNano"
+            includeAllModules = true
+            appResourcesRootDir.set(desktopPackageResources)
+            windows {
+                iconFile.set(desktopPackageIcons.map { it.file("yamibo.ico") })
+                upgradeUuid = "ba5a6164-7b43-46ad-b534-c0ecbdd937a7"
+                perUserInstall = true
+                menu = true
+                shortcut = true
+                menuGroup = "Yamibo"
+            }
+            macOS {
+                iconFile.set(desktopPackageIcons.map { it.file("yamibo.icns") })
+                bundleID = "me.thenano.yamibo.desktop"
+            }
+            linux {
+                iconFile.set(desktopPackageIcons.map { it.file("yamibo.png") })
+                packageName = "yamibo"
+                shortcut = true
+            }
+        }
         jvmArgs += listOf("--add-opens=java.desktop/sun.awt=ALL-UNNAMED")
+        jvmArgs += listOf("-Dfile.encoding=UTF-8", "-Dsun.stdout.encoding=UTF-8", "-Dsun.stderr.encoding=UTF-8")
         if (System.getProperty("os.name").startsWith("Mac", ignoreCase = true)) {
             jvmArgs += listOf(
                 "--add-opens=java.desktop/sun.lwawt=ALL-UNNAMED",
@@ -145,6 +216,10 @@ compose.desktop {
             )
         }
     }
+}
+
+tasks.matching { it.name in setOf("prepareAppResources", "createDistributable", "packageMsi", "packageDmg", "packageDeb", "packageRpm") }.configureEach {
+    dependsOn(prepareDesktopPackageIcons, prepareDesktopBrowser)
 }
 
 tasks.withType<Test>().matching { it.name == "desktopTest" }.configureEach {

@@ -9,6 +9,8 @@ import me.thenano.yamibo.yamibo_app.repository.appupdate.AppUpdateSource
 interface AppUpdateRepository {
     val downloadState: StateFlow<AppUpdateDownloadState>
     val sources: List<AppUpdateSource>
+    val manualDownloadUrl: String? get() = null
+    fun openManualDownloadPage() {}
 
     suspend fun checkForUpdate(force: Boolean = false): AppUpdateCheckResult
     suspend fun downloadAndInstall(release: AppUpdateRelease): AppUpdateDownloadState

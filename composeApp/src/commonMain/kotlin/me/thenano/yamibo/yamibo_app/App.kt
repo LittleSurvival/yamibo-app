@@ -62,6 +62,7 @@ import me.thenano.yamibo.yamibo_app.message.IMessageCenterScreen
 import me.thenano.yamibo.yamibo_app.message.MessageCenterTab
 import me.thenano.yamibo.yamibo_app.notification.messageNotificationNavigationTrigger
 import me.thenano.yamibo.yamibo_app.profile.settings.update.AppUpdatePromptContent
+import me.thenano.yamibo.yamibo_app.profile.settings.update.AppUpdateFailureDialog
 import me.thenano.yamibo.yamibo_app.profile.sign.ISignWebView
 import me.thenano.yamibo.yamibo_app.profile.sign.shouldDismissSignReminderFor
 import me.thenano.yamibo.yamibo_app.profile.sign.shouldEmitSignStatusChanged
@@ -170,6 +171,7 @@ fun App() {
     var completedPushTopId by remember { mutableStateOf(stack.lastOrNull()?.id) }
     var showSignReminder by remember { mutableStateOf(false) }
     var launchUpdateRelease by remember { mutableStateOf<AppUpdateRelease?>(null) }
+    var showDesktopUpdateFailure by remember { mutableStateOf(false) }
     LaunchedEffect(signReminderScheduler) {
         AppEventBus.events.collect { event ->
             if (shouldDismissSignReminderFor(event)) {
@@ -187,12 +189,19 @@ fun App() {
             val result = appUpdateRepository.checkForUpdate(force = false)
             if (result is AppUpdateCheckResult.UpdateAvailable) {
                 launchUpdateRelease = result.release
+            } else if (result is AppUpdateCheckResult.Failed && appUpdateRepository.manualDownloadUrl != null) {
+                showDesktopUpdateFailure = true
             }
         }
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     val downloadState by appUpdateRepository.downloadState.collectAsState()
+    LaunchedEffect(downloadState) {
+        if (downloadState is AppUpdateDownloadState.Failed && appUpdateRepository.manualDownloadUrl != null) {
+            showDesktopUpdateFailure = true
+        }
+    }
 
     DisposableEffect(lifecycleOwner, downloadState) {
         val observer = LifecycleEventObserver { _, event ->
@@ -342,6 +351,13 @@ fun App() {
                     appUpdateRepository.openReleasePage(release)
                 },
             )
+            if (showDesktopUpdateFailure) {
+                appUpdateRepository.manualDownloadUrl?.let { url ->
+                    AppUpdateFailureDialog(url,
+                        onOpen = { showDesktopUpdateFailure = false; appUpdateRepository.openManualDownloadPage() },
+                        onDismiss = { showDesktopUpdateFailure = false })
+                }
+            }
             AppConfirmationHost(controller = confirmationController)
             }
         }

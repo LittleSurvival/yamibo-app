@@ -68,6 +68,7 @@ internal fun DesktopAppContent(
     notify: (String, String) -> Unit,
     messageGateway: MessageNotificationGateway,
     rawSettingsStore: DesktopSettingsStore,
+    requestInstall: (java.io.File) -> Boolean,
 ) {
     /** Navigator Logic */
     val navigator = rememberRestorableNavigator()
@@ -253,7 +254,7 @@ internal fun DesktopAppContent(
     val appUpdateRepository = remember {
         DefaultAppUpdateRepository(
             appSettingsRepository = appSettingsRepository,
-            platform = DesktopAppUpdatePlatform(),
+            platform = DesktopAppUpdatePlatform(requestInstall),
         )
     }
     val background = remember {

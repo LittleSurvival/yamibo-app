@@ -22,6 +22,11 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,6 +43,28 @@ import me.thenano.yamibo.yamibo_app.repository.appupdate.fullVersionName
 import org.jetbrains.compose.resources.painterResource
 import yamibo_app.composeapp.generated.resources.Res
 import yamibo_app.composeapp.generated.resources.logo_about
+
+@Composable
+internal fun AppUpdateFailureDialog(url: String, onOpen: () -> Unit, onDismiss: () -> Unit) {
+    val clipboard = LocalClipboardManager.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(i18n("手動下載")) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(i18n("無法從 GitHub 取得更新，請重試或使用瀏覽器手動下載。"))
+                SelectionContainer { Text(url) }
+            }
+        },
+        confirmButton = { TextButton(onClick = onOpen) { Text(i18n("手動下載")) } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { clipboard.setText(AnnotatedString(url)) }) { Text(i18n("複製下載連結")) }
+                TextButton(onClick = onDismiss) { Text(i18n("稍後")) }
+            }
+        },
+    )
+}
 
 @Composable
 internal fun AppUpdatePromptContent(

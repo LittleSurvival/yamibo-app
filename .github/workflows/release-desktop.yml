@@ -1,0 +1,104 @@
+name: Desktop packages
+
+on:
+  workflow_call:
+    inputs:
+      publish:
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Attach packages to the existing shared release and update desktop feed
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2022
+            platform: windows
+            abi: x86_64
+          - runner: macos-15-intel
+            platform: macos
+            abi: x86_64
+          - runner: macos-15
+            platform: macos
+            abi: arm64
+          - runner: ubuntu-22.04
+            platform: linux
+            abi: x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: android-actions/setup-android@v3
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Validate desktop release helper
+        run: python -m unittest discover -s .github/scripts -p test_desktop_release.py
+      - name: Install Linux packaging and browser dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y rpm fakeroot xvfb libnss3 libatk-bridge2.0-0 libgbm1 libasound2 libxss1 libgtk-3-0
+      - name: Build unsigned native packages with runtime and browser
+        shell: bash
+        run: |
+          chmod +x gradlew
+          ./gradlew validateUpdateManifest :composeApp:createDistributable :composeApp:packageDistributionForCurrentOS --console=plain
+      - name: Smoke test packaged runtime
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a python .github/scripts/desktop-release.py smoke
+          else
+            python .github/scripts/desktop-release.py smoke
+          fi
+      - name: Collect and hash packages
+        run: python .github/scripts/desktop-release.py collect --platform ${{ matrix.platform }} --abi ${{ matrix.abi }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.platform }}-${{ matrix.abi }}
+          path: build/desktop-release/*
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    if: inputs.publish
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          path: build/desktop-release
+          merge-multiple: true
+      - name: Publish to shared GitHub release and generated desktop feed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh auth setup-git
+          python .github/scripts/desktop-release.py publish

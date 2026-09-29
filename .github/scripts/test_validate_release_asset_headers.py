@@ -13,7 +13,7 @@ SPEC.loader.exec_module(MODULE)
 
 class ValidateReleaseAssetHeadersTest(unittest.TestCase):
     def write_headers(self, content_length="1234", content_type="application/zip"):
-        temporary = tempfile.NamedTemporaryFile(mode="w", encoding="ascii", delete=False)
+        temporary = tempfile.NamedTemporaryFile(mode="w", encoding="ascii", newline="", delete=False)
         temporary.write(
             "HTTP/1.1 302 Found\r\n"
             "Location: https://download.example/app.apk\r\n\r\n"

@@ -7,6 +7,7 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.SerialName
@@ -31,10 +32,17 @@ class DefaultAppUpdateRepository(
     },
 ) : AppUpdateRepository {
     private val mutableDownloadState = MutableStateFlow<AppUpdateDownloadState>(AppUpdateDownloadState.Idle)
+    private var downloadGeneration = 0L
 
     override val downloadState: StateFlow<AppUpdateDownloadState> = mutableDownloadState
 
-    override val sources: List<AppUpdateSource> = listOf(
+    private val desktop = platform.platformKey in setOf("windows", "macos", "linux")
+    override val manualDownloadUrl: String? = if (desktop) "https://github.com/LittleSurvival/yamibo-app/releases" else null
+    override fun openManualDownloadPage() { manualDownloadUrl?.let(platform::openReleasePage) }
+
+    override val sources: List<AppUpdateSource> = if (desktop) listOf(
+        AppUpdateSource("GitHub", "https://raw.githubusercontent.com/LittleSurvival/yamibo-app/desktop-update-release/update/stable.json"),
+    ) else listOf(
         AppUpdateSource(
             name = "GitHub",
             manifestUrl = "https://raw.githubusercontent.com/LittleSurvival/yamibo-app/update-release/update/stable.json",
@@ -61,12 +69,11 @@ class DefaultAppUpdateRepository(
 
         for (source in orderedSources) {
             val result = runCatching {
-                val response = httpClient.get(source.manifestUrl)
-                if (!response.status.isSuccess()) {
-                    error("HTTP ${response.status.value}")
-                }
-                val manifest = json.decodeFromString<AppUpdateManifestDto>(response.bodyAsText())
-                manifest
+                withTimeoutOrNull(20_000) {
+                    val response = httpClient.get(source.manifestUrl)
+                    if (!response.status.isSuccess()) error("HTTP ${response.status.value}")
+                    json.decodeFromString<AppUpdateManifestDto>(response.bodyAsText())
+                } ?: error("Update check timed out")
             }
             val manifest = result
                 .onFailure { error ->
@@ -100,19 +107,20 @@ class DefaultAppUpdateRepository(
 
             // Fetch remote changelog if possible
             val changelogText = runCatching {
-                val changelogUrl = resolveChangelogUrl(source.manifestUrl, manifest.versionCode)
-                val response = httpClient.get(changelogUrl)
-                if (response.status.isSuccess()) {
-                    response.bodyAsText()
-                } else {
-                    null
+                withTimeoutOrNull(10_000) {
+                    val changelogUrl = resolveChangelogUrl(source.manifestUrl, manifest.versionCode)
+                    val response = httpClient.get(changelogUrl)
+                    if (response.status.isSuccess()) response.bodyAsText() else null
                 }
             }
-                .onFailure { Logger.d(TAG, "Failed to fetch update changelog source=${source.name} version=${manifest.versionCode}", it) }
+                .onFailure {
+                    if (it is CancellationException) throw it
+                    Logger.d(TAG, "Failed to fetch update changelog source=${source.name} version=${manifest.versionCode}", it)
+                }
                 .getOrNull()
 
             val release = manifest.toRelease(source, platform, changelogText)
-            appSettingsRepository.appUpdatePreferredSourceIndex.setValue(sources.indexOf(source).coerceAtLeast(0))
+            if (!desktop) appSettingsRepository.appUpdatePreferredSourceIndex.setValue(sources.indexOf(source).coerceAtLeast(0))
 
             return when {
                 release.versionCode <= platform.currentVersionCode -> AppUpdateCheckResult.UpToDate(platform.currentVersionName)
@@ -131,17 +139,24 @@ class DefaultAppUpdateRepository(
     }
 
     override suspend fun downloadAndInstall(release: AppUpdateRelease): AppUpdateDownloadState {
+        if (mutableDownloadState.value is AppUpdateDownloadState.Running) return mutableDownloadState.value
         if (release.asset == null) {
             val failed = AppUpdateDownloadState.Failed(release, "No installable asset for ${platform.platformKey}")
             mutableDownloadState.value = failed
             return failed
         }
+        val generation = ++downloadGeneration
         mutableDownloadState.value = AppUpdateDownloadState.Running(release, 0L, release.asset.size)
-        val result = platform.downloadAndInstall(release) { downloaded, total ->
-            mutableDownloadState.value = AppUpdateDownloadState.Running(release, downloaded, total ?: release.asset.size)
+        try {
+            val result = platform.downloadAndInstall(release) { downloaded, total ->
+                if (generation == downloadGeneration) mutableDownloadState.value = AppUpdateDownloadState.Running(release, downloaded, total ?: release.asset.size)
+            }
+            if (generation == downloadGeneration) mutableDownloadState.value = result
+            return result
+        } catch (cancelled: CancellationException) {
+            if (generation == downloadGeneration) mutableDownloadState.value = AppUpdateDownloadState.Idle
+            throw cancelled
         }
-        mutableDownloadState.value = result
-        return result
     }
 
     override fun ignoreRelease(release: AppUpdateRelease) {
@@ -149,12 +164,14 @@ class DefaultAppUpdateRepository(
     }
 
     override fun cancelDownload() {
+        ++downloadGeneration
         platform.cancelDownload()
         mutableDownloadState.value = AppUpdateDownloadState.Idle
     }
 
     override fun openReleasePage(release: AppUpdateRelease) {
-        platform.openReleasePage(release.releaseUrl)
+        platform.openReleasePage(if (desktop && !release.releaseUrl.startsWith("https://github.com/LittleSurvival/yamibo-app/releases/"))
+            requireNotNull(manualDownloadUrl) else release.releaseUrl)
     }
 
     override val isInstallPermissionGranted: Boolean

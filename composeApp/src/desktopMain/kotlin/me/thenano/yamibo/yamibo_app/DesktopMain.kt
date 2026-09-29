@@ -22,7 +22,22 @@ import me.thenano.yamibo.yamibo_app.store.DesktopSecretStore
 import me.thenano.yamibo.yamibo_app.store.settings.DesktopSettingsStore
 import me.thenano.yamibo.yamibo_app.webview.DesktopBrowserRuntime
 
-fun main() {
+fun main(args: Array<String>) {
+    if (args.firstOrNull() == "--prepare-browser") {
+        require(args.size == 2)
+        DesktopBrowserRuntime.prepareBundle(java.io.File(args[1]))
+        return
+    }
+    if (args.contentEquals(arrayOf("--package-smoke-test"))) {
+        check(DesktopBrowserRuntime.bundledDirectory()?.isDirectory == true) { "Packaged browser missing" }
+        Class.forName("org.sqlite.JDBC")
+        java.sql.DriverManager.getConnection("jdbc:sqlite::memory:").use { it.createStatement().use { stmt -> stmt.execute("SELECT 1") } }
+        check(DesktopIcon.image.width > 0)
+        runBlocking { DesktopBrowserRuntime.get(); DesktopBrowserRuntime.close() }
+        println("YAMIBO_PACKAGE_SMOKE_OK")
+        return
+    }
+    var pendingInstaller: java.io.File? = null
     val root = try { DesktopDirectories.ensureDataRoot() } catch (_: Exception) {
         JOptionPane.showMessageDialog(null, "無法開啟桌面資料目錄，請檢查磁碟權限。", "Yamibo", JOptionPane.ERROR_MESSAGE)
         return
@@ -49,7 +64,7 @@ fun main() {
                 JOptionPane.showMessageDialog(null, "無法讀取設定或安全憑證。請解鎖系統金鑰儲存並重試；既有資料未被重設。", "Yamibo", JOptionPane.ERROR_MESSAGE)
                 return
             }
-            application {
+            application(exitProcessOnExit = false) {
                 val scope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main) }
                 var visible by remember { mutableStateOf(true) }
                 var focused by remember { mutableStateOf(false) }
@@ -153,9 +168,25 @@ fun main() {
                         window.addWindowFocusListener(listener)
                         onDispose { window.removeWindowFocusListener(listener) }
                     }
-                    DesktopAppContent(scope, visible && focused && !exiting, visible, tray != null, ::notify, gateway, settings)
+                    DesktopAppContent(scope, visible && focused && !exiting, visible, tray != null, ::notify, gateway, settings,
+                        requestInstall = { installer ->
+                            val accepted = !exiting && JOptionPane.showConfirmDialog(window,
+                                "更新檔已驗證。是否完全退出百合會論壇並開啟安裝包？安裝後請重新啟動 App。\n目前安裝包未簽署，系統可能顯示安全警告。",
+                                "安裝更新", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION
+                            if (accepted) { pendingInstaller = installer; exit() }
+                            accepted
+                        })
                 }
             }
         }
     }
+    // Run only after Compose teardown, job/browser shutdown and release of the instance lock.
+    pendingInstaller?.let { installer ->
+        try { Desktop.getDesktop().open(installer) }
+        catch (_: Exception) {
+            JOptionPane.showMessageDialog(null, "無法開啟安裝包，請手動開啟：\n${installer.absolutePath}",
+                "安裝更新", JOptionPane.ERROR_MESSAGE)
+        }
+    }
+    kotlin.system.exitProcess(0)
 }

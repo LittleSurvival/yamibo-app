@@ -1,11 +1,7 @@
-name: Release Android APK
+name: Release Android and Desktop
 
 on:
   workflow_dispatch:
-
-concurrency:
-  group: mirror-publish-${{ github.repository }}
-  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -20,6 +16,13 @@ env:
 jobs:
   release:
     runs-on: ubuntu-latest
+    concurrency:
+      group: github-release-${{ github.repository }}
+      cancel-in-progress: false
+    outputs:
+      metadata: ${{ toJSON(steps.meta.outputs) }}
+      sha256: ${{ steps.sign.outputs.sha256 }}
+      size: ${{ steps.sign.outputs.size }}
 
     steps:
       - name: Checkout source repository
@@ -158,13 +161,78 @@ jobs:
           title="${{ steps.meta.outputs.release_title }}"
           changelog="${{ steps.meta.outputs.changelog }}"
           apk="${{ steps.sign.outputs.apk_path }}"
+          notes="$RUNNER_TEMP/release-notes.md"
+          cp "$changelog" "$notes"
+          cat >> "$notes" <<'NOTES'
+
+
+          ---
+          桌面安裝包僅於 GitHub 提供，未簽署／公證，Windows／macOS 可能顯示安全警告或阻擋。
+          Windows 使用 MSI；macOS 請依 Intel／Apple Silicon 選擇 DMG；Linux 使用 DEB／RPM。
+          安裝包內附 Java 與瀏覽器元件。更新前請退出 App，安裝完成後重新開啟；既有使用者資料保留。
+          Desktop packages are unsigned and not notarized. OS security warnings or restrictions may apply.
+          NOTES
 
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release edit "$tag" --title "$title" --notes-file "$changelog"
+            gh release edit "$tag" --title "$title" --notes-file "$notes"
             gh release upload "$tag" "$apk" --clobber
           else
-            gh release create "$tag" "$apk" --title "$title" --notes-file "$changelog" --verify-tag
+            gh release create "$tag" "$apk" --title "$title" --notes-file "$notes" --verify-tag
           fi
+
+      - name: Preserve APK for mirror job
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-apk
+          path: ${{ steps.sign.outputs.apk_path }}
+          if-no-files-found: error
+          retention-days: 3
+
+  desktop:
+    needs: release
+    uses: ./.github/workflows/release-desktop.yml
+    with:
+      publish: true
+
+  mirrors:
+    needs: release
+    runs-on: ubuntu-latest
+    concurrency:
+      group: mirror-publish-${{ github.repository }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-release-apk
+          path: ${{ runner.temp }}/android-release
+      - name: Restore release metadata
+        id: meta
+        env:
+          METADATA: ${{ needs.release.outputs.metadata }}
+        run: |
+          chmod +x gradlew
+          python3 - <<'PY'
+          import json, os
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
+              for key, value in json.loads(os.environ['METADATA']).items():
+                  out.write(f'{key}={value}\n')
+          PY
+      - name: Restore APK metadata
+        id: sign
+        env:
+          APK_NAME: ${{ steps.meta.outputs.apk_name }}
+          APK_SHA256: ${{ needs.release.outputs.sha256 }}
+          APK_SIZE: ${{ needs.release.outputs.size }}
+        run: |
+          echo "apk_path=$RUNNER_TEMP/android-release/$APK_NAME" >> "$GITHUB_OUTPUT"
+          echo "sha256=$APK_SHA256" >> "$GITHUB_OUTPUT"
+          echo "size=$APK_SIZE" >> "$GITHUB_OUTPUT"
 
       - name: Start SSH agent for mirrors
         uses: webfactory/ssh-agent@v0.9.0

@@ -890,4 +890,7 @@ App 啟動時同步,Sync on app start,App 啟動時同步,App 启动时同步
 統一段首縮排，取代原文的段首空白,Replace original leading whitespace with a consistent paragraph indent,統一段首縮排，取代原文的段首空白,统一段首缩进，取代原文的段首空白
 縮排字元寬度,Indent width in characters,縮排字元寬度,缩进字符宽度
 字,characters,字,字
+無法從 GitHub 取得更新，請重試或使用瀏覽器手動下載。,Unable to retrieve the update from GitHub. Retry or download manually in your browser.,無法從 GitHub 取得更新，請重試或使用瀏覽器手動下載。,无法从 GitHub 获取更新，请重试或使用浏览器手动下载。
+手動下載,Manual download,手動下載,手动下载
+複製下載連結,Copy download link,複製下載連結,复制下载链接
 <p>這是小說閱讀器的段落排版預覽。</p><p>調整設定後，可以在這裡立即查看顯示效果。</p>,<p>This is a paragraph layout preview for the novel reader.</p><p>Changes to the settings are shown here immediately.</p>,<p>這是小說閱讀器的段落排版預覽。</p><p>調整設定後，可以在這裡立即查看顯示效果。</p>,<p>这是小说阅读器的段落排版预览。</p><p>调整设置后，可以在这里立即查看显示效果。</p>
