@@ -59,7 +59,7 @@ Yamibo App 是一個百合會論壇第三方客戶端，支援首頁版塊、論
 - Gradle Wrapper `8.14.3`
 - Compose Multiplatform `1.10.3`
 - Android compile/target SDK `36`, min SDK `24`
-- [yamibo-api](https://github.com/LittleSurvival/yamibo-api) `1.1.10`
+- [yamibo-api](https://github.com/LittleSurvival/yamibo-api) `1.1.28`
 - Ktor `3.4.2`
 - Coil 3 `3.4.0`
 - SQLDelight `2.2.1`
@@ -86,6 +86,20 @@ $OutputEncoding=[System.Text.Encoding]::UTF8
 ```
 
 iOS 需要 macOS + Xcode，從 `iosApp` 開啟。
+
+### 桌面版（開發中）
+
+桌面版使用 Compose Desktop，共用 Android 的 UI 與資料層。Windows 已有實機驗收；macOS／Linux 僅完成實作與來源檢查，尚未實機驗證。完整功能驗收進度見 [桌面適配紀錄](dev-docs/desktop-adaptation.md)。
+
+桌面版直接使用 Maven Central 的 `yamibo-api`，不需要相鄰的 API 原始碼：
+
+```powershell
+.\gradlew.bat :composeApp:run --console=plain
+```
+
+macOS／Linux 使用 `./gradlew` 執行同樣參數。首次開啟內嵌瀏覽器需要下載原生元件；登入憑證依賴作業系統安全儲存，不提供明文儲存降級。關閉視窗會保留背景工作並可從系統匣重新開啟；無系統匣時改為最小化。明確退出可使用系統匣「退出」或 Ctrl+Shift+Q（macOS 亦支援 Command+Shift+Q）。本次適配不包含安裝包與自動發布。
+
+開發驗收期間不要在程式仍執行時重新建置其使用中的 JAR；先正常退出再建置，避免類別載入錯誤。
 
 ## 常用命令
 
