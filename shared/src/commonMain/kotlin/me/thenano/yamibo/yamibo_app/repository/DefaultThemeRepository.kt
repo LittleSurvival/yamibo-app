@@ -2,7 +2,7 @@ package me.thenano.yamibo.yamibo_app.repository
 
 import me.thenano.yamibo.yamibo_app.repository.scheme.YamiboColorScheme
 
-class AndroidThemeRepository : ThemeRepository {
+class DefaultThemeRepository : ThemeRepository {
     private var currentScheme: YamiboColorScheme = YamiboColorScheme.Default
 
     override fun getColorScheme(): YamiboColorScheme = currentScheme

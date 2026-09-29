@@ -9,7 +9,7 @@ import io.github.littlesurvival.dto.value.FormHash
 import io.github.littlesurvival.dto.value.UserId
 import me.thenano.yamibo.yamibo_app.store.auth.CookieStore
 
-class AndroidFavoriteRepository(
+class DefaultFavoriteRepository(
     private val cookieStore: CookieStore,
     private val yamiboClient: YamiboClient
 ) : FavoriteRepository {

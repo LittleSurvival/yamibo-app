@@ -18,7 +18,7 @@ import kotlin.time.Duration.Companion.hours
 
 import me.thenano.yamibo.yamibo_app.core.cache.DiskCacheFactory
 
-class AndroidThreadRepository(
+class DefaultThreadRepository(
     private val cookieStore: CookieStore,
     private val yamiboClient: YamiboClient,
     diskCacheFactory: DiskCacheFactory

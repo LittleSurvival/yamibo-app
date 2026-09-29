@@ -247,7 +247,7 @@ class SignRepositoryImpl(
             normalized.contains("just a moment") ||
             normalized.contains("verify you are human")
         ) {
-            i18n("尚未通過簽到頁的 Cloudflare 驗證，請先在 WebView 完成驗證。")
+            i18n("簽到請求仍被 Cloudflare 攔截；即使 WebView 已通過驗證，也可能未套用至此請求。請重新開啟簽到頁重試，或改用手動模式。")
         } else {
             reason
         }

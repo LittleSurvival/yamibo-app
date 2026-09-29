@@ -6,6 +6,9 @@ interface AppUpdatePlatform {
     val platformKey: String
     val supportedAssetTypes: Set<String>
 
+    fun supportsAsset(type: String, platform: String?, abi: String?): Boolean =
+        type in supportedAssetTypes && (platform == null || platform.equals(platformKey, ignoreCase = true))
+
     suspend fun downloadAndInstall(
         release: AppUpdateRelease,
         onProgress: (downloadedBytes: Long, totalBytes: Long?) -> Unit,

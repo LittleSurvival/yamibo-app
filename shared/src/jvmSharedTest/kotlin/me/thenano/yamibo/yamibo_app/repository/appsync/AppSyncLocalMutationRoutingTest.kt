@@ -9,7 +9,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.repository.BookMarkRepository
-import me.thenano.yamibo.yamibo_app.repository.AndroidReadHistoryRepository
+import me.thenano.yamibo.yamibo_app.repository.DefaultReadHistoryRepository
 import me.thenano.yamibo.yamibo_app.repository.DetailNoteRepository
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
 import me.thenano.yamibo.yamibo_app.repository.appsync.engine.DatabaseSyncDomainMaterializer
@@ -49,7 +49,7 @@ class AppSyncLocalMutationRoutingTest {
         )
         val recorder = AppSyncMutationRecorder(true, store, domainState, nowMillis = { 100 })
         val repository = OperationRecordingReadHistoryRepository(
-            AndroidReadHistoryRepository(db),
+            DefaultReadHistoryRepository(db),
             recorder,
         )
 
@@ -75,7 +75,7 @@ class AppSyncLocalMutationRoutingTest {
             onFullStateRead = { fullStateReads++ },
         )
         val recorder = AppSyncMutationRecorder(true, store, domainState, nowMillis = { 100 })
-        val delegate = AndroidReadHistoryRepository(db)
+        val delegate = DefaultReadHistoryRepository(db)
         val repository = OperationRecordingReadHistoryRepository(delegate, recorder)
         val history = sampleThread()
 
@@ -252,7 +252,7 @@ class AppSyncLocalMutationRoutingTest {
         cases.forEachIndexed { index, (input, expected) ->
             val fixture = activeFixture()
             val repository = OperationRecordingReadHistoryRepository(
-                AndroidReadHistoryRepository(fixture.db),
+                DefaultReadHistoryRepository(fixture.db),
                 fixture.recorder,
             )
 
@@ -444,7 +444,7 @@ class AppSyncLocalMutationRoutingTest {
     @Test
     fun allReadingHistoryModesRecordAndClearWithExactTombstones() = runBlocking {
         val fixture = activeFixture()
-        val delegate = AndroidReadHistoryRepository(fixture.db)
+        val delegate = DefaultReadHistoryRepository(fixture.db)
         val repository = OperationRecordingReadHistoryRepository(delegate, fixture.recorder)
         delegate.recordReadingDuration("2026-08-01", 123)
         fixture.db.rssSearchSubscriptionQueries.insertSubscription(
@@ -525,7 +525,7 @@ class AppSyncLocalMutationRoutingTest {
     @Test
     fun clearAllEnumerationFailureLeavesHistoryAndOutboxUntouched() = runBlocking {
         val fixture = activeFixture()
-        val base = AndroidReadHistoryRepository(fixture.db)
+        val base = DefaultReadHistoryRepository(fixture.db)
         val catalog = ReadHistoryRepository.TagCatalogReadingHistory(
             TagId(9), "catalog", 1, ThreadId(9), "thread", 1,
             PostId(9), "post", lastVisitTime = 9,
@@ -548,7 +548,7 @@ class AppSyncLocalMutationRoutingTest {
     @Test
     fun selectedDeleteDoesNotCrossTagHistoryModesAndLaterReadRecreatesGeneration() = runBlocking {
         val fixture = activeFixture()
-        val delegate = AndroidReadHistoryRepository(fixture.db)
+        val delegate = DefaultReadHistoryRepository(fixture.db)
         val repository = OperationRecordingReadHistoryRepository(delegate, fixture.recorder)
         val manga = ReadHistoryRepository.TagMangaReadingHistory(
             TagId(7), "manga", 1, ThreadId(7), "thread", 1, 10, lastVisitTime = 7,
@@ -584,13 +584,13 @@ class AppSyncLocalMutationRoutingTest {
     fun twoDeviceHistoryProjectionConvergesAcrossDifferentLocalRssIds() = runBlocking {
         val deviceA = activeFixture()
         val deviceB = activeFixture()
-        val delegateA = AndroidReadHistoryRepository(deviceA.db)
+        val delegateA = DefaultReadHistoryRepository(deviceA.db)
         val repositoryA = OperationRecordingReadHistoryRepository(delegateA, deviceA.recorder)
         insertRssSubscription(deviceB.db, "dummy")
         val rssIdA = insertRssSubscription(deviceA.db, "query")
         val rssIdB = insertRssSubscription(deviceB.db, "query")
         assertFalse(rssIdA == rssIdB)
-        val delegateB = AndroidReadHistoryRepository(deviceB.db)
+        val delegateB = DefaultReadHistoryRepository(deviceB.db)
         val domainB = SqlDelightSyncDomainStateAdapter(
             db = deviceB.db,
             materializer = DatabaseSyncDomainMaterializer(deviceB.db, MapSettingsStore()),

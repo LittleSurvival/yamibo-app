@@ -31,10 +31,19 @@ class DiskCacheFactory(
     val json: Json = Json { ignoreUnknownKeys = true },
     val cacheDirPath: String // Base cache directory from platform
 ) {
-    val database = Database(dbFactory.createDriver())
+    private val driver = dbFactory.createDriver()
+    @PublishedApi
+    internal val maintenanceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    val database = Database(driver)
     val fileSystem = FileSystem.SYSTEM
     val rootCacheDir = cacheDirPath.toPath() / "yamibo_cache"
     var backupStorageUsageProvider: (suspend () -> Long)? = null
+
+    /** Call after the owning application's repository work has stopped. */
+    suspend fun close() {
+        maintenanceScope.coroutineContext[Job]?.cancelAndJoin()
+        driver.close()
+    }
 
     /**
      * Create a new DiskCache instance for a specific type <T>
@@ -62,7 +71,8 @@ class DiskCacheFactory(
             json = json,
             rootCacheDir = rootCacheDir,
             fileSystem = fileSystem,
-            serializer = serializer
+            serializer = serializer,
+            scope = maintenanceScope,
         )
     }
 
@@ -171,11 +181,11 @@ class DiskCacheImpl<T : Any>(
     private val json: Json,
     rootCacheDir: okio.Path,
     private val fileSystem: FileSystem,
-    private val serializer: KSerializer<T>?
+    private val serializer: KSerializer<T>?,
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) : DiskCache<T> {
 
     private val queries = database.diskCacheEntryQueries
-    private val scope = CoroutineScope(Dispatchers.IO)
     private val namespaceDir = rootCacheDir / namespace
     
     private data class MemoryEntry<T>(val value: T, val createdAt: Long)

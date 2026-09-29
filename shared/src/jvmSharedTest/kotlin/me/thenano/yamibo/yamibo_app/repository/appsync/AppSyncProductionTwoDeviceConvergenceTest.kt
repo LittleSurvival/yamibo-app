@@ -23,7 +23,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
 import me.thenano.yamibo.yamibo_app.Database
-import me.thenano.yamibo.yamibo_app.repository.AndroidReadHistoryRepository
+import me.thenano.yamibo.yamibo_app.repository.DefaultReadHistoryRepository
 import me.thenano.yamibo.yamibo_app.repository.FavoriteStoreRepository
 import me.thenano.yamibo.yamibo_app.repository.FavoriteUpdateRepository
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
@@ -237,7 +237,7 @@ class AppSyncProductionTwoDeviceConvergenceTest {
             recorder,
         )
         val history = OperationRecordingReadHistoryRepository(
-            AndroidReadHistoryRepository(db),
+            DefaultReadHistoryRepository(db),
             recorder,
         )
         return Fixture(

@@ -16,7 +16,7 @@ import me.thenano.yamibo.yamibo_app.RssCatalogReadingHistory
 import me.thenano.yamibo.yamibo_app.RssSearchReadingHistory
 import me.thenano.yamibo.yamibo_app.TagCatalogReadingHistory
 
-class AndroidReadHistoryRepository(
+class DefaultReadHistoryRepository(
     private val db: Database,
 ) : ReadHistoryRepository, SynchronousReaderPersistence {
     constructor(dbFactory: DatabaseFactory) : this(Database(dbFactory.createDriver()))

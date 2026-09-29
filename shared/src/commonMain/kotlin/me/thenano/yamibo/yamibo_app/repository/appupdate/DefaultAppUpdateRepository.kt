@@ -192,9 +192,8 @@ private fun AppUpdateManifestDto.toRelease(
     remoteChangelog: String? = null,
 ): AppUpdateRelease {
     val selectedAsset = assets.firstOrNull { asset ->
-        val platformMatches = asset.platform == null || asset.platform.equals(platform.platformKey, ignoreCase = true)
-        platformMatches && asset.type in platform.supportedAssetTypes
-    } ?: assets.firstOrNull { it.type in platform.supportedAssetTypes }
+        platform.supportsAsset(asset.type, asset.platform, asset.abi)
+    }
 
     return AppUpdateRelease(
         source = source,

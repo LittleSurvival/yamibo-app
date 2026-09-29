@@ -34,8 +34,9 @@ class DownloadRepositoryImpl(
         encodeDefaults = true
         prettyPrint = true
     },
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    private val onBackgroundFailure: (Throwable) -> Unit = {},
 ) : DownloadRepository {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val workerMutex = Mutex()
     private val queueWriteMutex = Mutex()
     private val knownTitles = mutableMapOf<DownloadTaskKey, String>()
@@ -113,6 +114,12 @@ class DownloadRepositoryImpl(
                 restored.forEach { knownTitles[it.key] = it.title }
                 backgroundController.onQueueChanged(restored)
                 storageProvider.writeQueue(restoredQueue)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Logger.e(TAG, "Download initialization failed; stored queue was not reset", error)
+                onBackgroundFailure(error)
+                return@launch
             } finally {
                 initialized.complete(Unit)
             }
@@ -1033,9 +1040,19 @@ class DownloadRepositoryImpl(
     }
 
     private fun persistQueue() {
-        scope.launch {
-            queueWriteMutex.withLock {
-                storageProvider.writeQueue(queue.value)
+        // A committed queue mutation must survive a folder switch or orderly shutdown.
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            withContext(NonCancellable) {
+                try {
+                    queueWriteMutex.withLock {
+                        storageProvider.writeQueue(queue.value)
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    Logger.e(TAG, "Download queue persistence failed", error)
+                    onBackgroundFailure(error)
+                }
             }
         }
     }

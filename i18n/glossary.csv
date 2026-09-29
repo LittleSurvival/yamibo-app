@@ -184,7 +184,7 @@ Tag 頁數變動過大，可能有多個新帖子,Tag page count changed too muc
 讀取帖子首頁,Reading thread home page,讀取帖子首頁,读取帖子首页
 操作完成,Action completed,操作完成,操作完成
 今天已經打卡過了。,Already signed in today.,今天已經打卡過了。,今天已经打卡过了。
-尚未通過簽到頁的 Cloudflare 驗證，請先在 WebView 完成驗證。,Cloudflare verification for the sign page is not complete. Finish it in WebView first.,尚未通過簽到頁的 Cloudflare 驗證，請先在 WebView 完成驗證。,尚未通过签到页的 Cloudflare 验证，请先在 WebView 完成验证。
+簽到請求仍被 Cloudflare 攔截；即使 WebView 已通過驗證，也可能未套用至此請求。請重新開啟簽到頁重試，或改用手動模式。,Cloudflare still blocked the sign-in request. WebView verification may not apply to this request. Reopen the sign-in page to retry or use manual mode.,簽到請求仍被 Cloudflare 攔截；即使 WebView 已通過驗證，也可能未套用至此請求。請重新開啟簽到頁重試，或改用手動模式。,签到请求仍被 Cloudflare 拦截；即使 WebView 已通过验证，也可能未应用至此请求。请重新打开签到页重试，或改用手动模式。
 {} 已完成 {} 次補簽。,{} Completed {} repair signs.,{} 已完成 {} 次補簽。,{} 已完成 {} 次补签。
 已通過驗證，但找不到簽到按鈕，請改用手動模式。,"Verification passed, but the sign button was not found. Use manual mode.",已通過驗證，但找不到簽到按鈕，請改用手動模式。,已通过验证，但找不到签到按钮，请改用手动模式。
 圖片,Images,圖片,图片

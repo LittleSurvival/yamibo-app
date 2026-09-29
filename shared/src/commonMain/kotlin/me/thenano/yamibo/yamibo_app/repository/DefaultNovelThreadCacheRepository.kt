@@ -8,7 +8,7 @@ import kotlin.time.Duration.Companion.hours
 
 import me.thenano.yamibo.yamibo_app.core.cache.DiskCacheFactory
 
-class AndroidNovelThreadCacheRepository(
+class DefaultNovelThreadCacheRepository(
     diskCacheFactory: DiskCacheFactory
 ) : NovelPrePostCommentsCacheRepository {
 

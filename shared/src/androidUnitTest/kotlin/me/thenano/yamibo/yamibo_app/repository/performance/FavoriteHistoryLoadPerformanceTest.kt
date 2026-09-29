@@ -12,7 +12,7 @@ import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
 import io.github.littlesurvival.dto.value.ForumId
 import me.thenano.yamibo.yamibo_app.Database
-import me.thenano.yamibo.yamibo_app.repository.AndroidReadHistoryRepository
+import me.thenano.yamibo.yamibo_app.repository.DefaultReadHistoryRepository
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
 import me.thenano.yamibo.yamibo_app.repository.favorite.FavoriteStoreRepositoryImpl
 
@@ -58,7 +58,7 @@ class FavoriteHistoryLoadPerformanceTest {
         val favoriteQueries = driver.queryCount / MEASURE_RUNS
         assertTrue(favoriteQueries <= 3, "Favorite primary query count was $favoriteQueries")
 
-        val historyRepository = AndroidReadHistoryRepository(database)
+        val historyRepository = DefaultReadHistoryRepository(database)
         val favoriteItems = favoriteRepository.getCategoryContent(1L).let { content ->
             content.directItems + content.collections.flatMap { it.items }
         }

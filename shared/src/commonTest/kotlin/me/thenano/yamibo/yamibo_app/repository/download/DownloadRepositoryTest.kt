@@ -41,6 +41,102 @@ class DownloadRepositoryTest {
     private val json = Json { encodeDefaults = true }
 
     @Test
+    fun committedQueueWriteFinishesDuringOwnerCancellation() = runBlocking {
+        kotlinx.coroutines.withTimeout(5_000) {
+            val key = ThreadPageDownloadKey(42, 1)
+            val backing = FakeStorage()
+            backing.writeQueue(listOf(DownloadQueueEntry(key, "saved", DownloadStatus.Paused,
+                updatedAt = me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis())))
+            val writeStarted = CompletableDeferred<Unit>()
+            val releaseWrite = CompletableDeferred<Unit>()
+            var holdWrites = false
+            val storage = object : DownloadStorageProvider by backing {
+                override suspend fun writeQueue(entries: List<DownloadQueueEntry>) {
+                    if (holdWrites) {
+                        writeStarted.complete(Unit)
+                        releaseWrite.await()
+                    }
+                    backing.writeQueue(entries)
+                }
+            }
+            val owner = kotlinx.coroutines.Job(coroutineContext[kotlinx.coroutines.Job])
+            val fetcher = DownloadImageFetcher { "" }
+            try {
+                val repository = DownloadRepositoryImpl(threadRepository = FakeThreadRepository(),
+                    storageProvider = storage, imageFetcher = fetcher,
+                    scope = kotlinx.coroutines.CoroutineScope(coroutineContext + owner))
+                repository.getSummary()
+                holdWrites = true
+                repository.clearPage(key).getOrThrow()
+                writeStarted.await()
+                owner.cancel()
+                releaseWrite.complete(Unit)
+                owner.join()
+                assertTrue(backing.readQueue().isEmpty())
+            } finally {
+                releaseWrite.complete(Unit)
+                owner.cancel()
+                owner.join()
+                fetcher.close()
+            }
+        }
+    }
+
+    @Test
+    fun failedQueueInitializationReportsAndLeavesPersistedQueueUntouched() = runBlocking {
+        var writes = 0
+        val failure = IllegalStateException("unreadable queue")
+        val reported = mutableListOf<Throwable>()
+        val storage = object : DownloadStorageProvider by FakeStorage() {
+            override suspend fun readQueue(): List<DownloadQueueEntry> = throw failure
+            override suspend fun writeQueue(entries: List<DownloadQueueEntry>) { writes++ }
+        }
+        val fetcher = DownloadImageFetcher { "" }
+        try {
+            val repository = DownloadRepositoryImpl(
+                threadRepository = FakeThreadRepository(), storageProvider = storage,
+                imageFetcher = fetcher, scope = this, onBackgroundFailure = { reported.add(it) },
+            )
+            // Awaiting a read must finish even though initialization failed. With this test scope,
+            // an uncaught initialization exception would fail the test itself.
+            assertEquals(DownloadStatus.NotDownloaded, repository.getStatus(ThreadPageDownloadKey(42, 1)))
+            assertEquals(listOf<Throwable>(failure), reported)
+            assertEquals(0, writes)
+        } finally { fetcher.close() }
+    }
+
+    @Test
+    fun backgroundQueueWriteFailureIsReportedWithoutEscapingWorker() = runBlocking<Unit> {
+        val key = ThreadPageDownloadKey(42, 1)
+        val backing = FakeStorage()
+        backing.seed(key, ThreadPageDownloadManifest(key, "saved", 1, 1,
+            DownloadPageKind.LastAtDownloadTime), page(42, 1, 1))
+        var failWrites = false
+        val failure = IllegalStateException("disk full")
+        val reported = CompletableDeferred<Throwable>()
+        val storage = object : DownloadStorageProvider by backing {
+            override suspend fun writeQueue(entries: List<DownloadQueueEntry>) {
+                if (failWrites) throw failure
+                backing.writeQueue(entries)
+            }
+        }
+        val fetcher = DownloadImageFetcher { "" }
+        try {
+            val repository = DownloadRepositoryImpl(
+                threadRepository = FakeThreadRepository(), storageProvider = storage,
+                imageFetcher = fetcher, scope = this, onBackgroundFailure = { reported.complete(it) },
+            )
+            assertEquals(DownloadStatus.Downloaded, repository.getStatus(key))
+            val previousQueue = backing.readQueue()
+            failWrites = true
+            repository.markThreadUpdateAvailable(ThreadId(42), null)
+            assertEquals(failure, kotlinx.coroutines.withTimeout(5_000) { reported.await() })
+            assertEquals(previousQueue, backing.readQueue())
+            assertNotNull(repository.getDownloadedPage(key))
+        } finally { fetcher.close() }
+    }
+
+    @Test
     fun keyIsStableAndSeparatesAuthorMode() {
         assertEquals("thread_42_page_3_author_all", ThreadPageDownloadKey(42, 3).stableId)
         assertEquals("thread_42_page_3_author_7", ThreadPageDownloadKey(42, 3, 7).stableId)
