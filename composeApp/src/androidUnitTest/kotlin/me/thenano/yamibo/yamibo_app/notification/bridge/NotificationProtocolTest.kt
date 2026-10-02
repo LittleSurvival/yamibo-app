@@ -118,6 +118,14 @@ class NotificationProtocolTest {
     }
 
     @Test
+    fun eventIdMatchesServerLowercaseUuidV4Contract() {
+        listOf("arbitrary", eventId.replace("4000", "1000"), eventId.replace("8000", "7000"),
+            "abcdefab-0000-4000-8000-000000000001".uppercase()).forEach { invalid ->
+            assertNull(parseNotificationSignal("notification.upsert", signal().replace(eventId, invalid)))
+        }
+    }
+
+    @Test
     fun zeroTimestampIsAcceptedAsANonnegativeUnixTimestamp() {
         assertNotNull(parseNotificationSignal("notification.upsert", signal(timestamp = "0")))
     }

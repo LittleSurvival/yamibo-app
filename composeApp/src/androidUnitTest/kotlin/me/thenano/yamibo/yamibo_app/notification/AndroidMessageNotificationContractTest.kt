@@ -49,6 +49,15 @@ class AndroidMessageNotificationContractTest {
         assertTrue(source.contains(".addAction(0, \"查看通知\""))
         assertTrue(source.contains(".addAction(0, \"不再提醒（僅限今日）\""))
         assertTrue(source.contains("message_notification_channel"))
+        assertTrue(source.contains(".setVisibility(NotificationCompat.VISIBILITY_PRIVATE)"))
+        assertTrue(source.contains(".setCategory(NotificationCompat.CATEGORY_MESSAGE)"))
+        assertTrue(source.contains("putExtra(MessageNotificationActionReceiver.EXTRA_USER_ID, it)"))
+        assertTrue(source.contains("fun ensureChannel(context: Context)"))
+        assertTrue(source.contains("systemManager?.activeNotifications?.filter"))
+        assertTrue(source.contains("it.notification.channelId == AndroidMessageNotificationGateway.CHANNEL_ID"))
+        assertTrue(source.contains("manager.cancel(notification.tag, notification.id)"))
+        assertTrue(source.contains("isLegacyFirebaseMessageNotification("))
+        assertTrue(source.contains("postingFence.postIfAllowed(canPost)"))
         assertEquals(1, Regex("const val NOTIFICATION_ID = 228150").findAll(source).count())
     }
 
@@ -61,7 +70,46 @@ class AndroidMessageNotificationContractTest {
         assertTrue(manifest.contains(".notification.MessageNotificationActionReceiver"))
         assertTrue(activity.contains("EXTRA_FROM_MESSAGE_NOTIFICATION"))
         assertTrue(activity.contains("requestOpenMessageCenterFromNotification()"))
-        assertTrue(receiver.contains("createChecker(context).muteToday()"))
+        assertTrue(receiver.contains("AndroidMessageNotificationRuntime.muteToday(context, expectedUserId)"))
+        assertTrue(receiver.contains("intent.getIntExtra(EXTRA_USER_ID"))
+        assertTrue(receiver.contains("if (expectedUserId == null)"))
+    }
+
+    @Test
+    fun pollingAndMuteUseTheSerializedRuntimeAndCancellationPropagates() {
+        val runtime = androidSource("notification/AndroidMessageNotificationRuntime.kt")
+        val worker = androidSource("notification/MessageNotificationWorker.kt")
+
+        assertTrue(runtime.contains("private val mutex = Mutex()"))
+        assertTrue(runtime.contains("MessageNotificationChecker.Result = mutex.withLock"))
+        assertTrue(runtime.contains("val muted = postingFence.update"))
+        assertTrue(runtime.contains("suspend fun onOpened(context: Context) = postingFence.update"))
+        assertTrue(runtime.contains("postingFence.update { policy.recordDeliveryOrOpen(siteId, userId) }"))
+        assertTrue(runtime.contains("!deliveryState.stateFor(userId, currentLocalDateKey()).muted"))
+        assertTrue(runtime.contains("accountStillMatches()"))
+        assertTrue(runtime.contains("client.fetchHomePage()"))
+        assertTrue(runtime.contains("realtime: Boolean = eventId != null"))
+        assertTrue(runtime.contains("val checked = if (realtime)"))
+        assertTrue(runtime.contains("checkRealtimeMessageNotification("))
+        assertTrue(runtime.contains("expectedUserId != null && userId != expectedUserId"))
+        assertTrue(runtime.contains("messageNotificationMuteMatchesAccount(expectedUserId, userId)"))
+        assertFalse(runtime.contains("fetchNotice"))
+        assertFalse(runtime.contains("fetchPrivateMessage"))
+        assertTrue(worker.contains("AndroidMessageNotificationRuntime.check(applicationContext)"))
+        assertTrue(worker.contains("catch (cancelled: CancellationException)"))
+        assertTrue(worker.contains("throw cancelled"))
+    }
+
+    @Test
+    fun failedAndUnverifiedChecksDoNotAcknowledgeEvents() {
+        assertFalse(MessageNotificationChecker.Result.FetchFailed(true).isTerminalMessageNotificationCheck())
+        assertFalse(MessageNotificationChecker.Result.FetchFailed(false).isTerminalMessageNotificationCheck())
+        assertFalse(MessageNotificationChecker.Result.DeliveryUnavailable.isTerminalMessageNotificationCheck())
+        assertFalse(MessageNotificationChecker.Result.MissingAccount.isTerminalMessageNotificationCheck())
+        assertTrue(MessageNotificationChecker.Result.Delivered.isTerminalMessageNotificationCheck())
+        assertTrue(MessageNotificationChecker.Result.NoNewMessage.isTerminalMessageNotificationCheck())
+        assertTrue(MessageNotificationChecker.Result.MutedToday.isTerminalMessageNotificationCheck())
+        assertTrue(MessageNotificationChecker.Result.DailyLimitReached.isTerminalMessageNotificationCheck())
     }
 
     private fun androidSource(relativePath: String): String = projectFile(

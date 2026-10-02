@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "798950086384",
+    "project_id": "yamibo-notifications",
+    "storage_bucket": "yamibo-notifications.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:798950086384:android:09baac11e89925d3c69435",
+        "android_client_info": {
+          "package_name": "me.thenano.yamibo.yamibo_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAuwsYuOp3ZHUrjlz2o7qqBQTM2CK4si60"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -11,6 +11,7 @@ import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
+import me.thenano.yamibo.yamibo_app.notification.bridge.AndroidNotificationBridge
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -148,7 +149,15 @@ class AndroidBackgroundAccessRepository(
 
         return BackgroundAccessRepository.SetupState(
             summary = summary,
-            items = listOf(notificationItem, batteryItem, appSettingsItem, dontKillMyAppItem),
+            items = listOf(
+                notificationItem,
+                BackgroundAccessRepository.SetupItem(
+                    title = text("即時消息通知"),
+                    subtitle = text(AndroidNotificationBridge.status.value + "。每日次數上限只適用於定期檢查；靜音適用於 App 可控通知。"),
+                    status = BackgroundAccessRepository.SetupStatus.Info,
+                ),
+                batteryItem, appSettingsItem, dontKillMyAppItem,
+            ),
             platformNote = text("Android 的背景同步依賴前景通知。開始同步後，只要通知已成功出現，再縮小 App 也能持續執行。"),
         )
     }

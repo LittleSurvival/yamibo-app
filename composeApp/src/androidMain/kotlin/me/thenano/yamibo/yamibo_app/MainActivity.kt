@@ -39,6 +39,7 @@ import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.navigation.rememberRestorableNavigator
 import me.thenano.yamibo.yamibo_app.network.AndroidYamiboClientProvider
 import me.thenano.yamibo.yamibo_app.notification.dismissActiveSignReminder
+import me.thenano.yamibo.yamibo_app.notification.bridge.AndroidNotificationBridge
 import me.thenano.yamibo.yamibo_app.notification.AndroidMessageNotificationScheduler
 import me.thenano.yamibo.yamibo_app.notification.dismissActiveMessageNotification
 import me.thenano.yamibo.yamibo_app.notification.requestOpenMessageCenterFromNotification
@@ -85,6 +86,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         AndroidAppForegroundTracker.markForeground(true)
+        AndroidNotificationBridge.onForeground(this, true)
         AndroidAppSyncLifecycleBridge.onActivityStarted()
     }
 
@@ -95,12 +97,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIntent(intent: android.content.Intent?) {
+        AndroidNotificationBridge.onNotificationIntent(this, intent)
         if (intent?.getBooleanExtra(EXTRA_FROM_NOTIFICATION_SIGN_IN, false) == true) {
             dismissActiveSignReminder(this)
             showSignWebViewTrigger.value = true
             intent.putExtra(EXTRA_FROM_NOTIFICATION_SIGN_IN, false)
         }
         if (intent?.getBooleanExtra(EXTRA_FROM_MESSAGE_NOTIFICATION, false) == true) {
+            AndroidNotificationBridge.onLocalNotificationOpened(this)
             dismissActiveMessageNotification(this)
             requestOpenMessageCenterFromNotification()
             intent.putExtra(EXTRA_FROM_MESSAGE_NOTIFICATION, false)
@@ -108,6 +112,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        if (!isChangingConfigurations) AndroidNotificationBridge.onForeground(this, false)
         AndroidAppSyncLifecycleBridge.onActivityStopped(isChangingConfigurations)
         AndroidAppForegroundTracker.markForeground(false)
         super.onStop()
@@ -168,7 +173,11 @@ class MainActivity : ComponentActivity() {
             /** Repository Logic */
             val yamiboClient = remember { AndroidYamiboClientProvider.get(context) }
             val authRepository = remember {
-                AndroidAuthRepository(cookieStore, userStore, yamiboClient, forumFavoriteStore)
+                AndroidAuthRepository(
+                    cookieStore, userStore, yamiboClient, forumFavoriteStore,
+                    beforeLogout = { AndroidNotificationBridge.beforeLogout(context) },
+                    onAuthenticationChanged = { AndroidNotificationBridge.onAuthenticationChanged(context) },
+                )
             }
             val dbFactory = remember { DatabaseFactory(context) }
             val appDatabase = remember { Database(dbFactory.createDriver()) }
@@ -438,6 +447,7 @@ class MainActivity : ComponentActivity() {
                     signReminderScheduler.schedule(signReminderFrequency)
                 }
                 LaunchedEffect(messageNotificationEnabled, messageNotificationInterval) {
+                    AndroidNotificationBridge.onSettingsChanged(context)
                     delay(1_200.milliseconds)
                     messageNotificationScheduler.setEnabled(
                         enabled = messageNotificationEnabled,

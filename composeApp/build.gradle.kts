@@ -1,3 +1,4 @@
+import groovy.json.JsonSlurper
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.util.Properties
 
@@ -35,6 +36,18 @@ val yamiboIosBundleId = iosIdentifiers.getProperty("YAMIBO_IOS_BUNDLE_ID")
 
 fun localProperty(name: String): String? =
     localProperties.getProperty(name)?.takeIf { it.isNotBlank() }
+
+// Public Firebase client configuration. Never put server credentials in the APK.
+val notificationFirebaseConfig = JsonSlurper().parse(layout.projectDirectory.file("google-services.json").asFile) as Map<*, *>
+val notificationFirebaseProject = notificationFirebaseConfig["project_info"] as Map<*, *>
+val notificationFirebaseClient = (notificationFirebaseConfig["client"] as List<*>).map { it as Map<*, *> }
+    .single { ((it["client_info"] as Map<*, *>)["android_client_info"] as Map<*, *>)["package_name"] == yamiboAppApplicationId }
+val notificationFirebaseInfo = notificationFirebaseClient["client_info"] as Map<*, *>
+val notificationFirebaseApiKey = ((notificationFirebaseClient["api_key"] as List<*>).first() as Map<*, *>)["current_key"] as String
+fun quotedBuildString(value: String): String = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+// Empty is deliberately disabled. Must be the same trusted HTTPS origin as YamiboRoute.Domain.
+val notificationOrigin = providers.gradleProperty("yamibo.notifications.origin")
+    .orElse(localProperty("yamibo.notifications.origin") ?: "").get()
 
 val debugWafEnvironment =
     localProperty("debugWafEnvironment")?.toBooleanStrictOrNull() ?: false
@@ -86,6 +99,9 @@ kotlin {
             implementation(compose.preview)
             implementation(libs.androidx.activity.compose)
             implementation(libs.androidx.work.runtime.ktx)
+            implementation(libs.firebase.messaging)
+            implementation(libs.ktor.client.core)
+            implementation(libs.ktor.client.okhttp)
         }
         commonMain.dependencies {
             implementation(compose.runtime)
@@ -193,7 +209,14 @@ android {
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         versionCode = yamiboAppVersionCode
         versionName = yamiboAppVersionName
+        buildConfigField("String", "NOTIFICATION_ORIGIN", quotedBuildString(notificationOrigin))
+        buildConfigField("String", "FCM_PACKAGE", quotedBuildString(yamiboAppApplicationId))
+        buildConfigField("String", "FCM_APP_ID", quotedBuildString(notificationFirebaseInfo["mobilesdk_app_id"] as String))
+        buildConfigField("String", "FCM_PROJECT_ID", quotedBuildString(notificationFirebaseProject["project_id"] as String))
+        buildConfigField("String", "FCM_SENDER_ID", quotedBuildString(notificationFirebaseProject["project_number"] as String))
+        buildConfigField("String", "FCM_API_KEY", quotedBuildString(notificationFirebaseApiKey))
     }
+    buildFeatures { buildConfig = true }
     packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
     signingConfigs {
         if (hasReleaseRunSigning) {

@@ -48,3 +48,9 @@ yamibo.debug.useReleaseSignature=true
 # :composeApp:runDebugWafEnvironment on an Android emulator.
 
 debugWafEnvironment=false
+
+# Optional Android realtime notification bridge. Empty keeps the bridge disabled.
+# After the team's backend is deployed, set the exact existing forum HTTPS origin
+# (no /notification-api path). Cross-origin cookie exchange is rejected.
+# yamibo.notifications.origin=https://<trusted-forum-host>
+yamibo.notifications.origin=

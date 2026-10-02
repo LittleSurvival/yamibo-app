@@ -21,6 +21,7 @@ okio = "3.18.1"
 opencc4j = "1.14.0"
 
 [libraries]
+firebase-messaging = { module = "com.google.firebase:firebase-messaging", version = "25.1.0" }
 androidx-security-crypto = { module = "androidx.security:security-crypto", version.ref = "securityCrypto" }
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity" }

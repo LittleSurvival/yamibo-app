@@ -15,6 +15,7 @@ internal const val MAX_FRAME_CHARS = 32_768
 internal val notificationJson = Json { ignoreUnknownKeys = true }
 internal val cursorPattern = Regex("[0-9a-f]{48}")
 internal val secretPattern = Regex("[0-9a-f]{64}")
+internal val eventIdPattern = Regex("[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
 internal val eventTypes = setOf("notification.upsert", "pm.created", "pm.announcement")
 
 internal data class NotificationSession(val bearer: String, val uid: Int, val expiresAtMillis: Long)
@@ -45,7 +46,7 @@ internal fun parseNotificationSignal(type: String, raw: String): NotificationSig
         require(body["site_id"]?.jsonPrimitive?.takeIf { it.isString }?.contentOrNull == NOTIFICATION_SITE)
         require((body["timestamp"]?.jsonPrimitive?.takeUnless { it.isString }?.longOrNull ?: -1) >= 0)
         val eventId = requireNotNull(body["event_id"]?.jsonPrimitive?.takeIf { it.isString }?.contentOrNull)
-        require(eventId.length in 1..128 && eventId.none { it.isISOControl() })
+        require(eventIdPattern.matches(eventId))
         val source = body["source"]?.jsonObject ?: error("Missing source")
         fun positive(name: String) = (source[name]?.jsonPrimitive?.takeUnless { it.isString }?.longOrNull ?: 0L) > 0L
         require(when (type) {

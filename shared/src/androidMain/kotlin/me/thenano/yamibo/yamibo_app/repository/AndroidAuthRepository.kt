@@ -5,6 +5,9 @@ import io.github.littlesurvival.YamiboClient
 import io.github.littlesurvival.YamiboRoute
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.page.ProfilePage
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import me.thenano.yamibo.yamibo_app.i18n.i18n
@@ -20,6 +23,8 @@ class AndroidAuthRepository(
     override val userStore: UserStore,
     override val yamiboClient: YamiboClient,
     private val forumFavoriteStore: ForumFavoriteStore? = null,
+    private val beforeLogout: suspend () -> Unit = {},
+    private val onAuthenticationChanged: () -> Unit = {},
 ) : AuthRepository {
     override suspend fun isLoggedIn(): Boolean {
         return AuthRepository.hasCompleteAuthenticationCookies(cookieStore.load())
@@ -32,6 +37,7 @@ class AndroidAuthRepository(
         when (val profileResult = yamiboClient.fetchProfileInfo()) {
             is YamiboResult.Success -> {
                 userStore.save(profileResult.value)
+                onAuthenticationChanged()
                 return YamiboResult.Success(true)
             }
 
@@ -107,18 +113,29 @@ class AndroidAuthRepository(
             manager.setCookie(url, cookieDirective(name, value, persist = true))
         }
         manager.flush()
+        onAuthenticationChanged()
     }
 
     override fun currentUser(): ProfilePage? {
         return userStore.load()
     }
 
-    override suspend fun logOut() {
+    override suspend fun logOut() = withContext(NonCancellable) {
+        // UI scope cancellation must never leave native credentials live after logout was requested.
+        try {
+            withTimeoutOrNull(6_000) { beforeLogout() }
+        } catch (_: Exception) {
+            // Remote notification cleanup is best effort; local logout is unconditional.
+        }
         yamiboClient.clearCookies(clearNox = false)
         cookieStore.clear()
         userStore.clear()
         forumFavoriteStore?.clear()
-        CookieManager.getInstance().clearAllExceptNox(YamiboRoute.Domain.build())
+        onAuthenticationChanged()
+        withTimeoutOrNull(2_000) {
+            CookieManager.getInstance().clearAllExceptNox(YamiboRoute.Domain.build())
+        }
+        Unit
     }
 
     private suspend fun CookieManager.clearAllExceptNox(url: String) {
