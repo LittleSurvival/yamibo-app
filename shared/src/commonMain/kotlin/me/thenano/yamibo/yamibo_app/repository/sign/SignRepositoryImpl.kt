@@ -4,6 +4,7 @@ import io.github.littlesurvival.YamiboClient
 import io.github.littlesurvival.YamiboRoute
 import io.github.littlesurvival.core.ParseResult
 import io.github.littlesurvival.core.YamiboResult
+import io.github.littlesurvival.core.mapSuccess
 import io.github.littlesurvival.dto.page.SignActionResult
 import io.github.littlesurvival.dto.page.SignActionStatus
 import io.github.littlesurvival.dto.page.SignPage
@@ -30,21 +31,12 @@ class SignRepositoryImpl(
         if (!authRepository.isLoggedIn()) return YamiboResult.NotLoggedIn
         val cookie = authRepository.cookieStore.load().orEmpty()
 
-        return when (val result = yamiboClient.fetchSignPage(cookie)) {
-            is YamiboResult.Success -> {
-                val info = result.value.toAppModel()
-                updateTodayRecord(info)
-                YamiboResult.Success(info)
-            }
-
-            is YamiboResult.Failure ->
-                YamiboResult.Failure(toFriendlyFailure(result.reason), result.exception)
-
-            is YamiboResult.NotLoggedIn -> result
-            is YamiboResult.NoPermission -> result
-            is YamiboResult.Maintenance -> result
-            is YamiboResult.WafChallenge -> result
+        val result = yamiboClient.fetchSignPage(cookie).mapSuccess { page ->
+            page.toAppModel().also { updateTodayRecord(it) }
         }
+        return if (result is YamiboResult.Failure) {
+            YamiboResult.Failure(toFriendlyFailure(result.reason), result.exception)
+        } else result
     }
 
     override suspend fun runAutoSign(allowRepair: Boolean): YamiboResult<SignRepository.ActionResult> {
@@ -205,16 +197,10 @@ class SignRepositoryImpl(
         val absoluteUrl = buildAbsoluteUrl(url)
         val cookie = authRepository.cookieStore.load().orEmpty()
 
-        return when (val result = yamiboClient.fetchSignAction(absoluteUrl, cookie)) {
-            is YamiboResult.Success -> YamiboResult.Success(result.value.toAppModel())
-            is YamiboResult.Failure ->
-                YamiboResult.Failure(toFriendlyFailure(result.reason), result.exception)
-
-            is YamiboResult.NotLoggedIn -> result
-            is YamiboResult.NoPermission -> result
-            is YamiboResult.Maintenance -> result
-            is YamiboResult.WafChallenge -> result
-        }
+        val result = yamiboClient.fetchSignAction(absoluteUrl, cookie).mapSuccess { it.toAppModel() }
+        return if (result is YamiboResult.Failure) {
+            YamiboResult.Failure(toFriendlyFailure(result.reason), result.exception)
+        } else result
     }
 
     private fun parseSignPageFromHtml(html: String): SignRepository.SignPageInfo? {
