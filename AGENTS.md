@@ -14,6 +14,7 @@
 ## Main branch integration
 
 - Integrate changes from any other branch into `main` only through a pull request; do not merge locally or push directly to `main` unless the user explicitly authorizes that specific exception.
+- Release-preparation changes limited to Gradle app version fields, release/update metadata (including `update/manifest.json` and its generated `update/stable.json`), and `.changelog` files may be committed and pushed directly on `main` without a pull request. This exception does not cover application behavior, build logic, or release workflow changes.
 - Treat the PR as a checkpoint. Its description must record the problem and root cause, implementation and design decisions, user-visible behavior, verification evidence, and known risks, limits, or rollback notes.
 - Before opening or merging the PR, enforce the OpenSpec isolation guard above. Merge only after required checks pass, and prefer a merge commit to preserve branch lineage unless the user requests another strategy.
 

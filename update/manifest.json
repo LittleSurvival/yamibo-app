@@ -1,8 +1,8 @@
 {
   "channel": "stable",
-  "versionName": "0.0.8",
-  "versionCode": 9,
+  "versionName": "0.0.9",
+  "versionCode": 10,
   "isReady": false,
-  "releaseNotes": "新增閱讀器預設粗體／斜體、自訂首行縮排與目錄搜尋跳頁，修復帖子跳轉、小說分頁、首頁載入、圖片翻頁動畫及系統欄對比問題",
+  "releaseNotes": "修復搜尋校驗碼過期造成的 HTTP 200 搜尋失敗、圖片重試與捲動佔位問題，調整漫畫閱讀器系統列邊界",
   "assets": []
 }
