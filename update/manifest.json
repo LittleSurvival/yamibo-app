@@ -1,0 +1,17 @@
+{
+  "channel": "stable",
+  "versionName": "0.0.9",
+  "versionCode": 10,
+  "isReady": true,
+  "releaseNotes": "# stable-v0.0.9\n\n喜歡這個App的話，歡迎到github上幫我打顆星星 ⭐ ~\n\n修復 :\n- 搜索時出現HTTP200但空回復搜索失敗\n- 圖片載入失敗時重新載入無反應\n- 圖片(漫畫)閱讀器捲動模式時，第一章圖片上出現載入中的佔位模板\n\n更改 :\n- 圖片(漫畫閱讀器)改為和系統列不重疊，圖片閱讀器邊界更正為對齊系統列",
+  "assets": [
+    {
+      "platform": "android",
+      "type": "universal-apk",
+      "url": "https://github.com/LittleSurvival/yamibo-app/releases/download/10/yamibo-stable-v0.0.9.apk",
+      "sha256": "aea8518dcb8558effa26b38de5afc5508c2fa4fcd61343a1735b5206946dcb88",
+      "size": 19399595
+    }
+  ],
+  "releaseUrl": "https://github.com/LittleSurvival/yamibo-app/releases/tag/10"
+}
