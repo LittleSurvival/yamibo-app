@@ -2,7 +2,10 @@ package me.thenano.yamibo.yamibo_app.repository
 
 import io.github.littlesurvival.YamiboClient
 import io.github.littlesurvival.core.YamiboResult
+import io.github.littlesurvival.core.flatMapSuccess
 import io.github.littlesurvival.dto.page.ProfilePage
+import io.github.littlesurvival.dto.value.FormHash
+import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.store.auth.CookieStore
 import me.thenano.yamibo.yamibo_app.store.auth.UserStore
 import me.thenano.yamibo.yamibo_app.util.auth.parseCookieStringToMap
@@ -19,6 +22,17 @@ interface AuthRepository {
     /** auth function */
     suspend fun isLoggedIn(): Boolean
     suspend fun fetchStatus(): YamiboResult<Boolean>
+
+    /** Refresh the saved profile before reading its formhash. Never fall back to the old value. */
+    suspend fun refreshFormHash(): YamiboResult<FormHash> =
+        fetchStatus().flatMapSuccess { loggedIn ->
+            if (!loggedIn) {
+                YamiboResult.NotLoggedIn
+            } else {
+                currentUser()?.formHash?.let { YamiboResult.Success(it) }
+                    ?: YamiboResult.Failure(i18n("無法取得搜尋校驗碼，請刷新個人資料後重試"))
+            }
+        }
 
     suspend fun startLoginDetect(onSuccess: suspend () -> Unit, onTimeOut: () -> Unit = {})
     fun restoreCookiesToWebView(onComplete: () -> Unit = {}) = onComplete()

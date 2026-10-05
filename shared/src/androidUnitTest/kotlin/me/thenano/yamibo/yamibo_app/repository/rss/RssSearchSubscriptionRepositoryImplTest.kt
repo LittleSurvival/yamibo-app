@@ -36,6 +36,114 @@ import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
 
 class RssSearchSubscriptionRepositoryImplTest {
     @Test
+    fun searchFailuresAreReportedWithoutRefreshingOrSubmittingAgain() = runBlocking {
+        val failures: List<YamiboResult<Nothing>> = listOf(
+            YamiboResult.Failure("搜尋過於頻繁"),
+            YamiboResult.Failure("[HTTP 200] 請求失敗"),
+            YamiboResult.NoPermission("沒有搜尋權限"),
+            YamiboResult.NotLoggedIn,
+            YamiboResult.Maintenance,
+            YamiboResult.WafChallenge(statusCode = 405, url = "https://bbs.yamibo.com/search.php?mod=forum"),
+        )
+        for (failure in failures) {
+            val auth = FakeAuthRepository()
+            val forum = FakeForumRepository(nextFailure = failure)
+            val repository = RssSearchSubscriptionRepositoryImpl(inMemoryDatabase(), auth, forum)
+            val id = createSubscription(repository, SearchPage(query = "app", totalCount = 0, threads = emptyList()))
+
+            val result = repository.refresh(id)
+
+            if (failure is YamiboResult.WafChallenge) {
+                assertEquals(failure, result)
+            } else {
+                assertEquals(failure.message(), assertIs<YamiboResult.Failure>(result).reason)
+            }
+            assertEquals(1, auth.refreshCalls)
+            assertEquals(listOf(FormHash("fresh")), forum.submittedFormHashes)
+            assertEquals(emptyList(), forum.pageRequests)
+        }
+    }
+
+    @Test
+    fun refreshAndFirstPageUseRefreshedFormHashEvenWithoutLocalProfile() = runBlocking {
+        val db = inMemoryDatabase()
+        val auth = FakeAuthRepository().apply { profile = null }
+        val page = SearchPage(searchId = SearchId(11), query = "app", totalCount = 1, threads = listOf(thread(1, "Existing")))
+        val forum = FakeForumRepository(nextSearch = page)
+        val repository = RssSearchSubscriptionRepositoryImpl(db, auth, forum)
+        val id = createSubscription(repository, page)
+
+        assertIs<YamiboResult.Success<RssSearchSubscriptionRepository.RefreshSummary>>(repository.refresh(id))
+        auth.profile = UserStore.Preview.copy(formHash = FormHash("expired"))
+        assertEquals("Existing", repository.getCatalogPage(id, 1)!!.tagPage.threadSummaries.single().title)
+
+        assertEquals(2, auth.refreshCalls)
+        assertEquals(listOf(FormHash("fresh"), FormHash("fresh")), forum.submittedFormHashes)
+        assertEquals(emptyList(), forum.pageRequests)
+    }
+
+    @Test
+    fun paginationWithExistingSearchIdDoesNotRefreshOrRequireLocalFormHash() = runBlocking {
+        val db = inMemoryDatabase()
+        val auth = FakeAuthRepository().apply {
+            profile = null
+            refreshResult = YamiboResult.Failure("Refresh must not be called")
+        }
+        val seed = SearchPage(searchId = SearchId(11), query = "app", totalCount = 2, threads = listOf(thread(1, "First")))
+        val forum = FakeForumRepository().apply {
+            nextPage = seed.copy(threads = listOf(thread(2, "Second")), pageNav = PageNav(currentPage = 2, totalPages = 2))
+        }
+        val repository = RssSearchSubscriptionRepositoryImpl(db, auth, forum)
+        val id = createSubscription(repository, seed)
+
+        assertEquals("Second", repository.getCatalogPage(id, 2)!!.tagPage.threadSummaries.single().title)
+
+        assertEquals(0, auth.refreshCalls)
+        assertEquals(emptyList(), forum.submittedFormHashes)
+        assertEquals(listOf(SearchId(11) to 2), forum.pageRequests)
+    }
+
+    @Test
+    fun paginationWithoutSearchIdRefreshesBeforeCreatingSearch() = runBlocking {
+        val db = inMemoryDatabase()
+        val auth = FakeAuthRepository()
+        val seed = SearchPage(query = "app", totalCount = 1, threads = listOf(thread(1, "First")))
+        val forum = FakeForumRepository(nextSearch = seed.copy(searchId = SearchId(12))).apply {
+            nextPage = seed.copy(searchId = SearchId(12), threads = listOf(thread(2, "Second")), pageNav = PageNav(currentPage = 2, totalPages = 2))
+        }
+        val repository = RssSearchSubscriptionRepositoryImpl(db, auth, forum)
+        val id = createSubscription(repository, seed)
+
+        assertEquals("Second", repository.getCatalogPage(id, 2)!!.tagPage.threadSummaries.single().title)
+
+        assertEquals(1, auth.refreshCalls)
+        assertEquals(listOf(FormHash("fresh")), forum.submittedFormHashes)
+        assertEquals(listOf(SearchId(12) to 2), forum.pageRequests)
+    }
+
+    @Test
+    fun profileRefreshFailurePreservesCachedCatalogAndWafChallenge() = runBlocking {
+        val db = inMemoryDatabase()
+        val auth = FakeAuthRepository().apply { refreshResult = YamiboResult.Failure("offline") }
+        val seed = SearchPage(query = "app", totalCount = 1, threads = listOf(thread(1, "Cached")))
+        val forum = FakeForumRepository()
+        val repository = RssSearchSubscriptionRepositoryImpl(db, auth, forum)
+        val id = createSubscription(repository, seed)
+
+        assertEquals("offline", assertIs<YamiboResult.Failure>(repository.refresh(id)).reason)
+        assertEquals("Cached", repository.getCatalogPage(id, 1)!!.tagPage.threadSummaries.single().title)
+        assertEquals(RssSearchSubscriptionRepository.RefreshStatus.Failed, repository.getSubscription(id)!!.lastRefreshStatus)
+        val challenge = YamiboResult.WafChallenge(statusCode = 405, url = "https://bbs.yamibo.com/home.php")
+        auth.refreshResult = challenge
+        assertEquals(challenge, repository.refresh(id))
+        assertEquals("Cached", repository.getCatalogPage(id, 1)!!.tagPage.threadSummaries.single().title)
+
+        assertEquals(4, auth.refreshCalls)
+        assertEquals(emptyList(), forum.submittedFormHashes)
+        assertEquals(emptyList(), forum.pageRequests)
+    }
+
+    @Test
     fun createPersistsSearchPageSeedAndCatalogFetchesDynamically() = runBlocking {
         val db = inMemoryDatabase()
         val forum = FakeForumRepository(
@@ -214,6 +322,11 @@ class RssSearchSubscriptionRepositoryImplTest {
         assertTrue("lastSearchId" !in operations.first().fields)
     }
 
+    private suspend fun createSubscription(repository: RssSearchSubscriptionRepositoryImpl, page: SearchPage): Long =
+        assertIs<YamiboResult.Success<Long>>(
+            repository.createFromSearch("app", "app", null, null, page),
+        ).value
+
     private fun inMemoryDatabase(): Database {
         val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
         Database.Schema.create(driver)
@@ -251,41 +364,56 @@ class RssSearchSubscriptionRepositoryImplTest {
 }
 
 private class FakeAuthRepository : AuthRepository {
+    var profile: ProfilePage? = UserStore.Preview.copy(formHash = FormHash("expired"))
+    var refreshResult: YamiboResult<Boolean> = YamiboResult.Success(true)
+    var refreshCalls = 0
     override val cookieStore: CookieStore = object : CookieStore {
         override fun save(value: String) = Unit
         override fun load(): String? = null
         override fun clear() = Unit
     }
     override val userStore: UserStore = object : UserStore {
-        override fun load(): ProfilePage? = UserStore.Preview
-        override fun save(userInfo: ProfilePage) = Unit
-        override fun clear() = Unit
+        override fun load(): ProfilePage? = profile
+        override fun save(userInfo: ProfilePage) { profile = userInfo }
+        override fun clear() { profile = null }
     }
     override val yamiboClient: YamiboClient = YamiboClient()
 
     override suspend fun isLoggedIn(): Boolean = true
-    override suspend fun fetchStatus(): YamiboResult<Boolean> = YamiboResult.Success(true)
+    override suspend fun fetchStatus(): YamiboResult<Boolean> {
+        refreshCalls += 1
+        if (refreshResult == YamiboResult.Success(true)) {
+            userStore.save(UserStore.Preview.copy(formHash = FormHash("fresh")))
+        }
+        return refreshResult
+    }
     override suspend fun startLoginDetect(onSuccess: suspend () -> Unit, onTimeOut: () -> Unit) = onSuccess()
     override fun syncCookieFromWebView() = Unit
-    override fun currentUser(): ProfilePage? = UserStore.Preview
+    override fun currentUser(): ProfilePage? = userStore.load()
     override suspend fun logOut() = Unit
 }
 
 private class FakeForumRepository(
     var nextSearch: SearchPage? = null,
-    var nextFailure: YamiboResult.Failure? = null,
+    var nextFailure: YamiboResult<Nothing>? = null,
 ) : ForumRepository {
+    val submittedFormHashes = mutableListOf<FormHash>()
+    val pageRequests = mutableListOf<Pair<SearchId, Int>>()
+    var nextPage: SearchPage? = null
     override val favoriteForums = kotlinx.coroutines.flow.MutableStateFlow<
         Map<ForumId, io.github.littlesurvival.dto.value.FavoriteId?>
     >(emptyMap())
 
     override suspend fun fetchSearch(query: String, forumId: ForumId?, formHash: FormHash): YamiboResult<SearchPage> {
+        submittedFormHashes += formHash
         nextFailure?.let { return it }
         return YamiboResult.Success(requireNotNull(nextSearch))
     }
 
-    override suspend fun fetchSearchById(query: String, searchId: SearchId, page: Int): YamiboResult<SearchPage> =
-        error("Not used")
+    override suspend fun fetchSearchById(query: String, searchId: SearchId, page: Int): YamiboResult<SearchPage> {
+        pageRequests += searchId to page
+        return YamiboResult.Success(requireNotNull(nextPage))
+    }
 
     override suspend fun fetchHomePage(): YamiboResult<HomePage> = error("Not used")
     override suspend fun fetchForum(
