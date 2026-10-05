@@ -19,6 +19,7 @@ import androidx.compose.material3.ButtonDefaults.outlinedButtonColors
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -456,7 +457,7 @@ fun ImagesReaderScreen(
                         actualPostId = p.pid
                         val targetAuthorId = activeAuthorId ?: p.author.uid
                         val authorPosts = threadPage.posts.filter { it.author.uid == targetAuthorId }.take(2)
-                        actualImageList = authorPosts.flatMap { it.images }.map { it.url }
+                        actualImageList = authorPosts.flatMap { it.readerImageUrls() }
                         isDownloadedTagChapter = false
                         
                         // Coerce the initial page against the actual loaded bounds now
@@ -999,6 +1000,12 @@ fun ImagesReaderScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .then(
+                    if (isScrollMode) Modifier
+                        .windowInsetsPadding(WindowInsets.safeDrawing)
+                        .clipToBounds()
+                    else Modifier
+                )
                 .onSizeChanged {
                     if (containerSize != it) cancelPageDrag()
                     containerSize = it
@@ -1284,11 +1291,7 @@ fun ImagesReaderScreen(
                     state = scrollListState,
                     modifier = Modifier.fillMaxSize()
                         .nestedScroll(nestedScrollConnection),
-                    verticalArrangement = if (!isCatalogMode && actualImageList.size == 1) {
-                        Arrangement.Center
-                    } else {
-                        Arrangement.Top
-                    },
+                    verticalArrangement = Arrangement.Top,
                 ) {
                     if (isCatalogMode) {
                         item {
@@ -1333,7 +1336,7 @@ fun ImagesReaderScreen(
                             }
                         }
                     } else {
-                        itemsIndexed(actualImageList) { index, url ->
+                        itemsIndexed(actualImageList, key = { index, url -> "${activeTid.value}:$index:$url" }) { index, url ->
                             ImageViewer(
                                 url = url,
                                 contentDescription = i18n("第{}頁", index + 1),
@@ -1341,7 +1344,7 @@ fun ImagesReaderScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 enableContextMenu = false,
                                 isDarkTheme = true,
-                                imageVerticalPadding = if (readingMode == ReadingMode.SCROLL_CONTINUOUS) 0.dp else 1.dp,
+                                imageVerticalPadding = 0.dp,
                                 enableCrossfade = false
                             )
                             if (readingMode == ReadingMode.SCROLL_GAP && index < actualImageList.lastIndex) {

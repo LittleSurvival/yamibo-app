@@ -3474,13 +3474,14 @@ internal fun ThreadReaderScreen(
             }
         ) {
             val handleImageDoubleTap: (String) -> Unit = { url ->
-                val post = posts.firstOrNull { p -> p.images.any { it.url.endsWith(url) || url.endsWith(it.url) } }
-                if (post != null) {
-                    val imageList = post.images.map { img ->
-                        if (img.url.startsWith("http")) img.url else "${YamiboRoute.Domain.build()}${img.url}"
-                    }
-                    val cleanUrl = if (url.startsWith("http")) url else "${YamiboRoute.Domain.build()}$url"
-                    val initialIndex = imageList.indexOfFirst { it == cleanUrl }.coerceAtLeast(0)
+                val cleanUrl = normalizeImageUrl(url)
+                val target = posts.firstNotNullOfOrNull { post ->
+                    val images = post.readerImageUrls()
+                    val index = images.indexOf(cleanUrl)
+                    if (index >= 0) Triple(post, images, index) else null
+                }
+                if (target != null) {
+                    val (post, imageList, initialIndex) = target
 
                     navigator.navigate(
                         IImageReaderScreen(
