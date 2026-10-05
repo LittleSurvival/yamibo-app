@@ -2,6 +2,7 @@ package me.thenano.yamibo.yamibo_app.repository.rss
 
 import io.github.littlesurvival.YamiboForum
 import io.github.littlesurvival.core.YamiboResult
+import io.github.littlesurvival.core.flatMapSuccess
 import io.github.littlesurvival.dto.model.ThreadSummary
 import io.github.littlesurvival.dto.page.SearchPage
 import io.github.littlesurvival.dto.page.TagPage
@@ -260,26 +261,23 @@ class RssSearchSubscriptionRepositoryImpl private constructor(
         val searchResult = if (safePage == 1) {
             forumRepository.fetchSearch(subscriptionRow.query, forumId, formHash)
         } else if (subscriptionRow.lastSearchId == null) {
-            when (val first = forumRepository.fetchSearch(subscriptionRow.query, forumId, formHash)) {
-                is YamiboResult.Success -> {
-                    val now = currentTimeMillis()
-                    val firstPage = normalizeSearchPageForum(first.value, forumId)
-                    saveSearchPageCache(subscriptionId, firstPage.pageNav?.currentPage ?: 1, firstPage, now)
-                    mergeResults(subscriptionId, firstPage.threads, now, pageIndex = 1, pageForumId = firstPage.forumId)
-                    subscriptionQueries.updateRefreshFinished(
-                        lastRefreshFinishedAt = now,
-                        lastRefreshStatus = RssSearchSubscriptionRepository.RefreshStatus.Success.name,
-                        lastRefreshMessage = null,
-                        lastSearchId = firstPage.searchId?.value?.toLong(),
-                        lastTotalCount = firstPage.totalCount.toLong(),
-                        updatedAt = now,
-                        id = subscriptionId,
-                    )
-                    effectiveSubscriptionRow = subscriptionQueries.getById(subscriptionId).executeAsOne()
-                    firstPage.searchId?.let { forumRepository.fetchSearchById(subscriptionRow.query, it, safePage) }
-                        ?: YamiboResult.Failure("搜尋頁缺少 search id")
-                }
-                else -> first
+            forumRepository.fetchSearch(subscriptionRow.query, forumId, formHash).flatMapSuccess { first ->
+                val now = currentTimeMillis()
+                val firstPage = normalizeSearchPageForum(first, forumId)
+                saveSearchPageCache(subscriptionId, firstPage.pageNav?.currentPage ?: 1, firstPage, now)
+                mergeResults(subscriptionId, firstPage.threads, now, pageIndex = 1, pageForumId = firstPage.forumId)
+                subscriptionQueries.updateRefreshFinished(
+                    lastRefreshFinishedAt = now,
+                    lastRefreshStatus = RssSearchSubscriptionRepository.RefreshStatus.Success.name,
+                    lastRefreshMessage = null,
+                    lastSearchId = firstPage.searchId?.value?.toLong(),
+                    lastTotalCount = firstPage.totalCount.toLong(),
+                    updatedAt = now,
+                    id = subscriptionId,
+                )
+                effectiveSubscriptionRow = subscriptionQueries.getById(subscriptionId).executeAsOne()
+                firstPage.searchId?.let { forumRepository.fetchSearchById(subscriptionRow.query, it, safePage) }
+                    ?: YamiboResult.Failure("搜尋頁缺少 search id")
             }
         } else {
             forumRepository.fetchSearchById(subscriptionRow.query, SearchId(subscriptionRow.lastSearchId.toInt()), safePage)

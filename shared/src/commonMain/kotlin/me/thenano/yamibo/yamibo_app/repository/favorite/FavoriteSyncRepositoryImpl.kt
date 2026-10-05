@@ -2,6 +2,7 @@
 
 import io.github.littlesurvival.YamiboForum
 import io.github.littlesurvival.core.YamiboResult
+import io.github.littlesurvival.core.flatMapSuccess
 import io.github.littlesurvival.dto.page.FavoriteType
 import io.github.littlesurvival.dto.page.ThreadPage
 import io.github.littlesurvival.dto.value.FavoriteId
@@ -718,17 +719,9 @@ class FavoriteSyncRepositoryImpl(
 
     private suspend fun ensureFormHash(): YamiboResult<FormHash> {
         authRepository.currentUser()?.formHash?.let { return YamiboResult.Success(it) }
-        return when (val authResult = authRepository.fetchStatus()) {
-            is YamiboResult.Success -> {
-                authRepository.currentUser()?.formHash?.let { YamiboResult.Success(it) }
-                    ?: YamiboResult.Failure(i18n("登入狀態已更新，但仍無法取得 formHash。"))
-            }
-
-            is YamiboResult.NotLoggedIn,
-            is YamiboResult.NoPermission,
-            is YamiboResult.Maintenance,
-            is YamiboResult.WafChallenge,
-            is YamiboResult.Failure -> authResult
+        return authRepository.fetchStatus().flatMapSuccess {
+            authRepository.currentUser()?.formHash?.let { YamiboResult.Success(it) }
+                ?: YamiboResult.Failure(i18n("登入狀態已更新，但仍無法取得 formHash。"))
         }
     }
 

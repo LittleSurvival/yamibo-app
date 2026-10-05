@@ -1,6 +1,7 @@
 package me.thenano.yamibo.yamibo_app.repository.forum
 
 import io.github.littlesurvival.core.YamiboResult
+import io.github.littlesurvival.core.mapSuccess
 import io.github.littlesurvival.dto.page.FavoritePage
 import io.github.littlesurvival.dto.page.HomePage
 import io.github.littlesurvival.dto.value.FavoriteId
@@ -39,17 +40,13 @@ class ForumFavoriteSynchronizer(
             i18n("無法取得這個看板的收藏識別碼，請重新整理後再試。"),
         )
 
-        return when (val result = remove(favoriteId)) {
-            is YamiboResult.Success -> {
-                store.remove(forumId)
-                result
-            }
-            is YamiboResult.Failure -> repairIdAfterRemoveFailure(forumId, result)
-            is YamiboResult.NotLoggedIn,
-            is YamiboResult.NoPermission,
-            is YamiboResult.WafChallenge,
-            is YamiboResult.Maintenance -> result
+        val result = remove(favoriteId).mapSuccess { message ->
+            store.remove(forumId)
+            message
         }
+        return if (result is YamiboResult.Failure) {
+            repairIdAfterRemoveFailure(forumId, result)
+        } else result
     }
 
     private suspend fun refreshFavoriteId(forumId: ForumId): YamiboResult<FavoriteId?> {
