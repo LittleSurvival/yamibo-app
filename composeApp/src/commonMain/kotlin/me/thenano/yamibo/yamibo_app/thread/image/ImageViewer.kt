@@ -117,11 +117,11 @@ fun ImageViewer(
     val fullUrl = normalizeImageUrl(url)
     val diagnosticUrl = imageSourceForDiagnostics(fullUrl)
     DebugRecomposeProbe("ImageViewer", diagnosticUrl)
-    var localRetryKey by remember { mutableIntStateOf(0) }
+    var localRetryKey by remember(fullUrl) { mutableIntStateOf(0) }
     var showMenu by remember { mutableStateOf(false) }
     val retryKey = localRetryKey + externalRetryKey
-    var hasReportedSuccess by remember(url, retryKey) { mutableStateOf(false) }
-    var hasReportedError by remember(url, retryKey) { mutableStateOf(false) }
+    var hasReportedSuccess by remember(fullUrl, localRetryKey, externalRetryKey) { mutableStateOf(false) }
+    var hasReportedError by remember(fullUrl, localRetryKey, externalRetryKey) { mutableStateOf(false) }
 
     val colors = YamiboTheme.colors
     val isOverlayOpen = LocalReaderOverlayVisible.current
@@ -153,8 +153,12 @@ fun ImageViewer(
             .size(sizeResolver)
             .build()
     }
-    val painter = rememberAsyncImagePainter(model = sizedImageRequest)
-    val painterState by painter.state.collectAsState()
+    // Coil's default model equality ignores cache policies, so changing the request alone
+    // does not restart a failed load. Each retry owns a fresh painter and request job.
+    val painter = key(fullUrl, localRetryKey, externalRetryKey) {
+        rememberAsyncImagePainter(model = sizedImageRequest)
+    }
+    val painterState by key(painter) { painter.state.collectAsState() }
     val sharedPainterCache = LocalReaderImagePainterCache.current
     var lastSuccessfulPainter by remember(fullUrl) {
         mutableStateOf(sharedPainterCache?.get(fullUrl) ?: ReaderImagePainterMemoryCache[fullUrl])
@@ -250,7 +254,7 @@ fun ImageViewer(
                             fullUrl,
                         )
 
-                        LaunchedEffect(fullUrl, retryKey, errorMsg) {
+                        LaunchedEffect(fullUrl, localRetryKey, externalRetryKey, errorMsg) {
                             if (!hasReportedError) {
                                 hasReportedError = true
                                 debugPerfLog("image_error|url=$diagnosticUrl|retryKey=$retryKey|msg=$errorMsg")
@@ -282,7 +286,7 @@ fun ImageViewer(
                             sharedPainterCache?.put(fullUrl, state.painter)
                             ReaderImagePainterMemoryCache.put(fullUrl, state.painter)
                         }
-                        LaunchedEffect(fullUrl, retryKey, onSuccess) {
+                        LaunchedEffect(fullUrl, localRetryKey, externalRetryKey, onSuccess) {
                             if (!hasReportedSuccess) {
                                 hasReportedSuccess = true
                                 debugPerfLog("image_success|url=$diagnosticUrl|retryKey=$retryKey")
@@ -385,7 +389,8 @@ private fun ImageErrorContent(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(reservedHeight)
+            // Error details and the retry button must not be squeezed into a loading placeholder.
+            .heightIn(min = reservedHeight)
             .padding(16.dp)
             .background(errorBgColor, RoundedCornerShape(12.dp))
             .padding(24.dp),
