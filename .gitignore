@@ -31,5 +31,6 @@ node_modules/
 .run/composeApp releaseRun.run.xml
 /.codex
 /data/
-/openspec
+# Keep OpenSpec local; also use .git/info/exclude for older branches.
+/openspec/
 /.gradle-temp

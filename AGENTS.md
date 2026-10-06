@@ -2,6 +2,8 @@
 
 ## OpenSpec isolation
 
+- Keep `/openspec/` in the repository-local exclude file returned by `git rev-parse --git-path info/exclude`. Unlike `.gitignore`, this rule survives switching to older branches; ensure it is present before switching branches. Local exclude rules are not included in commits and must be set up per clone.
+- Ignore rules do not affect files already tracked by an older branch. Remove such files from that branch's index with `git rm --cached` while preserving the local files before including that branch in any integration.
 - Never merge any file or change under `openspec/` into the `main` branch.
 - Before merging into `main`, run `git diff --name-only main...HEAD -- openspec/` and require empty output.
 - If a feature branch contains both implementation and `openspec/` changes, exclude the `openspec/` changes from the commits or history merged into `main`.
