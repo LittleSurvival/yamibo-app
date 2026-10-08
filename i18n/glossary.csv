@@ -892,3 +892,5 @@ App 啟動時同步,Sync on app start,App 啟動時同步,App 启动时同步
 縮排字元寬度,Indent width in characters,縮排字元寬度,缩进字符宽度
 字,characters,字,字
 <p>這是小說閱讀器的段落排版預覽。</p><p>調整設定後，可以在這裡立即查看顯示效果。</p>,<p>This is a paragraph layout preview for the novel reader.</p><p>Changes to the settings are shown here immediately.</p>,<p>這是小說閱讀器的段落排版預覽。</p><p>調整設定後，可以在這裡立即查看顯示效果。</p>,<p>这是小说阅读器的段落排版预览。</p><p>调整设置后，可以在这里立即查看显示效果。</p>
+訊息已送出，但更新對話失敗，請重新整理,Message sent but the conversation could not be refreshed. Please refresh.,訊息已送出，但更新對話失敗，請重新整理,消息已发送，但更新对话失败，请刷新
+更新對話失敗，請重新整理：{},Could not refresh the conversation. Please refresh: {},更新對話失敗，請重新整理：{},更新对话失败，请刷新：{}

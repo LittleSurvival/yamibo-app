@@ -19,7 +19,6 @@ import androidx.compose.ui.unit.sp
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.model.PageNav
 import io.github.littlesurvival.dto.page.PrivateMessage
-import io.github.littlesurvival.dto.page.PrivateMessagePage
 import io.github.littlesurvival.dto.page.PrivateMessageType
 import io.github.littlesurvival.dto.page.ProfilePage
 import io.github.littlesurvival.dto.value.UserId
@@ -36,20 +35,22 @@ import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBarIconAction
 import me.thenano.yamibo.yamibo_app.components.user.UserAvatar
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
+import me.thenano.yamibo.yamibo_app.message.controller.PrivateMessageController
+import me.thenano.yamibo.yamibo_app.message.controller.PrivateMessageSendEffect
+import me.thenano.yamibo.yamibo_app.message.controller.PrivateMessageState
 import me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl.HtmlRenderer
 import me.thenano.yamibo.yamibo_app.task.isActive
-
-private sealed interface PrivateMessageState {
-    data object Loading : PrivateMessageState
-    data class Success(val page: PrivateMessagePage) : PrivateMessageState
-    data class Error(val message: String) : PrivateMessageState
-}
 
 @Composable
 fun PrivateMessageScreen(
     toUser: UserId,
     titleHint: String? = null,
 ) {
+    key(toUser) { PrivateMessageContent(toUser, titleHint) }
+}
+
+@Composable
+private fun PrivateMessageContent(toUser: UserId, titleHint: String?) {
     val colors = YamiboTheme.colors
     val repository = LocalUserSpaceRepository.current
     val authRepository = LocalAuthRepository.current
@@ -60,56 +61,32 @@ fun PrivateMessageScreen(
     val appTaskManager = me.thenano.yamibo.yamibo_app.LocalAppTaskManager.current
     val appTasks by appTaskManager.tasks.collectAsState()
     val listState = rememberLazyListState()
-    var currentPage by remember(toUser) { mutableIntStateOf(1) }
-    var state by remember(toUser) {
-        mutableStateOf(
-            repository.getCachedPrivateMessagePage(toUser)?.let { PrivateMessageState.Success(it) }
-                ?: PrivateMessageState.Loading
+    val controller = remember(toUser, repository, feedbackController) {
+        PrivateMessageController(
+            cachedPage = { repository.getCachedPrivateMessagePage(toUser, it) },
+            fetchPage = { repository.fetchPrivateMessagePage(toUser, it) },
+            onRefreshFailure = { afterSend, reason ->
+                feedbackController.post(
+                    if (afterSend) i18n("訊息已送出，但更新對話失敗，請重新整理")
+                    else i18n("更新對話失敗，請重新整理：{}", i18n(reason)),
+                )
+            },
         )
     }
-    var input by remember(toUser) { mutableStateOf("") }
-    var handledSendSubmissionId by remember(toUser) { mutableStateOf<Long?>(null) }
+    val state = controller.state
+    val currentPage = controller.currentPage
+    val sendTaskKey = controller.sendTaskKey
+    val sendTaskState = sendTaskKey?.let(appTasks::get)
+    val sending = sendTaskState?.isActive == true
 
-    suspend fun loadPage(page: Int? = null, preferCache: Boolean = true) {
-        if (preferCache) {
-            repository.getCachedPrivateMessagePage(toUser, page)?.let {
-                currentPage = it.pageNav?.currentPage ?: page ?: currentPage
-                state = PrivateMessageState.Success(it)
-                return
-            }
-        }
-        state = PrivateMessageState.Loading
-        state = when (val result = repository.fetchPrivateMessagePage(toUser, page)) {
-            is YamiboResult.Success -> {
-                currentPage = result.value.pageNav?.currentPage ?: page ?: 1
-                PrivateMessageState.Success(result.value)
-            }
-            else -> PrivateMessageState.Error(i18n(result.message()))
-        }
+    LaunchedEffect(controller) {
+        if (controller.state is PrivateMessageState.Loading) controller.loadPage()
     }
-
-    LaunchedEffect(toUser) {
-        if (state is PrivateMessageState.Loading) loadPage()
-    }
-
     LaunchedEffect((state as? PrivateMessageState.Success)?.page?.messages?.size) {
         val size = (state as? PrivateMessageState.Success)?.page?.messages?.size ?: return@LaunchedEffect
         if (size > 0) listState.animateScrollToItem(size - 1)
     }
-
-    val sendTaskKey = (state as? PrivateMessageState.Success)?.page?.let { page ->
-        me.thenano.yamibo.yamibo_app.task.AppTaskKey("message-send:${page.pmId}")
-    }
-    val sendTaskState = sendTaskKey?.let(appTasks::get)
-    val sending = sendTaskState?.isActive == true
-    LaunchedEffect(sendTaskState) {
-        val succeeded = sendTaskState as? me.thenano.yamibo.yamibo_app.task.AppTaskState.Succeeded
-            ?: return@LaunchedEffect
-        if (handledSendSubmissionId == succeeded.submissionId) return@LaunchedEffect
-        handledSendSubmissionId = succeeded.submissionId
-        input = ""
-        loadPage(page = null, preferCache = false)
-    }
+    PrivateMessageSendEffect(controller, sendTaskState)
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -121,21 +98,21 @@ fun PrivateMessageScreen(
                     ?: i18n("聊天"),
                 onBack = { navigator.pop() },
                 onRefresh = {
-                    scope.launch { loadPage(page = null, preferCache = false) }
+                    scope.launch { controller.loadPage(page = null, preferCache = false) }
                 },
             )
         },
         bottomBar = {
             val current = state as? PrivateMessageState.Success
             PrivateMessageInputBar(
-                value = input,
-                enabled = current != null && !sending,
+                value = controller.input,
+                enabled = current != null && !sending && !controller.refreshing,
                 sending = sending,
-                onValueChange = { input = it },
+                onValueChange = { controller.input = it },
                 onSend = {
                     val page = current?.page ?: return@PrivateMessageInputBar
                     val formHash = authRepository.currentUser()?.formHash
-                    val message = input.trim()
+                    val message = controller.input.trim()
                     when {
                         formHash == null -> {
                             feedbackController.post(i18n("請先登入後再發送消息"), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short)
@@ -172,10 +149,10 @@ fun PrivateMessageScreen(
                 .fillMaxSize()
                 .background(colors.creamBackground),
         ) {
-            when (val current = state) {
+            when (state) {
                 PrivateMessageState.Loading -> PrivateMessageLoading()
-                is PrivateMessageState.Error -> PrivateMessageError(current.message) {
-                    scope.launch { loadPage(currentPage, preferCache = false) }
+                is PrivateMessageState.Error -> PrivateMessageError(i18n(state.message)) {
+                    scope.launch { controller.loadPage(currentPage, preferCache = false) }
                 }
                 is PrivateMessageState.Success -> {
                     LazyColumn(
@@ -183,11 +160,11 @@ fun PrivateMessageScreen(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 16.dp),
                     ) {
-                        if (current.page.messages.isEmpty()) {
+                        if (state.page.messages.isEmpty()) {
                             item { EmptyPrivateMessages() }
                         } else {
                             itemsIndexed(
-                                items = current.page.messages,
+                                items = state.page.messages,
                                 key = { index, message ->
                                     "${message.messageType}_${message.timeInfo.text}_${message.contentHtml.hashCode()}_$index"
                                 },
@@ -195,15 +172,18 @@ fun PrivateMessageScreen(
                                 PrivateMessageBubble(message, currentUser)
                             }
                         }
-                        current.page.pageNav?.let { nav ->
+                        state.page.pageNav?.let { nav ->
                             item {
                                 PrivateMessagePageNavigation(nav, currentPage) { target ->
-                                    scope.launch { loadPage(target) }
+                                    scope.launch { controller.loadPage(target) }
                                 }
                             }
                         }
                     }
                 }
+            }
+            if (controller.refreshing) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter))
             }
         }
     }
