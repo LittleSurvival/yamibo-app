@@ -106,7 +106,10 @@ kotlin {
             implementation(libs.ksoup)
             implementation(projects.shared)
         }
-        commonTest.dependencies { implementation(libs.kotlin.test) }
+        commonTest.dependencies {
+            implementation(libs.kotlin.test)
+            implementation(libs.kotlinx.coroutines.test)
+        }
     }
 }
 
@@ -184,6 +187,8 @@ tasks.matching { task ->
 }
 
 android {
+    // Runtime-only Compose recomposition tests need no-op Android tracing/logging.
+    testOptions.unitTests.isReturnDefaultValues = true
     namespace = "me.thenano.yamibo.yamibo_app"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
 
