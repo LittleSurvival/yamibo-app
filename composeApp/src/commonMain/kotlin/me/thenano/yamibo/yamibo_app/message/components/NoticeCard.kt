@@ -1,4 +1,4 @@
-package me.thenano.yamibo.yamibo_app.message
+package me.thenano.yamibo.yamibo_app.message.components
 
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 
