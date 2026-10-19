@@ -8,6 +8,25 @@ import kotlin.test.assertNull
 import kotlin.test.assertSame
 
 class ReaderImagePainterCacheTest {
+    private fun sizedPainter(width: Float, height: Float) = object : androidx.compose.ui.graphics.painter.Painter() {
+        override val intrinsicSize = androidx.compose.ui.geometry.Size(width, height)
+        override fun androidx.compose.ui.graphics.drawscope.DrawScope.onDraw() = Unit
+    }
+
+    @Test
+    fun cacheBoundsPixelRetentionAndRejectsGiantImages() {
+        val cache = createReaderImagePainterCache(maxEntries = 24, maxPixels = 100)
+        cache.put("first", sizedPainter(8f, 8f))
+        cache.put("second", sizedPainter(8f, 8f))
+        assertEquals(1, cache.size)
+        assertNull(cache["first"])
+        cache.put("giant", sizedPainter(1000f, 1000f))
+        assertNull(cache["giant"])
+        assertEquals(1, cache.size)
+        cache.put("second", sizedPainter(1000f, 1000f))
+        assertEquals(0, cache.size)
+    }
+
     @Test
     fun cacheEvictsLeastRecentlyUsedPainter() {
         val cache = createReaderImagePainterCache(maxEntries = 2)

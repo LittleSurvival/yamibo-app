@@ -1,5 +1,8 @@
 package me.thenano.yamibo.yamibo_app.navigation
 
+import kotlinx.coroutines.launch
+import me.thenano.yamibo.yamibo_app.components.systembars.LocalSystemBarsActive
+
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.SaveableStateHolder
 import androidx.compose.runtime.saveable.Saver
@@ -226,3 +229,37 @@ fun rememberRestorableNavigator(
 
 val LocalNavigator =
     compositionLocalOf<ComposableNavigator> { error("LocalNavigator not provided") }
+
+/** Main-thread bridge for the iOS host. Callbacks never retain disposed screens. */
+object NativeNavigationBridge {
+    var onBack: (() -> Unit)? = null
+    var canGoBack: (() -> Boolean)? = null
+    var onScrollHandlersChanged: (() -> Unit)? = null
+    internal val topHandlers = mutableListOf<() -> Unit>()
+
+    fun canNavigateBack(): Boolean = canGoBack?.invoke() == true
+    fun hasScrollToTopHandler(): Boolean = topHandlers.isNotEmpty()
+    fun navigateBack() { onBack?.invoke() }
+    fun scrollToTop() { topHandlers.lastOrNull()?.invoke() }
+}
+
+@Composable
+internal fun StatusBarScrollToTop(enabled: Boolean = true, onScrollToTop: suspend () -> Unit) {
+    val active = LocalSystemBarsActive.current && enabled
+    val latestAction by rememberUpdatedState(onScrollToTop)
+    val scope = rememberCoroutineScope()
+    DisposableEffect(active) {
+        var job: kotlinx.coroutines.Job? = null
+        val handler: () -> Unit = {
+            job?.cancel()
+            job = scope.launch { latestAction() }
+        }
+        if (active) NativeNavigationBridge.topHandlers.add(handler)
+        NativeNavigationBridge.onScrollHandlersChanged?.invoke()
+        onDispose {
+            NativeNavigationBridge.topHandlers.remove(handler)
+            NativeNavigationBridge.onScrollHandlersChanged?.invoke()
+            job?.cancel()
+        }
+    }
+}

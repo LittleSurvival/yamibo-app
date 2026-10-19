@@ -1,5 +1,12 @@
 package me.thenano.yamibo.yamibo_app.repository.forum
 
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNull
+import me.thenano.yamibo.yamibo_app.repository.MessageTabUnread
+import me.thenano.yamibo.yamibo_app.repository.parseRatingRemaining
+import me.thenano.yamibo.yamibo_app.repository.parseMessageTabUnread
+
 import io.github.littlesurvival.core.ParseResult
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.model.ForumSummary
@@ -112,5 +119,44 @@ class HomePageLoaderTest {
         override fun remove(key: String) { removed += key; value = null }
         override fun removeByPrefix(prefix: String) = error("Not needed")
         override fun clear() = error("Do not clear unrelated caches")
+    }
+}
+
+class ForumSupplementalMetadataTest {
+    @Test fun desktopRatingSelectsLabelledDailyColumnForCorrectCurrency() {
+        assertEquals(17, parseRatingRemaining("""
+            <form id="rateform"><table><tr><th>積分</th><th>分數</th><th>範圍</th><th>今日剩餘</th></tr>
+            <tr><td>積分</td><td><input id="score1" value="0"></td><td>-5 ~ 5</td><td>17</td></tr>
+            <tr><td>其他</td><td><input id="score2"></td><td>-2 ~ 2</td><td>99</td></tr></table></form>
+        """))
+    }
+
+    @Test fun unbadgedKnownNavigationMeansReadAndMessageBodiesAreIgnored() {
+        assertEquals(MessageTabUnread(false, false), parseMessageTabUnread("""
+            <div class="dhnv"><a href="home.php?do=pm">我的消息</a><a href="home.php?do=notice">我的提醒</a></div>
+            <a href="home.php?do=pm&amp;subop=view">關於小說(99)</a>
+        """))
+    }
+
+    @Test fun ratingUsesDailyAllowanceNotMaximumSelectableScore() {
+        assertEquals(17, parseRatingRemaining("""<table><tr><td><select id="rate1"><option>5</option></select></td><td id="rateday1">17</td></tr></table>"""))
+        assertNull(parseRatingRemaining("""<select id="rate1"><option>5</option></select>"""))
+    }
+
+    @Test fun ratingHandlesCdataZeroAndUnrelatedNumbers() {
+        assertEquals(0, parseRatingRemaining("""<root><![CDATA[<select id="rate1"></select><span id="rateday1">0</span>]]></root>"""))
+        assertNull(parseRatingRemaining("今日剩餘：20 請先登入"))
+        assertEquals(3, parseRatingRemaining("""<select id="rate1"></select><p>今日剩余评分：3</p>"""))
+    }
+
+    @Test fun unreadTabsRemainIndependent() {
+        assertEquals(MessageTabUnread(false, true), parseMessageTabUnread("""
+            <a href="home.php?mod=space&amp;do=pm">我的消息(0)</a>
+            <a href="home.php?mod=space&amp;do=notice">我的提醒（2）</a>
+        """))
+        assertEquals(MessageTabUnread(null, true), parseMessageTabUnread("""
+            <a href="home.php?do=notice" class="new">我的提醒</a>
+        """))
+        assertEquals(MessageTabUnread(), parseMessageTabUnread("請先登入"))
     }
 }

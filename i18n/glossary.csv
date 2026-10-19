@@ -894,3 +894,15 @@ App 啟動時同步,Sync on app start,App 啟動時同步,App 启动时同步
 <p>這是小說閱讀器的段落排版預覽。</p><p>調整設定後，可以在這裡立即查看顯示效果。</p>,<p>This is a paragraph layout preview for the novel reader.</p><p>Changes to the settings are shown here immediately.</p>,<p>這是小說閱讀器的段落排版預覽。</p><p>調整設定後，可以在這裡立即查看顯示效果。</p>,<p>这是小说阅读器的段落排版预览。</p><p>调整设置后，可以在这里立即查看显示效果。</p>
 訊息已送出，但更新對話失敗，請重新整理,Message sent but the conversation could not be refreshed. Please refresh.,訊息已送出，但更新對話失敗，請重新整理,消息已发送，但更新对话失败，请刷新
 更新對話失敗，請重新整理：{},Could not refresh the conversation. Please refresh: {},更新對話失敗，請重新整理：{},更新对话失败，请刷新：{}
+今日剩餘評分：{},Rating points left today: {},今日剩餘評分：{},今日剩余评分：{}
+今日剩餘評分：暫無資料,Rating points left today: unavailable,今日剩餘評分：暫無資料,今日剩余评分：暂无资料
+今日剩餘評分：載入中,Rating points left today: loading,今日剩餘評分：載入中,今日剩余评分：载入中
+切換後使用各模式的閱讀進度。,Each mode keeps its own reading position.,切換後使用各模式的閱讀進度。,切换后使用各模式的阅读进度。
+小說閱讀方式,Novel reading style,小說閱讀方式,小说阅读方式
+查看完整帖子與所有回覆,Read the full thread and all replies,查看完整帖子與所有回覆,查看完整帖子与所有回复
+此處按發文順序顯示本樓到下一篇作者發文間的回覆，不代表回覆所討論的章節。,Replies are grouped by posting order between author posts. They may discuss other chapters.,此處按發文順序顯示本樓到下一篇作者發文間的回覆，不代表回覆所討論的章節。,此处按发文顺序显示本楼到下一篇作者发文间的回复，不代表回复所讨论的章节。
+沉浸模式：只看作者正文,Immersive: author posts only,沉浸模式：只看作者正文,沉浸模式：只看作者正文
+無法儲存圖片：請在系統設定允許加入相簿,Cannot save image. Allow adding photos in system settings.,無法儲存圖片：請在系統設定允許加入相簿,无法保存图片：请在系统设置允许加入相册
+論壇模式：正文與回覆一起閱讀,Forum: read author posts and replies together,論壇模式：正文與回覆一起閱讀,论坛模式：正文与回复一起阅读
+載入失敗，請重試,Could not load. Please try again.,載入失敗，請重試,载入失败，请重试
+圖片操作失敗，請重試,Image action failed. Please try again.,圖片操作失敗，請重試,图片操作失败，请重试

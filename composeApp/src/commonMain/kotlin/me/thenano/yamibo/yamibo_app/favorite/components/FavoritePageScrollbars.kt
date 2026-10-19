@@ -22,7 +22,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,7 +31,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.channels.Channel
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.milliseconds
@@ -104,14 +104,16 @@ private fun FavoriteScrollbarState(
         derivedStateOf(visibleCount)
     }
 
-    FavoriteScrollbar(
-        modifier = modifier,
-        totalItems = totalItems,
-        firstVisibleIndex = currentFirstVisibleIndex,
-        visibleCount = currentVisibleCount,
-        isScrollInProgress = isScrollInProgress(),
-        onScrollToIndex = onScrollToIndex,
-    )
+    androidx.compose.runtime.key(stateKey) {
+        FavoriteScrollbar(
+            modifier = modifier,
+            totalItems = totalItems,
+            firstVisibleIndex = currentFirstVisibleIndex,
+            visibleCount = currentVisibleCount,
+            isScrollInProgress = isScrollInProgress(),
+            onScrollToIndex = onScrollToIndex,
+        )
+    }
 }
 
 @Composable
@@ -126,13 +128,22 @@ private fun FavoriteScrollbar(
     if (totalItems <= visibleCount || totalItems <= 0) return
 
     val colors = YamiboTheme.colors
-    val scope = rememberCoroutineScope()
+    val scrollRequests = remember { Channel<Int>(Channel.CONFLATED) }
+    val latestScroll by rememberUpdatedState(onScrollToIndex)
+    LaunchedEffect(scrollRequests) {
+        for (index in scrollRequests) {
+            latestScroll(index)
+            // At most one expensive lazy layout per frame; intermediate targets are replaced.
+            androidx.compose.runtime.withFrameNanos { }
+        }
+    }
 
     // Track whether the user is actively dragging the thumb
     var isDragging by remember { mutableStateOf(false) }
     var keepVisible by remember { mutableStateOf(false) }
     var dragStartThumbTopPx by remember { mutableStateOf(0f) }
     var dragOffsetPx by remember { mutableStateOf(0f) }
+    var dragVisibleCount by remember { mutableStateOf(visibleCount) }
 
     LaunchedEffect(isScrollInProgress, isDragging) {
         if (isScrollInProgress || isDragging) {
@@ -161,18 +172,22 @@ private fun FavoriteScrollbar(
             .padding(end = 4.dp, top = 10.dp, bottom = 92.dp),
     ) {
         val trackHeightPx = constraints.maxHeight.toFloat().coerceAtLeast(1f)
-        val hiddenCount = (totalItems - visibleCount).coerceAtLeast(1)
-        val thumbHeightPx = (trackHeightPx * (visibleCount.toFloat() / totalItems.toFloat()))
+        val effectiveVisibleCount = if (isDragging) dragVisibleCount else visibleCount
+        val hiddenCount = (totalItems - effectiveVisibleCount).coerceAtLeast(1)
+        val thumbHeightPx = (trackHeightPx * (effectiveVisibleCount.toFloat() / totalItems.toFloat()))
             .coerceAtLeast(with(LocalDensity.current) { 48.dp.toPx() })
             .coerceAtMost(trackHeightPx * 0.5f)
         val travelPx = (trackHeightPx - thumbHeightPx).coerceAtLeast(0f)
         val progress = (firstVisibleIndex.toFloat() / hiddenCount.toFloat()).coerceIn(0f, 1f)
         val thumbOffsetPx = travelPx * progress
+        val latestThumbOffset by rememberUpdatedState(thumbOffsetPx)
+        val latestHiddenCount by rememberUpdatedState(hiddenCount)
+        val latestVisibleCount by rememberUpdatedState(visibleCount)
 
         fun scrollFromThumbTop(thumbTop: Float) {
             val ratio = (thumbTop / travelPx.coerceAtLeast(1f)).coerceIn(0f, 1f)
-            val targetIndex = (ratio * hiddenCount.toFloat()).roundToInt().coerceIn(0, totalItems - 1)
-            scope.launch { onScrollToIndex(targetIndex) }
+            val targetIndex = (ratio * latestHiddenCount.toFloat()).roundToInt().coerceIn(0, totalItems - 1)
+            scrollRequests.trySend(targetIndex)
         }
 
         Box(
@@ -190,15 +205,16 @@ private fun FavoriteScrollbar(
             // Thumb — wider, taller minimum, more opaque for easy touch targeting
             Box(
                 modifier = Modifier
-                    .offset { IntOffset(0, thumbOffsetPx.roundToInt()) }
+                    .offset { IntOffset(0, (if (isDragging) (dragStartThumbTopPx + dragOffsetPx).coerceIn(0f, travelPx) else thumbOffsetPx).roundToInt()) }
                     .align(Alignment.TopEnd)
                     .width(36.dp)
                     .height(with(LocalDensity.current) { thumbHeightPx.toDp() })
-                    .pointerInput(totalItems, visibleCount) {
+                    .pointerInput(totalItems, travelPx) {
                         detectDragGestures(
                             onDragStart = {
+                                dragVisibleCount = latestVisibleCount
                                 isDragging = true
-                                dragStartThumbTopPx = thumbOffsetPx
+                                dragStartThumbTopPx = latestThumbOffset
                                 dragOffsetPx = 0f
                             },
                             onDrag = { change, dragAmount ->
