@@ -12,6 +12,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.zIndex
@@ -62,6 +64,7 @@ import me.thenano.yamibo.yamibo_app.message.MessageCenterTab
 import me.thenano.yamibo.yamibo_app.notification.messageNotificationNavigationTrigger
 import me.thenano.yamibo.yamibo_app.profile.settings.update.AppUpdatePromptContent
 import me.thenano.yamibo.yamibo_app.profile.sign.ISignWebView
+import me.thenano.yamibo.yamibo_app.profile.sign.LaunchSignReminderState
 import me.thenano.yamibo.yamibo_app.profile.sign.shouldDismissSignReminderFor
 import me.thenano.yamibo.yamibo_app.profile.sign.shouldEmitSignStatusChanged
 import me.thenano.yamibo.yamibo_app.profile.sign.signActionFeedbackMessage
@@ -166,11 +169,17 @@ fun App() {
     val poppingIdx by navigator.poppingIndex
     val duration = 250
     var completedPushTopId by remember { mutableStateOf(stack.lastOrNull()?.id) }
-    var showSignReminder by remember { mutableStateOf(false) }
+    val signReminder = rememberSaveable(
+        saver = Saver<LaunchSignReminderState, Boolean>(
+            save = { it.suppressed },
+            restore = { LaunchSignReminderState(it) },
+        ),
+    ) { LaunchSignReminderState(suppressed = showSignWebViewTrigger.value) }
     var launchUpdateRelease by remember { mutableStateOf<AppUpdateRelease?>(null) }
     LaunchedEffect(signReminderScheduler) {
         AppEventBus.events.collect { event ->
             if (shouldDismissSignReminderFor(event)) {
+                signReminder.suppress()
                 signReminderScheduler.dismissActiveReminder()
             }
         }
@@ -305,17 +314,17 @@ fun App() {
                 )
             }
             LaunchSignReminderDialog(
-                visible = showSignReminder,
+                visible = signReminder.visible && !showSignWebViewTrigger.value,
                 dismissTodayChecked = appSettingsRepository.signInLaunchReminderDismissToday.state(),
                 onDismissTodayChange = { appSettingsRepository.signInLaunchReminderDismissToday.setValue(it) },
                 onDismiss = {
                     if (appSettingsRepository.signInLaunchReminderDismissToday.getValue()) {
                         appSettingsRepository.signInLaunchReminderDismissedDate.setValue(currentLocalDateKey())
                     }
-                    showSignReminder = false
+                    signReminder.dismiss()
                 },
                 onGoSign = {
-                    showSignReminder = false
+                    signReminder.suppress()
                     navigateToSignWebViewOrProfile(
                         navigator = navigator,
                         appSettingsRepository = appSettingsRepository,
@@ -345,22 +354,22 @@ fun App() {
         }
     }
 
-    LaunchedEffect(signLaunchReminderEnabled, appLanguage) {
-        if (!signLaunchReminderEnabled) {
-            showSignReminder = false
+    LaunchedEffect(signLaunchReminderEnabled, appLanguage, signReminder.suppressed) {
+        if (!signLaunchReminderEnabled || signReminder.suppressed) {
+            signReminder.dismiss()
             return@LaunchedEffect
         }
         val today = currentLocalDateKey()
         val dismissToday = appSettingsRepository.signInLaunchReminderDismissToday.getValue()
         if (dismissToday && appSettingsRepository.signInLaunchReminderDismissedDate.getValue() == today) return@LaunchedEffect
         if (authRepository.currentUser() == null) return@LaunchedEffect
-        if (!signRepository.isSignedToday()) {
-            showSignReminder = true
-        }
+        signReminder.onStatusChecked(signedToday = signRepository.isSignedToday())
     }
 
     LaunchedEffect(showSignWebViewTrigger.value) {
         if (showSignWebViewTrigger.value) {
+            // Suppress before consuming the trigger, including while navigation is preparing.
+            signReminder.suppress()
             showSignWebViewTrigger.value = false
             navigateToSignWebViewOrProfile(
                 navigator = navigator,

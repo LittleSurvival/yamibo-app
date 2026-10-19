@@ -7,8 +7,42 @@ import me.thenano.yamibo.yamibo_app.repository.SignRepository
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 class SignStatusEventsTest {
+    @Test
+    fun notificationSuppressesLateLaunchCheckAndExistingDialog() = runBlocking {
+        val state = LaunchSignReminderState()
+        state.onStatusChecked(signedToday = false)
+        assertTrue(state.visible)
+        val lateResult = CompletableDeferred<Boolean>()
+        val check = launch(start = CoroutineStart.UNDISPATCHED) {
+            state.onStatusChecked(lateResult.await())
+        }
+        state.suppress()
+        assertFalse(state.visible)
+        lateResult.complete(false)
+        check.join()
+        assertFalse(state.visible)
+        assertTrue(state.suppressed)
+    }
+
+    @Test
+    fun coldNotificationLaunchAndRestorationStaySuppressed() {
+        val state = LaunchSignReminderState(suppressed = true)
+        state.onStatusChecked(signedToday = false)
+        assertFalse(state.visible)
+        val restored = LaunchSignReminderState(suppressed = state.suppressed)
+        restored.onStatusChecked(signedToday = false)
+        assertFalse(restored.visible)
+        val regularLaunch = LaunchSignReminderState()
+        regularLaunch.onStatusChecked(signedToday = false)
+        assertTrue(regularLaunch.visible)
+    }
+
     @Test
     fun confirmedSuccessfulOutcomesEmitSignStatusChange() {
         SignRepository.ActionStatus.entries.forEach { status ->
