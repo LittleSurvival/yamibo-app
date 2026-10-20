@@ -20,6 +20,14 @@
 - Treat the PR as a checkpoint. Its description must record the problem and root cause, implementation and design decisions, user-visible behavior, verification evidence, and known risks, limits, or rollback notes.
 - Before opening or merging the PR, enforce the OpenSpec isolation guard above. Merge only after required checks pass, and prefer a merge commit to preserve branch lineage unless the user requests another strategy.
 
+## Test isolation
+
+- Keep test sources, fixtures, QA receivers, simulator scripts, test-only dependencies, and test run configurations off `main` and production PR branches.
+- `archived-tests` is the permanent archive name, exempt from version-based branch naming. Never merge it into `main`, and never merge `main` into it merely to update production code; doing so can remove archived tests.
+- Use a separate validation branch/worktree for test commits. Build the production PR branch from current `main` and cherry-pick only production commits. Do not hide test commits by deleting their files in a later PR commit.
+- Keep validation evidence in PR descriptions, including the production commit, validation commit/branch, commands, outcomes, and limitations. Do not treat the absence of tests on `main` as a passing test run.
+- Before delivering to `main`, run `python .github/scripts/validate_test_isolation.py --base origin/main`. See [Test isolation](dev-docs/test-isolation.md) for recovery and archive maintenance.
+
 ## Git identity guard
 
 - Before every commit, run `python .github/scripts/validate_git_name.py` from the project root.

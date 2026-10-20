@@ -14,7 +14,6 @@ plugins {
 val yamiboAppVersionCode = 10
 val yamiboAppVersionName = "0.0.9"
 val yamiboAppApplicationId = "me.thenano.yamibo.yamibo_app"
-val generatedDebugWafResources = layout.buildDirectory.dir("generated/wafSimulatorResources/debug")
 val localProperties = Properties().apply {
     val file = rootProject.layout.projectDirectory.file("local.properties").asFile
     if (file.isFile) {
@@ -35,9 +34,6 @@ val yamiboIosBundleId = iosIdentifiers.getProperty("YAMIBO_IOS_BUNDLE_ID")
 
 fun localProperty(name: String): String? =
     localProperties.getProperty(name)?.takeIf { it.isNotBlank() }
-
-val debugWafEnvironment =
-    localProperty("debugWafEnvironment")?.toBooleanStrictOrNull() ?: false
 
 val releaseRunSigningValues = listOf(
     localProperty("yamibo.releaseRun.storeFile"),
@@ -105,10 +101,6 @@ kotlin {
             implementation(libs.yamibo.api)
             implementation(libs.ksoup)
             implementation(projects.shared)
-        }
-        commonTest.dependencies {
-            implementation(libs.kotlin.test)
-            implementation(libs.kotlinx.coroutines.test)
         }
     }
 }
@@ -187,8 +179,6 @@ tasks.matching { task ->
 }
 
 android {
-    // Runtime-only Compose recomposition tests need no-op Android tracing/logging.
-    testOptions.unitTests.isReturnDefaultValues = true
     namespace = "me.thenano.yamibo.yamibo_app"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
 
@@ -212,11 +202,7 @@ android {
     }
     buildTypes {
         getByName("debug") {
-            manifestPlaceholders["debugNetworkSecurityConfig"] = if (debugWafEnvironment) {
-                "@xml/debug_waf_network_security_config"
-            } else {
-                "@xml/debug_default_network_security_config"
-            }
+            manifestPlaceholders["debugNetworkSecurityConfig"] = "@xml/debug_default_network_security_config"
             if (useReleaseSignatureForDebugRun) {
                 signingConfig = signingConfigs.getByName("releaseRunLocal")
             } else {
@@ -240,9 +226,6 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
-    }
-    if (debugWafEnvironment) {
-        sourceSets.getByName("debug").res.srcDir(generatedDebugWafResources)
     }
 }
 
@@ -280,95 +263,6 @@ tasks.register<Exec>("runReleaseOnDevice") {
             "1",
         )
     }
-}
-
-val yamiboDebugApplicationId = if (useReleaseSignatureForDebugRun) {
-    yamiboAppApplicationId
-} else {
-    "$yamiboAppApplicationId.debug"
-}
-val wafSimulatorStartScriptPath = rootProject.file("tools/waf-405-simulator/start.ps1").absolutePath
-val wafSimulatorLaunchScriptPath = rootProject.file("tools/waf-405-simulator/launch.ps1").absolutePath
-val wafSimulatorStopScriptPath = rootProject.file("tools/waf-405-simulator/stop.ps1").absolutePath
-val generatedDebugWafResourcesPath = generatedDebugWafResources.get().asFile.absolutePath
-
-val prepareDebugWafEnvironment = tasks.register<Exec>("prepareDebugWafEnvironment") {
-    group = "build setup"
-    description = "Generates the local proxy CA resources for a WAF simulator debug build."
-    notCompatibleWithConfigurationCache("Bootstraps a local mitmproxy runtime and CA.")
-    commandLine(
-        "powershell.exe",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        wafSimulatorStartScriptPath,
-        "-PrepareOnly",
-        "-GeneratedResourceDirectory",
-        generatedDebugWafResourcesPath,
-    )
-}
-
-if (debugWafEnvironment) {
-    tasks.matching { it.name == "preDebugBuild" }.configureEach {
-        dependsOn(prepareDebugWafEnvironment)
-    }
-}
-
-tasks.register<Exec>("runDebugWafEnvironment") {
-    group = "run"
-    description = "Installs debug, starts the emulator HTTP 405 simulator, and launches the app."
-    notCompatibleWithConfigurationCache("Starts a local proxy and changes emulator proxy settings.")
-    val wafEnvironmentEnabled = debugWafEnvironment
-    if (wafEnvironmentEnabled) {
-        dependsOn("installDebug")
-    }
-    commandLine(
-        "powershell.exe",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        wafSimulatorLaunchScriptPath,
-        "-ApplicationId",
-        yamiboDebugApplicationId,
-    )
-    doFirst {
-        require(wafEnvironmentEnabled) {
-            "runDebugWafEnvironment requires debugWafEnvironment=true in local.properties"
-        }
-    }
-}
-
-tasks.register<Exec>("startDebugWafEnvironmentForIde") {
-    group = "run"
-    description = "Starts only the emulator HTTP 405 simulator and proxy for an IDE Android debug run."
-    notCompatibleWithConfigurationCache("Starts a local proxy and changes emulator proxy settings.")
-    val wafEnvironmentEnabled = debugWafEnvironment
-    commandLine(
-        "powershell.exe",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        wafSimulatorLaunchScriptPath,
-        "-ProxyOnly",
-    )
-    doFirst {
-        require(wafEnvironmentEnabled) {
-            "startDebugWafEnvironmentForIde requires debugWafEnvironment=true in local.properties"
-        }
-    }
-}
-
-tasks.register<Exec>("stopDebugWafEnvironment") {
-    group = "run"
-    description = "Stops the emulator HTTP 405 simulator and restores normal proxy settings."
-    notCompatibleWithConfigurationCache("Stops a local proxy and changes emulator proxy settings.")
-    commandLine(
-        "powershell.exe",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        wafSimulatorStopScriptPath,
-    )
 }
 
 val syncStableManifest by tasks.registering(SyncStableManifestTask::class) {

@@ -1,22 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application android:networkSecurityConfig="${debugNetworkSecurityConfig}">
-        <receiver
-            android:name=".favorite.updates.FavoriteUpdateQaReceiver"
-            android:exported="true" />
-        <receiver
-            android:name=".appsync.AppSyncProviderProbeReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="me.thenano.yamibo.yamibo_app.debug.APP_SYNC_PROVIDER_PROBE" />
-            </intent-filter>
-        </receiver>
-        <receiver
-            android:name=".performance.FavoriteHistoryFixtureReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="me.thenano.yamibo.yamibo_app.debug.POPULATE_FAVORITE_HISTORY_PERF" />
-            </intent-filter>
-        </receiver>
-    </application>
+    <application android:networkSecurityConfig="${debugNetworkSecurityConfig}" />
 </manifest>

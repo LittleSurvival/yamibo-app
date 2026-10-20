@@ -18,12 +18,11 @@ captures
 **/xcshareddata/WorkspaceSettings.xcsettings
 iosApp/Configuration/Config.local.xcconfig
 node_modules/
+__pycache__/
+*.py[cod]
 /.agents
 .vscode/settings.json
 *.txt
-/composeApp/src/commonTest
-!/composeApp/src/commonTest/
-!/composeApp/src/commonTest/**
 /.agent
 *.dll
 *.log

@@ -1,5 +1,11 @@
 # Branch Naming Rules
 
+## Permanent test archive
+
+`archived-tests` is the explicit exception to version/lineage naming. It is the
+permanent test archive and must never be merged into `main`. Do not rename it
+for a release. See [Test isolation](test-isolation.md) for the delivery workflow.
+
 ## Tagged Branch Bases
 
 - Before creating a branch, check whether its base commit has a tag with `git tag --points-at <base-ref>`.
