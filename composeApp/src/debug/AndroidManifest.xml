@@ -2,6 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application android:networkSecurityConfig="${debugNetworkSecurityConfig}">
         <receiver
+            android:name=".favorite.updates.FavoriteUpdateQaReceiver"
+            android:exported="true" />
+        <receiver
             android:name=".appsync.AppSyncProviderProbeReceiver"
             android:exported="true">
             <intent-filter>

@@ -205,6 +205,8 @@ tip：長按可詳細編輯收藏路徑,Tip: Long press to edit the favorite pat
 收藏刪除,favorite delete,收藏刪除,收藏删除
 收藏功能開發中,Favorite function is under development,收藏功能開發中,收藏功能开发中
 收藏更新中斷,Favorite update interrupted,收藏更新中斷,收藏更新中断
+更新檢查已中斷，請開啟 App 繼續,Update check interrupted. Open the app to continue.,更新檢查已中斷，請開啟 App 繼續,更新检查已中断，请打开 App 继续
+已儲存進度，等待系統繼續檢查,Progress saved. Waiting for the system to continue.,已儲存進度，等待系統繼續檢查,已保存进度，等待系统继续检查
 收藏更新失敗,Favorite update failed,收藏更新失敗,收藏更新失败
 收藏更新已中斷,Favorite update has been interrupted,收藏更新已中斷,收藏更新已中断
 收藏更新檢查週期,Favorite update check cycle,收藏更新檢查週期,收藏更新检查周期
