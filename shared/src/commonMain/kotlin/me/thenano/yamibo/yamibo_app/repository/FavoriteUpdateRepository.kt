@@ -93,7 +93,7 @@ interface FavoriteUpdateRepository {
 
     val state: StateFlow<RunState>
 
-    suspend fun startRun(): String
+    suspend fun startRun(runId: String? = null): String
     suspend fun resumeInterruptedRun(): String?
     suspend fun interruptRun(runId: String)
     suspend fun cancelRun(runId: String)

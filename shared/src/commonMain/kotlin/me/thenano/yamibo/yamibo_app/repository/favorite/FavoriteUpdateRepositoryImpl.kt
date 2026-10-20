@@ -60,9 +60,9 @@ class FavoriteUpdateRepositoryImpl internal constructor(
             ?: RunState.Idle
     }
 
-    override suspend fun startRun(): String {
+    override suspend fun startRun(runId: String?): String {
         val now = currentTimeMillis()
-        val runId = "favorite-update-$now-${Random.nextInt(1000, 9999)}"
+        val runId = runId ?: "favorite-update-$now-${Random.nextInt(1000, 9999)}"
         val snapshot = RunSnapshot(
             runId = runId,
             status = RunStatus.RUNNING,
@@ -168,7 +168,8 @@ class FavoriteUpdateRepositoryImpl internal constructor(
                 categoryIdsByItem[item.id].orEmpty().any { it in enabledCategories }
             fidMatches && categoryMatches
         }
-        val resumeFrom = current.completedCount.coerceIn(0, targets.size)
+        val resumeFrom = (current.completedCount + current.skippedCount + current.failedCount)
+            .coerceIn(0, targets.size)
         current = updateSnapshot(
             current.copy(
                 phase = RunPhase.CHECKING,

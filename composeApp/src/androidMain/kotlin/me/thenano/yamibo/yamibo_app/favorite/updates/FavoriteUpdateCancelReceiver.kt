@@ -19,6 +19,7 @@ class FavoriteUpdateCancelReceiver : BroadcastReceiver() {
                 AndroidFavoriteUpdateSupport.createRepository(context).interruptRun(runId)
                 WorkManager.getInstance(context.applicationContext)
                     .cancelUniqueWork(AndroidFavoriteUpdateScheduler.UNIQUE_MANUAL_WORK)
+                AndroidFavoriteUpdateNotificationRepository(context).dismiss()
             } finally {
                 pending.finish()
             }
