@@ -1,4 +1,4 @@
-package me.thenano.yamibo.yamibo_app.repository
+package me.thenano.yamibo.yamibo_app.repository.thread
 
 import com.fleeksoft.ksoup.Ksoup
 import io.github.littlesurvival.YamiboRoute

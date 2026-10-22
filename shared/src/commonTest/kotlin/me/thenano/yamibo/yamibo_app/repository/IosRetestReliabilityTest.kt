@@ -1,5 +1,9 @@
 package me.thenano.yamibo.yamibo_app.repository
 
+import me.thenano.yamibo.yamibo_app.repository.thread.ChapterCommentIndex
+import me.thenano.yamibo.yamibo_app.repository.thread.isValidThreadPage
+import me.thenano.yamibo.yamibo_app.repository.thread.validatedThreadPage
+
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.model.*
 import io.github.littlesurvival.dto.page.*

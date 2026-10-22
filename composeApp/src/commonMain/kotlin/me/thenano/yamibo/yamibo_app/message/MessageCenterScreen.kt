@@ -84,7 +84,7 @@ fun MessageCenterScreen(
     var unreadNotices by remember(currentUser?.uid) { mutableStateOf(false) }
 
     suspend fun refreshUnreadTabs() {
-        val unread = me.thenano.yamibo.yamibo_app.repository.ForumSupplementalMetadata
+        val unread = me.thenano.yamibo.yamibo_app.repository.forum.ForumSupplementalMetadata
             .messageUnread(authRepository.cookieStore.load().orEmpty()) ?: return
         unread.messages?.let { unreadMessages = it }
         if (selectedTab != MessageCenterTab.Notices || state !is MessageCenterState.Success) {

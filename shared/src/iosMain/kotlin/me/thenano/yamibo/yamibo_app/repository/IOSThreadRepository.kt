@@ -1,5 +1,8 @@
 package me.thenano.yamibo.yamibo_app.repository
 
+import me.thenano.yamibo.yamibo_app.repository.thread.isValidThreadPage
+import me.thenano.yamibo.yamibo_app.repository.thread.validatedThreadPage
+
 import me.thenano.yamibo.yamibo_app.util.auth.setNativeCookies
 
 import io.github.littlesurvival.YamiboClient
