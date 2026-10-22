@@ -906,3 +906,5 @@ App 啟動時同步,Sync on app start,App 啟動時同步,App 启动时同步
 論壇模式：正文與回覆一起閱讀,Forum: read author posts and replies together,論壇模式：正文與回覆一起閱讀,论坛模式：正文与回复一起阅读
 載入失敗，請重試,Could not load. Please try again.,載入失敗，請重試,载入失败，请重试
 圖片操作失敗，請重試,Image action failed. Please try again.,圖片操作失敗，請重試,图片操作失败，请重试
+明確引用會歸回對應章節；其餘按發文順序顯示，不代表所討論章節。尚未讀取的頁面可能有更多回覆。,Explicit references link replies to chapters. Other replies use posting order and may discuss another chapter. Unread pages may contain more replies.,明確引用會歸回對應章節；其餘按發文順序顯示，不代表所討論章節。尚未讀取的頁面可能有更多回覆。,明确引用会归回对应章节；其余按发文顺序显示，不代表所讨论章节。尚未读取的页面可能有更多回复。
+讀取更多帖子頁面與引用回覆,Load more thread pages and referenced replies,讀取更多帖子頁面與引用回覆,读取更多帖子页面与引用回复
