@@ -1,5 +1,9 @@
 package me.thenano.yamibo.yamibo_app.thread.reader
 
+import me.thenano.yamibo.yamibo_app.repository.fetchReaderStartPage
+import me.thenano.yamibo.yamibo_app.repository.isValidThreadPage
+import me.thenano.yamibo.yamibo_app.repository.validatedThreadPage
+
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -579,6 +583,7 @@ internal fun ThreadReaderScreen(
     catalogRssQuery: String? = null,
     catalogRssPage: Int? = null,
 ) {
+    val errorMessages = LocalForumErrorMessageResolver.current
     DebugRecomposeProbe("ThreadReaderScreen", tid.value.toString())
     val colors = YamiboTheme.colors
     val appSettingsRepository = LocalAppSettingsRepository.current
@@ -991,7 +996,7 @@ internal fun ThreadReaderScreen(
                 }
 
                 else -> {
-                    feedbackController.post(i18n("投票失敗: {}", i18n(res.message())))
+                    feedbackController.post(i18n("投票失敗: {}", i18n(errorMessages.resolve(res))))
                     false
                 }
             }
@@ -1006,7 +1011,7 @@ internal fun ThreadReaderScreen(
             scope.launch {
                 when (val res = threadRepository.ratePost(tid, pid, score, reason, formHash, noticeAuthor)) {
                     is YamiboResult.Success -> feedbackController.post(i18n("評分成功，刷新後更新評分/點評狀態"))
-                    else -> feedbackController.post(i18n("評分失敗: {}", i18n(res.message())))
+                    else -> feedbackController.post(i18n("評分失敗: {}", i18n(errorMessages.resolve(res))))
                 }
             }
         }
@@ -1020,7 +1025,7 @@ internal fun ThreadReaderScreen(
             scope.launch {
                 when (val res = threadRepository.commentPost(tid, pid, message, formHash)) {
                     is YamiboResult.Success -> feedbackController.post(i18n("點評成功，刷新後更新評分/點評狀態"))
-                    else -> feedbackController.post(i18n("點評失敗: {}", i18n(res.message())))
+                    else -> feedbackController.post(i18n("點評失敗: {}", i18n(errorMessages.resolve(res))))
                 }
             }
         }
@@ -2659,6 +2664,7 @@ internal fun ThreadReaderScreen(
         suspend fun loadFromDownload(): Boolean {
             val downloadKey = ThreadPageDownloadKey(tid.value, page, authorId?.value)
             val downloaded = downloadRepository.getDownloadedPage(downloadKey)
+                ?.takeIf { it.isValidThreadPage(tid, page = page, authorId = authorId) }
                 ?: return false
             loadedPostsByPage[page] = downloaded.posts
             rebuildPosts()
@@ -2672,6 +2678,7 @@ internal fun ThreadReaderScreen(
 
         fun loadFromCache(): Boolean {
             val cached = threadRepository.getCachedThread(tid, authorId, page)
+                ?.takeIf { it.isValidThreadPage(tid, page = page, authorId = authorId) }
             if (cached != null) {
                 loadedPostsByPage[page] = cached.posts
                 rebuildPosts()
@@ -2697,18 +2704,19 @@ internal fun ThreadReaderScreen(
 
         try {
             if (forceRefresh) {
-                when (val result = threadRepository.fetchThread(tid, authorId, page)) {
+                when (val result = threadRepository.fetchThread(tid, authorId, page)
+                    .validatedThreadPage(tid, page = page, authorId = authorId)) {
                     is YamiboResult.Success -> {
                         updatePage(result)
                         loadSucceeded = true
                     }
 
                     else -> {
-                        feedbackController.post(i18n("刷新失敗: {}，嘗試讀取緩存", i18n(result.message())))
+                        feedbackController.post(i18n("刷新失敗: {}，嘗試讀取緩存", i18n(errorMessages.resolve(result))))
                         if (loadFromCache()) {
                             loadSucceeded = true
                         } else if (page == initialPage || page == 1) {
-                            state = ReaderState.Error(i18n(result.message()))
+                            state = ReaderState.Error(i18n(errorMessages.resolve(result)))
                         }
                     }
                 }
@@ -2716,7 +2724,8 @@ internal fun ThreadReaderScreen(
                 if (loadFromDownload()) return true
                 if (loadFromCache()) return true
 
-                when (val result = threadRepository.fetchThread(tid, authorId, page)) {
+                when (val result = threadRepository.fetchThread(tid, authorId, page)
+                    .validatedThreadPage(tid, page = page, authorId = authorId)) {
                     is YamiboResult.Success -> {
                         updatePage(result)
                         loadSucceeded = true
@@ -2724,10 +2733,10 @@ internal fun ThreadReaderScreen(
 
                     else -> {
                         if (autoTriggered && page != initialPage && page != 1) {
-                            failedAutoLoadPages[page] = i18n(result.message())
+                            failedAutoLoadPages[page] = i18n(errorMessages.resolve(result))
                         }
-                        if (page == initialPage || page == 1) state = ReaderState.Error(i18n(result.message()))
-                        else feedbackController.post(i18n("載入失敗: {}", i18n(result.message())))
+                        if (page == initialPage || page == 1) state = ReaderState.Error(i18n(errorMessages.resolve(result)))
+                        else feedbackController.post(i18n("載入失敗: {}", i18n(errorMessages.resolve(result))))
                     }
                 }
             }
@@ -2934,7 +2943,7 @@ internal fun ThreadReaderScreen(
     LaunchedEffect(tid, initialPage, targetPid) {
         val located = targetPid?.let { pid ->
             try {
-                val result = threadRepository.fetchFindPost(tid, pid, authorId)
+                val result = threadRepository.fetchReaderStartPage(tid, pid, authorId, initialPage)
                 (result as? YamiboResult.Success)?.value
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
@@ -2943,7 +2952,7 @@ internal fun ThreadReaderScreen(
                 null
             }
         }
-        val locatedPage = located?.pageNav?.currentPage
+        val locatedPage = located?.let { it.pageNav?.currentPage ?: 1 }
         if (located != null && locatedPage != null) {
             threadRepository.setCachedThread(tid, authorId, locatedPage, located)
         }
@@ -5062,7 +5071,7 @@ internal fun ThreadReaderScreen(
 
                                 else -> {
                                     state = ReaderState.Success
-                                    feedbackController.post(i18n("刷新失敗: {}", i18n(result.message())))
+                                    feedbackController.post(i18n("刷新失敗: {}", i18n(errorMessages.resolve(result))))
                                 }
                             }
                         }

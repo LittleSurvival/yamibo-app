@@ -1,5 +1,6 @@
 ﻿package me.thenano.yamibo.yamibo_app.favorite.sync
 
+import me.thenano.yamibo.yamibo_app.components.feedback.forumErrorMessage
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 
 
@@ -247,7 +248,7 @@ fun FavoriteSyncStatusCard(
             snapshot.logMessage?.takeIf { it.isNotBlank() }?.let {
                 SyncMessageBlock(
                     title = i18n("日誌"),
-                    message = it,
+                    message = forumErrorMessage(it),
                     tint = colors.brownPrimary,
                     textColor = colors.textDark,
                     maxHeight = messageMaxHeight,
@@ -257,7 +258,7 @@ fun FavoriteSyncStatusCard(
             snapshot.warningMessage?.takeIf { it.isNotBlank() }?.let {
                 SyncMessageBlock(
                     title = i18n("提醒"),
-                    message = it,
+                    message = forumErrorMessage(it),
                     tint = colors.orangeAccent,
                     textColor = colors.textStrong,
                     maxHeight = messageMaxHeight,

@@ -107,7 +107,11 @@ internal fun calculateReaderPageProgressSample(
     if (viewportEnd <= viewportStart || visibleItems.isEmpty() || slots.byListIndex.isEmpty()) return null
 
     val viewportCenter = (viewportStart + viewportEnd) / 2
-    val selected = visibleItems.asSequence()
+    val startSlot = slots.byListIndex[firstVisibleItemIndex]?.takeIf {
+        firstVisibleItemScrollOffset == 0 && it.firstListIndexInPage == firstVisibleItemIndex
+    }
+    val selected = visibleItems.firstOrNull { it.index == startSlot?.listIndex && it.size > 0 }
+        ?: visibleItems.asSequence()
         .filter { it.size > 0 && it.index in slots.byListIndex }
         .minByOrNull { item ->
             when {
@@ -132,8 +136,8 @@ internal fun calculateReaderPageProgressSample(
         firstVisibleItemScrollOffset == 0
 
     val fraction = when {
-        isAtTerminalBoundary -> 1f
         isAtInitialBoundary -> 0f
+        isAtTerminalBoundary -> 1f
         else -> readerPageEntryFraction(slot, positionInsideEntry)
     }
     return ReaderPageProgressSample(
@@ -168,7 +172,10 @@ internal class ReaderPageProgressStabilizer {
             old.progress.page != sample.progress.page
         val movedToEarlierEntry = old != null &&
             sample.cursor.ordinalInPage < old.cursor.ordinalInPage
-        val allowDecrease = direction == ReaderPageProgressDirection.Backward || movedToEarlierEntry
+        // scrollToItem can finish between snapshotFlow samples, so its direction
+        // may already be Idle. A measured page start must override old progress.
+        val allowDecrease = sample.progress.fraction == 0f ||
+            direction == ReaderPageProgressDirection.Backward || movedToEarlierEntry
         val fraction = if (!snapshotChanged && !allowDecrease) {
             maxOf(old.progress.fraction, sample.progress.fraction)
         } else {

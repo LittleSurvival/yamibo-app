@@ -44,6 +44,7 @@ fun RssSearchSubscriptionDetailScreen(
     subscriptionId: Long,
     initialPage: Int? = null,
 ) {
+    val errorMessages = LocalForumErrorMessageResolver.current
     val colors = YamiboTheme.colors
     val navigator = LocalNavigator.current
     val repository = LocalRssSearchSubscriptionRepository.current
@@ -575,7 +576,7 @@ fun RssSearchSubscriptionDetailScreen(
                     if (!ensureDownloadStorageReady()) return@launchDownloadTask
                     when (val result = downloadRepository.refreshRssMangaChapter(downloadKey)) {
                         is YamiboResult.Success -> feedbackController.post(i18n("已重新整理此章"))
-                        else -> feedbackController.post(result.message())
+                        else -> feedbackController.post(errorMessages.resolve(result))
                     }
                 }
             },

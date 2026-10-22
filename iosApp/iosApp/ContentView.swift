@@ -53,7 +53,22 @@ private final class ReaderHostController: UIViewController, UIScrollViewDelegate
         statusBarTarget.frame = view.bounds
         statusBarTarget.contentSize = CGSize(width: view.bounds.width, height: view.bounds.height + 1)
         statusBarTarget.contentOffset = CGPoint(x: 0, y: 1)
+        updateReaderTrackInsets()
         updateScrollToTopOwnership()
+    }
+
+    override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
+        updateReaderTrackInsets()
+    }
+
+    private func updateReaderTrackInsets() {
+        // The iPadOS full-screen window drag reproduced at y=44pt, below the
+        // reported drawing safe area. Reserve a 64pt top band for the reader
+        // track only, in both orientations, without overriding system gestures.
+        // This is a conservative app bound; device acceptance is still required.
+        let minimumTop: CGFloat = traitCollection.userInterfaceIdiom == .pad ? 64 : 0
+        NativeNavigationBridge.shared.readerTrackTopInset = Float(max(view.safeAreaInsets.top, minimumTop))
     }
 
     override func viewDidAppear(_ animated: Bool) {

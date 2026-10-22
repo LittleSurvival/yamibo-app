@@ -10,6 +10,7 @@ import me.thenano.yamibo.yamibo_app.repository.AuthRepository
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncService
 import me.thenano.yamibo.yamibo_app.appsync.AppSyncBackgroundScheduler
 import me.thenano.yamibo.yamibo_app.repository.AppUpdateRepository
+import me.thenano.yamibo.yamibo_app.repository.servernotice.ForumErrorMessageResolver
 import me.thenano.yamibo.yamibo_app.repository.BlogRepository
 import me.thenano.yamibo.yamibo_app.repository.BackupRepository
 import me.thenano.yamibo.yamibo_app.repository.ChineseConversionRepository
@@ -67,6 +68,9 @@ val LocalAppSyncBackgroundScheduler =
 
 val LocalAppUpdateRepository =
     compositionLocalOf<AppUpdateRepository> { error("LocalAppUpdateRepository not provided") }
+
+val LocalForumErrorMessageResolver =
+    compositionLocalOf<ForumErrorMessageResolver> { error("LocalForumErrorMessageResolver not provided") }
 
 val LocalForumRepository =
     compositionLocalOf<ForumRepository> { error("LocalForumRepository not provided") }

@@ -2,6 +2,9 @@
 
 package me.thenano.yamibo.yamibo_app
 
+import me.thenano.yamibo.yamibo_app.repository.servernotice.ForumErrorMessageResolver
+import me.thenano.yamibo.yamibo_app.repository.servernotice.DefaultServerNoticeRepository
+import me.thenano.yamibo.yamibo_app.repository.servernotice.ServerNoticeStore
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
@@ -91,6 +94,13 @@ fun MainViewController() = ComposeUIViewController {
     val userStore = remember { IOSUserStore() }
     val forumFavoriteStore = remember { IOSForumFavoriteStore() }
     val rawSettingsStore = remember { IOSSettingsStore() }
+    val errorMessages = remember {
+        ForumErrorMessageResolver(
+            DefaultServerNoticeRepository(
+                ServerNoticeStore(rawSettingsStore),
+            ),
+        )
+    }
 
     /** Repository Logic */
     val yamiboClient = remember { IOSYamiboClientProvider.get(cookieStore) }
@@ -279,6 +289,7 @@ fun MainViewController() = ComposeUIViewController {
         LocalAppSyncService provides appSyncService,
         LocalAppSyncBackgroundScheduler provides appSyncBackgroundScheduler,
         LocalAppUpdateRepository provides appUpdateRepository,
+        LocalForumErrorMessageResolver provides errorMessages,
         LocalForumRepository provides forumRepository,
         LocalThreadRepository provides threadRepository,
         LocalInAppLinkNavigationRepository provides inAppLinkNavigationRepository,

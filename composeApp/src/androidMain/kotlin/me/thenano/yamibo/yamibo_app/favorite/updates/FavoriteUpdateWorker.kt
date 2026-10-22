@@ -1,5 +1,8 @@
 package me.thenano.yamibo.yamibo_app.favorite.updates
 
+import me.thenano.yamibo.yamibo_app.repository.servernotice.isForum524Failure
+import me.thenano.yamibo.yamibo_app.repository.servernotice.ForumErrorMessageResolver
+import me.thenano.yamibo.yamibo_app.network.AndroidServerNoticeProvider
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 
 import android.content.Context
@@ -17,6 +20,9 @@ class FavoriteUpdateWorker(
     override suspend fun doWork(): Result {
         val repository = AndroidFavoriteUpdateSupport.createRepository(applicationContext)
         val notifications = AndroidFavoriteUpdateNotificationRepository(applicationContext)
+        val errorMessages = ForumErrorMessageResolver(
+            AndroidServerNoticeProvider.get(applicationContext),
+        )
         // WorkRequest IDs survive retries and process death. Periodic scheduling delegates to
         // a fresh one-time request, so each scheduled run also gets its own durable identity.
         val requestedRunId = inputData.getString(KEY_RUN_ID)
@@ -30,10 +36,21 @@ class FavoriteUpdateWorker(
                 repository = repository,
                 runId = runId,
                 nowMillis = SystemClock::elapsedRealtime,
-                onProgress = notifications::showProgress,
+                onProgress = { snapshot ->
+                    val warning = snapshot.warningMessage
+                    val display = if (warning != null && isForum524Failure(warning)) {
+                        snapshot.copy(currentItem = errorMessages.resolve(warning))
+                    } else snapshot
+                    notifications.showProgress(display)
+                },
             )) {
                 FavoriteUpdateAttemptResult.COMPLETED -> {
-                    repository.getRunSnapshot(runId)?.let(notifications::showCompleted)
+                    repository.getRunSnapshot(runId)?.let { snapshot ->
+                        val warning = snapshot.warningMessage
+                        if (warning != null && isForum524Failure(warning)) {
+                            notifications.showFailed(i18n("收藏更新完成，部分項目失敗"), errorMessages.resolve(warning))
+                        } else notifications.showCompleted(snapshot)
+                    }
                     Result.success()
                 }
                 FavoriteUpdateAttemptResult.RETRY -> {
@@ -45,7 +62,7 @@ class FavoriteUpdateWorker(
                     if (snapshot?.status == FavoriteUpdateRepository.RunStatus.INTERRUPTED ||
                         snapshot?.status == FavoriteUpdateRepository.RunStatus.FAILED
                     ) {
-                        notifications.showFailed(i18n("收藏更新中斷"), i18n("更新檢查已中斷，請開啟 App 繼續"))
+                        notifications.showFailed(i18n("收藏更新中斷"), errorMessages.resolve(snapshot.errorMessage ?: i18n("更新檢查已中斷，請開啟 App 繼續")))
                     } else {
                         notifications.dismiss()
                     }

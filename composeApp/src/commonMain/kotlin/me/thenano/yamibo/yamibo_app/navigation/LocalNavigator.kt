@@ -232,6 +232,8 @@ val LocalNavigator =
 
 /** Main-thread bridge for the iOS host. Callbacks never retain disposed screens. */
 object NativeNavigationBridge {
+    // Logical points from the native host, consumed through WindowInsets in Compose.
+    var readerTrackTopInset by mutableFloatStateOf(0f)
     var onBack: (() -> Unit)? = null
     var canGoBack: (() -> Boolean)? = null
     var onScrollHandlersChanged: (() -> Unit)? = null
