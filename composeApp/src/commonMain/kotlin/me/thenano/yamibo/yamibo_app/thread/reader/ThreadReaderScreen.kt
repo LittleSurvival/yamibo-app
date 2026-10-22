@@ -579,6 +579,7 @@ internal fun ThreadReaderScreen(
     catalogRssQuery: String? = null,
     catalogRssPage: Int? = null,
 ) {
+    val errorMessages = LocalForumErrorMessageResolver.current
     DebugRecomposeProbe("ThreadReaderScreen", tid.value.toString())
     val colors = YamiboTheme.colors
     val appSettingsRepository = LocalAppSettingsRepository.current
@@ -991,7 +992,7 @@ internal fun ThreadReaderScreen(
                 }
 
                 else -> {
-                    feedbackController.post(i18n("投票失敗: {}", i18n(res.message())))
+                    feedbackController.post(i18n("投票失敗: {}", i18n(errorMessages.resolve(res))))
                     false
                 }
             }
@@ -1006,7 +1007,7 @@ internal fun ThreadReaderScreen(
             scope.launch {
                 when (val res = threadRepository.ratePost(tid, pid, score, reason, formHash, noticeAuthor)) {
                     is YamiboResult.Success -> feedbackController.post(i18n("評分成功，刷新後更新評分/點評狀態"))
-                    else -> feedbackController.post(i18n("評分失敗: {}", i18n(res.message())))
+                    else -> feedbackController.post(i18n("評分失敗: {}", i18n(errorMessages.resolve(res))))
                 }
             }
         }
@@ -1020,7 +1021,7 @@ internal fun ThreadReaderScreen(
             scope.launch {
                 when (val res = threadRepository.commentPost(tid, pid, message, formHash)) {
                     is YamiboResult.Success -> feedbackController.post(i18n("點評成功，刷新後更新評分/點評狀態"))
-                    else -> feedbackController.post(i18n("點評失敗: {}", i18n(res.message())))
+                    else -> feedbackController.post(i18n("點評失敗: {}", i18n(errorMessages.resolve(res))))
                 }
             }
         }
@@ -2704,11 +2705,11 @@ internal fun ThreadReaderScreen(
                     }
 
                     else -> {
-                        feedbackController.post(i18n("刷新失敗: {}，嘗試讀取緩存", i18n(result.message())))
+                        feedbackController.post(i18n("刷新失敗: {}，嘗試讀取緩存", i18n(errorMessages.resolve(result))))
                         if (loadFromCache()) {
                             loadSucceeded = true
                         } else if (page == initialPage || page == 1) {
-                            state = ReaderState.Error(i18n(result.message()))
+                            state = ReaderState.Error(i18n(errorMessages.resolve(result)))
                         }
                     }
                 }
@@ -2724,10 +2725,10 @@ internal fun ThreadReaderScreen(
 
                     else -> {
                         if (autoTriggered && page != initialPage && page != 1) {
-                            failedAutoLoadPages[page] = i18n(result.message())
+                            failedAutoLoadPages[page] = i18n(errorMessages.resolve(result))
                         }
-                        if (page == initialPage || page == 1) state = ReaderState.Error(i18n(result.message()))
-                        else feedbackController.post(i18n("載入失敗: {}", i18n(result.message())))
+                        if (page == initialPage || page == 1) state = ReaderState.Error(i18n(errorMessages.resolve(result)))
+                        else feedbackController.post(i18n("載入失敗: {}", i18n(errorMessages.resolve(result))))
                     }
                 }
             }
@@ -5062,7 +5063,7 @@ internal fun ThreadReaderScreen(
 
                                 else -> {
                                     state = ReaderState.Success
-                                    feedbackController.post(i18n("刷新失敗: {}", i18n(result.message())))
+                                    feedbackController.post(i18n("刷新失敗: {}", i18n(errorMessages.resolve(result))))
                                 }
                             }
                         }

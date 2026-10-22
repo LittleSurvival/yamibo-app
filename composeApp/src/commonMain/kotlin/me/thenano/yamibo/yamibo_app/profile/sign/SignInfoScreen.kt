@@ -1,5 +1,6 @@
 package me.thenano.yamibo.yamibo_app.profile.sign
 
+import me.thenano.yamibo.yamibo_app.LocalForumErrorMessageResolver
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 
 
@@ -64,6 +65,7 @@ internal class ISignInfoScreen(
 
 @Composable
 private fun SignInfoScreen(onInfoLoaded: () -> Unit) {
+    val errorMessages = LocalForumErrorMessageResolver.current
     val colors = YamiboTheme.colors
     val navigator = LocalNavigator.current
     val signRepository = LocalSignRepository.current
@@ -90,7 +92,7 @@ private fun SignInfoScreen(onInfoLoaded: () -> Unit) {
                     onInfoLoaded()
                 }
 
-                else -> errorMessage = result.signInfoErrorMessage()
+                else -> errorMessage = result.signInfoErrorMessage()?.let { errorMessages.resolve(it) }
             }
             loading = false
         }

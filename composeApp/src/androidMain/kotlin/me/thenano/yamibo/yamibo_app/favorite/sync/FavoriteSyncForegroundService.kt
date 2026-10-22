@@ -1,5 +1,7 @@
 package me.thenano.yamibo.yamibo_app.favorite.sync
 
+import me.thenano.yamibo.yamibo_app.repository.servernotice.ForumErrorMessageResolver
+import me.thenano.yamibo.yamibo_app.network.AndroidServerNoticeProvider
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 
 import android.Manifest
@@ -23,6 +25,11 @@ class FavoriteSyncForegroundService : Service() {
     private val activeRuns = linkedMapOf<String, ActiveRun>()
     private lateinit var favoriteSyncRepository: FavoriteSyncRepository
     private lateinit var notificationRepository: AndroidSystemNotificationRepository
+    private val errorMessages by lazy {
+        ForumErrorMessageResolver(
+            AndroidServerNoticeProvider.get(this),
+        )
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -85,11 +92,11 @@ class FavoriteSyncForegroundService : Service() {
                         finishRun(runId, keepNotification = true)
                     }
                     is FavoriteSyncRepository.FavoriteSyncState.Failed -> {
-                        notificationRepository.showFailed(notificationId, i18n("同步失敗"), snapshot.errorMessage ?: i18n("同步過程發生錯誤"))
+                        notificationRepository.showFailed(notificationId, i18n("同步失敗"), errorMessages.resolve(snapshot.errorMessage ?: i18n("同步過程發生錯誤")))
                         finishRun(runId, keepNotification = true)
                     }
                     is FavoriteSyncRepository.FavoriteSyncState.Interrupted -> {
-                        notificationRepository.showFailed(notificationId, i18n("同步已中斷"), snapshot.errorMessage ?: i18n("同步已取消"))
+                        notificationRepository.showFailed(notificationId, i18n("同步已中斷"), errorMessages.resolve(snapshot.errorMessage ?: i18n("同步已取消")))
                         finishRun(runId, keepNotification = true)
                     }
                     else -> Unit

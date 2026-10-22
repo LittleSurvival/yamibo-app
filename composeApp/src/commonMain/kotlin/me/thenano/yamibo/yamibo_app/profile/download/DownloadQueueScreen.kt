@@ -1,5 +1,7 @@
 package me.thenano.yamibo.yamibo_app.profile.download
 
+import me.thenano.yamibo.yamibo_app.components.feedback.forumErrorMessage
+import me.thenano.yamibo.yamibo_app.LocalForumErrorMessageResolver
 import YamiboIcons
 import androidx.compose.animation.*
 import androidx.compose.animation.core.animateFloatAsState
@@ -67,6 +69,7 @@ private sealed interface DownloadContentManagementState {
 
 @Composable
 fun DownloadQueueScreen() {
+    val errorMessages = LocalForumErrorMessageResolver.current
     val colors = YamiboTheme.colors
     val navigator = LocalNavigator.current
     val repository = LocalDownloadRepository.current
@@ -225,7 +228,7 @@ fun DownloadQueueScreen() {
                                     reloadContentManagement()
                                     feedbackController.post(i18n("已重新載入下載內容"))
                                 }
-                                else -> feedbackController.post(i18n("重新載入失敗：{}", i18n(result.message())))
+                                else -> feedbackController.post(i18n("重新載入失敗：{}", i18n(errorMessages.resolve(result))))
                             }
                         }
                         scope.launch {
@@ -399,7 +402,7 @@ private fun DownloadQueueEntryCard(
             Column(Modifier.weight(1f).padding(start = 12.dp)) {
                 Text(entry.title, color = colors.textStrong, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    "${downloadEntryLabel(entry)} · ${entryDetailLabel(entry)}${entry.message?.let { " · $it" }.orEmpty()}",
+                    "${downloadEntryLabel(entry)} · ${entryDetailLabel(entry)}${entry.message?.let { " · ${forumErrorMessage(it)}" }.orEmpty()}",
                     color = if (entry.status == DownloadStatus.Failed) colors.redAccent else colors.textDark.copy(alpha = 0.68f),
                     fontSize = 12.sp,
                 )

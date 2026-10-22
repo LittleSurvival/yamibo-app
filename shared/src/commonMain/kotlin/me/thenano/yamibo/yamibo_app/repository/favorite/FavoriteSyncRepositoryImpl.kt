@@ -1,5 +1,6 @@
 ﻿package me.thenano.yamibo.yamibo_app.repository.favorite
 
+import me.thenano.yamibo.yamibo_app.repository.servernotice.isForum524Failure
 import io.github.littlesurvival.YamiboForum
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.core.flatMapSuccess
@@ -799,6 +800,7 @@ class FavoriteSyncRepositoryImpl(
         remoteItem: RemoteFavoriteItem,
         reason: String,
     ): String {
+        if (isForum524Failure(reason)) return reason
         return truncateFavoriteMessage(i18n("無法匯入帖子 {}：{}", formatPostLabel(remoteItem.threadId, remoteItem.title), reason))
     }
 
@@ -807,6 +809,7 @@ class FavoriteSyncRepositoryImpl(
         threadId: ThreadId,
         reason: String,
     ): String {
+        if (isForum524Failure(reason)) return reason
         return truncateFavoriteMessage(i18n("無法同步到百合會 {}：{}", formatPostLabel(threadId, title), reason))
     }
 

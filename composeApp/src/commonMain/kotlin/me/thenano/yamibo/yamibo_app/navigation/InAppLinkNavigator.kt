@@ -94,6 +94,7 @@ private sealed interface InAppLinkResolvingState {
 
 @Composable
 private fun InAppLinkResolvingScreen(url: String, context: InAppLinkContext) {
+    val errorMessages = me.thenano.yamibo.yamibo_app.LocalForumErrorMessageResolver.current
     val colors = YamiboTheme.colors
     val navigator = LocalNavigator.current
     val repository = LocalInAppLinkNavigationRepository.current
@@ -114,7 +115,7 @@ private fun InAppLinkResolvingScreen(url: String, context: InAppLinkContext) {
                 }
             }
             is InAppLinkResolveResult.Failed -> {
-                state = InAppLinkResolvingState.Error(result.reason?.takeIf { it.isNotBlank() } ?: i18n("定位失敗"), result.target)
+                state = InAppLinkResolvingState.Error(errorMessages.resolve(result.reason?.takeIf { it.isNotBlank() } ?: i18n("定位失敗")), result.target)
             }
         }
     }

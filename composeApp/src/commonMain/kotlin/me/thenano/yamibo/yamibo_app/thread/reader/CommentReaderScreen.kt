@@ -1,5 +1,6 @@
 package me.thenano.yamibo.yamibo_app.thread.reader
 
+import me.thenano.yamibo.yamibo_app.LocalForumErrorMessageResolver
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -70,6 +71,7 @@ internal fun CommentReaderScreen(
     authorId: UserId,
     targetCommentPid: PostId? = null,
 ) {
+    val errorMessages = LocalForumErrorMessageResolver.current
     val colors = YamiboTheme.colors
     val threadRepository = LocalThreadRepository.current
     val novelCache = LocalNovelThreadCacheRepository.current
@@ -135,7 +137,7 @@ internal fun CommentReaderScreen(
                 novelCache.setCachedFullPage(tid, currentFullPage, result.value)
                 publishComments()
             }
-            else -> state = CommentState.Error(i18n(result.message()))
+            else -> state = CommentState.Error(i18n(errorMessages.resolve(result)))
         }
     }
 
@@ -153,7 +155,7 @@ internal fun CommentReaderScreen(
                     novelCache.setCachedFullPage(tid, next, result.value)
                     publishComments()
                 }
-                else -> feedbackController.post(i18n("載入失敗: {}", i18n(result.message())))
+                else -> feedbackController.post(i18n("載入失敗: {}", i18n(errorMessages.resolve(result))))
             }
         } finally {
             isLoadingMore = false
@@ -258,7 +260,7 @@ internal fun CommentReaderScreen(
                                         scope.launch {
                                             when (val res = threadRepository.ratePost(tid, post.pid, score, reason, formHash, noticeAuthor)) {
                                                 is YamiboResult.Success -> feedbackController.post(i18n("評分成功，刷新後更新評分/點評狀態"))
-                                                else -> feedbackController.post(i18n("評分失敗: {}", i18n(res.message())))
+                                                else -> feedbackController.post(i18n("評分失敗: {}", i18n(errorMessages.resolve(res))))
                                             }
                                         }
                                     },
@@ -271,7 +273,7 @@ internal fun CommentReaderScreen(
                                         scope.launch {
                                             when (val res = threadRepository.commentPost(tid, post.pid, message, formHash)) {
                                                 is YamiboResult.Success -> feedbackController.post(i18n("點評成功，刷新後更新評分/點評狀態"))
-                                                else -> feedbackController.post(i18n("點評失敗: {}", i18n(res.message())))
+                                                else -> feedbackController.post(i18n("點評失敗: {}", i18n(errorMessages.resolve(res))))
                                             }
                                         }
                                     },

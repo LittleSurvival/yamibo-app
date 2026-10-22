@@ -1,5 +1,6 @@
 package me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl
 
+import me.thenano.yamibo.yamibo_app.LocalForumErrorMessageResolver
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,6 +39,7 @@ internal fun RateResultsDialog(
     onLoad: suspend () -> YamiboResult<RateResultPopoutPage>,
     onDismiss: () -> Unit,
 ) {
+    val errorMessages = LocalForumErrorMessageResolver.current
     val colors = YamiboTheme.colors
     var page by remember { mutableStateOf<RateResultPopoutPage?>(null) }
     var loading by remember { mutableStateOf(true) }
@@ -46,7 +48,7 @@ internal fun RateResultsDialog(
     LaunchedEffect(onLoad) {
         when (val result = onLoad()) {
             is YamiboResult.Success -> page = result.value
-            else -> error = i18n(result.message())
+            else -> error = i18n(errorMessages.resolve(result))
         }
         loading = false
     }

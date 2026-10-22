@@ -225,23 +225,14 @@ jobs:
           prepare_mirror_tag() {
             local name="$1"
             local remote="$2"
+            local feed="$RUNNER_TEMP/mirror-tag-feed-$name/update"
+            mkdir -p "$feed"
+            cp -R update/. "$feed/"
+            bash .github/scripts/publish-feed-directory.sh "$remote" main "$feed" update
             local dir="$RUNNER_TEMP/mirror-tag-$name"
-
-            rm -rf "$dir"
-            mkdir -p "$dir/update"
-            cp update/manifest.json "$dir/update/manifest.json"
-            cp update/stable.json "$dir/update/stable.json"
-
-            git -C "$dir" init
-            git -C "$dir" config user.name "github-actions[bot]"
-            git -C "$dir" config user.email "github-actions[bot]@users.noreply.github.com"
-            git -C "$dir" remote add origin "$remote"
-            git -C "$dir" add update
-            git -C "$dir" commit -m "Prepare mirror release tag ${{ steps.meta.outputs.release_title }}"
-            git -C "$dir" branch -M main
-            retry_git "$name main push" git -C "$dir" push --force origin main
+            git clone --quiet --depth 1 --single-branch --branch main "$remote" "$dir"
             git -C "$dir" tag -f "${{ steps.meta.outputs.version_code }}"
-            retry_git "$name tag push" git -C "$dir" push --force origin "${{ steps.meta.outputs.version_code }}"
+            retry_git "$name tag push" git -C "$dir" push --force origin "refs/tags/${{ steps.meta.outputs.version_code }}"
           }
 
           prepare_mirror_tag "gitee" "git@gitee.com:${MIRROR_OWNER}/${MIRROR_REPO}.git"
@@ -316,19 +307,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          dir="$RUNNER_TEMP/github-update-release"
-          rm -rf "$dir"
-          mkdir -p "$dir"
-          cp -R "$RUNNER_TEMP/published-update/github/update" "$dir/update"
-
-          git -C "$dir" init
-          git -C "$dir" config user.name "github-actions[bot]"
-          git -C "$dir" config user.email "github-actions[bot]@users.noreply.github.com"
-          git -C "$dir" remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
-          git -C "$dir" add update
-          git -C "$dir" commit -m "Publish update manifest for ${{ steps.meta.outputs.release_title }}"
-          git -C "$dir" branch -M update-release
-          git -C "$dir" push --force origin update-release
+          bash .github/scripts/publish-feed-directory.sh \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+            update-release "$RUNNER_TEMP/published-update/github/update" update
 
       - name: Push update folder to mirror repositories
         timeout-minutes: 60
@@ -372,22 +353,12 @@ jobs:
           push_mirror() {
             local name="$1"
             local remote="$2"
-            local dir="$RUNNER_TEMP/mirror-$name"
-
-            rm -rf "$dir"
-            mkdir -p "$dir"
-            cp -R "$RUNNER_TEMP/published-update/$name/update" "$dir/update"
-
-            git -C "$dir" init
-            git -C "$dir" config user.name "github-actions[bot]"
-            git -C "$dir" config user.email "github-actions[bot]@users.noreply.github.com"
-            git -C "$dir" remote add origin "$remote"
-            git -C "$dir" add update
-            git -C "$dir" commit -m "Update release manifest"
-            git -C "$dir" branch -M main
-            retry_git "$name main push" git -C "$dir" push --force origin main
+            bash .github/scripts/publish-feed-directory.sh \
+              "$remote" main "$RUNNER_TEMP/published-update/$name/update" update
+            local dir="$RUNNER_TEMP/mirror-release-tag-$name"
+            git clone --quiet --depth 1 --single-branch --branch main "$remote" "$dir"
             git -C "$dir" tag -f "${{ steps.meta.outputs.version_code }}"
-            retry_git "$name tag push" git -C "$dir" push --force origin "${{ steps.meta.outputs.version_code }}"
+            retry_git "$name tag push" git -C "$dir" push --force origin "refs/tags/${{ steps.meta.outputs.version_code }}"
           }
 
           push_mirror "gitee" "git@gitee.com:${MIRROR_OWNER}/${MIRROR_REPO}.git"
