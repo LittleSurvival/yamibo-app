@@ -1,0 +1,23 @@
+{
+  "productionCommit": "23e2a6e338546aa91be48972c6ed591cc7d6e493",
+  "unitValidationCommit": "8dac3bba29b91aa113f6c84a8a60ab336769c265",
+  "emulatorSourceCommit": "10e7f23c113ada87e3944044502913f8940b24ce",
+  "kotlinTests": 18,
+  "pythonTests": 5,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "nativeCompileRun": 39757929048,
+  "nativeCompileResult": "success",
+  "emulator": "Pixel_9, Android 17, emulator-5554",
+  "package": "me.thenano.yamibo.yamibo_app.noticeqa.debug",
+  "timestamp": "2026-10-22T17:59:33.218569+08:00",
+  "cases": [
+    "active page notice",
+    "operation feedback",
+    "native notification gateway",
+    "expiry within 60-second cache then retry",
+    "newer cancellation against two older active mirrors",
+    "non-524 HTTP error unchanged"
+  ]
+}

@@ -11,7 +11,8 @@ CONTROL = ROOT / "build/server-notice-fixture.json"
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith("/forum"):
-            self.send_response(524)
+            config = json.loads(CONTROL.read_text(encoding="utf-8"))
+            self.send_response(config.get("forumStatus", 524))
             self.end_headers()
             self.wfile.write(b"Cloudflare: origin timed out (local QA fixture)")
             return
