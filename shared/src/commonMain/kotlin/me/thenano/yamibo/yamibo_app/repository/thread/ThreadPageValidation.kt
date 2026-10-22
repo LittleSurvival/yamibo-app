@@ -1,5 +1,6 @@
-package me.thenano.yamibo.yamibo_app.repository
+package me.thenano.yamibo.yamibo_app.repository.thread
 
+import me.thenano.yamibo.yamibo_app.repository.ThreadRepository
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.page.ThreadPage
 import io.github.littlesurvival.dto.value.PostId

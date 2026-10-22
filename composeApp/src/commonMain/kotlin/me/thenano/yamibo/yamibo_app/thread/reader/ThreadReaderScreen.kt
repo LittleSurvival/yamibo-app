@@ -1,8 +1,8 @@
 package me.thenano.yamibo.yamibo_app.thread.reader
 
-import me.thenano.yamibo.yamibo_app.repository.fetchReaderStartPage
-import me.thenano.yamibo.yamibo_app.repository.isValidThreadPage
-import me.thenano.yamibo.yamibo_app.repository.validatedThreadPage
+import me.thenano.yamibo.yamibo_app.repository.thread.fetchReaderStartPage
+import me.thenano.yamibo.yamibo_app.repository.thread.isValidThreadPage
+import me.thenano.yamibo.yamibo_app.repository.thread.validatedThreadPage
 
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween

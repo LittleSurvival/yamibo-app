@@ -427,7 +427,7 @@ fun PostRenderer(
         val ratingAuth = me.thenano.yamibo.yamibo_app.LocalAuthRepository.current
         LaunchedEffect(post.pid, linkContext.currentTid) {
             dailyRemaining = linkContext.currentTid?.let { tid ->
-                me.thenano.yamibo.yamibo_app.repository.ForumSupplementalMetadata.ratingRemaining(
+                me.thenano.yamibo.yamibo_app.repository.forum.ForumSupplementalMetadata.ratingRemaining(
                     tid, post.pid, ratingAuth.cookieStore.load().orEmpty(),
                 )
             }
