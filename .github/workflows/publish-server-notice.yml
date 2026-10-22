@@ -1,0 +1,102 @@
+name: Publish server notice
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Publish or cancel the HTTP 524 notice
+        required: true
+        type: choice
+        options: [publish, cancel]
+      message:
+        description: Plain text shown instead of the forum HTTP 524 error (publish only)
+        required: false
+        type: string
+      duration:
+        description: 'Validity in dd:hh:mm, e.g. 00:02:00 means two hours (publish only)'
+        required: false
+        default: '00:01:00'
+        type: string
+
+concurrency:
+  group: mirror-publish-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate and generate notice
+        env:
+          NOTICE_OPERATION: ${{ inputs.operation }}
+          NOTICE_MESSAGE: ${{ inputs.message }}
+          NOTICE_DURATION: ${{ inputs.duration }}
+          NOTICE_OUTPUT_DIR: ${{ runner.temp }}/notice
+        run: python3 .github/scripts/publish-server-notice.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-notice
+          path: ${{ runner.temp }}/notice/status/forum-524.json
+          retention-days: 7
+
+  publish:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [github, gitee, gitea]
+    env:
+      GITEA_SSH_HOST: ${{ vars.GITEA_SSH_HOST }}
+      GITEA_SSH_PORT: ${{ vars.GITEA_SSH_PORT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: server-notice
+          path: ${{ runner.temp }}/notice/status
+      - uses: webfactory/ssh-agent@v0.9.0
+        if: matrix.target != 'github'
+        with:
+          ssh-private-key: ${{ matrix.target == 'gitee' && secrets.GITEE_SSH_PRIVATE_KEY || secrets.GITEA_SSH_PRIVATE_KEY }}
+      - name: Trust mirror host
+        if: matrix.target != 'github'
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          if [ "$TARGET" = gitee ]; then
+            ssh-keyscan -T 30 gitee.com >> ~/.ssh/known_hosts
+          else
+            ssh-keyscan -T 30 -p "${GITEA_SSH_PORT:-22}" "${GITEA_SSH_HOST:-gitea.com}" >> ~/.ssh/known_hosts
+          fi
+      - name: Publish notice directory
+        id: publish
+        env:
+          TARGET: ${{ matrix.target }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GIT_SSH_COMMAND: ssh -o BatchMode=yes -o ConnectTimeout=30
+        run: |
+          set -euo pipefail
+          branch=main
+          case "$TARGET" in
+            github)
+              remote="https://x-access-token:$GH_TOKEN@github.com/${{ github.repository }}.git"
+              branch=update-release ;;
+            gitee) remote="git@gitee.com:LittleSurvival/ymb-apk-release.git" ;;
+            gitea) remote="ssh://git@${GITEA_SSH_HOST:-gitea.com}:${GITEA_SSH_PORT:-22}/LittleSurvival/ymb-apk-release.git" ;;
+          esac
+          bash .github/scripts/publish-feed-directory.sh "$remote" "$branch" "$RUNNER_TEMP/notice/status" status
+      - name: Record mirror result
+        if: always()
+        env:
+          TARGET: ${{ matrix.target }}
+          OUTCOME: ${{ job.status }}
+        run: printf '\n- %s notice publication outcome: **%s**\n' "$TARGET" "$OUTCOME" >> "$GITHUB_STEP_SUMMARY"
