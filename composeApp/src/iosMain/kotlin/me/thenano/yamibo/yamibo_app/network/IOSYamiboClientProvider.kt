@@ -1,5 +1,7 @@
 package me.thenano.yamibo.yamibo_app.network
 
+import me.thenano.yamibo.yamibo_app.util.auth.setNativeCookies
+
 import io.github.littlesurvival.YamiboClient
 import io.github.littlesurvival.YamiboRoute
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -39,7 +41,7 @@ internal object IOSYamiboClientProvider {
         authenticationCookieHeader: String?,
         platformCookieHeader: String?,
     ): YamiboClient {
-        client.setCookie(
+        client.setNativeCookies(
             composeYamiboClientCookieHeader(authenticationCookieHeader, platformCookieHeader),
             importNox = true,
         )

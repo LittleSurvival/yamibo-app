@@ -1,5 +1,7 @@
 package me.thenano.yamibo.yamibo_app.repository
 
+import me.thenano.yamibo.yamibo_app.util.auth.setNativeCookies
+
 import io.github.littlesurvival.YamiboClient
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.page.RatePopoutPage
@@ -31,8 +33,9 @@ class IOSThreadRepository(
         page: Int,
         reverse: Boolean,
     ): YamiboResult<ThreadPage> {
-        yamiboClient.setCookie(cookieStore.load() ?: "")
+        yamiboClient.setNativeCookies(cookieStore.load() ?: "")
         val result = yamiboClient.fetchThreadById(tid, authorId, reverse, page)
+            .validatedThreadPage(tid, page = page)
 
         if (result is YamiboResult.Success) {
             if (!reverse) {
@@ -48,42 +51,51 @@ class IOSThreadRepository(
         postId: PostId,
         authorId: UserId?,
     ): YamiboResult<ThreadPage> {
-        yamiboClient.setCookie(cookieStore.load() ?: "")
-        return yamiboClient.fetchFindPost(threadId = tid, authorId = authorId, postId = postId)
+        yamiboClient.setNativeCookies(cookieStore.load() ?: "")
+        val located = yamiboClient.fetchFindPost(threadId = tid, authorId = authorId, postId = postId)
+        if (located !is YamiboResult.Success || located.value.isValidThreadPage(tid, postId)) {
+            return located
+        }
+        // A known page can be fetched once via the explicit mobile canonical route.
+        // Never guess a page or turn login/WAF/permission failures into retries.
+        val page = located.value.pageNav?.currentPage?.takeIf { it > 0 }
+            ?: return located.validatedThreadPage(tid, postId)
+        return yamiboClient.fetchThreadById(tid, authorId, page = page)
+            .validatedThreadPage(tid, postId, page)
     }
 
     override suspend fun addFavorite(tid: ThreadId, formHash: FormHash): YamiboResult<AddFavoriteResult> {
-        yamiboClient.setCookie(cookieStore.load() ?: "")
+        yamiboClient.setNativeCookies(cookieStore.load() ?: "")
         return yamiboClient.fetchAddFavorite(tid, formHash)
     }
 
     override suspend fun votePoll(fId: ForumId, tId: ThreadId, pollOptionIds: List<PollOptionId>, formHash: FormHash): YamiboResult<String> {
-        yamiboClient.setCookie(cookieStore.load() ?: "")
+        yamiboClient.setNativeCookies(cookieStore.load() ?: "")
         return yamiboClient.votePoll(fId, tId, pollOptionIds, formHash)
     }
 
     override suspend fun fetchRatePopoutPage(tId: ThreadId, pId: PostId): YamiboResult<RatePopoutPage> {
-        yamiboClient.setCookie(cookieStore.load() ?: "")
+        yamiboClient.setNativeCookies(cookieStore.load() ?: "")
         return yamiboClient.fetchRatePopoutPage(tId, pId)
     }
 
     override suspend fun fetchRateResults(tId: ThreadId, pId: PostId): YamiboResult<RateResultPopoutPage> {
-        yamiboClient.setCookie(cookieStore.load() ?: "")
+        yamiboClient.setNativeCookies(cookieStore.load() ?: "")
         return yamiboClient.fetchRateResultPopoutPage(tId, pId)
     }
 
     override suspend fun fetchVoters(tId: ThreadId, pollOptionId: PollOptionId?, page: Int): YamiboResult<VotersPopoutScreen> {
-        yamiboClient.setCookie(cookieStore.load() ?: "")
+        yamiboClient.setNativeCookies(cookieStore.load() ?: "")
         return yamiboClient.fetchViewVoters(tId, pollOptionId, page)
     }
 
     override suspend fun ratePost(tId: ThreadId, pId: PostId, score: Int, reason: String, formHash: FormHash, noticeAuthor: Boolean): YamiboResult<String> {
-        yamiboClient.setCookie(cookieStore.load() ?: "")
+        yamiboClient.setNativeCookies(cookieStore.load() ?: "")
         return yamiboClient.fetchRatePost(tId, pId, score, reason, formHash, noticeAuthor)
     }
 
     override suspend fun commentPost(tId: ThreadId, pId: PostId, message: String, formHash: FormHash): YamiboResult<String> {
-        yamiboClient.setCookie(cookieStore.load() ?: "")
+        yamiboClient.setNativeCookies(cookieStore.load() ?: "")
         return yamiboClient.fetchCommentPost(tId, pId, message, formHash)
     }
 

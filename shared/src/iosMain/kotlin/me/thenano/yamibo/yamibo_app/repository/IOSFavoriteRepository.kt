@@ -1,5 +1,7 @@
 package me.thenano.yamibo.yamibo_app.repository
 
+import me.thenano.yamibo.yamibo_app.util.auth.setNativeCookies
+
 import io.github.littlesurvival.YamiboClient
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.page.FavoritePage
@@ -18,7 +20,7 @@ class IOSFavoriteRepository(
         type: FavoriteType,
         page: Int
     ): YamiboResult<FavoritePage> {
-        yamiboClient.setCookie(cookieStore.load() ?: "")
+        yamiboClient.setNativeCookies(cookieStore.load() ?: "")
         return yamiboClient.fetchFavoritePage(userId, type, page)
     }
 
@@ -26,7 +28,7 @@ class IOSFavoriteRepository(
         favoriteId: FavoriteId,
         formHash: FormHash,
     ): YamiboResult<String> {
-        yamiboClient.setCookie(cookieStore.load() ?: "")
+        yamiboClient.setNativeCookies(cookieStore.load() ?: "")
         return yamiboClient.fetchRemoveFavorite(favoriteId, formHash)
     }
 }
