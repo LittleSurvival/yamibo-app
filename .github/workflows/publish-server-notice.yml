@@ -99,4 +99,5 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
           OUTCOME: ${{ job.status }}
-        run: printf '\n- %s notice publication outcome: **%s**\n' "$TARGET" "$OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          printf '\n- %s notice publication outcome: **%s**\n' "$TARGET" "$OUTCOME" >> "$GITHUB_STEP_SUMMARY"
