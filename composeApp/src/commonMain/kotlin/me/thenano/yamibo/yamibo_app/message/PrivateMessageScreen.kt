@@ -70,7 +70,7 @@ private fun PrivateMessageContent(toUser: UserId, titleHint: String?) {
             fetchPage = { repository.fetchPrivateMessagePage(toUser, it) },
             onRefreshFailure = { afterSend, reason ->
                 feedbackController.post(
-                    if (afterSend) i18n("訊息已送出，但更新對話失敗，請重新整理")
+                    if (afterSend) "${i18n("訊息已送出，但更新對話失敗，請重新整理")}：${i18n(reason)}"
                     else i18n("更新對話失敗，請重新整理：{}", i18n(reason)),
                 )
             },
@@ -135,7 +135,7 @@ private fun PrivateMessageContent(toUser: UserId, titleHint: String?) {
                                 else -> {
                                     val reason = i18n(errorMessages.resolve(result))
                                     me.thenano.yamibo.yamibo_app.task.AppTaskResult.Failure(
-                                        message = reason,
+                                        message = result.message(),
                                         feedback = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackEvent(reason),
                                     )
                                 }
