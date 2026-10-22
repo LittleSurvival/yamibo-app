@@ -70,9 +70,15 @@ class ChapterCommentIndex(private val tid: ThreadId, private val authorId: UserI
 internal data class ChapterReferences(val posts: Set<PostId>, val ambiguous: Boolean)
 
 /** Recognize Discuz reference links only; prose and unrelated content links are not evidence. */
-internal fun explicitChapterReferences(html: String, tid: ThreadId): ChapterReferences {
+internal fun explicitChapterReferences(
+    html: String,
+    tid: ThreadId,
+    forumUrl: String = YamiboRoute.Domain.build(),
+): ChapterReferences {
     val document = Ksoup.parseBodyFragment(html)
-    val forum = Url(YamiboRoute.Domain.build())
+    val forum = Url(forumUrl)
+    val host = if (':' in forum.host) "[${forum.host}]" else forum.host
+    val origin = "${forum.protocol.name}://$host:${forum.port}"
     val posts = mutableSetOf<PostId>()
     var ambiguous = false
     for (link in document.select("a[href]")) {
@@ -81,14 +87,14 @@ internal fun explicitChapterReferences(html: String, tid: ThreadId): ChapterRefe
         val url = runCatching {
             Url(when {
                 href.startsWith("//") -> "${forum.protocol.name}:$href"
-                href.startsWith("/") -> "${forum.protocol.name}://${forum.host}$href"
-                href.startsWith("?") -> "${forum.protocol.name}://${forum.host}/forum.php$href"
-                ":" !in href.substringBefore('/') -> "${forum.protocol.name}://${forum.host}/$href"
+                href.startsWith("/") -> "$origin$href"
+                href.startsWith("?") -> "$origin/forum.php$href"
+                ":" !in href.substringBefore('/') -> "$origin/$href"
                 else -> href
             })
         }.getOrNull() ?: continue
         if (!inQuote && url.parameters["goto"] != "findpost") continue
-        if (url.host != forum.host || url.port != forum.port ||
+        if (!url.host.equals(forum.host, ignoreCase = true) || url.port != forum.port ||
             url.protocol.name !in setOf("https", "http")) {
             ambiguous = true
             continue
