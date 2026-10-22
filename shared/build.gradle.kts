@@ -18,6 +18,9 @@ kotlin {
     iosSimulatorArm64()
 
     sourceSets {
+        commonTest.dependencies {
+            implementation(kotlin("test"))
+        }
         commonMain.dependencies {
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.content.negotiation)
@@ -43,6 +46,7 @@ kotlin {
 }
 
 android {
+    testOptions { unitTests.isReturnDefaultValues = true }
     namespace = "me.thenano.yamibo.yamibo_app.shared"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
     compileOptions {
