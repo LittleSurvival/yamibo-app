@@ -45,6 +45,7 @@ import io.github.littlesurvival.dto.value.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import me.thenano.yamibo.yamibo_app.*
@@ -612,7 +613,7 @@ internal fun ThreadReaderScreen(
         )
     }
     val listState = rememberLazyListState()
-    val isNovelThread = threadType == ReadHistoryRepository.ThreadEntryType.Novel
+    val isNovelThread = threadType == ReadHistoryRepository.ThreadEntryType.Novel && authorId != null
     val keepSystemBarsBackground = novelSettingsRepository.keepSystemBarsBackground.state()
     val readerFontSize = novelSettingsRepository.fontSize.state()
     val favoriteAddDownloadPromptEnabled = appSettingsRepository.favoriteAddDownloadPromptEnabled.state()
@@ -1262,6 +1263,7 @@ internal fun ThreadReaderScreen(
         val urls = prioritizedPosts.asSequence()
             .flatMap { post -> expectedImageUrlsByPost[post.pid.value.toLong()].orEmpty().asSequence() }
             .distinct()
+            .take(24)
             .toList()
         if (urls.isEmpty()) {
             activeImageGeometrySnapshot = imageAspectRatioCache.toMap()
@@ -1278,21 +1280,30 @@ internal fun ThreadReaderScreen(
                 urls.map { imageUrl ->
                     async {
                         semaphore.withPermit {
-                            val request = buildImageRequest(
-                                context = platformContext,
-                                url = imageUrl,
-                                cookie = cookie,
-                                enableCrossfade = false,
-                            )
-                            val cachedResult = imageLoader.execute(
-                                request.newBuilder()
-                                    .networkCachePolicy(CachePolicy.DISABLED)
+                            try {
+                                val request = buildImageRequest(
+                                    context = platformContext,
+                                    url = imageUrl,
+                                    cookie = cookie,
+                                    enableCrossfade = false,
+                                ).newBuilder()
+                                    .size(128, 128)
+                                    .memoryCachePolicy(CachePolicy.DISABLED)
                                     .build()
-                            )
-                            val result = cachedResult as? SuccessResult ?: imageLoader.execute(request)
-                            if (result is SuccessResult && result.image.width > 0 && result.image.height > 0) {
-                                measuredRatios[imageUrl] =
-                                    result.image.height.toFloat() / result.image.width.toFloat()
+                                val cachedResult = imageLoader.execute(
+                                    request.newBuilder()
+                                        .networkCachePolicy(CachePolicy.DISABLED)
+                                        .build()
+                                )
+                                val result = cachedResult as? SuccessResult ?: imageLoader.execute(request)
+                                if (result is SuccessResult && result.image.width > 0 && result.image.height > 0) {
+                                    measuredRatios[imageUrl] =
+                                        result.image.height.toFloat() / result.image.width.toFloat()
+                                }
+                            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                throw cancelled
+                            } catch (error: Exception) {
+                                Logger.w("ThreadReaderScreen", "Image geometry unavailable", error)
                             }
                         }
                     }
@@ -2684,50 +2695,53 @@ internal fun ThreadReaderScreen(
             markPageLoadSucceeded()
         }
 
-        if (forceRefresh) {
-            when (val result = threadRepository.fetchThread(tid, authorId, page)) {
-                is YamiboResult.Success -> {
-                    updatePage(result)
-                    loadSucceeded = true
-                }
-
-                else -> {
-                    feedbackController.post(i18n("刷新失敗: {}，嘗試讀取緩存", i18n(result.message())))
-                    if (loadFromCache()) {
+        try {
+            if (forceRefresh) {
+                when (val result = threadRepository.fetchThread(tid, authorId, page)) {
+                    is YamiboResult.Success -> {
+                        updatePage(result)
                         loadSucceeded = true
-                    } else if (page == initialPage || page == 1) {
-                        state = ReaderState.Error(i18n(result.message()))
+                    }
+
+                    else -> {
+                        feedbackController.post(i18n("刷新失敗: {}，嘗試讀取緩存", i18n(result.message())))
+                        if (loadFromCache()) {
+                            loadSucceeded = true
+                        } else if (page == initialPage || page == 1) {
+                            state = ReaderState.Error(i18n(result.message()))
+                        }
+                    }
+                }
+            } else {
+                if (loadFromDownload()) return true
+                if (loadFromCache()) return true
+
+                when (val result = threadRepository.fetchThread(tid, authorId, page)) {
+                    is YamiboResult.Success -> {
+                        updatePage(result)
+                        loadSucceeded = true
+                    }
+
+                    else -> {
+                        if (autoTriggered && page != initialPage && page != 1) {
+                            failedAutoLoadPages[page] = i18n(result.message())
+                        }
+                        if (page == initialPage || page == 1) state = ReaderState.Error(i18n(result.message()))
+                        else feedbackController.post(i18n("載入失敗: {}", i18n(result.message())))
                     }
                 }
             }
-        } else {
-            if (loadFromDownload()) {
-                isLoadingNextPage = false
-                return true
-            }
-
-            if (loadFromCache()) {
-                isLoadingNextPage = false
-                return true
-            }
-
-            when (val result = threadRepository.fetchThread(tid, authorId, page)) {
-                is YamiboResult.Success -> {
-                    updatePage(result)
-                    loadSucceeded = true
-                }
-
-                else -> {
-                    if (autoTriggered && page != initialPage && page != 1) {
-                        failedAutoLoadPages[page] = i18n(result.message())
-                    }
-                    if (page == initialPage || page == 1) state = ReaderState.Error(i18n(result.message()))
-                    else feedbackController.post(i18n("載入失敗: {}", i18n(result.message())))
-                }
-            }
+            return loadSucceeded
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Logger.w("ThreadReaderScreen", "Failed to load reader page", error)
+            if (posts.isEmpty()) state = ReaderState.Error(i18n("載入失敗，請重試"))
+            else feedbackController.post(i18n("載入失敗，請重試"))
+            return false
+        } finally {
+            isLoadingNextPage = false
         }
-        isLoadingNextPage = false
-        return loadSucceeded
     }
 
     refreshThreadAfterVote = {
@@ -2896,9 +2910,44 @@ internal fun ThreadReaderScreen(
         )
     }
 
+    val latestSeekEntries by rememberUpdatedState(readerEntries)
+    val latestSeekPages by rememberUpdatedState(pageByPid)
+    suspend fun seekReader(fraction: Float) {
+        val position = fraction.coerceIn(0f, 1f) * totalPages.coerceAtLeast(1)
+        val page = (position.toInt() + 1).coerceIn(1, totalPages.coerceAtLeast(1))
+        if (!loadPage(page)) return
+        val entries = kotlinx.coroutines.withTimeoutOrNull(5_000) {
+            snapshotFlow {
+                latestSeekEntries.indices.filter {
+                    latestSeekPages[latestSeekEntries[it].post.pid.value.toLong()] == page
+                }
+            }.first { it.isNotEmpty() }
+        } ?: return
+        val withinPage = if (fraction >= 1f) 1f else position % 1f
+        val index = entries[(withinPage * entries.size).toInt().coerceIn(entries.indices)]
+        if (isSinglePageMode) setSinglePageEntryIndex(index)
+        listState.scrollToItem(if (isSinglePageMode) 0 else index)
+    }
+    me.thenano.yamibo.yamibo_app.navigation.StatusBarScrollToTop { seekReader(0f) }
+
     // Initial load + position restore
     LaunchedEffect(tid, initialPage, targetPid) {
-        loadPage(initialPage)
+        val located = targetPid?.let { pid ->
+            try {
+                val result = threadRepository.fetchFindPost(tid, pid, authorId)
+                (result as? YamiboResult.Success)?.value
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Logger.w("ThreadReaderScreen", "Could not locate target post", error)
+                null
+            }
+        }
+        val locatedPage = located?.pageNav?.currentPage
+        if (located != null && locatedPage != null) {
+            threadRepository.setCachedThread(tid, authorId, locatedPage, located)
+        }
+        loadPage(locatedPage ?: initialPage)
 
         /** Restore position from history if no explicit targetPid */
         if (!hasRestoredPosition && targetPid != null && threadHistoryOrigin != ReadHistoryRepository.ThreadHistoryOrigin.Direct) {
@@ -3667,7 +3716,7 @@ internal fun ThreadReaderScreen(
                                             }
                                         }
                                     }
-                                } else if (position.x in (size.width / 3f)..(size.width * 2f / 3f)) {
+                                } else {
                                     showMenu = !showMenu
                                     debugPerfLog("toggle_overlay|showMenu=$showMenu")
                                 }
@@ -4627,6 +4676,7 @@ internal fun ThreadReaderScreen(
                         pageByPid = pageByPid,
                         totalPages = totalPages,
                         initialPage = initialPage,
+                        onSeek = { fraction -> seekReader(fraction) },
                         slideBarModifier = Modifier
                             .align(Alignment.CenterEnd)
                             .padding(
@@ -4800,6 +4850,7 @@ internal fun ThreadReaderScreen(
                     NovelReaderSettingsPanel(
                         visible = showSettingsPanel,
                         appSettingsRepo = appSettingsRepo,
+                        showNovelReadingMode = threadType == ReadHistoryRepository.ThreadEntryType.Novel,
                         modifier = Modifier.align(Alignment.BottomCenter)
                     )
                 }
@@ -5412,6 +5463,7 @@ private fun ThreadReaderProgressOverlay(
     pageByPid: Map<Long, Int>,
     totalPages: Int,
     initialPage: Int,
+    onSeek: suspend (Float) -> Unit,
     @Suppress("ModifierParameter") slideBarModifier: Modifier,
     hintModifier: Modifier,
 ) {
@@ -5464,6 +5516,7 @@ private fun ThreadReaderProgressOverlay(
     ReaderPageProgressSlideBar(
         progress = progress,
         modifier = slideBarModifier,
+        onSeek = onSeek,
     )
     ReaderPageProgressHint(
         progress = progress,

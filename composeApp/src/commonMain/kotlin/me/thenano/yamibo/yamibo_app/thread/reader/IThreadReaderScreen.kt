@@ -1,6 +1,7 @@
 ﻿package me.thenano.yamibo.yamibo_app.thread.reader
 
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import me.thenano.yamibo.yamibo_app.util.state
 import io.github.littlesurvival.dto.value.PostId
 import io.github.littlesurvival.dto.value.TagId
 import io.github.littlesurvival.dto.value.ThreadId
@@ -85,23 +86,56 @@ class IThreadReaderScreen(
 
     @Composable
     override fun Content() {
-        ThreadReaderScreen(
-            tid = tid,
-            title = title,
-            threadType = threadType,
-            authorId = authorId,
-            initialPage = initialPage,
-            targetPid = targetPid,
-            catalogCoverTargetType = catalogCoverTargetType,
-            catalogCoverTargetId = catalogCoverTargetId,
-            catalogTagId = catalogTagId,
-            catalogTagName = catalogTagName,
-            catalogTagPage = catalogTagPage,
-            catalogRssSubscriptionId = catalogRssSubscriptionId,
-            catalogRssTitle = catalogRssTitle,
-            catalogRssQuery = catalogRssQuery,
-            catalogRssPage = catalogRssPage,
-        )
+        val isNovel = threadType == ReadHistoryRepository.ThreadEntryType.Novel
+        val forumMode = isNovel &&
+            me.thenano.yamibo.yamibo_app.LocalNovelReaderSettingsRepository.current.forumReadingMode.state()
+        val repository = me.thenano.yamibo.yamibo_app.LocalThreadRepository.current
+        var resolvedAuthor by remember(tid, authorId) { mutableStateOf(authorId) }
+        var authorLookupFailed by remember(tid) { mutableStateOf(false) }
+        var authorRetry by remember(tid) { mutableIntStateOf(0) }
+        LaunchedEffect(tid, isNovel, authorId, authorRetry) {
+            if (!isNovel || resolvedAuthor != null) return@LaunchedEffect
+            authorLookupFailed = false
+            try {
+                val page = repository.getCachedThread(tid, null, 1)
+                    ?: (repository.fetchThread(tid, null, 1) as? io.github.littlesurvival.core.YamiboResult.Success)?.value
+                resolvedAuthor = page?.posts?.firstOrNull { it.floor == 1 }?.author?.uid
+                authorLookupFailed = resolvedAuthor == null
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                authorLookupFailed = true
+            }
+        }
+        if (isNovel && !forumMode && resolvedAuthor == null) {
+            if (authorLookupFailed) {
+                me.thenano.yamibo.yamibo_app.thread.detail.novel.components.ThreadErrorContent(
+                    message = me.thenano.yamibo.yamibo_app.i18n.i18n("載入失敗，請重試"),
+                    onRetry = { authorRetry++ },
+                )
+            } else me.thenano.yamibo.yamibo_app.thread.detail.novel.components.ThreadLoadingSkeleton()
+            return
+        }
+        val effectiveAuthor = if (forumMode) null else resolvedAuthor
+        key(forumMode, effectiveAuthor) {
+            ThreadReaderScreen(
+                tid = tid,
+                title = title,
+                threadType = threadType,
+                authorId = effectiveAuthor,
+                initialPage = if (isNovel && (forumMode || authorId == null)) 1 else initialPage,
+                targetPid = targetPid,
+                catalogCoverTargetType = if (forumMode) null else catalogCoverTargetType,
+                catalogCoverTargetId = if (forumMode) null else catalogCoverTargetId,
+                catalogTagId = if (forumMode) null else catalogTagId,
+                catalogTagName = if (forumMode) null else catalogTagName,
+                catalogTagPage = if (forumMode) null else catalogTagPage,
+                catalogRssSubscriptionId = if (forumMode) null else catalogRssSubscriptionId,
+                catalogRssTitle = if (forumMode) null else catalogRssTitle,
+                catalogRssQuery = if (forumMode) null else catalogRssQuery,
+                catalogRssPage = if (forumMode) null else catalogRssPage,
+            )
+        }
     }
 
     companion object Decoder : TypedRestorableNavigatableDecoder<IThreadReaderScreen>(IThreadReaderScreen::class) {

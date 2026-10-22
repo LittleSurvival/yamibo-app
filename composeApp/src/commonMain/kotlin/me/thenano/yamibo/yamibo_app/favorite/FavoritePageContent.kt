@@ -336,6 +336,14 @@ internal fun FavoriteGridLayout(
     val gridState = gridStates.getOrPut(stateKey) { LazyGridState() }
     val staggeredGridState = staggeredGridStates.getOrPut(stateKey) { LazyStaggeredGridState() }
 
+    me.thenano.yamibo.yamibo_app.navigation.StatusBarScrollToTop {
+        when (favoriteGridMode) {
+            FavoriteGridMode.FIXED_GRID -> gridState.scrollToItem(0)
+            FavoriteGridMode.STAGGERED -> staggeredGridState.scrollToItem(0)
+            else -> listState.scrollToItem(0)
+        }
+    }
+
     when (favoriteGridMode) {
         FavoriteGridMode.FIXED_GRID -> {
             Box(Modifier.fillMaxSize()) {

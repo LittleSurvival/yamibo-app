@@ -571,7 +571,10 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
                 is HistoryState.Success -> {
                     val totalPages = ceil(current.totalCount.toDouble() / PAGE_SIZE).toInt()
                     key(current.currentPage) {
+                        val topScrollState = androidx.compose.foundation.lazy.rememberLazyListState()
+                        me.thenano.yamibo.yamibo_app.navigation.StatusBarScrollToTop { topScrollState.scrollToItem(0) }
                         LazyColumn(
+                            state = topScrollState,
                             modifier = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(top = 8.dp, bottom = 8.dp)
                         ) {
