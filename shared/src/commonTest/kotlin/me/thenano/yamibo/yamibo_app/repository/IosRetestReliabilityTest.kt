@@ -91,6 +91,15 @@ class IosRetestReliabilityTest {
         index.addPage(page(1, 1, post(1, true), post(2, html = quote(1)), post(3, true), post(4, html = quote(2))))
         assertEquals(listOf(2, 4), ids(index, 1))
     }
+    @Test fun depthLimitForOneReplyDoesNotPoisonShorterReplyChains() {
+        val index = ChapterCommentIndex(tid, author)
+        val chain = (10..60).map { id -> post(id, html = quote(if (id == 60) 1 else id + 1)) }
+        index.addPage(page(1, 1, post(1, true), post(3, true), *chain.toTypedArray()))
+        val firstChapter = ids(index, 1)
+        assertFalse(10 in firstChapter)
+        assertTrue(30 in firstChapter)
+        assertTrue(60 in firstChapter)
+    }
     @Test fun ambiguousMissingAndCyclicReferencesFallBack() {
         val index = ChapterCommentIndex(tid, author)
         index.addPage(page(1, 1, post(1, true), post(2), post(3, true),
