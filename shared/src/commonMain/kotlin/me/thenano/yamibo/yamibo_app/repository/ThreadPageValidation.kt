@@ -8,10 +8,12 @@ import io.github.littlesurvival.dto.value.ThreadId
 /** A parser's successful empty snapshot is not evidence of an empty discussion. */
 fun ThreadPage.isValidThreadPage(tid: ThreadId, target: PostId? = null, page: Int? = null): Boolean {
     val nav = pageNav
+    val currentPage = nav?.currentPage ?: 1
+    val totalPages = nav?.totalPages ?: currentPage
     return thread.tid == tid && posts.isNotEmpty() && posts.all { it.pid.value > 0 } &&
         (target == null || posts.any { it.pid == target }) &&
-        (nav == null || nav.currentPage > 0 && nav.totalPages >= nav.currentPage) &&
-        (page == null || (nav?.currentPage ?: 1) == page)
+        currentPage > 0 && totalPages >= currentPage &&
+        (page == null || currentPage == page)
 }
 
 fun YamiboResult<ThreadPage>.validatedThreadPage(
