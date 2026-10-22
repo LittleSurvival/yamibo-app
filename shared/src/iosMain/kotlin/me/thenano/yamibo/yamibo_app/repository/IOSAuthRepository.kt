@@ -1,5 +1,7 @@
 package me.thenano.yamibo.yamibo_app.repository
 
+import me.thenano.yamibo.yamibo_app.util.auth.setNativeCookies
+
 import io.github.littlesurvival.YamiboClient
 import io.github.littlesurvival.YamiboRoute
 import io.github.littlesurvival.core.YamiboResult
@@ -37,7 +39,7 @@ class IOSAuthRepository(
     override suspend fun fetchStatus(): YamiboResult<Boolean> {
         if (!isLoggedIn()) return YamiboResult.Failure(i18n("查無登入資料，請重新登入"))
 
-        yamiboClient.setCookie(cookieStore.load() ?: "")
+        yamiboClient.setNativeCookies(cookieStore.load() ?: "")
         when (val profileResult = yamiboClient.fetchProfileInfo()) {
             is YamiboResult.Success -> {
                 userStore.save(profileResult.value)
@@ -111,7 +113,7 @@ class IOSAuthRepository(
             }
             val cookieHeader = cookieStrings.joinToString("; ")
             cookieStore.save(cookieHeader)
-            yamiboClient.setCookie(cookieHeader, importNox = true)
+            yamiboClient.setNativeCookies(cookieHeader, importNox = true)
             restoreCookiesToWebView()
         }
     }

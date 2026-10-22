@@ -31,6 +31,8 @@ import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
+import me.thenano.yamibo.yamibo_app.repository.isValidThreadPage
+import me.thenano.yamibo.yamibo_app.repository.validatedThreadPage
 import me.thenano.yamibo.yamibo_app.repository.inapplinknavigation.InAppLinkContext
 import me.thenano.yamibo.yamibo_app.thread.detail.novel.components.ThreadErrorContent
 import me.thenano.yamibo.yamibo_app.thread.detail.novel.components.ThreadLoadingSkeleton
@@ -215,7 +217,7 @@ internal fun CommentReaderScreen(
     }
 
     suspend fun reloadComments() {
-        when (val result = threadRepository.fetchFindPost(tid, oPostId)) {
+        when (val result = threadRepository.fetchFindPost(tid, oPostId).validatedThreadPage(tid, oPostId)) {
             is YamiboResult.Success -> {
                 currentFullPage = result.value.pageNav?.currentPage ?: 1
                 totalFullPages = result.value.pageNav?.totalPages ?: 1
@@ -413,9 +415,10 @@ internal fun CommentReaderScreen(
 
                                                     // Check full page cache first
                                                     val cachedPage = novelCache.getCachedFullPage(tid, nextPage)
+                                                        ?.takeIf { it.isValidThreadPage(tid, page = nextPage) }
                                                     val threadPage = cachedPage
                                                         ?: when (val result =
-                                                            threadRepository.fetchThread(tid, null, nextPage)) {
+                                                            threadRepository.fetchThread(tid, null, nextPage).validatedThreadPage(tid, page = nextPage)) {
                                                             is YamiboResult.Success -> result.value
                                                             else -> {
                                                                 feedbackController.post(i18n("載入失敗: {}", i18n(result.message())))

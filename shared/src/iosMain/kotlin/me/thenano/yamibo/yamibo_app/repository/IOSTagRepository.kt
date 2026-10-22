@@ -1,5 +1,7 @@
 package me.thenano.yamibo.yamibo_app.repository
 
+import me.thenano.yamibo.yamibo_app.util.auth.setNativeCookies
+
 import io.github.littlesurvival.YamiboClient
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.model.Tags
@@ -19,7 +21,7 @@ class IOSTagRepository(
     private val tagCache = diskCacheFactory.create<TagPage>("tag_page", maxSize = 10, expiration = 24.hours)
 
     override suspend fun fetchTagPage(tagId: TagId, page: Int): YamiboResult<TagPage> {
-        yamiboClient.setCookie(cookieStore.load() ?: "")
+        yamiboClient.setNativeCookies(cookieStore.load() ?: "")
         val result = yamiboClient.fetchTagPageById(tagId, page)
         if (result is YamiboResult.Success) {
             tagCache.set(TagRepository.TagCacheKey(tagId.value, page).toCacheKey(), result.value)
@@ -28,7 +30,7 @@ class IOSTagRepository(
     }
 
     override suspend fun fetchExtractTags(tid: ThreadId): YamiboResult<Tags> {
-        yamiboClient.setCookie(cookieStore.load() ?: "")
+        yamiboClient.setNativeCookies(cookieStore.load() ?: "")
         return yamiboClient.fetchExtractTagsInThreadById(tid)
     }
 
