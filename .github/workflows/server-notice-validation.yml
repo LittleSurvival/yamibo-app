@@ -1,0 +1,28 @@
+name: Server notice native validation
+on:
+  push:
+    branches: [stable-v0.0.9-server-notice-31a82bd-a01dfc4-validation]
+    paths-ignore: ['validation/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  apple:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Record toolchain
+        run: |
+          xcodebuild -version
+          java -version
+          chmod +x gradlew
+      - name: Compile shared iOS code
+        run: ./gradlew :shared:compileKotlinIosSimulatorArm64 --console=plain
+      - name: Compile iOS app integration
+        run: ./gradlew :composeApp:compileKotlinIosSimulatorArm64 --console=plain
