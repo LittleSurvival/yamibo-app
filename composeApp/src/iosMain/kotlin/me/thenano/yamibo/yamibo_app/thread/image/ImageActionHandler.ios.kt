@@ -16,7 +16,7 @@ import platform.Photos.*
 import kotlinx.coroutines.withContext
 import org.jetbrains.skia.EncodedImageFormat
 import org.jetbrains.skia.Image
-import org.jetbrains.skia.use
+import org.jetbrains.skia.impl.use
 import platform.Foundation.NSData
 import platform.Foundation.dataWithBytes
 import platform.UIKit.*
