@@ -78,6 +78,7 @@ private data class SavedRssFavorite(
 
 @Composable
 fun SearchScreen(fid: ForumId?) {
+    val errorMessages = LocalForumErrorMessageResolver.current
     val colors = YamiboTheme.colors
     val forumRepository = LocalForumRepository.current
     val authRepository = LocalAuthRepository.current
@@ -168,7 +169,7 @@ fun SearchScreen(fid: ForumId?) {
                     }
                 }
 
-                else -> SearchState.Error(i18n(result.message()))
+                else -> SearchState.Error(i18n(errorMessages.resolve(result)))
             }
         }
     }

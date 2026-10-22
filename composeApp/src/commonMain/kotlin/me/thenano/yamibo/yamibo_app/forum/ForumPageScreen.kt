@@ -1,5 +1,6 @@
 package me.thenano.yamibo.yamibo_app.forum
 
+import me.thenano.yamibo.yamibo_app.LocalForumErrorMessageResolver
 import YamiboIcons
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -64,6 +65,7 @@ private data class ForumPageSnapshot(
 /** Main Forum Screen Entry */
 @Composable
 fun ForumPageScreen(fid: ForumId, name: String) {
+    val errorMessages = LocalForumErrorMessageResolver.current
     val colors = YamiboTheme.colors
     val forumRepository = LocalForumRepository.current
     val authRepository = LocalAuthRepository.current
@@ -108,7 +110,7 @@ fun ForumPageScreen(fid: ForumId, name: String) {
                     ForumState.Success(result.value)
                 }
 
-                else -> ForumState.Error(i18n(result.message()))
+                else -> ForumState.Error(i18n(errorMessages.resolve(result)))
             }
     }
 
@@ -206,7 +208,7 @@ fun ForumPageScreen(fid: ForumId, name: String) {
                                 message = if (result is YamiboResult.Success) {
                                     i18n("已解除本版收藏")
                                 } else {
-                                    i18n(result.message())
+                                    i18n(errorMessages.resolve(result))
                                 },
                                 groupKey = feedbackGroup,
                             )
@@ -217,7 +219,7 @@ fun ForumPageScreen(fid: ForumId, name: String) {
                                 message = if (result is YamiboResult.Success) {
                                     i18n("已收藏本版")
                                 } else {
-                                    i18n(result.message())
+                                    i18n(errorMessages.resolve(result))
                                 },
                                 groupKey = feedbackGroup,
                             )
@@ -274,7 +276,7 @@ fun ForumPageScreen(fid: ForumId, name: String) {
                                     }
 
                                     else -> {
-                                        val msg = i18n(result.message())
+                                        val msg = i18n(errorMessages.resolve(result))
                                         feedbackController.post(
                                             message = i18n("刷新失敗：{}", msg),
                                             duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short

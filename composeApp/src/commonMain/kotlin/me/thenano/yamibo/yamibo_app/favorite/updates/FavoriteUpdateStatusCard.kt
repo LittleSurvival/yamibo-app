@@ -1,5 +1,6 @@
 ﻿package me.thenano.yamibo.yamibo_app.favorite.updates
 
+import me.thenano.yamibo.yamibo_app.components.feedback.forumErrorMessage
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 
 
@@ -95,7 +96,7 @@ fun FavoriteUpdateStatusCard(
 
             snapshot.warningMessage?.takeIf { it.isNotBlank() }?.let {
                 Text(
-                    text = it.lineSequence().lastOrNull().orEmpty(),
+                    text = forumErrorMessage(it).lineSequence().lastOrNull().orEmpty(),
                     color = colors.brownDeep,
                     fontSize = 12.sp,
                     maxLines = 1,
@@ -104,7 +105,7 @@ fun FavoriteUpdateStatusCard(
             }
             snapshot.errorMessage?.takeIf { it.isNotBlank() }?.let {
                 Text(
-                    text = it,
+                    text = forumErrorMessage(it),
                     color = Color(0xFFB74D42),
                     fontSize = 12.sp,
                     maxLines = 1,

@@ -1,5 +1,6 @@
 package me.thenano.yamibo.yamibo_app.repository
 
+import me.thenano.yamibo.yamibo_app.repository.servernotice.isForum524Failure
 import io.github.littlesurvival.YamiboClient
 import io.github.littlesurvival.YamiboRoute
 import io.github.littlesurvival.core.YamiboResult
@@ -54,6 +55,7 @@ class IOSAuthRepository(
             }
 
             is YamiboResult.Failure -> {
+                if (isForum524Failure(profileResult.reason)) return profileResult
                 return YamiboResult.Failure(i18n("獲取用戶資料失敗: {}", profileResult.reason))
             }
 

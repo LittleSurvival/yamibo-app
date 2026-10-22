@@ -48,6 +48,7 @@ internal fun TagDetailScreen(
     tagName: String,
     initialPage: Int? = null
 ) {
+    val errorMessages = LocalForumErrorMessageResolver.current
     val colors = YamiboTheme.colors
     val navigator = LocalNavigator.current
     val tagRepository = LocalTagRepository.current
@@ -197,7 +198,7 @@ internal fun TagDetailScreen(
                     TagDetailState.Success(correctedTagPage)
                 }
 
-                else -> TagDetailState.Error(i18n(result.message()))
+                else -> TagDetailState.Error(i18n(errorMessages.resolve(result)))
             }
     }
 
@@ -474,7 +475,7 @@ internal fun TagDetailScreen(
 
                                     else -> {
                                         feedbackController.post(
-                                            message = i18n("重新整理標籤頁失敗：{}", i18n(result.message())),
+                                            message = i18n("重新整理標籤頁失敗：{}", i18n(errorMessages.resolve(result))),
                                             duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short,
                                         )
                                     }
@@ -841,7 +842,7 @@ internal fun TagDetailScreen(
                     if (!ensureDownloadStorageReady()) return@launchDownloadTask
                     when (val result = downloadRepository.refreshTagMangaChapter(downloadKey)) {
                         is YamiboResult.Success -> feedbackController.post(i18n("已重新整理下載"))
-                        else -> feedbackController.post(i18n("重新整理下載失敗：{}", i18n(result.message())))
+                        else -> feedbackController.post(i18n("重新整理下載失敗：{}", i18n(errorMessages.resolve(result))))
                     }
                 }
             },

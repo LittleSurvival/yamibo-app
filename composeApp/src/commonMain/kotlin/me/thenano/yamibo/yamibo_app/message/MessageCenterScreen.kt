@@ -1,5 +1,6 @@
 package me.thenano.yamibo.yamibo_app.message
 
+import me.thenano.yamibo.yamibo_app.LocalForumErrorMessageResolver
 import YamiboIcons
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -66,6 +67,7 @@ fun MessageCenterScreen(
     mainTabTopBar: Boolean = false,
     onPrivateMessageUnreadChange: (Boolean) -> Unit = {},
 ) {
+    val errorMessages = LocalForumErrorMessageResolver.current
     val colors = YamiboTheme.colors
     val userSpaceRepository = LocalUserSpaceRepository.current
     val authRepository = LocalAuthRepository.current
@@ -102,7 +104,7 @@ fun MessageCenterScreen(
                 }
                 MessageCenterState.Success(content)
             }
-            else -> MessageCenterState.Error(i18n(result.message()))
+            else -> MessageCenterState.Error(i18n(errorMessages.resolve(result)))
         }
     }
 

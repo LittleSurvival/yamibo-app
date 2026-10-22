@@ -161,19 +161,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          dir="$RUNNER_TEMP/github-update-release"
-          rm -rf "$dir"
-          mkdir -p "$dir"
-          cp -R "$RUNNER_TEMP/published-update/github/update" "$dir/update"
-
-          git -C "$dir" init
-          git -C "$dir" config user.name "github-actions[bot]"
-          git -C "$dir" config user.email "github-actions[bot]@users.noreply.github.com"
-          git -C "$dir" remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
-          git -C "$dir" add update
-          git -C "$dir" commit -m "Mark update manifest ready"
-          git -C "$dir" branch -M update-release
-          git -C "$dir" push --force origin update-release
+          bash .github/scripts/publish-feed-directory.sh \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+            update-release "$RUNNER_TEMP/published-update/github/update" update
 
       - name: Start SSH agent for mirrors
         uses: webfactory/ssh-agent@v0.9.0
@@ -234,20 +224,8 @@ jobs:
           push_mirror() {
             local name="$1"
             local remote="$2"
-            local dir="$RUNNER_TEMP/mirror-$name"
-
-            rm -rf "$dir"
-            mkdir -p "$dir"
-            cp -R "$RUNNER_TEMP/published-update/$name/update" "$dir/update"
-
-            git -C "$dir" init
-            git -C "$dir" config user.name "github-actions[bot]"
-            git -C "$dir" config user.email "github-actions[bot]@users.noreply.github.com"
-            git -C "$dir" remote add origin "$remote"
-            git -C "$dir" add update
-            git -C "$dir" commit -m "Mark update manifest ready"
-            git -C "$dir" branch -M main
-            retry_git "$name main push" git -C "$dir" push --force origin main
+            bash .github/scripts/publish-feed-directory.sh \
+              "$remote" main "$RUNNER_TEMP/published-update/$name/update" update
           }
 
           push_mirror "gitee" "git@gitee.com:${MIRROR_OWNER}/${MIRROR_REPO}.git"

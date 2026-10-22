@@ -1,5 +1,6 @@
 package me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl
 
+import me.thenano.yamibo.yamibo_app.LocalForumErrorMessageResolver
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -47,6 +48,7 @@ internal fun VotersDialog(
     onLoad: suspend (PollOptionId?, Int) -> YamiboResult<VotersPopoutScreen>,
     onDismiss: () -> Unit,
 ) {
+    val errorMessages = LocalForumErrorMessageResolver.current
     val colors = YamiboTheme.colors
     val navigator = LocalNavigator.current
     var request by remember { mutableStateOf<Pair<PollOptionId?, Int>>(null to 1) }
@@ -60,7 +62,7 @@ internal fun VotersDialog(
         error = null
         when (val result = onLoad(request.first, request.second)) {
             is YamiboResult.Success -> screen = result.value
-            else -> error = i18n(result.message())
+            else -> error = i18n(errorMessages.resolve(result))
         }
         loading = false
     }

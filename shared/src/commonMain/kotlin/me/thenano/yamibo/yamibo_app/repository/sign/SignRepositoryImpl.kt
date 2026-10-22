@@ -1,5 +1,6 @@
 package me.thenano.yamibo.yamibo_app.repository.sign
 
+import me.thenano.yamibo.yamibo_app.repository.servernotice.isForum524Failure
 import io.github.littlesurvival.YamiboClient
 import io.github.littlesurvival.YamiboRoute
 import io.github.littlesurvival.core.ParseResult
@@ -226,6 +227,8 @@ class SignRepositoryImpl(
     }
 
     private fun toFriendlyFailure(reason: String): String {
+        // Cloudflare's 524 HTML also contains "cloudflare"; it is not a WAF challenge.
+        if (isForum524Failure(reason)) return reason
         val normalized = reason.lowercase()
         return if (
             normalized.contains("cloudflare") ||

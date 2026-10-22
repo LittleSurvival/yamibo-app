@@ -1,5 +1,6 @@
 package me.thenano.yamibo.yamibo_app.home
 
+import me.thenano.yamibo.yamibo_app.LocalForumErrorMessageResolver
 import YamiboIcons
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -65,9 +66,9 @@ internal sealed interface HomeState {
     data class Error(val message: String) : HomeState
 }
 
-internal fun HomeState.afterRefresh(result: YamiboResult<HomePage>): HomeState = when (result) {
+internal fun HomeState.afterRefresh(result: YamiboResult<HomePage>, failureMessage: String = result.message()): HomeState = when (result) {
     is YamiboResult.Success -> HomeState.Success(result.value)
-    else -> if (this is HomeState.Success) this else HomeState.Error(i18n(result.message()))
+    else -> if (this is HomeState.Success) this else HomeState.Error(i18n(failureMessage))
 }
 
 /** Main Entry */
@@ -75,6 +76,7 @@ internal fun HomeState.afterRefresh(result: YamiboResult<HomePage>): HomeState =
 fun HomePageScreen(
     onNewMessageStatusChange: (Boolean) -> Unit = {},
 ) {
+    val errorMessages = LocalForumErrorMessageResolver.current
     val colors = YamiboTheme.colors
     val forumRepository = LocalForumRepository.current
     val navigator = LocalNavigator.current
@@ -89,7 +91,7 @@ fun HomePageScreen(
         state =
             when (result) {
                 is YamiboResult.Success -> HomeState.Success(result.value)
-                else -> HomeState.Error(i18n(result.message()))
+                else -> HomeState.Error(i18n(errorMessages.resolve(result)))
             }
     }
 
@@ -114,10 +116,10 @@ fun HomePageScreen(
                 isRefreshing = true
                 try {
                     val result = forumRepository.fetchHomePage()
-                    state = state.afterRefresh(result)
+                    state = state.afterRefresh(result, errorMessages.resolve(result))
                     if (result !is YamiboResult.Success && state is HomeState.Success) {
                         feedbackController.post(
-                            message = i18n(result.message()),
+                            message = i18n(errorMessages.resolve(result)),
                             duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short,
                         )
                     }
@@ -157,7 +159,7 @@ fun HomePageScreen(
 
                                 else -> {
                                     feedbackController.post(
-                                        message = i18n(result.message()),
+                                        message = i18n(errorMessages.resolve(result)),
                                         duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short
                                     )
                                 }

@@ -1,5 +1,6 @@
 package me.thenano.yamibo.yamibo_app.thread.reader.components.tag
 
+import me.thenano.yamibo.yamibo_app.LocalForumErrorMessageResolver
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 
 import androidx.compose.foundation.BorderStroke
@@ -37,6 +38,7 @@ internal fun TagListScreen(
     tid: ThreadId,
     initialTags: List<TagValue>
 ) {
+    val errorMessages = LocalForumErrorMessageResolver.current
     val colors = YamiboTheme.colors
     val navigator = LocalNavigator.current
     val tagRepository = LocalTagRepository.current
@@ -58,7 +60,7 @@ internal fun TagListScreen(
                 }
                 else -> {
                     state = if (!forceRefresh) {
-                        TagListState.Error(i18n(result.message()))
+                        TagListState.Error(i18n(errorMessages.resolve(result)))
                     } else {
                         TagListState.Success // keep old tags if refresh fails but don't show error box
                     }

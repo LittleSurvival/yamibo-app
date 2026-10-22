@@ -1,5 +1,6 @@
 package me.thenano.yamibo.yamibo_app.userspace
 
+import me.thenano.yamibo.yamibo_app.LocalForumErrorMessageResolver
 import YamiboIcons
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
@@ -98,6 +99,7 @@ fun UserSpaceScreen(
     initialTab: UserSpaceSubPage = UserSpaceSubPage.Profile,
     mainTabTopBar: Boolean = false,
 ) {
+    val errorMessages = LocalForumErrorMessageResolver.current
     val colors = YamiboTheme.colors
     val repository = LocalUserSpaceRepository.current
     val authRepository = LocalAuthRepository.current
@@ -138,7 +140,7 @@ fun UserSpaceScreen(
                 currentPage = result.value.pageNumber() ?: page
                 UserSpaceState.Success(result.value)
             }
-            else -> UserSpaceState.Error(i18n(result.message()))
+            else -> UserSpaceState.Error(i18n(errorMessages.resolve(result)))
         }
     }
 
@@ -261,7 +263,7 @@ fun UserSpaceScreen(
                                     scope.launch {
                                         when (val result = repository.fetchAddFriendPopoutScreen(targetProfile.uid)) {
                                             is YamiboResult.Success -> addFriendPopout = result.value
-                                            else -> addFriendError = i18n(result.message())
+                                            else -> addFriendError = i18n(errorMessages.resolve(result))
                                         }
                                         isAddFriendLoading = false
                                     }
@@ -346,7 +348,7 @@ fun UserSpaceScreen(
                             )
                         }
                         else -> feedbackController.post(
-                            i18n("加為好友失敗：{}", i18n(result.message())),
+                            i18n("加為好友失敗：{}", i18n(errorMessages.resolve(result))),
                             duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short,
                         )
                     }
