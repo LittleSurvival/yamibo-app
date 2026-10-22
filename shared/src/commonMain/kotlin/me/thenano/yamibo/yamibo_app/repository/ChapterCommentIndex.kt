@@ -48,21 +48,27 @@ class ChapterCommentIndex(private val tid: ThreadId, private val authorId: UserI
 
         // Resolve only explicit evidence. An unreferenced intermediary must not turn
         // a guess into a confirmed chapter; cycles/missing/ambiguous targets fall back.
-        val memo = mutableMapOf<PostId, PostId?>()
-        fun resolve(id: PostId, path: Set<PostId>): PostId? {
-            if (id in memo) return memo[id]
-            if (path.size >= 32 || id in path) return null
+        val memo = mutableMapOf<PostId, PostId>()
+        fun resolve(id: PostId, path: Set<PostId>, budget: IntArray): PostId? {
+            memo[id]?.let { return it }
+            if (path.size >= 32 || id in path || budget[0]-- <= 0) return null
             val entry = byId[id] ?: return null
             if (entry.post.author.uid == authorId) return id
             if (entry.ambiguous || entry.references.isEmpty()) return null
-            val targets = entry.references.map { resolve(it, path + id) }
-            val result = targets.firstOrNull()?.takeIf { candidate -> targets.all { it == candidate } }
-            memo[id] = result
+            var result: PostId? = null
+            for (reference in entry.references) {
+                val target = resolve(reference, path + id, budget) ?: return null
+                if (result != null && target != result) return null
+                result = target
+            }
+            // A depth/budget failure is relative to its caller, so only successful
+            // resolutions can be reused for another comment's independent traversal.
+            if (result != null) memo[id] = result
             return result
         }
         return entries.filter { entry ->
             entry.post.author.uid != authorId &&
-                (resolve(entry.post.pid, emptySet()) ?: chronological[entry.post.pid]) == chapter
+                (resolve(entry.post.pid, emptySet(), intArrayOf(256)) ?: chronological[entry.post.pid]) == chapter
         }.map { it.post }
     }
 }
