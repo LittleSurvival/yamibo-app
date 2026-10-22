@@ -1,10 +1,10 @@
 @file:Suppress("FunctionName", "unused")
 
+package me.thenano.yamibo.yamibo_app
+
 import me.thenano.yamibo.yamibo_app.repository.servernotice.ForumErrorMessageResolver
 import me.thenano.yamibo.yamibo_app.repository.servernotice.DefaultServerNoticeRepository
 import me.thenano.yamibo.yamibo_app.repository.servernotice.ServerNoticeStore
-package me.thenano.yamibo.yamibo_app
-
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
