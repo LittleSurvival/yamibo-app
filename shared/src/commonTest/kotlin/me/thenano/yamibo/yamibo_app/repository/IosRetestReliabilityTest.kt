@@ -105,6 +105,13 @@ class IosRetestReliabilityTest {
             post(5, html = "<blockquote><a href='https://example.org/forum.php?goto=findpost&pid=1'>引用</a></blockquote>")))
         assertEquals(listOf(4, 5), ids(index, 3))
     }
+    @Test fun referenceFormatsPreserveConfiguredOrigin() {
+        val html = "<blockquote><a href='/forum.php?goto=findpost&amp;pid=1'>引用</a>" +
+            "<a href='?mod=viewthread&amp;tid=42#pid2'>引用</a></blockquote>"
+        val refs = explicitChapterReferences(html, tid, "http://127.0.0.1:8088/")
+        assertEquals(setOf(PostId(1), PostId(2)), refs.posts)
+        assertFalse(refs.ambiguous)
+    }
     @Test fun reloadingPageDeduplicatesAndRefreshClearsDerivedIndex() {
         val index = ChapterCommentIndex(tid, author)
         val original = page(1, 1, post(1, true), post(2))
