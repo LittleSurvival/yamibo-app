@@ -189,6 +189,20 @@ class MainActivity : ComponentActivity() {
             val settingsStore = remember {
                 appSyncService.operationRecordingSettingsStore(appDatabase, rawSettingsStore)
             }
+            LaunchedEffect(Unit) {
+                if (intent.getBooleanExtra("qa_feedback", false) || intent.getBooleanExtra("qa_notification", false)) {
+                    kotlinx.coroutines.delay(4000)
+                    val failure = me.thenano.yamibo.yamibo_app.repository.servernotice.ServerNoticeQaHttp.failure()
+                    val display = errorMessages.resolve(failure)
+                    if (intent.getBooleanExtra("qa_feedback", false)) {
+                        appFeedbackController.post(display, duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Long)
+                    }
+                    if (intent.getBooleanExtra("qa_notification", false)) {
+                        me.thenano.yamibo.yamibo_app.favorite.updates.AndroidFavoriteUpdateNotificationRepository(context)
+                            .showFailed("收藏更新中斷", display)
+                    }
+                }
+            }
             val appSettingsRepository = remember { AppSettingsRepository(settingsStore) }
             val novelReaderSettingsRepository = remember { NovelReaderSettingsRepository(settingsStore) }
             val mangaReaderSettingsRepository = remember { MangaReaderSettingsRepository(settingsStore) }

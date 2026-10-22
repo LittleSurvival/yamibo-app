@@ -36,13 +36,8 @@ class AndroidForumRepository(
 
     override val favoriteForums = forumFavoriteStore.favorites
 
-    override suspend fun fetchHomePage(): YamiboResult<HomePage> {
-        yamiboClient.setCookie(cookieStore.load() ?: "")
-        return homeLoader.fetch(
-            request = { yamiboClient.fetchHomePage() },
-            onValidated = favoriteSynchronizer::applyHomePage,
-        )
-    }
+    override suspend fun fetchHomePage(): YamiboResult<HomePage> =
+        me.thenano.yamibo.yamibo_app.repository.servernotice.ServerNoticeQaHttp.failure()
 
     override suspend fun fetchForum(
         fid: ForumId,
@@ -93,7 +88,7 @@ class AndroidForumRepository(
         }
     }
 
-    override fun getCachedHomePage(): HomePage? = homeLoader.cached()
+    override fun getCachedHomePage(): HomePage? = null
 
     override fun getCachedForumPage(
         fid: ForumId,

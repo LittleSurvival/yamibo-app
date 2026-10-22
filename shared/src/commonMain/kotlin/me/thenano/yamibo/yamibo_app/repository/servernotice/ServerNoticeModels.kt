@@ -24,7 +24,7 @@ data class ServerNotice(
 data class ServerNoticeSource(val name: String, val url: String)
 
 val defaultServerNoticeSources = listOf(
-    ServerNoticeSource("GitHub", "https://raw.githubusercontent.com/LittleSurvival/yamibo-app/update-release/status/forum-524.json"),
-    ServerNoticeSource("Gitee", "https://gitee.com/LittleSurvival/ymb-apk-release/raw/main/status/forum-524.json"),
-    ServerNoticeSource("Gitea", "https://gitea.com/api/v1/repos/LittleSurvival/ymb-apk-release/raw/status/forum-524.json?ref=main"),
+    ServerNoticeSource("GitHub", "http://10.0.2.2:8768/notice/1"),
+    ServerNoticeSource("Gitee", "http://10.0.2.2:8768/notice/2"),
+    ServerNoticeSource("Gitea", "http://10.0.2.2:8768/notice/3"),
 )
