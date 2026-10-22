@@ -45,6 +45,7 @@ internal sealed interface ThreadState {
 /** Main Thread Detail Screen */
 @Composable
 internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: UserId? = null) {
+    val errorMessages = LocalForumErrorMessageResolver.current
     val colors = YamiboTheme.colors
     val appSettingsRepo = LocalAppSettingsRepository.current
     val threadRepository = LocalThreadRepository.current
@@ -301,7 +302,7 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
                     pagePostsCache[page] = result.value.posts
                     ThreadState.Success(result.value)
                 }
-                else -> ThreadState.Error(i18n(result.message()))
+                else -> ThreadState.Error(i18n(errorMessages.resolve(result)))
             }
     }
 
@@ -372,7 +373,7 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
 
                                     else -> {
                                         feedbackController.post(
-                                            message = i18n("重新整理帖子失敗：{}", i18n(result.message())),
+                                            message = i18n("重新整理帖子失敗：{}", i18n(errorMessages.resolve(result))),
                                             duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short,
                                         )
                                     }
@@ -411,7 +412,7 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
                                             pagePostsCache[page] = result.value.posts
                                         } else {
                                             feedbackController.post(
-                                                message = i18n("載入第 {} 頁失敗: {}", page, i18n(result.message())),
+                                                message = i18n("載入第 {} 頁失敗: {}", page, i18n(errorMessages.resolve(result))),
                                                 duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short
                                             )
                                         }

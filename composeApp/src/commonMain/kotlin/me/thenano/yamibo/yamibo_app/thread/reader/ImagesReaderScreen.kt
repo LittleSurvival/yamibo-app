@@ -113,6 +113,7 @@ fun ImagesReaderScreen(
     rssTotalPages: Int? = null,
     rssThreads: List<ThreadSummary>? = null,
 ) {
+    val errorMessages = LocalForumErrorMessageResolver.current
     SystemBarsEffect(
         statusBarColor = Color.Black,
         navigationBarColor = Color.Black,
@@ -1637,7 +1638,7 @@ fun ImagesReaderScreen(
                                             feedbackController.post(i18n("已重新整理下載"))
                                         }
                                         else -> {
-                                            feedbackController.post(i18n("重新整理下載失敗：{}", i18n(result.message())))
+                                            feedbackController.post(i18n("重新整理下載失敗：{}", i18n(errorMessages.resolve(result))))
                                         }
                                     }
                                     isLoadingImages = false

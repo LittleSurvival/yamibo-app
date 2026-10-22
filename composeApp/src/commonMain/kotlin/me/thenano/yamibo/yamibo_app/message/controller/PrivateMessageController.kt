@@ -1,5 +1,6 @@
 package me.thenano.yamibo.yamibo_app.message.controller
 
+import me.thenano.yamibo.yamibo_app.repository.servernotice.ForumErrorMessageResolver
 import androidx.compose.runtime.*
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.page.PrivateMessagePage
@@ -21,6 +22,7 @@ internal class PrivateMessageController(
     private val cachedPage: (Int?) -> PrivateMessagePage?,
     private val fetchPage: suspend (Int?) -> YamiboResult<PrivateMessagePage>,
     private val onRefreshFailure: (afterSend: Boolean, reason: String) -> Unit,
+    private val errorMessages: ForumErrorMessageResolver,
 ) {
     private val initialPage = cachedPage(null)
     var state by mutableStateOf(initialPage?.let(PrivateMessageState::Success) ?: PrivateMessageState.Loading)
@@ -58,8 +60,11 @@ internal class PrivateMessageController(
                 else -> {
                     val cause = (result as? YamiboResult.Failure)?.exception
                     if (cause is CancellationException) throw cause
-                    if (previous != null) onRefreshFailure(afterSend, result.message())
-                    else state = PrivateMessageState.Error(result.message())
+                    val message = errorMessages.resolve(result)
+                    coroutineContext.ensureActive()
+                    if (id != requestId) return@coroutineScope
+                    if (previous != null) onRefreshFailure(afterSend, message)
+                    else state = PrivateMessageState.Error(message)
                 }
             }
         } catch (cancelled: CancellationException) {

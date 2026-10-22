@@ -1,5 +1,6 @@
 package me.thenano.yamibo.yamibo_app.userspace.blog
 
+import me.thenano.yamibo.yamibo_app.LocalForumErrorMessageResolver
 import YamiboIcons
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -59,6 +60,7 @@ fun BlogReaderScreen(
     userId: UserId? = null,
     titleHint: String? = null,
 ) {
+    val errorMessages = LocalForumErrorMessageResolver.current
     val colors = YamiboTheme.colors
     val repository = LocalBlogRepository.current
     val authRepository = LocalAuthRepository.current
@@ -94,7 +96,7 @@ fun BlogReaderScreen(
                 currentPage = result.value.pageNav?.currentPage ?: page
                 BlogReaderState.Success(result.value)
             }
-            else -> BlogReaderState.Error(i18n(result.message()))
+            else -> BlogReaderState.Error(i18n(errorMessages.resolve(result)))
         }
     }
 
@@ -204,7 +206,7 @@ fun BlogReaderScreen(
                                                     )
                                                 }
                                                 else -> {
-                                                    val reason = i18n(result.message())
+                                                    val reason = i18n(errorMessages.resolve(result))
                                                     me.thenano.yamibo.yamibo_app.task.AppTaskResult.Failure(
                                                         message = reason,
                                                         feedback = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackEvent(reason),

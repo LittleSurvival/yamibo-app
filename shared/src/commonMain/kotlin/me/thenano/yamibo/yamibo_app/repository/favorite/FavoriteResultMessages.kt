@@ -1,5 +1,6 @@
 package me.thenano.yamibo.yamibo_app.repository.favorite
 
+import me.thenano.yamibo.yamibo_app.repository.servernotice.isForum524Failure
 import io.github.littlesurvival.core.YamiboResult
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 
@@ -55,6 +56,8 @@ internal fun YamiboResult<*>.favoriteUpdateFailureReason(
 }
 
 internal fun truncateFavoriteMessage(message: String, maxChars: Int = 100): String {
+    // Keep the complete HTTP envelope for presentation-time notice resolution and diagnostics.
+    if (isForum524Failure(message)) return message
     val normalized = message
         .replace(Regex("\\s+"), " ")
         .trim()

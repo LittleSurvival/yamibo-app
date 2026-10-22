@@ -1,5 +1,6 @@
 package me.thenano.yamibo.yamibo_app.message
 
+import me.thenano.yamibo.yamibo_app.LocalForumErrorMessageResolver
 import YamiboIcons
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -51,6 +52,7 @@ fun PrivateMessageScreen(
 
 @Composable
 private fun PrivateMessageContent(toUser: UserId, titleHint: String?) {
+    val errorMessages = LocalForumErrorMessageResolver.current
     val colors = YamiboTheme.colors
     val repository = LocalUserSpaceRepository.current
     val authRepository = LocalAuthRepository.current
@@ -63,6 +65,7 @@ private fun PrivateMessageContent(toUser: UserId, titleHint: String?) {
     val listState = rememberLazyListState()
     val controller = remember(toUser, repository, feedbackController) {
         PrivateMessageController(
+            errorMessages = errorMessages,
             cachedPage = { repository.getCachedPrivateMessagePage(toUser, it) },
             fetchPage = { repository.fetchPrivateMessagePage(toUser, it) },
             onRefreshFailure = { afterSend, reason ->
@@ -130,7 +133,7 @@ private fun PrivateMessageContent(toUser: UserId, titleHint: String?) {
                                     me.thenano.yamibo.yamibo_app.task.AppTaskResult.Success()
                                 }
                                 else -> {
-                                    val reason = i18n(result.message())
+                                    val reason = i18n(errorMessages.resolve(result))
                                     me.thenano.yamibo.yamibo_app.task.AppTaskResult.Failure(
                                         message = reason,
                                         feedback = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackEvent(reason),

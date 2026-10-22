@@ -1,5 +1,6 @@
 package me.thenano.yamibo.yamibo_app
 
+import me.thenano.yamibo.yamibo_app.repository.servernotice.ForumErrorMessageResolver
 import androidx.compose.animation.*
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.tween
@@ -128,6 +129,7 @@ fun HomeScreenContent(
 
 @Composable
 fun App() {
+    val errorMessages = LocalForumErrorMessageResolver.current
     val imageLoaderFactory = remember {
         { context: PlatformContext ->
             ImageLoader.Builder(context)
@@ -326,6 +328,7 @@ fun App() {
                 onGoSign = {
                     signReminder.suppress()
                     navigateToSignWebViewOrProfile(
+                        errorMessages = errorMessages,
                         navigator = navigator,
                         appSettingsRepository = appSettingsRepository,
                         authRepository = authRepository,
@@ -372,6 +375,7 @@ fun App() {
             signReminder.suppress()
             showSignWebViewTrigger.value = false
             navigateToSignWebViewOrProfile(
+                        errorMessages = errorMessages,
                 navigator = navigator,
                 appSettingsRepository = appSettingsRepository,
                 authRepository = authRepository,
@@ -455,6 +459,7 @@ private fun AppFeedbackHost(
     controller: AppFeedbackController,
     modifier: Modifier = Modifier,
 ) {
+    val errorMessages = LocalForumErrorMessageResolver.current
     val hostState = remember { SnackbarHostState() }
     LaunchedEffect(controller) {
         controller.deliveries.collect { delivery ->
@@ -474,7 +479,7 @@ private fun AppFeedbackHost(
                 }
                 try {
                     hostState.showSnackbar(
-                        message = event.message,
+                        message = errorMessages.resolve(event.message),
                         actionLabel = event.actionLabel,
                         withDismissAction = event.withDismissAction,
                         duration = when (event.duration) {
@@ -668,6 +673,7 @@ private fun navigateToSignWebViewOrProfile(
     signRepository: SignRepository,
     appTaskManager: AppTaskManager,
     feedbackController: AppFeedbackController,
+    errorMessages: ForumErrorMessageResolver,
 ) {
     if (authRepository.currentUser() == null) return
     val isDirect = appSettingsRepository.signInDirectWebView.getValue()
@@ -705,7 +711,7 @@ private fun navigateToSignWebViewOrProfile(
                                 if (shouldEmitSignStatusChanged(result)) {
                                     AppEventBus.emit(SignStatusChangedEvent)
                                 }
-                                feedbackController.post(result.signActionFeedbackMessage())
+                                feedbackController.post(errorMessages.resolve(result.signActionFeedbackMessage()))
                             }
                         },
                         onMaintenanceObserved = {

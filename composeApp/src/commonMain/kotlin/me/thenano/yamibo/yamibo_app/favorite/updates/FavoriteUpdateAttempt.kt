@@ -22,7 +22,7 @@ internal suspend fun runFavoriteUpdateAttempt(
     repository: FavoriteUpdateRepository,
     runId: String,
     nowMillis: () -> Long,
-    onProgress: (FavoriteUpdateRepository.RunSnapshot) -> Unit,
+    onProgress: suspend (FavoriteUpdateRepository.RunSnapshot) -> Unit,
     budgetMillis: Long = 8 * 60_000L,
 ): FavoriteUpdateAttemptResult = coroutineScope {
     val initialStatus = repository.getRunSnapshot(runId)?.status
