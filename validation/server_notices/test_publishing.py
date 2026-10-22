@@ -7,6 +7,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location("publisher", ROOT / ".github/scripts/publish-server-notice.py")
@@ -92,6 +93,11 @@ class PublishingTest(unittest.TestCase):
     def test_workflows_preserve_notice_and_share_lock(self):
         for name in ["publish-server-notice", "sync-update-mirrors", "manual-ready", "release", "manual-stop-update"]:
             text = (ROOT / f".github/workflows/{name}.yml").read_text(encoding="utf-8")
+            workflow = yaml.load(text, Loader=yaml.BaseLoader)
+            self.assertIsInstance(workflow["jobs"], dict)
+            for job in workflow["jobs"].values():
+                for step in job.get("steps", []):
+                    if "run" in step: self.assertIsInstance(step["run"], str)
             self.assertIn("group: mirror-publish-${{ github.repository }}", text)
             self.assertNotIn("push --force origin main", text)
             self.assertNotIn("push --force origin update-release", text)
