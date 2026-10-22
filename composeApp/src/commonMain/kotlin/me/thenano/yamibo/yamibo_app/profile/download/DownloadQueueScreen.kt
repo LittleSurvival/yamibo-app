@@ -274,6 +274,8 @@ private fun DownloadQueueTab(
     onResumeAll: () -> Unit,
     onRetry: (DownloadQueueEntry) -> Unit,
 ) {
+    // Presentation order is independent of the repository's execution order.
+    val newestFirstEntries = remember(entries) { entries.sortedByDescending { it.queuedAt } }
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -292,7 +294,7 @@ private fun DownloadQueueTab(
         if (entries.isEmpty()) {
             item { EmptyDownloadQueueCard() }
         } else {
-            items(entries, key = { it.key.stableId }) { entry ->
+            items(newestFirstEntries, key = { it.key.stableId }) { entry ->
                 DownloadQueueEntryCard(entry = entry, onRetry = { onRetry(entry) })
             }
         }

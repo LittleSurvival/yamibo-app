@@ -133,6 +133,8 @@ data class DownloadQueueEntry(
     val stage: DownloadStage? = null,
     val message: String? = null,
     val updatedAt: Long = 0L,
+    // Legacy queues have only updatedAt; use it once when decoding older entries.
+    val queuedAt: Long = updatedAt,
 )
 
 data class DownloadQueueSummary(

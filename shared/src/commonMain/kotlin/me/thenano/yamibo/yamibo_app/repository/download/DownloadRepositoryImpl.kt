@@ -1008,8 +1008,9 @@ class DownloadRepositoryImpl(
 
     private fun upsert(entry: DownloadQueueEntry) {
         _queue.update { entries ->
+            val previous = entries.firstOrNull { it.key == entry.key }
             val without = entries.filterNot { it.key == entry.key }
-            (without + entry).sortedWith(compareBy { it.key.stableId })
+            (without + entry.preserveQueuedAt(previous)).sortedWith(compareBy { it.key.stableId })
         }
         backgroundController.onQueueChanged(queue.value)
         persistQueue()
@@ -1019,8 +1020,10 @@ class DownloadRepositoryImpl(
         if (newEntries.isEmpty()) return
         val newEntriesByKey = newEntries.associateBy { it.key }
         _queue.update { entries ->
+            val previousByKey = entries.associateBy { it.key }
             val without = entries.filterNot { it.key in newEntriesByKey }
-            (without + newEntriesByKey.values).sortedWith(compareBy { it.key.stableId })
+            val replacements = newEntriesByKey.values.map { it.preserveQueuedAt(previousByKey[it.key]) }
+            (without + replacements).sortedWith(compareBy { it.key.stableId })
         }
         backgroundController.onQueueChanged(queue.value)
         persistQueue()
@@ -1061,6 +1064,10 @@ class DownloadRepositoryImpl(
 
 internal const val DOWNLOAD_QUEUE_TERMINAL_RETENTION_MS: Long = 24L * 60L * 60L * 1000L
 private const val TAG = "DownloadRepository"
+
+private fun DownloadQueueEntry.preserveQueuedAt(previous: DownloadQueueEntry?): DownloadQueueEntry =
+    if (previous == null || status == DownloadStatus.Queued) this
+    else copy(queuedAt = previous.queuedAt)
 
 internal fun pruneExpiredQueueEntries(
     entries: List<DownloadQueueEntry>,
