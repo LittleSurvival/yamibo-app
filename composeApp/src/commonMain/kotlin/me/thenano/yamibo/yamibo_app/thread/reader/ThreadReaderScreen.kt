@@ -1,5 +1,9 @@
 package me.thenano.yamibo.yamibo_app.thread.reader
 
+import me.thenano.yamibo.yamibo_app.repository.fetchReaderStartPage
+import me.thenano.yamibo.yamibo_app.repository.isValidThreadPage
+import me.thenano.yamibo.yamibo_app.repository.validatedThreadPage
+
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -2660,6 +2664,7 @@ internal fun ThreadReaderScreen(
         suspend fun loadFromDownload(): Boolean {
             val downloadKey = ThreadPageDownloadKey(tid.value, page, authorId?.value)
             val downloaded = downloadRepository.getDownloadedPage(downloadKey)
+                ?.takeIf { it.isValidThreadPage(tid, page = page, authorId = authorId) }
                 ?: return false
             loadedPostsByPage[page] = downloaded.posts
             rebuildPosts()
@@ -2673,6 +2678,7 @@ internal fun ThreadReaderScreen(
 
         fun loadFromCache(): Boolean {
             val cached = threadRepository.getCachedThread(tid, authorId, page)
+                ?.takeIf { it.isValidThreadPage(tid, page = page, authorId = authorId) }
             if (cached != null) {
                 loadedPostsByPage[page] = cached.posts
                 rebuildPosts()
@@ -2698,7 +2704,8 @@ internal fun ThreadReaderScreen(
 
         try {
             if (forceRefresh) {
-                when (val result = threadRepository.fetchThread(tid, authorId, page)) {
+                when (val result = threadRepository.fetchThread(tid, authorId, page)
+                    .validatedThreadPage(tid, page = page, authorId = authorId)) {
                     is YamiboResult.Success -> {
                         updatePage(result)
                         loadSucceeded = true
@@ -2717,7 +2724,8 @@ internal fun ThreadReaderScreen(
                 if (loadFromDownload()) return true
                 if (loadFromCache()) return true
 
-                when (val result = threadRepository.fetchThread(tid, authorId, page)) {
+                when (val result = threadRepository.fetchThread(tid, authorId, page)
+                    .validatedThreadPage(tid, page = page, authorId = authorId)) {
                     is YamiboResult.Success -> {
                         updatePage(result)
                         loadSucceeded = true
@@ -2935,7 +2943,7 @@ internal fun ThreadReaderScreen(
     LaunchedEffect(tid, initialPage, targetPid) {
         val located = targetPid?.let { pid ->
             try {
-                val result = threadRepository.fetchFindPost(tid, pid, authorId)
+                val result = threadRepository.fetchReaderStartPage(tid, pid, authorId, initialPage)
                 (result as? YamiboResult.Success)?.value
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
@@ -2944,7 +2952,7 @@ internal fun ThreadReaderScreen(
                 null
             }
         }
-        val locatedPage = located?.pageNav?.currentPage
+        val locatedPage = located?.let { it.pageNav?.currentPage ?: 1 }
         if (located != null && locatedPage != null) {
             threadRepository.setCachedThread(tid, authorId, locatedPage, located)
         }

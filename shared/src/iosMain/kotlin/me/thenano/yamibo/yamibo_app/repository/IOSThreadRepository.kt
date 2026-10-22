@@ -35,7 +35,7 @@ class IOSThreadRepository(
     ): YamiboResult<ThreadPage> {
         yamiboClient.setNativeCookies(cookieStore.load() ?: "")
         val result = yamiboClient.fetchThreadById(tid, authorId, reverse, page)
-            .validatedThreadPage(tid, page = page)
+            .validatedThreadPage(tid, page = page, authorId = authorId)
 
         if (result is YamiboResult.Success) {
             if (!reverse) {
@@ -101,12 +101,14 @@ class IOSThreadRepository(
 
     override fun getCachedThread(tid: ThreadId, authorId: UserId?, page: Int): ThreadPage? {
         val key = ThreadRepository.ThreadCacheKey(tid.value, page, authorId?.value).toCacheKey()
-        return threadCache.get(key)
+        return threadCache.get(key)?.takeIf { it.isValidThreadPage(tid, page = page, authorId = authorId) }
     }
 
     override fun setCachedThread(tid: ThreadId, authorId: UserId?, page: Int, threadPage: ThreadPage) {
         val key = ThreadRepository.ThreadCacheKey(tid.value, page, authorId?.value).toCacheKey()
-        threadCache.set(key, threadPage)
+        if (threadPage.isValidThreadPage(tid, page = page, authorId = authorId)) {
+            threadCache.set(key, threadPage)
+        }
     }
 
     override fun clearCachedThread(tid: ThreadId) {
