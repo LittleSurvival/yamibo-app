@@ -77,6 +77,7 @@ import me.thenano.yamibo.yamibo_app.util.buildImageRequest
 import me.thenano.yamibo.yamibo_app.util.shareText
 import me.thenano.yamibo.yamibo_app.util.state
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
+import kotlin.math.roundToInt
 import kotlin.math.abs
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -1530,7 +1531,34 @@ fun ImagesReaderScreen(
             }
         }
 
+        me.thenano.yamibo.yamibo_app.navigation.StatusBarScrollToTop {
+            if (actualImageList.isNotEmpty()) {
+                setReaderPage(0)
+                resetZoom()
+                if (isScrollMode) scrollListState.scrollToItem(if (isCatalogMode) 1 else 0)
+            }
+        }
+
         /** Overlays (Not affected by graphicsLayer zoom) */
+
+        if (!showSettings && !showCatalog && actualImageList.isNotEmpty()) {
+            me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.ReaderPageProgressSlideBar(
+                progress = me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.ReaderPageProgress(
+                    currentPage + 1, actualImageList.size,
+                    currentPage.toFloat() / actualImageList.lastIndex.coerceAtLeast(1),
+                ),
+                modifier = Modifier.align(Alignment.CenterEnd).systemBarsPadding().padding(bottom = 48.dp),
+                thumbColor = Color.White.copy(alpha = 0.65f),
+                onSeek = { fraction ->
+                    if (actualImageList.isNotEmpty()) {
+                        val page = (fraction * actualImageList.lastIndex).roundToInt().coerceIn(actualImageList.indices)
+                        setReaderPage(page)
+                        if (isScrollMode) scrollListState.scrollToItem(page + if (isCatalogMode) 1 else 0)
+                        resetZoom()
+                    }
+                },
+            )
+        }
 
         // Page Indicator
         if (!showOverlay && actualImageList.isNotEmpty()) {

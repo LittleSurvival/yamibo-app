@@ -470,7 +470,10 @@ private fun SearchResultContent(
 ) {
     val colors = YamiboTheme.colors
     val navigator = LocalNavigator.current
+    val topScrollState = androidx.compose.foundation.lazy.rememberLazyListState()
+    me.thenano.yamibo.yamibo_app.navigation.StatusBarScrollToTop { topScrollState.scrollToItem(0) }
     LazyColumn(
+        state = topScrollState,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(0.dp),

@@ -17,6 +17,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -132,6 +136,7 @@ private fun ContextMenuContainer(
     val context = LocalPlatformContext.current
     val authRepo = LocalAuthRepository.current
     val scope = rememberCoroutineScope()
+    var actionInProgress by remember(imageUrl) { mutableStateOf(false) }
     
     val cookie = authRepo.cookieStore.load() ?: ""
     val referer = "https://bbs.yamibo.com/"
@@ -141,36 +146,44 @@ private fun ContextMenuContainer(
         onMessage?.invoke(message)
     }
 
+    fun runAction(action: suspend () -> ImageActionResult) {
+        if (actionInProgress) return
+        actionInProgress = true
+        scope.launch {
+            try {
+                handleResult(action())
+                onDismiss()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                onMessage?.invoke(i18n("圖片操作失敗，請重試"))
+            } finally {
+                actionInProgress = false
+            }
+        }
+    }
+
     @Composable
     fun ContextMenuActions() {
         ContextMenuItem(
             icon = YamiboIcons.Copy,
             label = i18n("複製"),
             onClick = {
-                scope.launch {
-                    handleResult(copyImageToClipboard(context, imageUrl, cookie, referer))
-                    onDismiss()
-                }
+                runAction { copyImageToClipboard(context, imageUrl, cookie, referer) }
             },
         )
         ContextMenuItem(
             icon = YamiboIcons.Share,
             label = i18n("分享"),
             onClick = {
-                scope.launch {
-                    handleResult(shareImageToApp(context, imageUrl, cookie, referer))
-                    onDismiss()
-                }
+                runAction { shareImageToApp(context, imageUrl, cookie, referer) }
             },
         )
         ContextMenuItem(
             icon = YamiboIcons.Save,
             label = i18n("儲存"),
             onClick = {
-                scope.launch {
-                    handleResult(saveImageToGallery(context, imageUrl, cookie, referer))
-                    onDismiss()
-                }
+                runAction { saveImageToGallery(context, imageUrl, cookie, referer) }
             },
         )
         if (onSetAsCover != null) {

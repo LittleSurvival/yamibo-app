@@ -73,6 +73,7 @@ internal fun CommentReaderScreen(
     val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
     val platformContext = LocalPlatformContext.current
     val listState = rememberLazyListState()
+    me.thenano.yamibo.yamibo_app.navigation.StatusBarScrollToTop { listState.scrollToItem(0) }
     val htmlLinkContext = remember(tid, postTitle, authorId) {
         InAppLinkContext(
             currentTid = tid,
@@ -273,10 +274,25 @@ internal fun CommentReaderScreen(
         modifier = Modifier.fillMaxSize(),
         containerColor = colors.creamBackground,
         topBar = {
-            ThreadTopBar(
-                title = postTitle,
-                onBack = { navigator.pop() }
-            )
+            Column {
+                ThreadTopBar(
+                    title = postTitle,
+                    onBack = { navigator.pop() }
+                )
+                Text(
+                    i18n("此處按發文順序顯示本樓到下一篇作者發文間的回覆，不代表回覆所討論的章節。"),
+                    color = colors.textDark.copy(alpha = 0.65f),
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                )
+                CommentBanner(text = i18n("查看完整帖子與所有回覆"), onClick = {
+                    navigator.navigate(IThreadReaderScreen(
+                        tid = tid, title = postTitle,
+                        threadType = ReadHistoryRepository.ThreadEntryType.Normal,
+                        targetPid = targetCommentPid ?: oPostId,
+                    ))
+                })
+            }
         }
     ) { paddingValues ->
         Box(
