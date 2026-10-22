@@ -4653,16 +4653,6 @@ internal fun ThreadReaderScreen(
                         )
                     }
 
-                    val progressOverlayTopPadding = if (keepSystemBarsBackground) {
-                        WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-                    } else {
-                        0.dp
-                    }
-                    val progressOverlayBottomPadding = if (keepSystemBarsBackground) {
-                        WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 48.dp
-                    } else {
-                        48.dp
-                    }
                     val progressHintBottomPadding = if (keepSystemBarsBackground) {
                         WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
                     } else {
@@ -4680,8 +4670,7 @@ internal fun ThreadReaderScreen(
                         slideBarModifier = Modifier
                             .align(Alignment.CenterEnd)
                             .padding(
-                                top = progressOverlayTopPadding,
-                                bottom = progressOverlayBottomPadding,
+                                bottom = 48.dp,
                                 end = 0.dp,
                             ),
                         hintModifier = Modifier
