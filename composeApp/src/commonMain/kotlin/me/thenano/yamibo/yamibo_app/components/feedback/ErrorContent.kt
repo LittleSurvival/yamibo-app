@@ -50,7 +50,7 @@ fun YamiboErrorContent(
             Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(i18n("載入失敗"), color = colors.textStrong, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                 Spacer(Modifier.height(10.dp))
-                Text(message, color = colors.brownPrimary.copy(alpha = 0.75f), fontSize = 13.sp)
+                Text(forumErrorMessage(message), color = colors.brownPrimary.copy(alpha = 0.75f), fontSize = 13.sp)
                 Spacer(Modifier.height(16.dp))
                 Surface(onClick = onRetry, shape = RoundedCornerShape(50), color = colors.brownDeep) {
                     Text(i18n("重試"), modifier = Modifier.padding(horizontal = 22.dp, vertical = 10.dp), color = colors.textOnDeepHigh)
@@ -90,7 +90,7 @@ internal fun YamiboDetailedErrorContent(
                 )
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    text = message,
+                    text = forumErrorMessage(message),
                     fontSize = 13.sp,
                     color = colors.brownPrimary.copy(alpha = 0.75f),
                     lineHeight = 18.sp,
