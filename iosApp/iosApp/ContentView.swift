@@ -19,6 +19,7 @@ private final class ReaderHostController: UIViewController, UIScrollViewDelegate
         init(_ view: UIScrollView) { self.view = view }
     }
     private var suspendedScrollViews: [SuspendedScrollView] = []
+    private var hostIsVisible = false
 
     override var childForStatusBarStyle: UIViewController? { compose }
     override var childForStatusBarHidden: UIViewController? { compose }
@@ -55,8 +56,21 @@ private final class ReaderHostController: UIViewController, UIScrollViewDelegate
         updateScrollToTopOwnership()
     }
 
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        hostIsVisible = true
+        updateScrollToTopOwnership()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        hostIsVisible = false
+        updateScrollToTopOwnership()
+        super.viewWillDisappear(animated)
+    }
+
     private func updateScrollToTopOwnership() {
-        let ownsScrolling = NativeNavigationBridge.shared.hasScrollToTopHandler()
+        let ownsScrolling = hostIsVisible && presentedViewController == nil &&
+            compose.presentedViewController == nil && NativeNavigationBridge.shared.hasScrollToTopHandler()
         statusBarTarget.scrollsToTop = ownsScrolling
         if ownsScrolling {
             // Scope changes to this host's Compose subtree, and restore native
@@ -77,6 +91,8 @@ private final class ReaderHostController: UIViewController, UIScrollViewDelegate
     }
 
     func scrollViewShouldScrollToTop(_ scrollView: UIScrollView) -> Bool {
+        guard hostIsVisible, presentedViewController == nil,
+              compose.presentedViewController == nil else { return false }
         NativeNavigationBridge.shared.scrollToTop()
         return false
     }
