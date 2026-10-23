@@ -2,8 +2,8 @@
 
 ## Revisions and isolation
 
-- Production: `cd202b6facb90f9d0591ec09e7d0c3474be31c81`, PR https://github.com/LittleSurvival/yamibo-app/pull/62 (draft).
-- Validation code: `f947873f923ad5b88c517bee3fb8094145280995` on `stable-v0.0.9-fix-downloaded-content-loading-d76edbf-9be0117-validation`.
+- Production app source: `cd202b6facb90f9d0591ec09e7d0c3474be31c81`; latest PR infrastructure/documentation: `bc9c32d`, PR https://github.com/LittleSurvival/yamibo-app/pull/62 (draft).
+- Verified 40-test native baseline: `f947873f923ad5b88c517bee3fb8094145280995` on `stable-v0.0.9-fix-downloaded-content-loading-d76edbf-9be0117-validation`.
 - `production-source-comparison.json`: all 11 changed production sources are byte-identical in validation. Validation alone adds test sources/dependencies, startup adapters in MainActivity/MainViewController, an independent application/bundle ID, a local DocumentsProvider, QA Activities and an Apple UI workflow.
 - Production test-isolation and OpenSpec guards pass; no test/QA code or OpenSpec files are proposed for main. Do not merge the validation branch.
 
@@ -52,3 +52,29 @@ RSS reader: 8 UI-derived left swipes, reached page 9/300. gfxinfo: 235 total fra
 - The workflow checks that tracked inputs outside .tmp and the isolated workflow match verified f947873, and that Xcode is still 26.6 / 17F113. Unchanged native inputs reuse the recorded 40-test result; changed inputs rerun the native checks.
 - The existing embedAndSign task is invoked with the actual Kotlin/Compose-required Xcode environment before simulator boot; its resource output and framework symlink are reused by Xcode. No production build files or download data format are changed.
 - Six UI scenarios cover novel, ordinary thread, thread/tag/RSS manga and management. Manga tests require a large rendered cyan fixture region and page 2/300 after navigation; screenshots are exported as artifacts. QA startup adapters/bundle IDs and direct app-owned fixture paths are validation-only.
+
+
+## Shared Apple validation entry and script naming
+
+The production PR contains one manual `.github/workflows/apple-validate.yml` and
+an English guide at `dev-docs/apple-emulator-validation.md`. There is no generic
+`run.sh` or permanent native test script. Validation scripts use
+`.github/scripts/apple-validate/<full-branch-name>-<NN>.sh` on the validation ref.
+The dropdown has the current script basename and `custom`; custom names require
+no new workflow. The default-branch entry is not available until the PR merges.
+
+This branch's script is
+`stable-v0.0.9-fix-downloaded-content-loading-d76edbf-9be0117-validation-01.sh`.
+Supporting XCTest, fixture generator and orchestration files are in the sibling
+`downloaded-content/` directory. The historical branch-only workflow is now a
+thin migration adapter using the same selection/log/export steps as the permanent
+entry. Do not merge that adapter or any feature validation code into production.
+Disable the old workflow after its final migration run completes, preserving runs.
+
+Run 40025829153 on 5e35268 executed six UI cases and all six failed. Attachments
+show an automatic-update modal and synthetic thread 42 falling through to a
+server 404; manga screens showed no images. See `ios-first-ui-attempt.json`.
+No passing UI claim is made for that run. QA startup 75d4cf3 now selects the
+current-container fixture root through IOSSettingsStore, checks a page file
+exists, and disables unrelated automatic update checks. Run 40028706074 is
+executing that revision; Native checks passed, App/UI results remain pending.

@@ -1,0 +1,14 @@
+{
+  "run": "https://github.com/LittleSurvival/yamibo-app/actions/runs/40025829153",
+  "validationCommit": "5e3526811c50e75526c70e9408e4d20b094d36e4",
+  "productionAppCommit": "cd202b6facb90f9d0591ec09e7d0c3474be31c81",
+  "executed": 6,
+  "failed": 6,
+  "unexpected": 0,
+  "observations": [
+    "Launch update modal blocked management assertion",
+    "Synthetic thread 42 used a server request and got HTTP 404",
+    "Manga screens reported no images"
+  ],
+  "classification": "UI validation failed; fixture settings/bootstrap under investigation; no passing claim"
+}
