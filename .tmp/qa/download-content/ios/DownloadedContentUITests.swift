@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 final class DownloadedContentUITests: XCTestCase {
     private let app = XCUIApplication(bundleIdentifier: "com.yamibo.bbs.downloadqa")
@@ -35,12 +36,32 @@ final class DownloadedContentUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground)
     }
 
+    private func assertLocalImage() {
+        let source = app.screenshot().image.cgImage!
+        let width = source.width, height = source.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        pixels.withUnsafeMutableBytes { bytes in
+            let context = CGContext(data: bytes.baseAddress, width: width, height: height,
+                bitsPerComponent: 8, bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue)!
+            context.draw(source, in: CGRect(x: 0, y: 0, width: width, height: height))
+        }
+        let cyan = stride(from: 0, to: pixels.count, by: 4).filter {
+            (14...26).contains(Int(pixels[$0])) && (174...186).contains(Int(pixels[$0 + 1])) && (214...226).contains(Int(pixels[$0 + 2]))
+        }.count
+        XCTAssertGreaterThan(cyan, 100_000, "The synthetic local image must be rendered")
+    }
+
     private func manga(_ mode: String) {
         open(mode)
         let pages = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "300")).firstMatch
         XCTAssertTrue(pages.waitForExistence(timeout: 30), app.debugDescription)
+        sleep(2)
+        assertLocalImage()
         capture(mode + "-300-local-images")
         app.swipeLeft()
+        let secondPage = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "2 / 300")).firstMatch
+        XCTAssertTrue(secondPage.waitForExistence(timeout: 10), app.debugDescription)
         capture(mode + "-after-navigation")
         XCTAssertEqual(app.state, .runningForeground)
     }

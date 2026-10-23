@@ -69,6 +69,12 @@ jobs:
                   PY
             - name: Run actual reader and management UI flows
               run: xcodebuild -project iosApp/iosApp.xcodeproj -scheme DownloadedContentQA -configuration Debug -destination "id=$QA_SIMULATOR" -derivedDataPath .tmp/qa/ios-derived -resultBundlePath .tmp/qa/download-content/ios-ui.xcresult CODE_SIGNING_ALLOWED=NO test-without-building
+            - name: Export UI screenshots
+              if: always()
+              run: |
+                  if [ -d .tmp/qa/download-content/ios-ui.xcresult ]; then
+                    xcrun xcresulttool export attachments --path .tmp/qa/download-content/ios-ui.xcresult --output-path .tmp/qa/download-content/ios-screenshots
+                  fi
             - name: Preserve native results
               if: always()
               uses: actions/upload-artifact@v4
@@ -76,5 +82,6 @@ jobs:
                   name: download-content-ios-results
                   path: |
                       .tmp/qa/download-content/ios-ui.xcresult
+                      .tmp/qa/download-content/ios-screenshots
                       shared/build/test-results/iosSimulatorArm64Test
                       shared/build/reports/tests/iosSimulatorArm64Test
