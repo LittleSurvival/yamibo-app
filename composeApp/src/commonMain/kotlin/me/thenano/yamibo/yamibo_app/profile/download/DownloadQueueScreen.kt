@@ -85,19 +85,20 @@ fun DownloadQueueScreen() {
     var selectedTab by remember { mutableStateOf(DownloadManagerTab.Queue) }
     var contentState by remember { mutableStateOf<DownloadContentManagementState>(DownloadContentManagementState.Loading) }
     var contentReloadToken by remember { mutableStateOf(0) }
+    var lastContentReloadToken by remember { mutableStateOf(0) }
     var contentSortMode by rememberSaveable { mutableStateOf(DownloadedContentSortMode.DownloadedAt) }
     var contentSortDescending by rememberSaveable { mutableStateOf(true) }
     var selectedContentFilterKeys by rememberSaveable { mutableStateOf(emptyList<String>()) }
     val queueStatuses = remember(entries) { entries.map { it.key to it.status } }
     val contentRevision = remember(entries) { downloadedContentRevision(entries) }
 
-    suspend fun reloadContentManagement() {
+    suspend fun reloadContentManagement(forceRefresh: Boolean) {
         if (contentState !is DownloadContentManagementState.Ready) {
             contentState = DownloadContentManagementState.Loading
         }
         contentState = try {
             withContext(Dispatchers.Default) {
-                val groups = repository.getDownloadedContentGroups()
+                val groups = repository.getDownloadedContentGroups(forceRefresh)
                 DownloadContentManagementState.Ready(
                     summary = summarizeDownloadedContent(groups),
                     groups = groups,
@@ -119,7 +120,11 @@ fun DownloadQueueScreen() {
     }
 
     LaunchedEffect(selectedTab, contentRevision, contentReloadToken) {
-        if (selectedTab == DownloadManagerTab.Content) reloadContentManagement()
+        if (selectedTab == DownloadManagerTab.Content) {
+            val forceRefresh = lastContentReloadToken != contentReloadToken
+            reloadContentManagement(forceRefresh)
+            lastContentReloadToken = contentReloadToken
+        }
     }
 
     Scaffold(

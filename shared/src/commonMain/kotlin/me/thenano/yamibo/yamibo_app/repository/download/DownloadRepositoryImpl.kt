@@ -38,6 +38,8 @@ class DownloadRepositoryImpl(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val workerMutex = Mutex()
     private val queueWriteMutex = Mutex()
+    private val contentMutex = Mutex()
+    private var contentCatalog: DownloadedContentCatalog? = null
     private val knownTitles = mutableMapOf<DownloadTaskKey, String>()
     private val prefetchedPages = mutableMapOf<ThreadPageDownloadKey, ThreadPage>()
     private val tagMangaTasks = mutableMapOf<TagMangaChapterDownloadKey, TagMangaTaskInfo>()
@@ -61,6 +63,7 @@ class DownloadRepositoryImpl(
         scope.launch {
             try {
                 if (!storageProvider.isReady()) return@launch
+                val storageKey = storageProvider.getStorageKey()
                 val restoredQueue = pruneExpiredQueueEntries(
                     entries = storageProvider.readQueue(),
                     now = currentTimeMillis(),
@@ -71,7 +74,8 @@ class DownloadRepositoryImpl(
                     }
                 }
                 val queueKeys = restoredQueue.mapTo(mutableSetOf()) { it.key }
-                val restoredDownloads = storageProvider.listManifests()
+                val threadManifests = storageProvider.listManifests()
+                val restoredDownloads = threadManifests
                     .filterNot { it.key in queueKeys }
                     .map { manifest ->
                         DownloadQueueEntry(
@@ -81,7 +85,8 @@ class DownloadRepositoryImpl(
                             updatedAt = manifest.downloadedAt,
                         )
                     }
-                val restoredTagMangaDownloads = storageProvider.listTagMangaManifests()
+                val tagManifests = storageProvider.listTagMangaManifests()
+                val restoredTagMangaDownloads = tagManifests
                     .filterNot { it.key in queueKeys }
                     .map { manifest ->
                         val title = tagMangaQueueTitle(manifest.tagName, manifest.title)
@@ -94,7 +99,8 @@ class DownloadRepositoryImpl(
                             updatedAt = manifest.downloadedAt,
                         )
                     }
-                val restoredRssMangaDownloads = storageProvider.listRssMangaManifests()
+                val rssManifests = storageProvider.listRssMangaManifests()
+                val restoredRssMangaDownloads = rssManifests
                     .filterNot { it.key in queueKeys }
                     .map { manifest ->
                         val title = rssMangaQueueTitle(manifest.subscriptionTitle, manifest.title)
@@ -109,6 +115,9 @@ class DownloadRepositoryImpl(
                     }
                 val restored = (restoredQueue + restoredDownloads + restoredTagMangaDownloads + restoredRssMangaDownloads)
                     .sortedWith(compareBy { it.key.stableId })
+                contentMutex.withLock {
+                    contentCatalog = DownloadedContentCatalog(storageKey, buildContentGroups(threadManifests, tagManifests, rssManifests))
+                }
                 _queue.value = restored
                 restored.forEach { knownTitles[it.key] = it.title }
                 backgroundController.onQueueChanged(restored)
@@ -130,114 +139,115 @@ class DownloadRepositoryImpl(
             DownloadQueueSummary(
                 queued = entries.count { it.status == DownloadStatus.Queued },
                 downloading = entries.count { it.status == DownloadStatus.Downloading },
-                downloaded = storageProvider.listManifests().size + storageProvider.listTagMangaManifests().size + storageProvider.listRssMangaManifests().size,
+                downloaded = getDownloadedContentSummary().totalItems,
                 failed = entries.count { it.status == DownloadStatus.Failed },
                 updateAvailable = entries.count { it.status == DownloadStatus.UpdateAvailable },
             )
         }
     }
 
-    override suspend fun getDownloadedContentSummary(): DownloadedContentSummary {
+    override suspend fun getDownloadedContentSummary(): DownloadedContentSummary =
+        summarizeDownloadedContent(getDownloadedContentGroups())
+
+    override suspend fun getDownloadedContentGroups(forceRefresh: Boolean): List<DownloadedContentGroup> {
         initialized.await()
         return withContext(Dispatchers.IO) {
-            val threadManifests = storageProvider.listManifests()
-            val tagManifests = storageProvider.listTagMangaManifests()
-            val rssManifests = storageProvider.listRssMangaManifests()
-            val threadBytes = threadManifests.sumOf { manifest -> manifest.images.sumOf { it.bytes } }
-            val tagBytes = tagManifests.sumOf { manifest -> manifest.images.sumOf { it.bytes } }
-            val rssBytes = rssManifests.sumOf { manifest -> manifest.images.sumOf { it.bytes } }
-            val threadImageCount = threadManifests.sumOf { it.images.size }
-            val tagImageCount = tagManifests.sumOf { it.images.size }
-            val rssImageCount = rssManifests.sumOf { it.images.size }
-            DownloadedContentSummary(
-                totalItems = threadManifests.size + tagManifests.size + rssManifests.size,
-                threadPages = threadManifests.size,
-                tagMangaChapters = tagManifests.size,
-                rssMangaChapters = rssManifests.size,
-                imageCount = threadImageCount + tagImageCount + rssImageCount,
-                imageBytes = threadBytes + tagBytes + rssBytes,
-                threadImageBytes = threadBytes,
-                tagMangaImageBytes = tagBytes,
-                rssMangaImageBytes = rssBytes,
-            )
+            val storageKey = storageProvider.getStorageKey()
+            contentMutex.withLock {
+                contentCatalog?.takeIf { !forceRefresh && it.storageKey == storageKey }?.let { return@withLock it.groups }
+                val groups = buildContentGroups(
+                    storageProvider.listManifests(),
+                    storageProvider.listTagMangaManifests(),
+                    storageProvider.listRssMangaManifests(),
+                )
+                contentCatalog = DownloadedContentCatalog(storageKey, groups)
+                groups
+            }
         }
     }
 
-    override suspend fun getDownloadedContentGroups(): List<DownloadedContentGroup> {
-        initialized.await()
-        return withContext(Dispatchers.IO) {
-            val threadGroups = storageProvider.listManifests()
-                .groupBy { manifest -> "thread_${manifest.key.tid}_author_${manifest.key.authorId ?: "all"}" }
-                .map { (id, manifests) ->
-                    val sorted = manifests.sortedBy { it.key.page }
-                    downloadedContentGroup(
-                        id = id,
-                        title = sorted.firstOrNull()?.title ?: id,
-                        type = DownloadedContentGroupType.Thread,
-                        items = sorted.map { manifest ->
-                            DownloadedContentItem(
-                                key = manifest.key,
-                                title = manifest.title,
-                                detail = "第 ${manifest.key.page} 頁",
-                                downloadedAt = manifest.downloadedAt,
-                                imageCount = manifest.images.size,
-                                imageBytes = manifest.images.sumOf { it.bytes },
-                            )
-                        },
-                        filterKey = sorted.firstOrNull()?.forumId?.let { "forum_$it" }
-                            ?: DOWNLOADED_CONTENT_FILTER_UNKNOWN_FORUM,
-                        filterLabel = sorted.firstOrNull()?.forumName?.takeIf { it.isNotBlank() }
-                            ?: "未知板塊",
-                    )
-                }
-            val tagGroups = storageProvider.listTagMangaManifests()
-                .groupBy { manifest -> "tag_manga_${manifest.key.tagId}" }
-                .map { (id, manifests) ->
-                    val sorted = manifests.sortedWith(compareBy<TagMangaChapterManifest> { it.tagPage }.thenBy { it.title })
-                    val tagName = sorted.firstOrNull()?.tagName.orEmpty()
-                    downloadedContentGroup(
-                        id = id,
-                        title = if (tagName.isBlank()) id else "#$tagName",
-                        type = DownloadedContentGroupType.TagManga,
-                        items = sorted.map { manifest ->
-                            DownloadedContentItem(
-                                key = manifest.key,
-                                title = manifest.title,
-                                detail = "標籤第 ${manifest.tagPage} 頁",
-                                downloadedAt = manifest.downloadedAt,
-                                imageCount = manifest.images.size,
-                                imageBytes = manifest.images.sumOf { it.bytes },
-                            )
-                        },
-                        filterKey = DOWNLOADED_CONTENT_FILTER_TAG_MANGA,
-                        filterLabel = "標籤漫畫",
-                    )
-                }
-            val rssGroups = storageProvider.listRssMangaManifests()
-                .groupBy { manifest -> "rss_${manifest.key.subscriptionId}" }
-                .map { (id, manifests) ->
-                    val sorted = manifests.sortedWith(compareBy<RssMangaChapterManifest> { it.subscriptionPage }.thenBy { it.title })
-                    val subscriptionTitle = sorted.firstOrNull()?.subscriptionTitle.orEmpty()
-                    downloadedContentGroup(
-                        id = id,
-                        title = if (subscriptionTitle.isBlank()) id else "RSS / $subscriptionTitle",
-                        type = DownloadedContentGroupType.RssManga,
-                        items = sorted.map { manifest ->
-                            DownloadedContentItem(
-                                key = manifest.key,
-                                title = manifest.title,
-                                detail = "RSS 第 ${manifest.subscriptionPage} 頁",
-                                downloadedAt = manifest.downloadedAt,
-                                imageCount = manifest.images.size,
-                                imageBytes = manifest.images.sumOf { it.bytes },
-                            )
-                        },
-                        filterKey = DOWNLOADED_CONTENT_FILTER_TAG_MANGA,
-                        filterLabel = "標籤漫畫",
-                    )
-                }
-            (threadGroups + tagGroups + rssGroups).sortedWith(compareBy<DownloadedContentGroup> { it.type.name }.thenBy { it.title })
-        }
+    private suspend fun invalidateContentCatalog() {
+        contentMutex.withLock { contentCatalog = null }
+    }
+
+    private data class DownloadedContentCatalog(val storageKey: String?, val groups: List<DownloadedContentGroup>)
+
+    private fun buildContentGroups(
+        threadManifests: List<ThreadPageDownloadManifest>,
+        tagManifests: List<TagMangaChapterManifest>,
+        rssManifests: List<RssMangaChapterManifest>,
+    ): List<DownloadedContentGroup> {
+        val threadGroups = threadManifests
+            .groupBy { manifest -> "thread_${manifest.key.tid}_author_${manifest.key.authorId ?: "all"}" }
+            .map { (id, manifests) ->
+                val sorted = manifests.sortedBy { it.key.page }
+                downloadedContentGroup(
+                    id = id,
+                    title = sorted.firstOrNull()?.title ?: id,
+                    type = DownloadedContentGroupType.Thread,
+                    items = sorted.map { manifest ->
+                        DownloadedContentItem(
+                            key = manifest.key,
+                            title = manifest.title,
+                            detail = "第 ${manifest.key.page} 頁",
+                            downloadedAt = manifest.downloadedAt,
+                            imageCount = manifest.images.size,
+                            imageBytes = manifest.images.sumOf { it.bytes },
+                        )
+                    },
+                    filterKey = sorted.firstOrNull()?.forumId?.let { "forum_$it" }
+                        ?: DOWNLOADED_CONTENT_FILTER_UNKNOWN_FORUM,
+                    filterLabel = sorted.firstOrNull()?.forumName?.takeIf { it.isNotBlank() }
+                        ?: "未知板塊",
+                )
+            }
+        val tagGroups = tagManifests
+            .groupBy { manifest -> "tag_manga_${manifest.key.tagId}" }
+            .map { (id, manifests) ->
+                val sorted = manifests.sortedWith(compareBy<TagMangaChapterManifest> { it.tagPage }.thenBy { it.title })
+                val tagName = sorted.firstOrNull()?.tagName.orEmpty()
+                downloadedContentGroup(
+                    id = id,
+                    title = if (tagName.isBlank()) id else "#$tagName",
+                    type = DownloadedContentGroupType.TagManga,
+                    items = sorted.map { manifest ->
+                        DownloadedContentItem(
+                            key = manifest.key,
+                            title = manifest.title,
+                            detail = "標籤第 ${manifest.tagPage} 頁",
+                            downloadedAt = manifest.downloadedAt,
+                            imageCount = manifest.images.size,
+                            imageBytes = manifest.images.sumOf { it.bytes },
+                        )
+                    },
+                    filterKey = DOWNLOADED_CONTENT_FILTER_TAG_MANGA,
+                    filterLabel = "標籤漫畫",
+                )
+            }
+        val rssGroups = rssManifests
+            .groupBy { manifest -> "rss_${manifest.key.subscriptionId}" }
+            .map { (id, manifests) ->
+                val sorted = manifests.sortedWith(compareBy<RssMangaChapterManifest> { it.subscriptionPage }.thenBy { it.title })
+                val subscriptionTitle = sorted.firstOrNull()?.subscriptionTitle.orEmpty()
+                downloadedContentGroup(
+                    id = id,
+                    title = if (subscriptionTitle.isBlank()) id else "RSS / $subscriptionTitle",
+                    type = DownloadedContentGroupType.RssManga,
+                    items = sorted.map { manifest ->
+                        DownloadedContentItem(
+                            key = manifest.key,
+                            title = manifest.title,
+                            detail = "RSS 第 ${manifest.subscriptionPage} 頁",
+                            downloadedAt = manifest.downloadedAt,
+                            imageCount = manifest.images.size,
+                            imageBytes = manifest.images.sumOf { it.bytes },
+                        )
+                    },
+                    filterKey = DOWNLOADED_CONTENT_FILTER_TAG_MANGA,
+                    filterLabel = "標籤漫畫",
+                )
+            }
+        return (threadGroups + tagGroups + rssGroups).sortedWith(compareBy<DownloadedContentGroup> { it.type.name }.thenBy { it.title })
     }
 
     private fun downloadedContentGroup(
@@ -572,6 +582,7 @@ class DownloadRepositoryImpl(
         prefetchedPages.remove(key)
         remove(key)
         withContext(Dispatchers.IO) { storageProvider.deleteThreadPage(key) }
+        invalidateContentCatalog()
     }
 
     override suspend fun clearThread(key: ThreadPageDownloadKey): Result<Unit> = downloadResult("clearThread key=${key.stableId}") {
@@ -585,6 +596,7 @@ class DownloadRepositoryImpl(
         }
         persistQueue()
         withContext(Dispatchers.IO) { storageProvider.deleteThread(key) }
+        invalidateContentCatalog()
     }
 
     override suspend fun clearTagMangaChapter(key: TagMangaChapterDownloadKey): Result<Unit> = downloadResult("clearTagMangaChapter key=${key.stableId}") {
@@ -592,6 +604,7 @@ class DownloadRepositoryImpl(
         tagMangaTasks.remove(key)
         remove(key)
         withContext(Dispatchers.IO) { storageProvider.deleteTagMangaChapter(key) }
+        invalidateContentCatalog()
     }
 
     override suspend fun clearTagManga(tagId: TagId): Result<Unit> = downloadResult("clearTagManga tagId=${tagId.value}") {
@@ -600,6 +613,7 @@ class DownloadRepositoryImpl(
         _queue.update { entries -> entries.filterNot { (it.key as? TagMangaChapterDownloadKey)?.tagId == tagId.value } }
         persistQueue()
         withContext(Dispatchers.IO) { storageProvider.deleteTagManga(tagId.value) }
+        invalidateContentCatalog()
     }
 
     override suspend fun clearRssMangaChapter(key: RssMangaChapterDownloadKey): Result<Unit> = downloadResult("clearRssMangaChapter key=${key.stableId}") {
@@ -607,6 +621,7 @@ class DownloadRepositoryImpl(
         rssMangaTasks.remove(key)
         remove(key)
         withContext(Dispatchers.IO) { storageProvider.deleteRssMangaChapter(key) }
+        invalidateContentCatalog()
     }
 
     override suspend fun clearRssManga(subscriptionId: Long): Result<Unit> = downloadResult("clearRssManga subscriptionId=$subscriptionId") {
@@ -615,6 +630,7 @@ class DownloadRepositoryImpl(
         _queue.update { entries -> entries.filterNot { (it.key as? RssMangaChapterDownloadKey)?.subscriptionId == subscriptionId } }
         persistQueue()
         withContext(Dispatchers.IO) { storageProvider.deleteRssManga(subscriptionId) }
+        invalidateContentCatalog()
     }
 
     override suspend fun retry(key: DownloadTaskKey): Result<Unit> = downloadResult("retry key=${key.stableId}") {
@@ -801,6 +817,7 @@ class DownloadRepositoryImpl(
             threadPageBytes = json.encodeToString(page).encodeToByteArray(),
             images = pendingImages,
         )
+        invalidateContentCatalog()
         threadRepository.setCachedThread(ThreadId(key.tid), key.authorId?.let(::UserId), key.page, page)
     }
 
@@ -828,6 +845,7 @@ class DownloadRepositoryImpl(
             manifestBytes = json.encodeToString(manifest).encodeToByteArray(),
             images = images.pending,
         )
+        invalidateContentCatalog()
         return storageProvider.resolveTagMangaImageUris(key, images.downloaded.map { it.fileName })
             .ifEmpty { images.downloaded.map { it.sourceUrl } }
     }
@@ -858,6 +876,7 @@ class DownloadRepositoryImpl(
             manifestBytes = json.encodeToString(manifest).encodeToByteArray(),
             images = images.pending,
         )
+        invalidateContentCatalog()
         return storageProvider.resolveRssMangaImageUris(key, images.downloaded.map { it.fileName })
             .ifEmpty { images.downloaded.map { it.sourceUrl } }
     }

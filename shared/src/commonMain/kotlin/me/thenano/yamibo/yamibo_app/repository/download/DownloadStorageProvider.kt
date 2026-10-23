@@ -2,6 +2,7 @@ package me.thenano.yamibo.yamibo_app.repository.download
 
 interface DownloadStorageProvider {
     suspend fun getSelectedFolderLabel(): String?
+    suspend fun getStorageKey(): String? = getSelectedFolderLabel()
     suspend fun isReady(): Boolean
     suspend fun writeThreadPage(
         key: ThreadPageDownloadKey,

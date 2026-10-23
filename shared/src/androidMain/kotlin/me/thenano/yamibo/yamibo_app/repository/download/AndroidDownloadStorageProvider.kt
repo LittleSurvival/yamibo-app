@@ -20,6 +20,8 @@ class AndroidDownloadStorageProvider(
     override suspend fun getSelectedFolderLabel(): String? =
         selectedTreeUri()?.let { queryDisplayName(rootDocumentUri(it)) }
 
+    override suspend fun getStorageKey(): String? = selectedTreeUri()?.toString()
+
     override suspend fun isReady(): Boolean =
         selectedTreeUri()?.let { uri ->
             resolver.persistedUriPermissions.any {

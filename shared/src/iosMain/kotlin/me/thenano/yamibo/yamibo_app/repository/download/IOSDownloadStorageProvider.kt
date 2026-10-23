@@ -21,6 +21,8 @@ class IOSDownloadStorageProvider(
     override suspend fun getSelectedFolderLabel(): String? =
         appSettingsRepository.backupFolderUri.getValue().takeIf { it.isNotBlank() }
 
+    override suspend fun getStorageKey(): String? = getSelectedFolderLabel()
+
     override suspend fun isReady(): Boolean =
         appSettingsRepository.backupFolderUri.getValue().isNotBlank()
 
