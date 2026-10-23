@@ -1,6 +1,8 @@
 package me.thenano.yamibo.yamibo_app.repository.thread
 
 import me.thenano.yamibo.yamibo_app.repository.ThreadRepository
+import me.thenano.yamibo.yamibo_app.repository.DownloadRepository
+import me.thenano.yamibo.yamibo_app.repository.download.ThreadPageDownloadKey
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.page.ThreadPage
 import io.github.littlesurvival.dto.value.PostId
@@ -41,11 +43,17 @@ suspend fun ThreadRepository.fetchReaderStartPage(
     target: PostId,
     authorId: UserId?,
     initialPage: Int,
-): YamiboResult<ThreadPage> = if (authorId != null) {
-    // Catalog/history page numbers belong to the author-only view. Reusing a
-    // full-thread redirect here poisons that cache and can request a nonexistent page.
-    fetchThread(tid, authorId, initialPage)
-        .validatedThreadPage(tid, page = initialPage, authorId = authorId)
-} else {
-    fetchFindPost(tid, target).validatedThreadPage(tid, target)
+    downloadRepository: DownloadRepository? = null,
+): YamiboResult<ThreadPage> {
+    val downloaded = downloadRepository?.getDownloadedPage(ThreadPageDownloadKey(tid.value, initialPage, authorId?.value))
+        ?.takeIf { it.isValidThreadPage(tid, target = target, page = initialPage, authorId = authorId) }
+    if (downloaded != null) return YamiboResult.Success(downloaded)
+    return if (authorId != null) {
+        // Catalog/history page numbers belong to the author-only view. Reusing a
+        // full-thread redirect here poisons that cache and can request a nonexistent page.
+        fetchThread(tid, authorId, initialPage)
+            .validatedThreadPage(tid, page = initialPage, authorId = authorId)
+    } else {
+        fetchFindPost(tid, target).validatedThreadPage(tid, target)
+    }
 }

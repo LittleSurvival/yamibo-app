@@ -2650,7 +2650,12 @@ internal fun ThreadReaderScreen(
         }
     }
 
-    suspend fun loadPage(page: Int, forceRefresh: Boolean = false, autoTriggered: Boolean = false): Boolean {
+    suspend fun loadPage(
+        page: Int,
+        forceRefresh: Boolean = false,
+        autoTriggered: Boolean = false,
+        initialSnapshot: ThreadPage? = null,
+    ): Boolean {
         if (!forceRefresh && page in loadedPages) return true
         isLoadingNextPage = true
         var loadSucceeded = false
@@ -2721,6 +2726,10 @@ internal fun ThreadReaderScreen(
                     }
                 }
             } else {
+                if (initialSnapshot?.isValidThreadPage(tid, page = page, authorId = authorId) == true) {
+                    updatePage(YamiboResult.Success(initialSnapshot))
+                    return true
+                }
                 if (loadFromDownload()) return true
                 if (loadFromCache()) return true
 
@@ -2943,7 +2952,7 @@ internal fun ThreadReaderScreen(
     LaunchedEffect(tid, initialPage, targetPid) {
         val located = targetPid?.let { pid ->
             try {
-                val result = threadRepository.fetchReaderStartPage(tid, pid, authorId, initialPage)
+                val result = threadRepository.fetchReaderStartPage(tid, pid, authorId, initialPage, downloadRepository)
                 (result as? YamiboResult.Success)?.value
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
@@ -2956,7 +2965,7 @@ internal fun ThreadReaderScreen(
         if (located != null && locatedPage != null) {
             threadRepository.setCachedThread(tid, authorId, locatedPage, located)
         }
-        loadPage(locatedPage ?: initialPage)
+        loadPage(locatedPage ?: initialPage, initialSnapshot = located)
 
         /** Restore position from history if no explicit targetPid */
         if (!hasRestoredPosition && targetPid != null && threadHistoryOrigin != ReadHistoryRepository.ThreadHistoryOrigin.Direct) {

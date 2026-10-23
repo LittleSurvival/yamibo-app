@@ -11,6 +11,8 @@ interface DownloadStorageProvider {
     )
     suspend fun readThreadPage(key: ThreadPageDownloadKey): ByteArray?
     suspend fun resolveImageUri(key: ThreadPageDownloadKey, fileName: String): String?
+    suspend fun resolveImageUris(key: ThreadPageDownloadKey, fileNames: List<String>): Map<String, String> =
+        fileNames.mapNotNull { name -> resolveImageUri(key, name)?.let { name to it } }.toMap()
     suspend fun readManifest(key: ThreadPageDownloadKey): ThreadPageDownloadManifest?
     suspend fun listManifests(): List<ThreadPageDownloadManifest>
     suspend fun writeTagMangaChapter(
