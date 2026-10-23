@@ -9,6 +9,7 @@ import io.github.littlesurvival.dto.value.TagId
 import io.github.littlesurvival.dto.value.ThreadId
 import io.github.littlesurvival.dto.value.UserId
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -37,7 +38,7 @@ class DownloadRepositoryImpl(
 ) : DownloadRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val workerMutex = Mutex()
-    private val queueWriteMutex = Mutex()
+    private val queueWrites = Channel<Unit>(Channel.CONFLATED)
     private val contentMutex = Mutex()
     private var contentCatalog: DownloadedContentCatalog? = null
     private val knownTitles = mutableMapOf<DownloadTaskKey, String>()
@@ -126,6 +127,12 @@ class DownloadRepositoryImpl(
                 initialized.complete(Unit)
             }
             drainQueue()
+        }
+        scope.launch {
+            initialized.await()
+            for (request in queueWrites) {
+                downloadResult("persistQueue") { storageProvider.writeQueue(queue.value) }
+            }
         }
     }
 
@@ -1044,11 +1051,7 @@ class DownloadRepositoryImpl(
     }
 
     private fun persistQueue() {
-        scope.launch {
-            queueWriteMutex.withLock {
-                storageProvider.writeQueue(queue.value)
-            }
-        }
+        queueWrites.trySend(Unit)
     }
 
     private data class TagMangaTaskInfo(
