@@ -1,0 +1,21 @@
+{
+  "run_id": 40017237771,
+  "validation_sha": "f947873f923ad5b88c517bee3fb8094145280995",
+  "production_sha": "cd202b6facb90f9d0591ec09e7d0c3474be31c81",
+  "suites": [
+    {
+      "name": "me.thenano.yamibo.yamibo_app.repository.download.DownloadedContentLoadingTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "me.thenano.yamibo.yamibo_app.repository.download.DownloadRepositoryTest",
+      "tests": "31",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    }
+  ]
+}
