@@ -4,11 +4,12 @@
 checks. Test sources, fixtures, QA receivers, simulator tools, their dependencies,
 and their run configurations live on validation branches or `archived-tests`.
 
-The permanent [Apple validation dispatcher](apple-emulator-validation.md) is an
-explicit infrastructure exception: its one manual workflow, shared dispatcher,
-Kotlin compilation baseline, and documentation may ship through a PR. Feature
-profiles and all test sources, fixtures, and application QA wiring remain on the
-selected validation branch. Do not merge a feature-specific workflow into `main`.
+The permanent [Apple validation workflow](apple-emulator-validation.md) is an
+explicit infrastructure exception: its one manual workflow and documentation may
+ship through a PR. Scripts named `<full-branch-name>-<NN>.sh` under
+`.github/scripts/apple-validate/`, supporting files, test sources, fixtures, and
+application QA wiring remain on the selected validation branch. Do not merge a
+feature-specific workflow into `main`.
 
 ## Existing archive
 

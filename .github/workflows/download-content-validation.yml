@@ -1,130 +1,89 @@
+# Branch-only migration adapter. Never merge this workflow into main.
 name: Download content Apple validation
 
 on:
-    push:
-        branches:
-            - stable-v0.0.9-fix-downloaded-content-loading-d76edbf-9be0117-validation
+  push:
+    branches:
+      - stable-v0.0.9-fix-downloaded-content-loading-d76edbf-9be0117-validation
 
 permissions:
-    contents: read
+  contents: read
 
 concurrency:
-    group: download-content-framework-first-${{ github.ref }}
-    cancel-in-progress: true
+  group: download-content-framework-first-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-    apple-validation:
-        runs-on: macos-latest
-        timeout-minutes: 60
-        steps:
-            - uses: actions/checkout@v4
-            - uses: actions/setup-java@v4
-              with:
-                  distribution: temurin
-                  java-version: '17'
-            - uses: gradle/actions/setup-gradle@v4
-              with:
-                  cache-read-only: false
-            - uses: actions/cache/restore@v4
-              id: konan
-              with:
-                  path: ~/.konan
-                  key: download-native-ui-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('gradle/libs.versions.toml') }}
-                  restore-keys: |
-                      download-native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('gradle/libs.versions.toml') }}
-            - name: Check whether native inputs changed from the verified 40-test run
-              id: native-inputs
-              run: |
-                  chmod +x gradlew
-                  git fetch --no-tags --depth=1 origin f947873f923ad5b88c517bee3fb8094145280995
-                  apple_xcode_version="$(xcodebuild -version)"
-                  if git diff --quiet f947873f923ad5b88c517bee3fb8094145280995 HEAD -- . ':(exclude).tmp/**' ':(exclude).github/workflows/download-content-validation.yml' && [ "$apple_xcode_version" = $'Xcode 26.6\nBuild version 17F113' ]; then
-                    echo 'required=false' >> "$GITHUB_OUTPUT"
-                    echo 'Native code/build inputs and Xcode match the 40 passing native tests in run 40017237771.'
-                  else
-                    echo 'required=true' >> "$GITHUB_OUTPUT"
-                  fi
-            - name: Kotlin simulator and device compilation and native regressions
-              if: steps.native-inputs.outputs.required == 'true'
-              run: |
-                  uname -m
-                  xcodebuild -version
-                  chmod +x gradlew
-                  ./gradlew :composeApp:compileKotlinIosSimulatorArm64 :composeApp:compileKotlinIosArm64 :shared:iosSimulatorArm64Test --console=plain --max-workers=2
-                  xcrun simctl shutdown all
-            - name: Configure isolated UI test target
-              run: |
-                  gem install xcodeproj -v 1.27.0 --no-document --user-install
-                  ruby .tmp/qa/download-content/ios/configure_tests.rb
-                  python3 - <<'PY'
-                  import json, os, subprocess
-                  data=json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','-j']))
-                  phones=[d for values in data['devices'].values() for d in values if 'iPhone' in d['name']]
-                  assert phones, 'No available iPhone simulator'
-                  udid=phones[0]['udid']
-                  with open(os.environ['GITHUB_ENV'],'a') as f: f.write('QA_SIMULATOR='+udid+'\n')
-                  PY
-            - name: Prepare Kotlin framework before booting the simulator
-              timeout-minutes: 30
-              run: |
-                  export SDK_NAME="iphonesimulator$(xcrun --sdk iphonesimulator --show-sdk-version)"
-                  export PLATFORM_NAME=iphonesimulator
-                  export CONFIGURATION=Debug
-                  export ARCHS=arm64
-                  export BUILT_PRODUCTS_DIR="$PWD/.tmp/qa/ios-derived/Build/Products/Debug-iphonesimulator"
-                  export TARGET_BUILD_DIR="$BUILT_PRODUCTS_DIR"
-                  export FRAMEWORKS_FOLDER_PATH=yamibo_app.app/Frameworks
-                  export UNLOCALIZED_RESOURCES_FOLDER_PATH=yamibo_app.app
-                  export ENABLE_USER_SCRIPT_SANDBOXING=NO
-                  mkdir -p "$BUILT_PRODUCTS_DIR"
-                  sysctl -n hw.memsize
-                  ./gradlew :composeApp:embedAndSignAppleFrameworkForXcode --console=plain --max-workers=2
-                  ./gradlew --stop
-            - uses: actions/cache/save@v4
-              if: steps.konan.outputs.cache-hit != 'true'
-              with:
-                  path: ~/.konan
-                  key: download-native-ui-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('gradle/libs.versions.toml') }}
-            - name: Build simulator app and UI tests
-              timeout-minutes: 10
-              run: OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED=YES xcodebuild -project iosApp/iosApp.xcodeproj -scheme DownloadedContentQA -configuration Debug -sdk iphonesimulator -destination "id=$QA_SIMULATOR" -derivedDataPath .tmp/qa/ios-derived CODE_SIGNING_ALLOWED=NO build-for-testing
-            - name: Install independent app and seed offline fixtures
-              timeout-minutes: 8
-              run: |
-                  python3 - <<'PY'
-                  import os, pathlib, plistlib, subprocess
-                  products=pathlib.Path('.tmp/qa/ios-derived/Build/Products/Debug-iphonesimulator')
-                  apps=[p for p in products.glob('*.app') if plistlib.loads((p/'Info.plist').read_bytes()).get('CFBundleIdentifier')=='com.yamibo.bbs.downloadqa']
-                  assert len(apps)==1, apps
-                  device=os.environ['QA_SIMULATOR']
-                  subprocess.run(['open','-a','Simulator','--args','-CurrentDeviceUDID',device],check=True,timeout=30)
-                  subprocess.run(['xcrun','simctl','boot',device],check=False,timeout=30)
-                  subprocess.run(['xcrun','simctl','bootstatus',device,'-b'],check=True,timeout=300)
-                  subprocess.run(['xcrun','simctl','install',device,str(apps[0])],check=True)
-                  container=pathlib.Path(subprocess.check_output(['xcrun','simctl','get_app_container',device,'com.yamibo.bbs.downloadqa','data'],text=True).strip())
-                  fixture=container/'Documents/qa_downloads'
-                  subprocess.run(['python3','.tmp/qa/download-content/generate_fixtures.py',str(fixture)],check=True)
-                  assert (fixture/'YamiboDownloads/thread_42_page_1_author_7/thread_page.json').is_file()
-                  print('Seeded current application container:', container)
-                  print('Seeded manifests:', len(list(fixture.rglob('manifest.json'))))
-                  PY
-            - name: Run actual reader and management UI flows
-              timeout-minutes: 12
-              run: xcodebuild -project iosApp/iosApp.xcodeproj -scheme DownloadedContentQA -configuration Debug -destination "id=$QA_SIMULATOR" -derivedDataPath .tmp/qa/ios-derived -resultBundlePath .tmp/qa/download-content/ios-ui.xcresult CODE_SIGNING_ALLOWED=NO -parallel-testing-enabled NO test-without-building
-            - name: Export UI screenshots
-              if: always()
-              run: |
-                  if [ -d .tmp/qa/download-content/ios-ui.xcresult ]; then
-                    xcrun xcresulttool export attachments --path .tmp/qa/download-content/ios-ui.xcresult --output-path .tmp/qa/download-content/ios-screenshots
-                  fi
-            - name: Preserve native results
-              if: always()
-              uses: actions/upload-artifact@v4
-              with:
-                  include-hidden-files: true
-                  name: download-content-ios-results
-                  path: |
-                      .tmp/qa/download-content/ios-ui.xcresult
-                      .tmp/qa/download-content/ios-screenshots
-                      shared/build/test-results/iosSimulatorArm64Test
-                      shared/build/reports/tests/iosSimulatorArm64Test
+  apple-validation:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      APPLE_VALIDATE_OUTPUT: ${{ github.workspace }}/.tmp/qa/apple-validate/results
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: actions/cache/restore@v4
+        with:
+          path: ~/.konan
+          key: download-native-ui-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('gradle/libs.versions.toml') }}
+      - name: Run selected validation script
+        timeout-minutes: 50
+        shell: bash
+        env:
+          SELECTED_SCRIPT: stable-v0.0.9-fix-downloaded-content-loading-d76edbf-9be0117-validation-01
+          CUSTOM_SCRIPT: ''
+        run: |
+          set -euo pipefail
+          script="$SELECTED_SCRIPT"
+          if [ "$script" = custom ]; then script="$CUSTOM_SCRIPT"; fi
+          if [[ ! "$script" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*-[0-9]{2,}$ ]]; then
+            echo 'Expected a script name in <branch-name>-<NN> form, without .sh.' >&2
+            exit 2
+          fi
+          entry=".github/scripts/apple-validate/$script.sh"
+          if [ ! -f "$entry" ]; then
+            echo "Script not found: $entry. Select the validation ref containing it." >&2
+            exit 2
+          fi
+          mkdir -p "$APPLE_VALIDATE_OUTPUT"
+          {
+            printf 'Script: %s\nCommit: %s\n' "$script" "$(git rev-parse HEAD)"
+            git status --short
+            uname -m
+            sw_vers
+            java -version 2>&1
+            xcodebuild -version
+            xcrun --sdk iphonesimulator --show-sdk-version
+            xcrun simctl list devices available
+          } | tee "$APPLE_VALIDATE_OUTPUT/environment.log"
+          set +e
+          bash "$entry" 2>&1 | tee "$APPLE_VALIDATE_OUTPUT/validation.log"
+          status=$?
+          set -e
+          printf '%s\n' "$status" > "$APPLE_VALIDATE_OUTPUT/exit-code.txt"
+          exit "$status"
+      - name: Export Xcode results and attachments
+        if: always()
+        shell: bash
+        run: |
+          if [ -d "$APPLE_VALIDATE_OUTPUT" ]; then
+            find "$APPLE_VALIDATE_OUTPUT" -name '*.xcresult' -type d -prune -print0 |
+              while IFS= read -r -d '' result; do
+                xcrun xcresulttool get test-results summary --path "$result" > "${result%.xcresult}-summary.json"
+                xcrun xcresulttool export attachments --path "$result" --output-path "${result%.xcresult}-attachments"
+              done
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: apple-validation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.APPLE_VALIDATE_OUTPUT }}
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,15 +1,15 @@
-# Apple validation profiles
+# Apple validation scripts
 
-Use `bash scripts/apple-validate/run.sh <profile>` on macOS, or the single
-**Apple validation** workflow. See the [validation guide](../../dev-docs/apple-emulator-validation.md).
+Use the single **Apple validation** workflow, or run a selected script on macOS.
+See the [validation guide](../../../dev-docs/apple-emulator-validation.md).
 
-`native/run.sh` is the permanent Kotlin compilation baseline; it does not run tests.
-Feature profiles use `<name>/run.sh` on their validation branch. They can also keep
-their README, XCTest source, fixture generator and target-configuration script in
-that directory. Write evidence to `$APPLE_VALIDATE_OUTPUT`, return a nonzero exit
-code on failure, and preserve results when a test fails.
+Name each script `<full-branch-name>-<NN>.sh`, starting at `01`. Keep supporting
+files in a named sibling directory referenced by that entry. Scripts and their XCTest
+sources, fixtures, QA adapters and dependencies stay on the validation branch.
+This production directory contains the convention only; it has no generic
+`run.sh` or feature-specific executable.
 
-The workflow's `downloaded-content` option resolves the profile on the selected
-`validation_ref`; its feature-specific implementation is intentionally absent
-from production. Choose `custom` for any other profile folder. GitHub dropdowns
-cannot be populated dynamically from the checked-out filesystem.
+Select the script basename in the workflow menu and a `validation_ref` containing
+it. Choose `custom` to enter a new basename without editing the menu. GitHub
+dropdowns are static. Write evidence to `$APPLE_VALIDATE_OUTPUT`, return nonzero
+on failure, and preserve results when a test fails.

@@ -1,32 +1,38 @@
 # macOS and Apple Simulator validation
 
-## One workflow, branch-owned profiles
+## One workflow, branch-owned scripts
 
 Use **Apple validation** (`.github/workflows/apple-validate.yml`) as the permanent
-manual entry point. Put each scenario in `scripts/apple-validate/<profile>/run.sh`
-on the branch that contains its validation code. Do not create a new workflow for
+manual entry point. Put each scenario in
+`.github/scripts/apple-validate/<full-branch-name>-<NN>.sh` on the branch that
+contains its validation code. Start numbering at `01`; use `02`, `03`, and so on
+for additional validation variants on the same branch. Do not create a workflow for
 each feature. The downloaded-content experiment's old workflow remains on its
 validation branch and must not be merged.
 
-Production keeps the dispatcher, this guide, and the `native` compilation
-baseline. Feature profiles, XCTest targets, fixture generators, QA application
+Production keeps the manual workflow and this guide. Branch-specific scripts,
+XCTest targets, fixture generators, QA application
 adapters, and test dependencies stay on validation branches. Never merge those
 branches into `main`; deliver product commits through a separate production PR.
 See [test isolation](test-isolation.md).
 
-The dropdown contains `native`, `downloaded-content`, and `custom`. GitHub choice
+The dropdown contains script basenames and `custom`. For this experiment, the
+script is
+`stable-v0.0.9-fix-downloaded-content-loading-d76edbf-9be0117-validation-01.sh`.
+GitHub choice
 options are declared in YAML, so checking out a new folder cannot add a dropdown
-item at runtime. For a new profile, choose `custom` and enter its folder name;
+item at runtime. For a new script, choose `custom` and enter its basename without
+the `.sh` extension;
 promote frequently used names into the existing dropdown when useful.
 
 ## Run from GitHub Actions
 
-1. Commit and push a validation branch containing the product revision, the
-   dispatcher, and the selected profile. Prefer an exact commit SHA for reruns.
+1. Commit and push a validation branch containing the product revision and the
+   selected script and supporting files. Prefer an exact commit SHA for reruns.
 2. Open **Actions → Apple validation → Run workflow**. Keep **Use workflow from**
    on `main` to use the reviewed orchestration. Set `validation_ref` to the branch
-   or SHA containing the code and profile. These are separate selections.
-3. Select a profile, or choose `custom` and set `custom_profile`. The runner checks
+   or SHA containing the code and script. These are separate selections.
+3. Select `validation_script`, or choose `custom` and set `custom_script`. The runner checks
    out the whole validation ref; it does not overlay tests onto a different app
    revision. Only select repository code you intend to execute.
 4. Read the run's environment, build, and test logs. Download its
@@ -44,11 +50,12 @@ After that entry point is available, the CLI equivalent is:
 
 ```bash
 gh workflow run apple-validate.yml --ref main \
-  -f validation_ref='<validation-commit-sha>' -f profile=downloaded-content
+  -f validation_ref='<validation-commit-sha>' \
+  -f validation_script=stable-v0.0.9-fix-downloaded-content-loading-d76edbf-9be0117-validation-01
 
 gh workflow run apple-validate.yml --ref main \
   -f validation_ref='<validation-commit-sha>' \
-  -f profile=custom -f custom_profile=my-scenario
+  -f validation_script=custom -f custom_script='<full-branch-name>-02'
 ```
 
 The workflow has read-only repository permissions, does not persist checkout
@@ -69,31 +76,41 @@ xcode-select -p
 xcodebuild -version
 xcrun simctl list runtimes
 java -version
-bash scripts/apple-validate/run.sh native
 
-# Check out the appropriate validation branch before running a feature profile.
-APPLE_VALIDATE_OUTPUT="$PWD/.tmp/qa/apple-validate/my-run" \
-  bash scripts/apple-validate/run.sh downloaded-content
+# Check out the validation branch first. Use a fresh evidence directory.
+export APPLE_VALIDATE_OUTPUT="$PWD/.tmp/qa/apple-validate/my-run"
+mkdir -p "$APPLE_VALIDATE_OUTPUT"
+set -o pipefail
+validation_script='<full-branch-name>-01'
+bash ".github/scripts/apple-validate/$validation_script.sh" \
+  2>&1 | tee "$APPLE_VALIDATE_OUTPUT/validation.log"
 ```
 
-Use a fresh output directory for each attempt. The dispatcher writes
+Use a fresh output directory for each attempt. The common workflow writes
 `environment.log`, `validation.log`, and `exit-code.txt`. It records the actual
 commit and dirty state; use a clean checkout for reproducible evidence. The
-`native` baseline compiles Simulator/device Kotlin targets and runs **no tests**.
-An installed SDK or a successful Kotlin compile does not establish that the iOS
+script must state whether it compiles only, runs unit tests, or exercises actual
+UI cases. An installed SDK or a successful Kotlin compile does not establish that the iOS
 App, XCTest bundle, or a reader flow works.
 
-## Profile contract
+## Script naming and contract
 
-Each feature profile has a small directory:
+There is one clearly named shell entry for each validation variant. Use the full
+branch name from the repository's [branch naming rules](branch-naming.md), then
+a hyphen and a zero-padded sequence number. There is no generic `run.sh` and no
+separate shell dispatcher. The shared Action selects the file directly.
+
+Keep supporting files in a named sibling directory, referenced by the shell entry:
 
 ```text
-scripts/apple-validate/my-scenario/
-  run.sh                 # executable logic, invoked with bash
-  README.md              # prerequisites, fixtures, assertions, expected cases
-  configure_tests.rb     # only if an isolated Xcode target is needed
-  MyScenarioUITests.swift
-  generate_fixtures.py
+.github/scripts/apple-validate/
+  <full-branch-name>-01.sh   # shell entry, invoked with bash
+  downloaded-content/
+    README.md              # prerequisites, fixtures, assertions, expected cases
+    validate.py            # optional orchestration helper
+    configure_tests.rb     # only if an isolated Xcode target is needed
+    MyScenarioUITests.swift
+    generate_fixtures.py
 ```
 
 Use `set -euo pipefail`, run from the repository root, and write portable evidence
@@ -104,15 +121,15 @@ outside the evidence directory, or remove it before uploading.
 
 Provide clear log groups for preparation, native checks, framework preparation,
 App/XCTest build, installation/fixtures, UI execution, and cleanup. Set finite
-timeouts; the common workflow allows 50 minutes for the profile and 60 for the
+timeouts; the common workflow allows 50 minutes for the script and 60 for the
 job. Record cold-build timing before changing limits. Shut down/delete only
-Simulators created by the profile, using the exact recorded UDID; do not shut
+Simulators created by the script, using the exact recorded UDID; do not shut
 down all devices on a developer's Mac.
 
-If native unit tests are part of the profile, copy their XML results into the
+If native unit tests are part of the script, copy their XML results into the
 output directory and report executed/passed/failed/skipped counts. Keep `.xcresult`
 bundles directly under the output directory. The common workflow exports their
-test summaries and attachments even after a failed profile. Local runs can use:
+test summaries and attachments even after a failed script. Local runs can use:
 
 ```bash
 xcrun xcresulttool get test-results summary --path "$RESULT_BUNDLE"
@@ -146,7 +163,7 @@ xcrun xcresulttool export attachments --path "$RESULT_BUNDLE" \
    up owned resources even if assertions fail.
 
 For this repository's direct Kotlin/Xcode integration, the normal Xcode build
-phase calls `:composeApp:embedAndSignAppleFrameworkForXcode`. If a profile prepares
+phase calls `:composeApp:embedAndSignAppleFrameworkForXcode`. If a script prepares
 that framework separately, preserve Xcode's environment contract. For an arm64
 Simulator Debug build, the tested shape is:
 

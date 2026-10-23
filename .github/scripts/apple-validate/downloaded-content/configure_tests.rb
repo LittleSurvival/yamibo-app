@@ -5,7 +5,7 @@ app = project.targets.find { |target| target.name == 'iosApp' }
 raise 'Missing iosApp target' unless app
 tests = project.new_target(:ui_test_bundle, 'DownloadedContentUITests', :ios, '17.0')
 tests.add_dependency(app)
-source = project.main_group.new_file('../.tmp/qa/download-content/ios/DownloadedContentUITests.swift')
+source = project.main_group.new_file('../.github/scripts/apple-validate/downloaded-content/DownloadedContentUITests.swift')
 tests.source_build_phase.add_file_reference(source)
 tests.build_configurations.each do |config|
   config.build_settings['PRODUCT_BUNDLE_IDENTIFIER'] = 'com.yamibo.bbs.downloadqa.uitests'
