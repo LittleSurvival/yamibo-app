@@ -15,6 +15,9 @@ import me.thenano.yamibo.yamibo_app.navigation.decodeRestorePayload
 import me.thenano.yamibo.yamibo_app.navigation.restoreSnapshot
 import me.thenano.yamibo.yamibo_app.repository.ContentCoverRepository
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
+import me.thenano.yamibo.yamibo_app.LocalDownloadRepository
+import me.thenano.yamibo.yamibo_app.repository.download.ThreadPageDownloadKey
+import me.thenano.yamibo.yamibo_app.repository.thread.isValidThreadPage
 
 @Serializable
 private data class ThreadReaderRestorePayload(
@@ -90,6 +93,7 @@ class IThreadReaderScreen(
         val forumMode = isNovel &&
             me.thenano.yamibo.yamibo_app.LocalNovelReaderSettingsRepository.current.forumReadingMode.state()
         val repository = me.thenano.yamibo.yamibo_app.LocalThreadRepository.current
+        val downloads = LocalDownloadRepository.current
         var resolvedAuthor by remember(tid, authorId) { mutableStateOf(authorId) }
         var authorLookupFailed by remember(tid) { mutableStateOf(false) }
         var authorRetry by remember(tid) { mutableIntStateOf(0) }
@@ -98,6 +102,8 @@ class IThreadReaderScreen(
             authorLookupFailed = false
             try {
                 val page = repository.getCachedThread(tid, null, 1)
+                    ?: downloads.getDownloadedPage(ThreadPageDownloadKey(tid.value, 1))
+                        ?.takeIf { it.isValidThreadPage(tid, page = 1) }
                     ?: (repository.fetchThread(tid, null, 1) as? io.github.littlesurvival.core.YamiboResult.Success)?.value
                 resolvedAuthor = page?.posts?.firstOrNull { it.floor == 1 }?.author?.uid
                 authorLookupFailed = resolvedAuthor == null
