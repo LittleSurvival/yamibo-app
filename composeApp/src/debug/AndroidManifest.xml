@@ -2,7 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application android:networkSecurityConfig="${debugNetworkSecurityConfig}">
         <activity android:name="me.thenano.yamibo.yamibo_app.qa.DownloadContentQaActivity" android:exported="true" />
+        <activity android:name="me.thenano.yamibo.yamibo_app.qa.DownloadedReaderQaBenchmark" android:exported="true" />
         <provider android:name="me.thenano.yamibo.yamibo_app.qa.DownloadedReaderQaDocuments"
-            android:authorities="${applicationId}.qa.documents" android:exported="true" android:grantUriPermissions="true" />
+            android:authorities="${applicationId}.qa.documents" android:exported="true" android:grantUriPermissions="true"
+            android:permission="android.permission.MANAGE_DOCUMENTS" />
     </application>
 </manifest>

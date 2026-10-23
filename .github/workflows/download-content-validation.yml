@@ -23,6 +23,12 @@ jobs:
                   distribution: temurin
                   java-version: '17'
             - uses: gradle/actions/setup-gradle@v4
+              with:
+                  cache-read-only: false
+            - uses: actions/cache@v4
+              with:
+                  path: ~/.konan
+                  key: download-native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('gradle/libs.versions.toml') }}
             - name: Kotlin simulator and device compilation and native regressions
               run: |
                   uname -m

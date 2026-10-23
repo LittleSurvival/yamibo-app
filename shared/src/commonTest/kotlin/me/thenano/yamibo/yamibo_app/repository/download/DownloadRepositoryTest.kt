@@ -27,6 +27,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeout
 import me.thenano.yamibo.yamibo_app.repository.thread.fetchReaderStartPage
+import me.thenano.yamibo.yamibo_app.repository.thread.getDownloadedImagePage
 import kotlinx.coroutines.async
 import kotlinx.serialization.json.Json
 import me.thenano.yamibo.yamibo_app.repository.DownloadRepository
@@ -41,6 +42,27 @@ import kotlin.test.assertTrue
 
 class DownloadRepositoryTest {
     private val json = Json { encodeDefaults = true }
+
+    @Test
+    fun imageReaderCanUseAFullThreadDownloadWhenTheAuthorDownloadIsAbsent() = runBlocking {
+        val storage = FakeStorage()
+        val key = ThreadPageDownloadKey(42, 1)
+        val full = page(42, 1, 1)
+        storage.seed(key, ThreadPageDownloadManifest(key, "full", 1, 1, DownloadPageKind.Normal), full)
+        val repository = repository(FakeThreadRepository(), storage)
+        assertEquals(full, repository.getDownloadedImagePage(ThreadId(42), UserId(7)))
+    }
+
+    @Test
+    fun imageReaderRejectsWrongAuthorAndWrongThreadSnapshots() = runBlocking {
+        val storage = FakeStorage()
+        val authorKey = ThreadPageDownloadKey(42, 1, 7)
+        val wrongAuthor = page(42, 1, 1).let { it.copy(posts = it.posts.map { post -> post.copy(author = User(UserId(99), "wrong")) }) }
+        storage.seed(authorKey, ThreadPageDownloadManifest(authorKey, "bad author", 1, 1, DownloadPageKind.Normal), wrongAuthor)
+        val fullKey = ThreadPageDownloadKey(42, 1)
+        storage.seed(fullKey, ThreadPageDownloadManifest(fullKey, "bad thread", 1, 1, DownloadPageKind.Normal), page(99, 1, 1))
+        assertNull(repository(FakeThreadRepository(), storage).getDownloadedImagePage(ThreadId(42), UserId(7)))
+    }
 
     @Test
     fun pendingQueueWritesAreConflatedWhileStorageIsBusy() = runBlocking {
@@ -98,6 +120,27 @@ class DownloadRepositoryTest {
         assertEquals(0, repository.getSummary().downloaded)
         assertTrue(repository.getDownloadedContentGroups().isEmpty())
         assertEquals(2, storage.threadManifestScans)
+    }
+
+    @Test
+    fun deletionAndQueueObservationCannotRepopulateAStaleInventory() = runBlocking {
+        val storage = FakeStorage()
+        val key = ThreadPageDownloadKey(42, 1)
+        storage.seed(key, ThreadPageDownloadManifest(key, "download", 1, 1, DownloadPageKind.Normal), page(42, 1, 1))
+        val repository = repository(FakeThreadRepository(), storage)
+        assertEquals(1, repository.getSummary().downloaded)
+        val deleteGate = CompletableDeferred<Unit>()
+        storage.deleteGate = deleteGate
+        val clear = async { repository.clearPage(key).getOrThrow() }
+        storage.deleteStarted.await()
+        assertTrue(repository.queue.value.none { it.key == key })
+        val inventory = async { repository.getDownloadedContentGroups() }
+        delay(50)
+        assertTrue(!inventory.isCompleted)
+        deleteGate.complete(Unit)
+        clear.await()
+        assertTrue(inventory.await().isEmpty())
+        assertEquals(0, repository.getSummary().downloaded)
     }
 
     @Test
@@ -770,6 +813,8 @@ class DownloadRepositoryTest {
     }
 
     private class FakeStorage : DownloadStorageProvider {
+        var deleteGate: CompletableDeferred<Unit>? = null
+        val deleteStarted = CompletableDeferred<Unit>()
         var queueWriteGate: CompletableDeferred<Unit>? = null
         val queuedWriteStarted = CompletableDeferred<Unit>()
         var queueWriteCount = 0
@@ -899,6 +944,8 @@ class DownloadRepositoryTest {
         }
 
         override suspend fun deleteThreadPage(key: ThreadPageDownloadKey) {
+            deleteStarted.complete(Unit)
+            deleteGate?.await()
             manifests.remove(key)
             pages.remove(key)
             imageUris.keys.removeAll { it.first == key }

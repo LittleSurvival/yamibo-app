@@ -55,8 +55,8 @@ final class DownloadedContentUITests: XCTestCase {
         let tab = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ OR label CONTAINS[c] %@", "內容管理", "content management")).firstMatch
         XCTAssertTrue(tab.waitForExistence(timeout: 30), app.debugDescription)
         tab.tap()
-        XCTAssertTrue(app.staticTexts["QA NOVEL"].firstMatch.waitForExistence(timeout: 30), app.debugDescription)
-        app.staticTexts["QA NOVEL"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts.matching(identifier: "QA NOVEL").firstMatch.waitForExistence(timeout: 30), app.debugDescription)
+        app.staticTexts.matching(identifier: "QA NOVEL").firstMatch.tap()
         capture("management-expanded")
         app.swipeUp()
         XCTAssertEqual(app.state, .runningForeground)

@@ -13,10 +13,14 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /** Validation-only SAF provider backed by deterministic, isolated fixture files. */
 class DownloadedReaderQaDocuments : DocumentsProvider() {
-    private val queries = AtomicInteger()
-    private val mainQueries = AtomicInteger()
-    private val opens = AtomicInteger()
-    private val root get() = File(requireNotNull(context).filesDir, "qa_downloads")
+    companion object {
+        private val queries = AtomicInteger()
+        private val mainQueries = AtomicInteger()
+        private val opens = AtomicInteger()
+        fun queryCount(): Int = queries.get()
+        fun mainQueryCount(): Int = mainQueries.get()
+    }
+    private val root get() = File(requireNotNull(context).filesDir, "qa_downloads").canonicalFile
     override fun onCreate() = true
     override fun queryRoots(projection: Array<out String>?): Cursor = MatrixCursor(arrayOf(Root.COLUMN_ROOT_ID, Root.COLUMN_DOCUMENT_ID, Root.COLUMN_TITLE, Root.COLUMN_FLAGS)).apply {
         addRow(arrayOf<Any>("root", "root", "QA Downloads", Root.FLAG_LOCAL_ONLY))
@@ -41,10 +45,17 @@ class DownloadedReaderQaDocuments : DocumentsProvider() {
         check(Looper.myLooper() != Looper.getMainLooper()) { "QA document opened on the UI thread" }
         return ParcelFileDescriptor.open(file(documentId), ParcelFileDescriptor.MODE_READ_ONLY)
     }
-    private fun file(id: String): File = if (id == "root") root else File(root, id)
+    override fun isChildDocument(parentDocumentId: String, documentId: String): Boolean =
+        file(documentId).path.startsWith(file(parentDocumentId).path + File.separator)
+    private fun file(id: String): File {
+        val file = (if (id == "root") root else File(root, id)).canonicalFile
+        require(file == root.canonicalFile || file.path.startsWith(root.canonicalPath + File.separator))
+        return file
+    }
     private fun recordQuery() {
         queries.incrementAndGet()
         if (Looper.myLooper() == Looper.getMainLooper()) mainQueries.incrementAndGet()
+        android.util.Log.i("DownloadReaderQA", "queries=${queries.get()} mainQueries=${mainQueries.get()} opens=${opens.get()}")
     }
     private fun MatrixCursor.addFile(id: String, file: File) {
         val row = newRow()
