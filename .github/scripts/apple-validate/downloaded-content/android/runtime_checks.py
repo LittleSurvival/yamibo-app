@@ -1,7 +1,8 @@
-import json, re, subprocess, time, xml.etree.ElementTree as ET
+import json, os, re, subprocess, time, xml.etree.ElementTree as ET
 from pathlib import Path
-ROOT=Path(__file__).parent
-SERIAL="emulator-5554"
+ROOT=Path(os.environ.get("DOWNLOAD_QA_OUTPUT", ".tmp/qa/download-content"))
+ROOT.mkdir(parents=True, exist_ok=True)
+SERIAL=os.environ.get("ANDROID_SERIAL", "emulator-5554")
 def adb(*args):
     return subprocess.check_output(["adb", "-s", SERIAL, *args], timeout=30)
 def dump(name):

@@ -119,6 +119,11 @@ piping through `tee`. Return nonzero for failed assertions; never convert a test
 failure into a successful run merely to upload screenshots. Keep derived data
 outside the evidence directory, or remove it before uploading.
 
+Never commit or force-add `.tmp/`, even on a validation branch. Commit the scripts
+and fixture generators in the directory above; leave generated fixtures, XML,
+screenshots, traces and run reports in ignored output directories. Publish results
+through Actions artifacts and record the essential counts and run links in the PR.
+
 Provide clear log groups for preparation, native checks, framework preparation,
 App/XCTest build, installation/fixtures, UI execution, and cleanup. Set finite
 timeouts; the common workflow allows 50 minutes for the script and 60 for the
