@@ -13,8 +13,8 @@ class IOSNovelThreadCacheRepository(
 ) : NovelPrePostCommentsCacheRepository {
 
     private val fullPageCache = diskCacheFactory.create<ThreadPage>("novel_full_page", maxSize = 10, expiration = 24.hours)
-    private val commentCache = diskCacheFactory.create<List<Post>>("novel_comments", maxSize = 50, expiration = 24.hours)
-    private val commentCompleteFlags = diskCacheFactory.create<Boolean>("novel_comment_complete", maxSize = 50, expiration = 24.hours)
+    private val commentCache = diskCacheFactory.create<List<Post>>("novel_comments_v2", maxSize = 50, expiration = 24.hours)
+    private val commentCompleteFlags = diskCacheFactory.create<Boolean>("novel_comment_complete_v2", maxSize = 50, expiration = 24.hours)
 
     override fun getCachedFullPage(tid: ThreadId, page: Int): ThreadPage? =
         fullPageCache.get("${tid.value}_$page")

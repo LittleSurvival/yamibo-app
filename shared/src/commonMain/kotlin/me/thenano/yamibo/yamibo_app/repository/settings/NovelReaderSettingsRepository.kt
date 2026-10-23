@@ -29,6 +29,11 @@ enum class ThreadReaderMode(val label: String) {
 
 class NovelReaderSettingsRepository(store: SettingsStore) : SettingsRegistry(store, prefix = "novelreadersettings") {
 
+    val forumReadingMode by boolSetting(
+        name = "forum_reading_mode",
+        default = false,
+    )
+
     val fontSize by intSetting(
         name = "font_size",
         description = "novel_reader_font_size",

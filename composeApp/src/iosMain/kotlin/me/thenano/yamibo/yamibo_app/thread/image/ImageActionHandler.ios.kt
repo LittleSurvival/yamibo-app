@@ -9,9 +9,14 @@ import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.usePinned
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
+import platform.Photos.*
 import kotlinx.coroutines.withContext
 import org.jetbrains.skia.EncodedImageFormat
 import org.jetbrains.skia.Image
+import org.jetbrains.skia.impl.use
 import platform.Foundation.NSData
 import platform.Foundation.dataWithBytes
 import platform.UIKit.*
@@ -77,8 +82,11 @@ private suspend fun downloadImageBytes(
                 val diskCache = imageLoader.diskCache
                 val snapshot = diskCache?.openSnapshot(diskCacheKey)
                 if (snapshot != null) {
-                    val bytes = diskCache.fileSystem.read(snapshot.data) { readByteArray() }
-                    snapshot.close()
+                    val bytes = try {
+                        diskCache.fileSystem.read(snapshot.data) { readByteArray() }
+                    } finally {
+                        snapshot.close()
+                    }
                     return@withContext ImageBytesResult(bytes = bytes)
                 }
             }
@@ -89,6 +97,8 @@ private suspend fun downloadImageBytes(
             } else {
                 ImageBytesResult(errorMessage = i18n("下載圖片失敗：圖片已下載但無法轉換成 PNG"))
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             val detail = imageErrorForDiagnostics(e.message ?: i18n("未知錯誤"), url)
             if (normalizeImageUrl(url).startsWith("data:", ignoreCase = true)) {
@@ -103,10 +113,8 @@ private suspend fun downloadImageBytes(
 
 private fun coil3.Image.toPngByteArray(): ByteArray? {
     return try {
-        val skiaImage = Image.makeFromBitmap(toBitmap())
-        val data = skiaImage.encodeToData(EncodedImageFormat.PNG) ?: return null
-        ByteArray(data.size).also { bytes ->
-            data.bytes.copyInto(bytes)
+        Image.makeFromBitmap(toBitmap()).use { skiaImage ->
+            skiaImage.encodeToData(EncodedImageFormat.PNG)?.use { data -> data.bytes }
         }
     } catch (error: Exception) {
         Logger.w(TAG, "Failed to encode image as PNG", error)
@@ -118,6 +126,7 @@ private const val TAG = "ImageActionHandler"
 
 @OptIn(ExperimentalForeignApi::class)
 private fun ByteArray.toUIImage(): UIImage? {
+    if (isEmpty()) return null
     val nsData = usePinned { pinned ->
         NSData.dataWithBytes(pinned.addressOf(0), size.toULong())
     }
@@ -173,11 +182,28 @@ actual suspend fun saveImageToGallery(
     cookie: String,
     referer: String
 ) : ImageActionResult {
+    val authorized = withContext(Dispatchers.Main) {
+        suspendCancellableCoroutine { continuation ->
+            PHPhotoLibrary.requestAuthorizationForAccessLevel(PHAccessLevelAddOnly) { status ->
+                if (continuation.isActive) continuation.resume(status == PHAuthorizationStatusAuthorized)
+            }
+        }
+    }
+    if (!authorized) return ImageActionResult(errorMessage = i18n("無法儲存圖片：請在系統設定允許加入相簿"))
     val result = downloadImageBytes(context, url, cookie, referer)
     val bytes = result.bytes ?: return ImageActionResult(errorMessage = result.errorMessage)
     val image = bytes.toUIImage() ?: return ImageActionResult(errorMessage = i18n("儲存圖片失敗：圖片資料無法轉換為系統圖片"))
-    withContext(Dispatchers.Main) {
-        UIImageWriteToSavedPhotosAlbum(image, null, null, null)
+    return withContext(Dispatchers.Main) {
+        suspendCancellableCoroutine { continuation ->
+            PHPhotoLibrary.sharedPhotoLibrary().performChanges(
+                changeBlock = { PHAssetChangeRequest.creationRequestForAssetFromImage(image) },
+                completionHandler = { success, error ->
+                    if (continuation.isActive) continuation.resume(
+                        if (success) ImageActionResult(successMessage = i18n("已儲存圖片至相簿"))
+                        else ImageActionResult(errorMessage = i18n("儲存圖片失敗：{}", error?.localizedDescription ?: i18n("未知錯誤")))
+                    )
+                },
+            )
+        }
     }
-    return ImageActionResult(successMessage = i18n("已儲存圖片至相簿"))
 }

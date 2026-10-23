@@ -25,6 +25,11 @@ import io.github.littlesurvival.dto.value.PostId
 import io.github.littlesurvival.dto.value.ThreadId
 import io.github.littlesurvival.dto.value.UserId
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import me.thenano.yamibo.yamibo_app.repository.thread.ChapterCommentIndex
 import me.thenano.yamibo.yamibo_app.LocalAuthRepository
 import me.thenano.yamibo.yamibo_app.LocalNovelThreadCacheRepository
 import me.thenano.yamibo.yamibo_app.LocalThreadRepository
@@ -32,6 +37,8 @@ import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
+import me.thenano.yamibo.yamibo_app.repository.thread.isValidThreadPage
+import me.thenano.yamibo.yamibo_app.repository.thread.validatedThreadPage
 import me.thenano.yamibo.yamibo_app.repository.inapplinknavigation.InAppLinkContext
 import me.thenano.yamibo.yamibo_app.thread.detail.novel.components.ThreadErrorContent
 import me.thenano.yamibo.yamibo_app.thread.detail.novel.components.ThreadLoadingSkeleton
@@ -52,10 +59,9 @@ private sealed interface CommentState {
 /**
  * Comment reader screen — shows comments (non-author posts) for a specific author post.
  *
- * Uses fetchFindPost to locate the oPost in the full-view thread, then extracts
- * all user posts between oPost and the next author post as "comments".
- *
- * Supports cross-page lazy loading when comments span multiple pages.
+ * Resolves explicit same-thread references across incrementally scanned pages.
+ * Unreferenced replies retain chronological placement. Completion requires every
+ * full-thread page, since late references can appear after later author posts.
  */
 @Composable
 internal fun CommentReaderScreen(
@@ -75,6 +81,7 @@ internal fun CommentReaderScreen(
     val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
     val platformContext = LocalPlatformContext.current
     val listState = rememberLazyListState()
+    me.thenano.yamibo.yamibo_app.navigation.StatusBarScrollToTop { listState.scrollToItem(0) }
     val htmlLinkContext = remember(tid, postTitle, authorId) {
         InAppLinkContext(
             currentTid = tid,
@@ -90,8 +97,10 @@ internal fun CommentReaderScreen(
     var isLoadingMore by remember { mutableStateOf(false) }
 
     /** Current page in the full-view thread where we last fetched */
-    var currentFullPage by remember { mutableIntStateOf(0) }
-    var totalFullPages by remember { mutableIntStateOf(1) }
+    var currentFullPage by remember(tid) { mutableIntStateOf(1) }
+    val commentIndex = remember(tid, authorId) { ChapterCommentIndex(tid, authorId) }
+    val scanMutex = remember(tid, authorId) { Mutex() }
+    var useCachedPages by remember(tid, authorId) { mutableStateOf(true) }
     var targetCommentHandled by remember(tid, oPostId, targetCommentPid) { mutableStateOf(false) }
 
     fun getFormHash(): FormHash? {
@@ -110,153 +119,50 @@ internal fun CommentReaderScreen(
         )
     }
 
-    /**
-     * Extract comments from a full-view ThreadPage.
-     *
-     * Scans the page starting from oPostId:
-     * 1. Find oPost in the page
-     * 2. Collect all posts after oPost until the next author post
-     * 3. If oPost is the last author post on the page, comments may be incomplete
-     *
-     * Also scans the entire page to pre-cache comments for other author posts.
-     */
-    fun extractAndCacheComments(threadPage: ThreadPage, startFromPost: Boolean = true): Pair<List<Post>, Boolean> {
-        val allPosts = threadPage.posts
-        val pageNum = threadPage.pageNav?.currentPage ?: 1
-
-        // Cache the full page
-        novelCache.setCachedFullPage(tid, pageNum, threadPage)
-
-        // Pre-scan: find all author posts and cache their complete comments
-        val authorPostIndices = allPosts.indices.filter { allPosts[it].author.uid == authorId }
-
-        for (i in authorPostIndices.indices) {
-            val authorIdx = authorPostIndices[i]
-            val authorPost = allPosts[authorIdx]
-            val nextAuthorIdx = if (i + 1 < authorPostIndices.size) authorPostIndices[i + 1] else null
-
-            if (nextAuthorIdx != null) {
-                // Comments are between this author post and the next
-                val comments = allPosts.subList(authorIdx + 1, nextAuthorIdx)
-                novelCache.setCachedComments(tid, authorPost.pid, comments)
-                novelCache.setCommentComplete(tid, authorPost.pid, true)
-            } else {
-                // Last author post on this page — comments may extend to next page
-                val partialComments = if (authorIdx + 1 < allPosts.size) {
-                    allPosts.subList(authorIdx + 1, allPosts.size)
-                } else {
-                    emptyList()
-                }
-
-                val isLastPage = pageNum >= (threadPage.pageNav?.totalPages ?: 1)
-                novelCache.setCachedComments(tid, authorPost.pid, partialComments)
-                novelCache.setCommentComplete(tid, authorPost.pid, isLastPage)
-            }
-        }
-
-        // Now extract the target oPost's comments
-        if (startFromPost) {
-            val oPostIdx = allPosts.indexOfFirst { it.pid == oPostId }
-            if (oPostIdx < 0) return Pair(emptyList(), false)
-
-            // Find the next author post after oPost
-            val nextAuthorIdx = allPosts.indices
-                .firstOrNull { it > oPostIdx && allPosts[it].author.uid == authorId }
-
-            return if (nextAuthorIdx != null) {
-                Pair(allPosts.subList(oPostIdx + 1, nextAuthorIdx), true)
-            } else {
-                // oPost is last author post on page
-                val comments = if (oPostIdx + 1 < allPosts.size) {
-                    allPosts.subList(oPostIdx + 1, allPosts.size)
-                } else {
-                    emptyList()
-                }
-                val isLastPage = pageNum >= (threadPage.pageNav?.totalPages ?: 1)
-                Pair(comments, isLastPage)
-            }
-        }
-
-        return Pair(emptyList(), false)
+    suspend fun publishComments() {
+        commentPosts = withContext(Dispatchers.Default) { commentIndex.commentsFor(oPostId) }
+        isCommentComplete = commentIndex.complete
+        state = CommentState.Success
     }
 
-    /**
-     * Continue loading comments from the next page.
-     *
-     * Fetches the next full-view page and collects user posts until
-     * the next author post is found.
-     */
-    fun extractContinuationComments(threadPage: ThreadPage): Pair<List<Post>, Boolean> {
-        val allPosts = threadPage.posts
-        val pageNum = threadPage.pageNav?.currentPage ?: 1
-
-        // Cache the full page
-        novelCache.setCachedFullPage(tid, pageNum, threadPage)
-
-        // Find the first author post on this page
-        val firstAuthorIdx = allPosts.indexOfFirst { it.author.uid == authorId }
-
-        val continuationComments = if (firstAuthorIdx > 0) {
-            allPosts.subList(0, firstAuthorIdx)
-        } else if (firstAuthorIdx < 0) {
-            // No author post on this page — all posts are comments
-            allPosts
-        } else {
-            // Author post is at index 0 — no continuation comments
-            emptyList()
-        }
-
-        val isComplete = firstAuthorIdx >= 0 ||
-            pageNum >= (threadPage.pageNav?.totalPages ?: 1)
-
-        // Also pre-scan for other author posts on this page
-        extractAndCacheComments(threadPage, startFromPost = false)
-
-        return Pair(continuationComments, isComplete)
-    }
-
-    suspend fun reloadComments() {
-        when (val result = threadRepository.fetchFindPost(tid, oPostId)) {
+    suspend fun reloadComments(refresh: Boolean = false) = scanMutex.withLock {
+        // Refresh invalidates derived attribution, while valid full pages remain
+        // available for offline use. A malformed response never becomes an empty list.
+        when (val result = threadRepository.fetchFindPost(tid, oPostId).validatedThreadPage(tid, oPostId)) {
             is YamiboResult.Success -> {
+                commentIndex.clear()
+                withContext(Dispatchers.Default) { commentIndex.addPage(result.value) }
+                useCachedPages = !refresh
                 currentFullPage = result.value.pageNav?.currentPage ?: 1
-                totalFullPages = result.value.pageNav?.totalPages ?: 1
-                val (comments, complete) = extractAndCacheComments(result.value)
-                commentPosts = comments
-                isCommentComplete = complete
-                state = CommentState.Success
+                novelCache.setCachedFullPage(tid, currentFullPage, result.value)
+                publishComments()
             }
-
             else -> state = CommentState.Error(i18n(errorMessages.resolve(result)))
         }
     }
 
-    // Initial load
-    LaunchedEffect(tid, oPostId) {
-        // Check cache first
-        val cachedComments = novelCache.getCachedComments(tid, oPostId)
-        if (cachedComments != null) {
-            commentPosts = cachedComments
-            isCommentComplete = novelCache.isCommentComplete(tid, oPostId)
-            state = CommentState.Success
-
-            // Find the page for continuation loading if needed
-            if (!isCommentComplete) {
-                // We need to figure out which page we were on
-                // Try to find the page from full-page cache
-                for (page in 1..100) {
-                    val cached = novelCache.getCachedFullPage(tid, page)
-                    if (cached != null && cached.posts.any { it.pid == oPostId }) {
-                        currentFullPage = page
-                        totalFullPages = cached.pageNav?.totalPages ?: 1
-                        break
-                    }
+    suspend fun loadNextCommentPage() = scanMutex.withLock {
+        val next = commentIndex.nextPage() ?: return@withLock
+        isLoadingMore = true
+        try {
+            val cached = novelCache.getCachedFullPage(tid, next).takeIf { useCachedPages }
+                ?.takeIf { it.isValidThreadPage(tid, page = next) }
+            val result = cached?.let { YamiboResult.Success(it) }
+                ?: threadRepository.fetchThread(tid, null, next).validatedThreadPage(tid, page = next)
+            when (result) {
+                is YamiboResult.Success -> {
+                    withContext(Dispatchers.Default) { commentIndex.addPage(result.value) }
+                    novelCache.setCachedFullPage(tid, next, result.value)
+                    publishComments()
                 }
+                else -> feedbackController.post(i18n("載入失敗: {}", i18n(errorMessages.resolve(result))))
             }
-            return@LaunchedEffect
+        } finally {
+            isLoadingMore = false
         }
-
-        reloadComments()
     }
+
+    LaunchedEffect(tid, oPostId) { reloadComments() }
 
     LaunchedEffect(state, commentPosts, targetCommentPid) {
         val target = targetCommentPid ?: return@LaunchedEffect
@@ -275,10 +181,25 @@ internal fun CommentReaderScreen(
         modifier = Modifier.fillMaxSize(),
         containerColor = colors.creamBackground,
         topBar = {
-            ThreadTopBar(
-                title = postTitle,
-                onBack = { navigator.pop() }
-            )
+            Column {
+                ThreadTopBar(
+                    title = postTitle,
+                    onBack = { navigator.pop() }
+                )
+                Text(
+                    i18n("明確引用會歸回對應章節；其餘按發文順序顯示，不代表所討論章節。尚未讀取的頁面可能有更多回覆。"),
+                    color = colors.textDark.copy(alpha = 0.65f),
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                )
+                CommentBanner(text = i18n("查看完整帖子與所有回覆"), onClick = {
+                    navigator.navigate(IThreadReaderScreen(
+                        tid = tid, title = postTitle,
+                        threadType = ReadHistoryRepository.ThreadEntryType.Normal,
+                        targetPid = targetCommentPid ?: oPostId,
+                    ))
+                })
+            }
         }
     ) { paddingValues ->
         Box(
@@ -384,45 +305,11 @@ internal fun CommentReaderScreen(
                                         }
                                     } else {
                                         CommentBanner(
-                                            text = i18n("載入更多評論"),
+                                            text = i18n("讀取更多帖子頁面與引用回覆"),
                                             icon = "📖",
                                             onClick = {
                                                 scope.launch {
-                                                    isLoadingMore = true
-                                                    val nextPage = currentFullPage + 1
-                                                    if (nextPage > totalFullPages) {
-                                                        isCommentComplete = true
-                                                        novelCache.setCommentComplete(tid, oPostId, true)
-                                                        isLoadingMore = false
-                                                        return@launch
-                                                    }
-
-                                                    // Check full page cache first
-                                                    val cachedPage = novelCache.getCachedFullPage(tid, nextPage)
-                                                    val threadPage = cachedPage
-                                                        ?: when (val result =
-                                                            threadRepository.fetchThread(tid, null, nextPage)) {
-                                                            is YamiboResult.Success -> result.value
-                                                            else -> {
-                                                                feedbackController.post(i18n("載入失敗: {}", i18n(errorMessages.resolve(result))))
-                                                                isLoadingMore = false
-                                                                return@launch
-                                                            }
-                                                        }
-
-                                                    currentFullPage = nextPage
-                                                    totalFullPages = threadPage.pageNav?.totalPages ?: totalFullPages
-
-                                                    val (moreComments, complete) =
-                                                        extractContinuationComments(threadPage)
-                                                    commentPosts = commentPosts + moreComments
-                                                    isCommentComplete = complete
-
-                                                    // Update cache
-                                                    novelCache.setCachedComments(tid, oPostId, commentPosts)
-                                                    novelCache.setCommentComplete(tid, oPostId, complete)
-
-                                                    isLoadingMore = false
+                                                    loadNextCommentPage()
                                                 }
                                             }
                                         )
@@ -458,7 +345,7 @@ internal fun CommentReaderScreen(
                 onRefresh = {
                     scope.launch {
                         state = CommentState.Loading
-                        reloadComments()
+                        reloadComments(refresh = true)
                     }
                 },
                 onSettings = {

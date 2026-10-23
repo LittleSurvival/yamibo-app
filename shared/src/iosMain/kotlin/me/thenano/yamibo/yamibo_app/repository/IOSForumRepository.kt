@@ -1,5 +1,7 @@
 package me.thenano.yamibo.yamibo_app.repository
 
+import me.thenano.yamibo.yamibo_app.util.auth.setNativeCookies
+
 import io.github.littlesurvival.YamiboClient
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.page.FilterType
@@ -37,7 +39,7 @@ class IOSForumRepository(
     override val favoriteForums = forumFavoriteStore.favorites
 
     override suspend fun fetchHomePage(): YamiboResult<HomePage> {
-        yamiboClient.setCookie(cookieStore.load() ?: "")
+        yamiboClient.setNativeCookies(cookieStore.load() ?: "")
         return homeLoader.fetch(
             request = { yamiboClient.fetchHomePage() },
             onValidated = favoriteSynchronizer::applyHomePage,
@@ -50,7 +52,7 @@ class IOSForumRepository(
         filterType: FilterType?,
         orderType: OrderType?,
     ): YamiboResult<ForumPage> {
-        yamiboClient.setCookie(cookieStore.load() ?: "")
+        yamiboClient.setNativeCookies(cookieStore.load() ?: "")
         val result = yamiboClient.fetchForumById(fid, filterType, orderType, page)
 
         if (result is YamiboResult.Success) {
@@ -64,7 +66,7 @@ class IOSForumRepository(
         forumId: ForumId?,
         formHash: FormHash
     ): YamiboResult<SearchPage> {
-        yamiboClient.setCookie(cookieStore.load() ?: "")
+        yamiboClient.setNativeCookies(cookieStore.load() ?: "")
         return yamiboClient.fetchSearch(query, forumId, formHash)
     }
 
@@ -73,12 +75,12 @@ class IOSForumRepository(
         searchId: SearchId,
         page: Int
     ): YamiboResult<SearchPage> {
-        yamiboClient.setCookie(cookieStore.load() ?: "")
+        yamiboClient.setNativeCookies(cookieStore.load() ?: "")
         return yamiboClient.fetchSearchById(query, searchId, page)
     }
 
     override suspend fun addFavorite(forumId: ForumId, formHash: FormHash): YamiboResult<AddFavoriteResult> {
-        yamiboClient.setCookie(cookieStore.load() ?: "")
+        yamiboClient.setNativeCookies(cookieStore.load() ?: "")
         val result = yamiboClient.fetchAddFavorite(forumId, formHash)
         if (result is YamiboResult.Success) {
             forumFavoriteStore.upsert(forumId, result.value.favId)
@@ -87,7 +89,7 @@ class IOSForumRepository(
     }
 
     override suspend fun removeFavorite(forumId: ForumId, formHash: FormHash): YamiboResult<String> {
-        yamiboClient.setCookie(cookieStore.load() ?: "")
+        yamiboClient.setNativeCookies(cookieStore.load() ?: "")
         return favoriteSynchronizer.removeFavorite(forumId) { favoriteId ->
             yamiboClient.fetchRemoveFavorite(favoriteId, formHash)
         }

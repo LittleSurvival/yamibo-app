@@ -65,6 +65,14 @@ import me.thenano.yamibo.yamibo_app.appsync.detachIOSAppSyncLifecycle
 fun MainViewController() = ComposeUIViewController {
     /** Navigator Logic */
     val navigator = rememberRestorableNavigator()
+    DisposableEffect(navigator) {
+        me.thenano.yamibo.yamibo_app.navigation.NativeNavigationBridge.onBack = { navigator.dispatchBack() }
+        me.thenano.yamibo.yamibo_app.navigation.NativeNavigationBridge.canGoBack = { navigator.stack.size > 1 }
+        onDispose {
+            me.thenano.yamibo.yamibo_app.navigation.NativeNavigationBridge.onBack = null
+            me.thenano.yamibo.yamibo_app.navigation.NativeNavigationBridge.canGoBack = null
+        }
+    }
     val appCoroutineScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main) }
     val appFeedbackController = remember { AppFeedbackController() }
     val appConfirmationController = remember(appCoroutineScope) {

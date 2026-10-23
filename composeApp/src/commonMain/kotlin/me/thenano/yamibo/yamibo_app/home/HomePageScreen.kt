@@ -182,7 +182,9 @@ private fun HomeContent(homePage: HomePage, onSearch: () -> Unit) {
     val appSettingsRepo = LocalAppSettingsRepository.current
     val showSwiperImages = appSettingsRepo.showHomeSwiperImages.state()
 
-    LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+    val topScrollState = androidx.compose.foundation.lazy.rememberLazyListState()
+    me.thenano.yamibo.yamibo_app.navigation.StatusBarScrollToTop { topScrollState.scrollToItem(0) }
+    LazyColumn(state = topScrollState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
         /** header banner */
         item { HomeHeader(onSearch = onSearch) }
 

@@ -44,8 +44,8 @@ internal interface ReaderImagePainterCache {
     val size: Int
 }
 
-internal fun createReaderImagePainterCache(maxEntries: Int = 24): ReaderImagePainterCache =
-    LruReaderImagePainterCache(maxEntries)
+internal fun createReaderImagePainterCache(maxEntries: Int = 24, maxPixels: Long = 8_000_000L): ReaderImagePainterCache =
+    LruReaderImagePainterCache(maxEntries, maxPixels)
 
 internal val LocalReaderImagePainterCache = compositionLocalOf<ReaderImagePainterCache?> { null }
 val LocalImageClickListener = compositionLocalOf<(() -> Unit)?> { null }
@@ -57,12 +57,16 @@ val LocalImageActionMessageListener = compositionLocalOf<((String) -> Unit)?> { 
 
 private class LruReaderImagePainterCache(
     private val maxEntries: Int,
+    private val maxPixels: Long = 8_000_000L,
 ) : ReaderImagePainterCache {
     private val painters = mutableMapOf<String, Painter>()
     private val accessOrder = ArrayDeque<String>()
+    private val pixelsByUrl = mutableMapOf<String, Long>()
+    private var retainedPixels = 0L
 
     init {
         require(maxEntries > 0)
+        require(maxPixels > 0)
     }
 
     override val size: Int get() = painters.size
@@ -73,16 +77,29 @@ private class LruReaderImagePainterCache(
     }
 
     override fun put(url: String, painter: Painter) {
+        retainedPixels -= pixelsByUrl.remove(url) ?: 0L
+        painters.remove(url)
+        accessOrder.remove(url)
+        val size = painter.intrinsicSize
+        val pixels = if (size.width.isFinite() && size.height.isFinite()) {
+            (size.width.toDouble() * size.height.toDouble()).toLong().coerceAtLeast(0)
+        } else 0L
+        // A single giant scan must not keep tens/hundreds of MB alive after scrolling away.
+        if (pixels > maxPixels) return
+        pixelsByUrl[url] = pixels
+        retainedPixels += pixels
         painters[url] = painter
         accessOrder.remove(url)
         accessOrder.addLast(url)
-        while (accessOrder.size > maxEntries) {
-            painters.remove(accessOrder.removeFirst())
+        while (accessOrder.size > maxEntries || retainedPixels > maxPixels) {
+            val removed = accessOrder.removeFirst()
+            painters.remove(removed)
+            retainedPixels -= pixelsByUrl.remove(removed) ?: 0L
         }
     }
 }
 
-private object ReaderImagePainterMemoryCache : ReaderImagePainterCache by LruReaderImagePainterCache(24)
+private object ReaderImagePainterMemoryCache : ReaderImagePainterCache by LruReaderImagePainterCache(8, 2_000_000L)
 
 /**
  * A unified image viewer for posts and manga reading.

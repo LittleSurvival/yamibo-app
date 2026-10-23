@@ -80,6 +80,17 @@ fun MessageCenterScreen(
     var currentPage by remember { mutableIntStateOf(1) }
     var state by remember { mutableStateOf<MessageCenterState>(MessageCenterState.Loading) }
     var isRefreshing by remember { mutableStateOf(false) }
+    var unreadMessages by remember(currentUser?.uid) { mutableStateOf(false) }
+    var unreadNotices by remember(currentUser?.uid) { mutableStateOf(false) }
+
+    suspend fun refreshUnreadTabs() {
+        val unread = me.thenano.yamibo.yamibo_app.repository.forum.ForumSupplementalMetadata
+            .messageUnread(authRepository.cookieStore.load().orEmpty()) ?: return
+        unread.messages?.let { unreadMessages = it }
+        if (selectedTab != MessageCenterTab.Notices || state !is MessageCenterState.Success) {
+            unread.notices?.let { unreadNotices = it }
+        }
+    }
 
     suspend fun loadTab(tab: MessageCenterTab, page: Int, preferCache: Boolean = true) {
         if (preferCache) {
@@ -88,6 +99,7 @@ fun MessageCenterScreen(
                 currentPage = page
                 state = MessageCenterState.Success(it)
                 if (it is MessageCenterContent.PrivateMessages) {
+                    unreadMessages = it.page.hasUnreadMessages()
                     onPrivateMessageUnreadChange(it.page.hasUnreadMessages())
                 }
                 return
@@ -100,7 +112,10 @@ fun MessageCenterScreen(
                 val content = result.value
                 currentPage = content.pageNumber() ?: page
                 if (content is MessageCenterContent.PrivateMessages) {
+                    unreadMessages = content.page.hasUnreadMessages()
                     onPrivateMessageUnreadChange(content.page.hasUnreadMessages())
+                } else if (content is MessageCenterContent.Notices) {
+                    unreadNotices = false
                 }
                 MessageCenterState.Success(content)
             }
@@ -110,7 +125,8 @@ fun MessageCenterScreen(
 
     LaunchedEffect(selectedTab) {
         currentPage = 1
-        loadTab(selectedTab, 1)
+        launch { refreshUnreadTabs() }
+        loadTab(selectedTab, 1, preferCache = false)
     }
 
     Scaffold(
@@ -143,6 +159,8 @@ fun MessageCenterScreen(
         ) {
             MessageCenterTabRow(
                 selectedTab = selectedTab,
+                unreadMessages = unreadMessages,
+                unreadNotices = unreadNotices,
                 onSelect = { tab ->
                     if (tab != selectedTab) {
                         selectedTab = tab
@@ -166,9 +184,15 @@ fun MessageCenterScreen(
                         isRefreshing = isRefreshing,
                         onRefresh = {
                             isRefreshing = true
+                            val tab = selectedTab
+                            val page = currentPage
                             scope.launch {
-                                loadTab(selectedTab, currentPage, preferCache = false)
-                                isRefreshing = false
+                                launch { refreshUnreadTabs() }
+                                try {
+                                    loadTab(tab, page, preferCache = false)
+                                } finally {
+                                    if (selectedTab == tab) isRefreshing = false
+                                }
                             }
                         },
                         modifier = Modifier.fillMaxSize(),
@@ -244,6 +268,8 @@ private fun MessageCenterTopBar(
 @Composable
 private fun MessageCenterTabRow(
     selectedTab: MessageCenterTab,
+    unreadMessages: Boolean,
+    unreadNotices: Boolean,
     onSelect: (MessageCenterTab) -> Unit,
 ) {
     val colors = YamiboTheme.colors
@@ -255,12 +281,18 @@ private fun MessageCenterTabRow(
                 selected = tab == selectedTab,
                 onClick = { onSelect(tab) },
                 text = {
-                    Text(
-                        text = tab.title,
-                        color = colors.textOnSurface,
-                        fontSize = 14.sp,
-                        maxLines = 1,
-                    )
+                    BadgedBox(badge = {
+                        if (if (tab == MessageCenterTab.PrivateMessages) unreadMessages else unreadNotices) {
+                            Badge()
+                        }
+                    }) {
+                        Text(
+                            text = tab.title,
+                            color = colors.textOnSurface,
+                            fontSize = 14.sp,
+                            maxLines = 1,
+                        )
+                    }
                 },
             )
         }
@@ -322,7 +354,10 @@ private fun MessageCenterMainContent(
     onOpenPrivateMessage: (User) -> Unit,
     onMessageAction: () -> Unit,
 ) {
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    me.thenano.yamibo.yamibo_app.navigation.StatusBarScrollToTop { listState.scrollToItem(0) }
     LazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 24.dp),
     ) {

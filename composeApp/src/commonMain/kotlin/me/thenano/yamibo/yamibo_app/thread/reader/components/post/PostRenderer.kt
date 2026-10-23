@@ -422,10 +422,21 @@ fun PostRenderer(
         var noticeAuthor by remember { mutableStateOf(false) }
         var rateOptions by remember { mutableStateOf<RatePopoutPage?>(null) }
         var rateHint by remember { mutableStateOf<String?>(null) }
+        var dailyRemaining by remember { mutableStateOf<Int?>(null) }
+        var loadingDailyRemaining by remember { mutableStateOf(true) }
+        val ratingAuth = me.thenano.yamibo.yamibo_app.LocalAuthRepository.current
+        LaunchedEffect(post.pid, linkContext.currentTid) {
+            dailyRemaining = linkContext.currentTid?.let { tid ->
+                me.thenano.yamibo.yamibo_app.repository.forum.ForumSupplementalMetadata.ratingRemaining(
+                    tid, post.pid, ratingAuth.cookieStore.load().orEmpty(),
+                )
+            }
+            loadingDailyRemaining = false
+        }
         val loadingHint = i18n("正在載入選項")
         val failedHint = i18n("載入失敗, 可選擇直接填寫")
 
-        LaunchedEffect(onLoadRateOptions) {
+        LaunchedEffect(post.pid) {
             if (onLoadRateOptions == null) return@LaunchedEffect
             rateHint = loadingHint
             when (val result = onLoadRateOptions()) {
@@ -448,6 +459,15 @@ fun PostRenderer(
             title = { Text(i18n("本帖評分"), fontWeight = FontWeight.Bold, fontSize = 20.sp) },
             text = {
                 Column {
+                    Text(
+                        text = when {
+                            loadingDailyRemaining -> i18n("今日剩餘評分：載入中")
+                            dailyRemaining != null -> i18n("今日剩餘評分：{}", dailyRemaining!!)
+                            else -> i18n("今日剩餘評分：暫無資料")
+                        },
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
                     RateOptionTextField(
                         value = scoreInput,
                         onValueChange = { scoreInput = it },

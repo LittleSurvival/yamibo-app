@@ -8,13 +8,26 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlinx.coroutines.channels.Channel
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
+import me.thenano.yamibo.yamibo_app.navigation.NativeNavigationBridge
 import kotlin.math.roundToInt
 
 data class ReaderPageProgress(
@@ -27,24 +40,59 @@ data class ReaderPageProgress(
 fun ReaderPageProgressSlideBar(
     progress: ReaderPageProgress?,
     modifier: Modifier = Modifier,
+    onSeek: suspend (Float) -> Unit,
+    thumbColor: androidx.compose.ui.graphics.Color? = null,
 ) {
     val colors = YamiboTheme.colors
     val value = progress?.fraction?.coerceIn(0f, 1f) ?: return
+    val requests = remember { Channel<Float>(Channel.CONFLATED) }
+    val latestSeek by rememberUpdatedState(onSeek)
+    var dragFraction by remember { mutableStateOf<Float?>(null) }
+    val thumbHeightPx = with(LocalDensity.current) { 24.dp.toPx() }
+    val trackInsets = WindowInsets.safeDrawing.union(
+        WindowInsets(top = NativeNavigationBridge.readerTrackTopInset.dp),
+    ).only(WindowInsetsSides.Vertical)
+    LaunchedEffect(requests) {
+        for (fraction in requests) {
+            latestSeek(fraction)
+            withFrameNanos { }
+        }
+    }
 
     BoxWithConstraints(
         modifier = modifier
-            .width(4.dp)
-            .fillMaxHeight(),
+            .windowInsetsPadding(trackInsets)
+            .width(32.dp)
+            .fillMaxHeight()
+            .pointerInput(thumbHeightPx) {
+                detectTapGestures { point ->
+                    requests.trySend(readerTrackFraction(point.y, size.height.toFloat(), thumbHeightPx))
+                }
+            }
+            .pointerInput(thumbHeightPx) {
+                detectDragGestures(
+                    onDragStart = { point ->
+                        dragFraction = readerTrackFraction(point.y, size.height.toFloat(), thumbHeightPx)
+                        requests.trySend(dragFraction!!)
+                    },
+                    onDragEnd = { dragFraction = null },
+                    onDragCancel = { dragFraction = null },
+                ) { change, _ ->
+                    change.consume()
+                    dragFraction = readerTrackFraction(change.position.y, size.height.toFloat(), thumbHeightPx)
+                    requests.trySend(dragFraction!!)
+                }
+            },
     ) {
-        val thumbHeight = 24.dp
+        val thumbHeight = 24.dp.coerceAtMost(maxHeight).coerceAtLeast(0.dp)
         val travel = (maxHeight - thumbHeight).coerceAtLeast(0.dp)
         Box(
             modifier = Modifier
-                .align(Alignment.TopCenter)
-                .offset(y = travel * value)
+                .align(Alignment.TopEnd)
+                .offset(y = travel * (dragFraction ?: value))
                 .width(3.dp)
                 .height(thumbHeight)
-                .background(colors.textDark.copy(alpha = 0.38f)),
+                .background(thumbColor ?: colors.textDark.copy(alpha = 0.38f)),
         )
     }
 }

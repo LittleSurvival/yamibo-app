@@ -44,6 +44,7 @@ import me.thenano.yamibo.yamibo_app.util.state
 fun NovelReaderSettingsPanel(
     visible: Boolean,
     appSettingsRepo: AppSettingsRepository,
+    showNovelReadingMode: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val colors = YamiboTheme.colors
@@ -77,6 +78,21 @@ fun NovelReaderSettingsPanel(
                         .padding(horizontal = 20.dp, vertical = 20.dp)
                         .verticalScroll(rememberScrollState())
                 ) {
+                    if (showNovelReadingMode) {
+                        val setting = me.thenano.yamibo.yamibo_app.LocalNovelReaderSettingsRepository.current.forumReadingMode
+                        val forumMode = setting.state()
+                        SectionTitle(i18n("小說閱讀方式"), color = colors.textDark)
+                        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            Text(
+                                if (forumMode) i18n("論壇模式：正文與回覆一起閱讀") else i18n("沉浸模式：只看作者正文"),
+                                modifier = Modifier.weight(1f),
+                                color = colors.textDark,
+                            )
+                            androidx.compose.material3.Switch(checked = forumMode, onCheckedChange = { setting.setValue(it) })
+                        }
+                        Text(i18n("切換後使用各模式的閱讀進度。"), color = colors.textDark, fontSize = 12.sp)
+                        Spacer(Modifier.height(16.dp))
+                    }
                     // Typography Section
                     SectionTitle(i18n("文字排版"), color = colors.textDark)
 

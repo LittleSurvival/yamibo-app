@@ -1,0 +1,118 @@
+package me.thenano.yamibo.yamibo_app.repository.thread
+
+import com.fleeksoft.ksoup.Ksoup
+import io.github.littlesurvival.YamiboRoute
+import io.github.littlesurvival.dto.page.Post
+import io.github.littlesurvival.dto.page.ThreadPage
+import io.github.littlesurvival.dto.value.PostId
+import io.github.littlesurvival.dto.value.ThreadId
+import io.github.littlesurvival.dto.value.UserId
+import io.ktor.http.Url
+
+/** Incremental, screen-owned index. Each explicit load adds one full-thread page. */
+class ChapterCommentIndex(private val tid: ThreadId, private val authorId: UserId) {
+    private data class Entry(val post: Post, val references: Set<PostId>, val ambiguous: Boolean)
+    private val pages = mutableMapOf<Int, List<Entry>>()
+    var totalPages: Int = 1
+        private set
+
+    fun addPage(page: ThreadPage): Boolean {
+        if (!page.isValidThreadPage(tid)) return false
+        val number = page.pageNav?.currentPage ?: 1
+        totalPages = maxOf(totalPages, number, page.pageNav?.totalPages ?: number)
+        pages[number] = page.posts.map { post ->
+            val references = explicitChapterReferences(post.contentHtml, tid)
+            Entry(post, references.posts, references.ambiguous)
+        }
+        return true
+    }
+
+    fun clear() {
+        pages.clear()
+        totalPages = 1
+    }
+
+    fun nextPage(): Int? = (1..totalPages).firstOrNull { it !in pages }
+    val complete: Boolean get() = nextPage() == null
+
+    fun commentsFor(chapter: PostId): List<Post> {
+        val entries = pages.entries.sortedBy { it.key }.flatMap { it.value }
+            .distinctBy { it.post.pid }.sortedBy { it.post.floor }
+        val byId = entries.associateBy { it.post.pid }
+        val chronological = mutableMapOf<PostId, PostId?>()
+        var previousAuthor: PostId? = null
+        for (entry in entries) {
+            if (entry.post.author.uid == authorId) previousAuthor = entry.post.pid
+            else chronological[entry.post.pid] = previousAuthor
+        }
+
+        // Resolve only explicit evidence. An unreferenced intermediary must not turn
+        // a guess into a confirmed chapter; cycles/missing/ambiguous targets fall back.
+        val memo = mutableMapOf<PostId, PostId>()
+        fun resolve(id: PostId, path: Set<PostId>, budget: IntArray): PostId? {
+            memo[id]?.let { return it }
+            if (path.size >= 32 || id in path || budget[0]-- <= 0) return null
+            val entry = byId[id] ?: return null
+            if (entry.post.author.uid == authorId) return id
+            if (entry.ambiguous || entry.references.isEmpty()) return null
+            var result: PostId? = null
+            for (reference in entry.references) {
+                val target = resolve(reference, path + id, budget) ?: return null
+                if (result != null && target != result) return null
+                result = target
+            }
+            // A depth/budget failure is relative to its caller, so only successful
+            // resolutions can be reused for another comment's independent traversal.
+            if (result != null) memo[id] = result
+            return result
+        }
+        return entries.filter { entry ->
+            entry.post.author.uid != authorId &&
+                (resolve(entry.post.pid, emptySet(), intArrayOf(256)) ?: chronological[entry.post.pid]) == chapter
+        }.map { it.post }
+    }
+}
+
+internal data class ChapterReferences(val posts: Set<PostId>, val ambiguous: Boolean)
+
+/** Recognize Discuz reference links only; prose and unrelated content links are not evidence. */
+internal fun explicitChapterReferences(
+    html: String,
+    tid: ThreadId,
+    forumUrl: String = YamiboRoute.Domain.build(),
+): ChapterReferences {
+    val document = Ksoup.parseBodyFragment(html)
+    val forum = Url(forumUrl)
+    val host = if (':' in forum.host) "[${forum.host}]" else forum.host
+    val origin = "${forum.protocol.name}://$host:${forum.port}"
+    val posts = mutableSetOf<PostId>()
+    var ambiguous = false
+    for (link in document.select("a[href]")) {
+        val href = link.attr("href").trim()
+        val inQuote = link.closest(".quote, blockquote") != null
+        val url = runCatching {
+            Url(when {
+                href.startsWith("//") -> "${forum.protocol.name}:$href"
+                href.startsWith("/") -> "$origin$href"
+                href.startsWith("?") -> "$origin/forum.php$href"
+                ":" !in href.substringBefore('/') -> "$origin/$href"
+                else -> href
+            })
+        }.getOrNull() ?: continue
+        if (!inQuote && url.parameters["goto"] != "findpost") continue
+        if (!url.host.equals(forum.host, ignoreCase = true) || url.port != forum.port ||
+            url.protocol.name !in setOf("https", "http")) {
+            ambiguous = true
+            continue
+        }
+        val targetThread = url.parameters["ptid"] ?: url.parameters["tid"]
+        if (targetThread != null && targetThread.toIntOrNull() != tid.value) {
+            ambiguous = true
+            continue
+        }
+        val pid = url.parameters["pid"]?.toIntOrNull()
+            ?: url.fragment.removePrefix("pid").toIntOrNull()
+        if (pid != null && pid > 0) posts += PostId(pid)
+    }
+    return ChapterReferences(posts, ambiguous)
+}

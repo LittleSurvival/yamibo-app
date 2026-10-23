@@ -63,6 +63,7 @@ private fun PrivateMessageContent(toUser: UserId, titleHint: String?) {
     val appTaskManager = me.thenano.yamibo.yamibo_app.LocalAppTaskManager.current
     val appTasks by appTaskManager.tasks.collectAsState()
     val listState = rememberLazyListState()
+    me.thenano.yamibo.yamibo_app.navigation.StatusBarScrollToTop { listState.scrollToItem(0) }
     val controller = remember(toUser, repository, feedbackController) {
         PrivateMessageController(
             errorMessages = errorMessages,
