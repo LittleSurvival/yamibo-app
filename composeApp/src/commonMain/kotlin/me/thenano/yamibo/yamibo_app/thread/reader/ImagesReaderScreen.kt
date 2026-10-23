@@ -550,8 +550,12 @@ fun ImagesReaderScreen(
             }
 
             val downloadedPage = if (forceNetworkLoadTrigger == 0) {
-                downloadRepository.getDownloadedPage(ThreadPageDownloadKey(activeTid.value, 1, activeAuthorId?.value))
+                val authorPage = downloadRepository.getDownloadedPage(ThreadPageDownloadKey(activeTid.value, 1, activeAuthorId?.value))
                     ?.takeIf { it.isValidThreadPage(activeTid, page = 1, authorId = activeAuthorId) }
+                authorPage ?: if (activeAuthorId != null) {
+                    downloadRepository.getDownloadedPage(ThreadPageDownloadKey(activeTid.value, 1))
+                        ?.takeIf { it.isValidThreadPage(activeTid, page = 1) }
+                } else null
             } else null
             val cachedPage = downloadedPage ?: if (forceNetworkLoadTrigger == 0) threadRepository.getCachedThread(activeTid, null, 1) else null
             if (cachedPage != null) {
