@@ -586,58 +586,70 @@ class DownloadRepositoryImpl(
 
     override suspend fun clearPage(key: ThreadPageDownloadKey): Result<Unit> = downloadResult("clearPage key=${key.stableId}") {
         initialized.await()
-        prefetchedPages.remove(key)
-        remove(key)
-        withContext(Dispatchers.IO) { storageProvider.deleteThreadPage(key) }
-        invalidateContentCatalog()
+        contentMutex.withLock {
+            contentCatalog = null
+            prefetchedPages.remove(key)
+            remove(key)
+            withContext(Dispatchers.IO) { storageProvider.deleteThreadPage(key) }
+        }
     }
 
     override suspend fun clearThread(key: ThreadPageDownloadKey): Result<Unit> = downloadResult("clearThread key=${key.stableId}") {
         initialized.await()
-        prefetchedPages.keys.removeAll { it.tid == key.tid && it.authorId == key.authorId }
-        _queue.update { entries ->
-            entries.filterNot {
-                val entryKey = it.key as? ThreadPageDownloadKey
-                entryKey?.tid == key.tid && entryKey.authorId == key.authorId
+        contentMutex.withLock {
+            contentCatalog = null
+            prefetchedPages.keys.removeAll { it.tid == key.tid && it.authorId == key.authorId }
+            _queue.update { entries ->
+                entries.filterNot {
+                    val entryKey = it.key as? ThreadPageDownloadKey
+                    entryKey?.tid == key.tid && entryKey.authorId == key.authorId
+                }
             }
+            persistQueue()
+            withContext(Dispatchers.IO) { storageProvider.deleteThread(key) }
         }
-        persistQueue()
-        withContext(Dispatchers.IO) { storageProvider.deleteThread(key) }
-        invalidateContentCatalog()
     }
 
     override suspend fun clearTagMangaChapter(key: TagMangaChapterDownloadKey): Result<Unit> = downloadResult("clearTagMangaChapter key=${key.stableId}") {
         initialized.await()
-        tagMangaTasks.remove(key)
-        remove(key)
-        withContext(Dispatchers.IO) { storageProvider.deleteTagMangaChapter(key) }
-        invalidateContentCatalog()
+        contentMutex.withLock {
+            contentCatalog = null
+            tagMangaTasks.remove(key)
+            remove(key)
+            withContext(Dispatchers.IO) { storageProvider.deleteTagMangaChapter(key) }
+        }
     }
 
     override suspend fun clearTagManga(tagId: TagId): Result<Unit> = downloadResult("clearTagManga tagId=${tagId.value}") {
         initialized.await()
-        tagMangaTasks.keys.removeAll { it.tagId == tagId.value }
-        _queue.update { entries -> entries.filterNot { (it.key as? TagMangaChapterDownloadKey)?.tagId == tagId.value } }
-        persistQueue()
-        withContext(Dispatchers.IO) { storageProvider.deleteTagManga(tagId.value) }
-        invalidateContentCatalog()
+        contentMutex.withLock {
+            contentCatalog = null
+            tagMangaTasks.keys.removeAll { it.tagId == tagId.value }
+            _queue.update { entries -> entries.filterNot { (it.key as? TagMangaChapterDownloadKey)?.tagId == tagId.value } }
+            persistQueue()
+            withContext(Dispatchers.IO) { storageProvider.deleteTagManga(tagId.value) }
+        }
     }
 
     override suspend fun clearRssMangaChapter(key: RssMangaChapterDownloadKey): Result<Unit> = downloadResult("clearRssMangaChapter key=${key.stableId}") {
         initialized.await()
-        rssMangaTasks.remove(key)
-        remove(key)
-        withContext(Dispatchers.IO) { storageProvider.deleteRssMangaChapter(key) }
-        invalidateContentCatalog()
+        contentMutex.withLock {
+            contentCatalog = null
+            rssMangaTasks.remove(key)
+            remove(key)
+            withContext(Dispatchers.IO) { storageProvider.deleteRssMangaChapter(key) }
+        }
     }
 
     override suspend fun clearRssManga(subscriptionId: Long): Result<Unit> = downloadResult("clearRssManga subscriptionId=$subscriptionId") {
         initialized.await()
-        rssMangaTasks.keys.removeAll { it.subscriptionId == subscriptionId }
-        _queue.update { entries -> entries.filterNot { (it.key as? RssMangaChapterDownloadKey)?.subscriptionId == subscriptionId } }
-        persistQueue()
-        withContext(Dispatchers.IO) { storageProvider.deleteRssManga(subscriptionId) }
-        invalidateContentCatalog()
+        contentMutex.withLock {
+            contentCatalog = null
+            rssMangaTasks.keys.removeAll { it.subscriptionId == subscriptionId }
+            _queue.update { entries -> entries.filterNot { (it.key as? RssMangaChapterDownloadKey)?.subscriptionId == subscriptionId } }
+            persistQueue()
+            withContext(Dispatchers.IO) { storageProvider.deleteRssManga(subscriptionId) }
+        }
     }
 
     override suspend fun retry(key: DownloadTaskKey): Result<Unit> = downloadResult("retry key=${key.stableId}") {
