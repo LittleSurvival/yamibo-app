@@ -22,6 +22,7 @@
 
 ## Test isolation
 
+- Permanent Apple validation infrastructure is an explicit exception: `.github/workflows/apple-validate.yml`, the dispatcher/compilation baseline under `scripts/apple-validate/`, and its documentation may be merged through a PR. Feature-specific profiles, test sources, fixtures, QA startup adapters, and one-off workflows must remain on validation branches. Use the single manual workflow with a validation ref rather than adding a workflow per experiment; see [Apple emulator validation](dev-docs/apple-emulator-validation.md).
 - Keep test sources, fixtures, QA receivers, simulator scripts, test-only dependencies, and test run configurations off `main` and production PR branches.
 - `archived-tests` is the permanent archive name, exempt from version-based branch naming. Never merge it into `main`, and never merge `main` into it merely to update production code; doing so can remove archived tests.
 - Use a separate validation branch/worktree for test commits. Build the production PR branch from current `main` and cherry-pick only production commits. Do not hide test commits by deleting their files in a later PR commit.

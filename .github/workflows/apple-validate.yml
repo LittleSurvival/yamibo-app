@@ -1,0 +1,84 @@
+name: Apple validation
+run-name: Apple validation / ${{ inputs.profile }} / ${{ inputs.validation_ref }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      validation_ref:
+        description: Branch, tag or commit containing the code and validation profile
+        required: true
+        type: string
+      profile:
+        description: Validation profile
+        required: true
+        default: native
+        type: choice
+        options:
+          - native
+          - downloaded-content
+          - custom
+      custom_profile:
+        description: Folder name under scripts/apple-validate/ when profile is custom
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apple-validation-${{ inputs.validation_ref }}-${{ inputs.profile }}-${{ inputs.custom_profile }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      APPLE_VALIDATE_OUTPUT: ${{ github.workspace }}/.tmp/qa/apple-validate/results
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.validation_ref }}
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Identify Xcode cache inputs
+        id: toolchain
+        shell: bash
+        run: echo "xcode=$(xcodebuild -version | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: apple-native-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('gradle/libs.versions.toml', 'gradle/wrapper/gradle-wrapper.properties') }}
+      - name: Run selected validation profile
+        timeout-minutes: 50
+        shell: bash
+        env:
+          SELECTED_PROFILE: ${{ inputs.profile }}
+          CUSTOM_PROFILE: ${{ inputs.custom_profile }}
+        run: |
+          profile="$SELECTED_PROFILE"
+          if [ "$profile" = custom ]; then profile="$CUSTOM_PROFILE"; fi
+          bash scripts/apple-validate/run.sh "$profile"
+      - name: Export Xcode results and attachments
+        if: always()
+        shell: bash
+        run: |
+          if [ -d "$APPLE_VALIDATE_OUTPUT" ]; then
+            find "$APPLE_VALIDATE_OUTPUT" -name '*.xcresult' -type d -prune -print0 |
+              while IFS= read -r -d '' result; do
+                xcrun xcresulttool get test-results summary --path "$result" > "${result%.xcresult}-summary.json"
+                xcrun xcresulttool export attachments --path "$result" --output-path "${result%.xcresult}-attachments"
+              done
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: apple-validation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.APPLE_VALIDATE_OUTPUT }}
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
