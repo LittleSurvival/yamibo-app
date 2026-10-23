@@ -1,6 +1,8 @@
 package me.thenano.yamibo.yamibo_app.repository.thread
 
 import me.thenano.yamibo.yamibo_app.repository.ThreadRepository
+import me.thenano.yamibo.yamibo_app.repository.DownloadRepository
+import me.thenano.yamibo.yamibo_app.repository.download.ThreadPageDownloadKey
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.page.ThreadPage
 import io.github.littlesurvival.dto.value.PostId
@@ -35,17 +37,32 @@ fun YamiboResult<ThreadPage>.validatedThreadPage(
     else -> YamiboResult.Failure("[THREAD_INVALID_CONTENT] 帖子內容不完整或版本不符，請重新載入")
 }
 
+/** A full-thread download can supply images for one author without reusing its pagination. */
+suspend fun DownloadRepository.getDownloadedImagePage(tid: ThreadId, authorId: UserId?): ThreadPage? {
+    val authorPage = getDownloadedPage(ThreadPageDownloadKey(tid.value, 1, authorId?.value))
+        ?.takeIf { it.isValidThreadPage(tid, page = 1, authorId = authorId) }
+    if (authorPage != null || authorId == null) return authorPage
+    return getDownloadedPage(ThreadPageDownloadKey(tid.value, 1))
+        ?.takeIf { it.isValidThreadPage(tid, page = 1) }
+}
+
 /** findpost uses full-thread pagination; fromuid is not an author filter. */
 suspend fun ThreadRepository.fetchReaderStartPage(
     tid: ThreadId,
     target: PostId,
     authorId: UserId?,
     initialPage: Int,
-): YamiboResult<ThreadPage> = if (authorId != null) {
-    // Catalog/history page numbers belong to the author-only view. Reusing a
-    // full-thread redirect here poisons that cache and can request a nonexistent page.
-    fetchThread(tid, authorId, initialPage)
-        .validatedThreadPage(tid, page = initialPage, authorId = authorId)
-} else {
-    fetchFindPost(tid, target).validatedThreadPage(tid, target)
+    downloadRepository: DownloadRepository? = null,
+): YamiboResult<ThreadPage> {
+    val downloaded = downloadRepository?.getDownloadedPage(ThreadPageDownloadKey(tid.value, initialPage, authorId?.value))
+        ?.takeIf { it.isValidThreadPage(tid, target = target, page = initialPage, authorId = authorId) }
+    if (downloaded != null) return YamiboResult.Success(downloaded)
+    return if (authorId != null) {
+        // Catalog/history page numbers belong to the author-only view. Reusing a
+        // full-thread redirect here poisons that cache and can request a nonexistent page.
+        fetchThread(tid, authorId, initialPage)
+            .validatedThreadPage(tid, page = initialPage, authorId = authorId)
+    } else {
+        fetchFindPost(tid, target).validatedThreadPage(tid, target)
+    }
 }

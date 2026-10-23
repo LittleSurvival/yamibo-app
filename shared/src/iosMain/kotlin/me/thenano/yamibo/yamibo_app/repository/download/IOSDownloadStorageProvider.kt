@@ -21,6 +21,8 @@ class IOSDownloadStorageProvider(
     override suspend fun getSelectedFolderLabel(): String? =
         appSettingsRepository.backupFolderUri.getValue().takeIf { it.isNotBlank() }
 
+    override suspend fun getStorageKey(): String? = getSelectedFolderLabel()
+
     override suspend fun isReady(): Boolean =
         appSettingsRepository.backupFolderUri.getValue().isNotBlank()
 
@@ -52,6 +54,14 @@ class IOSDownloadStorageProvider(
     override suspend fun resolveImageUri(key: ThreadPageDownloadKey, fileName: String): String? {
         val path = rootDir() / key.stableId / "images" / fileName
         return path.takeIf(fileSystem::exists)?.let { "file://$it" }
+    }
+
+    override suspend fun resolveImageUris(key: ThreadPageDownloadKey, fileNames: List<String>): Map<String, String> {
+        val imagesDir = rootDir() / key.stableId / "images"
+        return fileNames.mapNotNull { name ->
+            val path = imagesDir / name
+            path.takeIf(fileSystem::exists)?.let { name to "file://$it" }
+        }.toMap()
     }
 
     override suspend fun readManifest(key: ThreadPageDownloadKey): ThreadPageDownloadManifest? =

@@ -20,6 +20,8 @@ class AndroidDownloadStorageProvider(
     override suspend fun getSelectedFolderLabel(): String? =
         selectedTreeUri()?.let { queryDisplayName(rootDocumentUri(it)) }
 
+    override suspend fun getStorageKey(): String? = selectedTreeUri()?.toString()
+
     override suspend fun isReady(): Boolean =
         selectedTreeUri()?.let { uri ->
             resolver.persistedUriPermissions.any {
@@ -73,6 +75,19 @@ class AndroidDownloadStorageProvider(
         val pageDir = findChild(treeUri, downloadsRoot(treeUri) ?: return null, key.stableId) ?: return null
         val imagesDir = findChild(treeUri, pageDir, IMAGES_DIR) ?: return null
         return findChild(treeUri, imagesDir, fileName)?.toString()
+    }
+
+    override suspend fun resolveImageUris(
+        key: ThreadPageDownloadKey,
+        fileNames: List<String>,
+    ): Map<String, String> = withContext(Dispatchers.IO) {
+        if (fileNames.isEmpty()) return@withContext emptyMap()
+        val treeUri = selectedTreeUri() ?: return@withContext emptyMap()
+        val pageDir = findChild(treeUri, downloadsRoot(treeUri) ?: return@withContext emptyMap(), key.stableId)
+            ?: return@withContext emptyMap()
+        val imagesDir = findChild(treeUri, pageDir, IMAGES_DIR) ?: return@withContext emptyMap()
+        val childrenByName = listChildren(treeUri, imagesDir).associateBy { it.name }
+        fileNames.mapNotNull { name -> childrenByName[name]?.let { name to it.uri.toString() } }.toMap()
     }
 
     override suspend fun readManifest(key: ThreadPageDownloadKey): ThreadPageDownloadManifest? {

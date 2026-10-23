@@ -2,6 +2,7 @@ package me.thenano.yamibo.yamibo_app.repository.download
 
 interface DownloadStorageProvider {
     suspend fun getSelectedFolderLabel(): String?
+    suspend fun getStorageKey(): String? = getSelectedFolderLabel()
     suspend fun isReady(): Boolean
     suspend fun writeThreadPage(
         key: ThreadPageDownloadKey,
@@ -11,6 +12,8 @@ interface DownloadStorageProvider {
     )
     suspend fun readThreadPage(key: ThreadPageDownloadKey): ByteArray?
     suspend fun resolveImageUri(key: ThreadPageDownloadKey, fileName: String): String?
+    suspend fun resolveImageUris(key: ThreadPageDownloadKey, fileNames: List<String>): Map<String, String> =
+        fileNames.mapNotNull { name -> resolveImageUri(key, name)?.let { name to it } }.toMap()
     suspend fun readManifest(key: ThreadPageDownloadKey): ThreadPageDownloadManifest?
     suspend fun listManifests(): List<ThreadPageDownloadManifest>
     suspend fun writeTagMangaChapter(

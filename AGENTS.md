@@ -22,11 +22,21 @@
 
 ## Test isolation
 
+- Never commit or force-add `.tmp/` contents, including on validation branches. Keep reproducible validation scripts under `.github/scripts/`; keep generated reports, screenshots, traces and fixtures untracked, and publish run evidence through Actions artifacts and PR descriptions.
+- Permanent Apple validation infrastructure is an explicit exception: `.github/workflows/apple-validate.yml` and its documentation may be merged through a PR. Validation scripts use `.github/scripts/apple-validate/<full-branch-name>-<NN>.sh` and remain on validation branches with their supporting files, test sources, fixtures, QA startup adapters, and one-off workflows. Use the single manual workflow with a validation ref rather than adding a workflow per experiment; see [Apple emulator validation](dev-docs/apple-emulator-validation.md).
 - Keep test sources, fixtures, QA receivers, simulator scripts, test-only dependencies, and test run configurations off `main` and production PR branches.
 - `archived-tests` is the permanent archive name, exempt from version-based branch naming. Never merge it into `main`, and never merge `main` into it merely to update production code; doing so can remove archived tests.
 - Use a separate validation branch/worktree for test commits. Build the production PR branch from current `main` and cherry-pick only production commits. Do not hide test commits by deleting their files in a later PR commit.
 - Keep validation evidence in PR descriptions, including the production commit, validation commit/branch, commands, outcomes, and limitations. Do not treat the absence of tests on `main` as a passing test run.
 - Before delivering to `main`, run `python .github/scripts/validate_test_isolation.py --base origin/main`. See [Test isolation](dev-docs/test-isolation.md) for recovery and archive maintenance.
+
+## Commit granularity
+
+- Prefer a small number of complete, independently reviewable commits, organized by logical outcome (for example, one product fix and one reusable validation-tooling/documentation change).
+- Consolidate implementation adjustments, corrections to earlier edits, naming/path changes, and documentation revisions locally before committing or pushing. Do not create a commit for each small adjustment, investigation attempt, progress note, or intermediate state.
+- Apply the same discipline to validation branches. Batch prepared CI fixes into a coherent change; use a rerun of the existing commit for transient infrastructure failures rather than making an empty or cosmetic commit to trigger CI.
+- Before PR delivery, review the introduced commit history and consolidate temporary/fixup commits into the final logical changes while preserving unrelated work and test/OpenSpec isolation. Keep validation-only history out of the production PR.
+- Do not create a separate commit solely to record this preference or routine validation status. Include policy/documentation updates with the relevant logical change; record run outcomes in PR descriptions and Actions artifacts.
 
 ## Git identity guard
 

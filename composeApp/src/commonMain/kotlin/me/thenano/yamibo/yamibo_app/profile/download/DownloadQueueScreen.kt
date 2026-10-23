@@ -27,6 +27,7 @@ import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.value.TagId
 import io.github.littlesurvival.dto.value.ThreadId
 import io.github.littlesurvival.dto.value.UserId
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -84,29 +85,46 @@ fun DownloadQueueScreen() {
     var selectedTab by remember { mutableStateOf(DownloadManagerTab.Queue) }
     var contentState by remember { mutableStateOf<DownloadContentManagementState>(DownloadContentManagementState.Loading) }
     var contentReloadToken by remember { mutableStateOf(0) }
+    var lastContentReloadToken by remember { mutableStateOf(0) }
     var contentSortMode by rememberSaveable { mutableStateOf(DownloadedContentSortMode.DownloadedAt) }
     var contentSortDescending by rememberSaveable { mutableStateOf(true) }
     var selectedContentFilterKeys by rememberSaveable { mutableStateOf(emptyList<String>()) }
+    val queueStatuses = remember(entries) { entries.map { it.key to it.status } }
+    val contentRevision = remember(entries) { downloadedContentRevision(entries) }
 
-    suspend fun reloadContentManagement() {
-        contentState = DownloadContentManagementState.Loading
-        contentState = runCatching {
+    suspend fun reloadContentManagement(forceRefresh: Boolean) {
+        if (contentState !is DownloadContentManagementState.Ready) {
+            contentState = DownloadContentManagementState.Loading
+        }
+        contentState = try {
             withContext(Dispatchers.Default) {
+                val groups = repository.getDownloadedContentGroups(forceRefresh)
                 DownloadContentManagementState.Ready(
-                    summary = repository.getDownloadedContentSummary(),
-                    groups = repository.getDownloadedContentGroups(),
+                    summary = summarizeDownloadedContent(groups),
+                    groups = groups,
                 )
             }
-        }.getOrElse { error ->
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
             Logger.e("DownloadQueueScreen", "Failed to load downloaded content management", error)
             DownloadContentManagementState.Error(error.message ?: i18n("載入下載內容失敗"))
         }
     }
 
-    LaunchedEffect(entries, contentReloadToken) {
-        summary = repository.getSummary()
-        folderReady = repository.isStorageReady()
-        reloadContentManagement()
+    LaunchedEffect(selectedTab, queueStatuses, contentReloadToken) {
+        if (selectedTab == DownloadManagerTab.Queue) {
+            summary = repository.getSummary()
+            folderReady = repository.isStorageReady()
+        }
+    }
+
+    LaunchedEffect(selectedTab, contentRevision, contentReloadToken) {
+        if (selectedTab == DownloadManagerTab.Content) {
+            val forceRefresh = lastContentReloadToken != contentReloadToken
+            reloadContentManagement(forceRefresh)
+            lastContentReloadToken = contentReloadToken
+        }
     }
 
     Scaffold(
@@ -167,21 +185,19 @@ fun DownloadQueueScreen() {
                     onSelectFilterKeys = { keys -> selectedContentFilterKeys = keys.toList() },
                     onRetryLoad = {
                         scope.launch {
-                            contentReloadToken++
                             if (downloadedContentRefreshAutoUpdate) {
                                 val refreshed = refreshUpdateAvailableDownloads(entries, repository)
                                 if (refreshed > 0) {
-                                    reloadContentManagement()
                                     feedbackController.post(i18n("已自動刷新 {} 項可更新內容", refreshed))
                                 }
                             }
+                            contentReloadToken++
                         }
                     },
                     onClearGroup = { group ->
                         val handle = appTaskManager.launch(AppTaskKey("download-control:clear-group:${group.id}")) {
                             clearGroup(group, repository)
                                 .onSuccess {
-                                    reloadContentManagement()
                                     feedbackController.post(i18n("已清除下載內容"))
                                 }
                                 .onFailure { error ->
@@ -191,14 +207,13 @@ fun DownloadQueueScreen() {
                         }
                         scope.launch {
                             handle.state.first { !it.isActive }
-                            reloadContentManagement()
+                            contentReloadToken++
                         }
                     },
                     onClearItem = { item ->
                         val handle = appTaskManager.launch(AppTaskKey("download-control:clear-item:${item.key.stableId}")) {
                             clearItem(item.key, repository)
                                 .onSuccess {
-                                    reloadContentManagement()
                                     feedbackController.post(i18n("已清除下載內容"))
                                 }
                                 .onFailure { error ->
@@ -208,7 +223,7 @@ fun DownloadQueueScreen() {
                         }
                         scope.launch {
                             handle.state.first { !it.isActive }
-                            reloadContentManagement()
+                            contentReloadToken++
                         }
                     },
                     onRefreshItem = { item ->
@@ -225,7 +240,6 @@ fun DownloadQueueScreen() {
                             }
                             when (result) {
                                 is YamiboResult.Success -> {
-                                    reloadContentManagement()
                                     feedbackController.post(i18n("已重新載入下載內容"))
                                 }
                                 else -> feedbackController.post(i18n("重新載入失敗：{}", i18n(errorMessages.resolve(result))))
@@ -233,7 +247,7 @@ fun DownloadQueueScreen() {
                         }
                         scope.launch {
                             handle.state.first { !it.isActive }
-                            reloadContentManagement()
+                            contentReloadToken++
                         }
                     },
                 )
@@ -429,7 +443,7 @@ private fun DownloadContentManagementTab(
 ) {
     val colors = YamiboTheme.colors
     val groups = (state as? DownloadContentManagementState.Ready)?.groups.orEmpty()
-    var expandedGroups by remember(groups) { mutableStateOf(emptySet<String>()) }
+    var expandedGroups by remember { mutableStateOf(emptySet<String>()) }
     var showSortDialog by remember { mutableStateOf(false) }
     var showFilterDialog by remember { mutableStateOf(false) }
     val filterOptions = remember(groups) { buildDownloadedContentFilterOptions(groups) }
@@ -491,18 +505,33 @@ private fun DownloadContentManagementTab(
                         }
                     }
                 } else {
-                    items(displayedGroups, key = { it.id }) { group ->
+                    displayedGroups.forEach { group ->
                         val expanded = group.id in expandedGroups
-                        DownloadContentGroupCard(
-                            group = group,
-                            expanded = expanded,
-                            onToggleExpanded = {
-                                expandedGroups = if (expanded) expandedGroups - group.id else expandedGroups + group.id
-                            },
-                            onClearGroup = { onClearGroup(group) },
-                            onClearItem = onClearItem,
-                            onRefreshItem = onRefreshItem,
-                        )
+                        item(key = "group:${group.id}", contentType = "group") {
+                            DownloadContentGroupCard(
+                                group = group,
+                                expanded = expanded,
+                                onToggleExpanded = {
+                                    expandedGroups = if (expanded) expandedGroups - group.id else expandedGroups + group.id
+                                },
+                            )
+                        }
+                        if (expanded) {
+                            items(group.items, key = { "item:${group.id}:${it.key.stableId}" }, contentType = { "content" }) { item ->
+                                YamiboDownloadCard {
+                                    DownloadContentItemRow(item, onClearItem, onRefreshItem)
+                                }
+                            }
+                            item(key = "clear:${group.id}", contentType = "clear") {
+                                YamiboDownloadCard {
+                                    SmallQueueButton(
+                                        text = if (group.type == DownloadedContentGroupType.TagManga) i18n("清除整個標籤") else i18n("清除整個 Thread"),
+                                        onClick = { onClearGroup(group) },
+                                        destructive = true,
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -637,9 +666,6 @@ private fun DownloadContentGroupCard(
     group: DownloadedContentGroup,
     expanded: Boolean,
     onToggleExpanded: () -> Unit,
-    onClearGroup: () -> Unit,
-    onClearItem: (DownloadedContentItem) -> Unit,
-    onRefreshItem: (DownloadedContentItem) -> Unit,
 ) {
     val colors = YamiboTheme.colors
     val arrowRotation by animateFloatAsState(
@@ -671,24 +697,6 @@ private fun DownloadContentGroupCard(
                 fontSize = 12.sp,
                 modifier = Modifier.graphicsLayer { rotationZ = arrowRotation },
             )
-        }
-        AnimatedVisibility(
-            visible = expanded,
-            enter = expandVertically(tween(180)) + fadeIn(tween(180)),
-            exit = shrinkVertically(tween(160)) + fadeOut(tween(160)),
-        ) {
-            Column(Modifier.fillMaxWidth()) {
-                Spacer(Modifier.height(12.dp))
-                group.items.forEach { item ->
-                    DownloadContentItemRow(item, onClearItem, onRefreshItem)
-                }
-                Spacer(Modifier.height(8.dp))
-                SmallQueueButton(
-                    text = if (group.type == DownloadedContentGroupType.TagManga) i18n("清除整個標籤") else i18n("清除整個 Thread"),
-                    onClick = onClearGroup,
-                    destructive = true,
-                )
-            }
         }
     }
 }

@@ -15,6 +15,30 @@ data class DownloadedContentFilterOption(
     val count: Int,
 )
 
+/** Progress updates do not change the downloaded library. */
+fun downloadedContentRevision(entries: List<DownloadQueueEntry>): Map<DownloadTaskKey, Long> =
+    entries.asSequence()
+        .filter { it.status == DownloadStatus.Downloaded || it.status == DownloadStatus.UpdateAvailable }
+        .associate { it.key to it.updatedAt }
+
+/** Reuse the inventory already loaded for the list instead of scanning storage again. */
+fun summarizeDownloadedContent(groups: List<DownloadedContentGroup>): DownloadedContentSummary {
+    val threads = groups.filter { it.type == DownloadedContentGroupType.Thread }
+    val tags = groups.filter { it.type == DownloadedContentGroupType.TagManga }
+    val rss = groups.filter { it.type == DownloadedContentGroupType.RssManga }
+    return DownloadedContentSummary(
+        totalItems = groups.sumOf { it.itemCount },
+        threadPages = threads.sumOf { it.itemCount },
+        tagMangaChapters = tags.sumOf { it.itemCount },
+        rssMangaChapters = rss.sumOf { it.itemCount },
+        imageCount = groups.sumOf { it.imageCount },
+        imageBytes = groups.sumOf { it.imageBytes },
+        threadImageBytes = threads.sumOf { it.imageBytes },
+        tagMangaImageBytes = tags.sumOf { it.imageBytes },
+        rssMangaImageBytes = rss.sumOf { it.imageBytes },
+    )
+}
+
 fun buildDownloadedContentFilterOptions(groups: List<DownloadedContentGroup>): List<DownloadedContentFilterOption> =
     groups
         .groupBy { it.normalizedFilterKey() to it.normalizedFilterLabel() }
