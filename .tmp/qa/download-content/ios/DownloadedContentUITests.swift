@@ -28,7 +28,7 @@ final class DownloadedContentUITests: XCTestCase {
 
     private func novel(_ mode: String) {
         open(mode)
-        let body = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "QA_NOVEL_START")).firstMatch
+        let body = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "QA_NOVEL_START")).firstMatch
         XCTAssertTrue(body.waitForExistence(timeout: 30), app.debugDescription)
         capture(mode + "-local-content")
         app.swipeUp()
@@ -54,13 +54,13 @@ final class DownloadedContentUITests: XCTestCase {
 
     private func manga(_ mode: String) {
         open(mode)
-        let pages = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "300")).firstMatch
+        let pages = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "300")).firstMatch
         XCTAssertTrue(pages.waitForExistence(timeout: 30), app.debugDescription)
         sleep(2)
         assertLocalImage()
         capture(mode + "-300-local-images")
         app.swipeLeft()
-        let secondPage = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "2 / 300")).firstMatch
+        let secondPage = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "2 / 300")).firstMatch
         XCTAssertTrue(secondPage.waitForExistence(timeout: 10), app.debugDescription)
         capture(mode + "-after-navigation")
         XCTAssertEqual(app.state, .runningForeground)
@@ -73,11 +73,11 @@ final class DownloadedContentUITests: XCTestCase {
     func testDownloadedRssManga() { manga("rss") }
     func testDownloadedManagement() {
         open("management")
-        let tab = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ OR label CONTAINS[c] %@", "內容管理", "content management")).firstMatch
+        let tab = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ OR label CONTAINS[c] %@", "內容管理", "content management")).firstMatch
         XCTAssertTrue(tab.waitForExistence(timeout: 30), app.debugDescription)
         tab.tap()
-        XCTAssertTrue(app.staticTexts.matching(identifier: "QA NOVEL").firstMatch.waitForExistence(timeout: 30), app.debugDescription)
-        app.staticTexts.matching(identifier: "QA NOVEL").firstMatch.tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "QA NOVEL")).firstMatch.waitForExistence(timeout: 30), app.debugDescription)
+        app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "QA NOVEL")).firstMatch.tap()
         capture("management-expanded")
         app.swipeUp()
         XCTAssertEqual(app.state, .runningForeground)

@@ -25,7 +25,8 @@ jobs:
             - uses: gradle/actions/setup-gradle@v4
               with:
                   cache-read-only: false
-            - uses: actions/cache@v4
+            - uses: actions/cache/restore@v4
+              id: konan
               with:
                   path: ~/.konan
                   key: download-native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('gradle/libs.versions.toml') }}
@@ -35,6 +36,11 @@ jobs:
                   xcodebuild -version
                   chmod +x gradlew
                   ./gradlew :composeApp:compileKotlinIosSimulatorArm64 :composeApp:compileKotlinIosArm64 :shared:iosSimulatorArm64Test --console=plain --max-workers=2
+            - uses: actions/cache/save@v4
+              if: steps.konan.outputs.cache-hit != 'true'
+              with:
+                  path: ~/.konan
+                  key: download-native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('gradle/libs.versions.toml') }}
             - name: Configure isolated UI test target
               run: |
                   gem install xcodeproj -v 1.27.0 --no-document --user-install
@@ -68,7 +74,7 @@ jobs:
                   prefs.write_bytes(plistlib.dumps({'appsettings.backupfolderuri':str(fixture)}))
                   PY
             - name: Run actual reader and management UI flows
-              run: xcodebuild -project iosApp/iosApp.xcodeproj -scheme DownloadedContentQA -configuration Debug -destination "id=$QA_SIMULATOR" -derivedDataPath .tmp/qa/ios-derived -resultBundlePath .tmp/qa/download-content/ios-ui.xcresult CODE_SIGNING_ALLOWED=NO test-without-building
+              run: xcodebuild -project iosApp/iosApp.xcodeproj -scheme DownloadedContentQA -configuration Debug -destination "id=$QA_SIMULATOR" -derivedDataPath .tmp/qa/ios-derived -resultBundlePath .tmp/qa/download-content/ios-ui.xcresult CODE_SIGNING_ALLOWED=NO -parallel-testing-enabled NO test-without-building
             - name: Export UI screenshots
               if: always()
               run: |
@@ -79,6 +85,7 @@ jobs:
               if: always()
               uses: actions/upload-artifact@v4
               with:
+                  include-hidden-files: true
                   name: download-content-ios-results
                   path: |
                       .tmp/qa/download-content/ios-ui.xcresult
