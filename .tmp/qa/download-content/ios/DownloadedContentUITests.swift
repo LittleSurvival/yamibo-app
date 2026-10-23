@@ -46,9 +46,17 @@ final class DownloadedContentUITests: XCTestCase {
                 bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue)!
             context.draw(source, in: CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)))
         }
-        let cyan = stride(from: 0, to: pixels.count, by: 4).filter {
-            (14...26).contains(Int(pixels[$0])) && (174...186).contains(Int(pixels[$0 + 1])) && (214...226).contains(Int(pixels[$0 + 2]))
-        }.count
+        var cyan = 0
+        var offset = 0
+        while offset < pixels.count {
+            let red = Int(pixels[offset])
+            let green = Int(pixels[offset + 1])
+            let blue = Int(pixels[offset + 2])
+            if red >= 14 && red <= 26 && green >= 174 && green <= 186 && blue >= 214 && blue <= 226 {
+                cyan += 1
+            }
+            offset += 4
+        }
         XCTAssertGreaterThan(cyan, 100_000, "The synthetic local image must be rendered")
     }
 
