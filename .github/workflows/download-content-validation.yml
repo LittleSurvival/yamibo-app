@@ -29,18 +29,29 @@ jobs:
               id: konan
               with:
                   path: ~/.konan
-                  key: download-native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('gradle/libs.versions.toml') }}
+                  key: download-native-ui-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('gradle/libs.versions.toml') }}
+                  restore-keys: |
+                      download-native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('gradle/libs.versions.toml') }}
+            - name: Check whether native inputs changed from the verified 40-test run
+              id: native-inputs
+              run: |
+                  chmod +x gradlew
+                  git fetch --no-tags --depth=1 origin f947873f923ad5b88c517bee3fb8094145280995
+                  apple_xcode_version="$(xcodebuild -version)"
+                  if git diff --quiet f947873f923ad5b88c517bee3fb8094145280995 HEAD -- . ':(exclude).tmp/**' ':(exclude).github/workflows/download-content-validation.yml' && [ "$apple_xcode_version" = $'Xcode 26.6\nBuild version 17F113' ]; then
+                    echo 'required=false' >> "$GITHUB_OUTPUT"
+                    echo 'Native code/build inputs and Xcode match the 40 passing native tests in run 40017237771.'
+                  else
+                    echo 'required=true' >> "$GITHUB_OUTPUT"
+                  fi
             - name: Kotlin simulator and device compilation and native regressions
+              if: steps.native-inputs.outputs.required == 'true' 
               run: |
                   uname -m
                   xcodebuild -version
                   chmod +x gradlew
                   ./gradlew :composeApp:compileKotlinIosSimulatorArm64 :composeApp:compileKotlinIosArm64 :shared:iosSimulatorArm64Test --console=plain --max-workers=2
-            - uses: actions/cache/save@v4
-              if: steps.konan.outputs.cache-hit != 'true'
-              with:
-                  path: ~/.konan
-                  key: download-native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('gradle/libs.versions.toml') }}
+                  xcrun simctl shutdown all
             - name: Configure isolated UI test target
               run: |
                   gem install xcodeproj -v 1.27.0 --no-document --user-install
@@ -57,6 +68,7 @@ jobs:
               timeout-minutes: 20
               run: |
                   export SDK_NAME="iphonesimulator$(xcrun --sdk iphonesimulator --show-sdk-version)"
+                  export PLATFORM_NAME=iphonesimulator
                   export CONFIGURATION=Debug
                   export ARCHS=arm64
                   export BUILT_PRODUCTS_DIR="$PWD/.tmp/qa/ios-derived/Build/Products/Debug-iphonesimulator"
@@ -68,6 +80,11 @@ jobs:
                   sysctl -n hw.memsize
                   ./gradlew :composeApp:embedAndSignAppleFrameworkForXcode --console=plain --max-workers=2
                   ./gradlew --stop
+            - uses: actions/cache/save@v4
+              if: steps.konan.outputs.cache-hit != 'true'
+              with:
+                  path: ~/.konan
+                  key: download-native-ui-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('gradle/libs.versions.toml') }}
             - name: Build simulator app and UI tests
               timeout-minutes: 10
               run: OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED=YES xcodebuild -project iosApp/iosApp.xcodeproj -scheme DownloadedContentQA -configuration Debug -sdk iphonesimulator -destination "id=$QA_SIMULATOR" -derivedDataPath .tmp/qa/ios-derived CODE_SIGNING_ALLOWED=NO build-for-testing

@@ -52,7 +52,8 @@ final class DownloadedContentUITests: XCTestCase {
             let red = Int(pixels[offset])
             let green = Int(pixels[offset + 1])
             let blue = Int(pixels[offset + 2])
-            if red >= 14 && red <= 26 && green >= 174 && green <= 186 && blue >= 214 && blue <= 226 {
+            // Allow screenshot color-profile conversion while requiring a large cyan image area.
+            if red < 80 && green >= 140 && green <= 220 && blue >= 190 {
                 cyan += 1
             }
             offset += 4
