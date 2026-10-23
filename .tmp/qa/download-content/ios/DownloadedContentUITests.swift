@@ -44,7 +44,7 @@ final class DownloadedContentUITests: XCTestCase {
             let context = CGContext(data: bytes.baseAddress, width: width, height: height,
                 bitsPerComponent: 8, bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
                 bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue)!
-            context.draw(source, in: CGRect(x: 0, y: 0, width: width, height: height))
+            context.draw(source, in: CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)))
         }
         let cyan = stride(from: 0, to: pixels.count, by: 4).filter {
             (14...26).contains(Int(pixels[$0])) && (174...186).contains(Int(pixels[$0 + 1])) && (214...226).contains(Int(pixels[$0 + 2]))

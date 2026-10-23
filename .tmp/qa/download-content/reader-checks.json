@@ -1,0 +1,42 @@
+[
+  {
+    "mode": "novel",
+    "ui_observation_seconds_including_dump": 7.602,
+    "queries": 6,
+    "main_thread_queries": 0,
+    "opens_at_last_query": 1,
+    "pid": "5872"
+  },
+  {
+    "mode": "thread",
+    "ui_observation_seconds_including_dump": 7.498,
+    "queries": 6,
+    "main_thread_queries": 0,
+    "opens_at_last_query": 1,
+    "pid": "5960"
+  },
+  {
+    "mode": "manga",
+    "ui_observation_seconds_including_dump": 5.505,
+    "queries": 12,
+    "main_thread_queries": 0,
+    "opens_at_last_query": 4,
+    "pid": "6049"
+  },
+  {
+    "mode": "tag",
+    "ui_observation_seconds_including_dump": 5.812,
+    "queries": 11,
+    "main_thread_queries": 0,
+    "opens_at_last_query": 3,
+    "pid": "6135"
+  },
+  {
+    "mode": "rss",
+    "ui_observation_seconds_including_dump": 5.71,
+    "queries": 11,
+    "main_thread_queries": 0,
+    "opens_at_last_query": 3,
+    "pid": "6222"
+  }
+]

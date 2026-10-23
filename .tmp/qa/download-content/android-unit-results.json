@@ -1,0 +1,16 @@
+[
+  {
+    "name": "me.thenano.yamibo.yamibo_app.repository.download.DownloadedContentLoadingTest",
+    "tests": "9",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "me.thenano.yamibo.yamibo_app.repository.download.DownloadRepositoryTest",
+    "tests": "31",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  }
+]

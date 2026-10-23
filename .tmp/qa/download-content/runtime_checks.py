@@ -3,9 +3,13 @@ from pathlib import Path
 ROOT=Path(__file__).parent
 SERIAL="emulator-5554"
 def adb(*args):
-    return subprocess.check_output(["adb", "-s", SERIAL, *args])
+    return subprocess.check_output(["adb", "-s", SERIAL, *args], timeout=30)
 def dump(name):
-    text=adb("exec-out", "uiautomator", "dump", "/dev/tty").decode("utf-8",errors="replace")
+    for attempt in range(6):
+        text=adb("exec-out", "uiautomator", "dump", "/dev/tty").decode("utf-8",errors="replace")
+        if "<?xml" in text and "</hierarchy>" in text: break
+        time.sleep(.5)
+    else: raise RuntimeError(text)
     xml=text[text.index("<?xml"):text.rindex("</hierarchy>")+12]
     (ROOT/(name+".xml")).write_text(xml,encoding="utf-8")
     return ET.fromstring(xml)
