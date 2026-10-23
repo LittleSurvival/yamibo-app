@@ -93,7 +93,22 @@ fun MainViewController() = ComposeUIViewController {
     val cookieStore = remember { IOSCookieStore() }
     val userStore = remember { IOSUserStore() }
     val forumFavoriteStore = remember { IOSForumFavoriteStore() }
-    val rawSettingsStore = remember { IOSSettingsStore() }
+    val rawSettingsStore = remember {
+        IOSSettingsStore().also { store ->
+            if (platform.Foundation.NSUserDefaults.standardUserDefaults.stringForKey("qa-reader") != null) {
+                val documents = platform.Foundation.NSSearchPathForDirectoriesInDomains(
+                    platform.Foundation.NSDocumentDirectory, platform.Foundation.NSUserDomainMask, true,
+                ).first() as String
+                val root = "$documents/qa_downloads"
+                check(platform.Foundation.NSFileManager.defaultManager.fileExistsAtPath(
+                    "$root/YamiboDownloads/thread_42_page_1_author_7/thread_page.json",
+                )) { "QA fixtures missing in current application container: $root" }
+                store.putString("appsettings.backupfolderuri", root)
+                store.putString("appsettings.appupdatelaunchcheckthreshold", "MANUAL")
+                println("QA download root verified: $root")
+            }
+        }
+    }
     val errorMessages = remember {
         ForumErrorMessageResolver(
             DefaultServerNoticeRepository(

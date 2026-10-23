@@ -104,9 +104,9 @@ jobs:
                   container=pathlib.Path(subprocess.check_output(['xcrun','simctl','get_app_container',device,'com.yamibo.bbs.downloadqa','data'],text=True).strip())
                   fixture=container/'Documents/qa_downloads'
                   subprocess.run(['python3','.tmp/qa/download-content/generate_fixtures.py',str(fixture)],check=True)
-                  prefs=container/'Library/Preferences/com.yamibo.bbs.downloadqa.plist'
-                  prefs.parent.mkdir(parents=True,exist_ok=True)
-                  prefs.write_bytes(plistlib.dumps({'appsettings.backupfolderuri':str(fixture)}))
+                  assert (fixture/'YamiboDownloads/thread_42_page_1_author_7/thread_page.json').is_file()
+                  print('Seeded current application container:', container)
+                  print('Seeded manifests:', len(list(fixture.rglob('manifest.json'))))
                   PY
             - name: Run actual reader and management UI flows
               timeout-minutes: 12
