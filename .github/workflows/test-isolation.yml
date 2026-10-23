@@ -24,7 +24,7 @@ jobs:
           PR_BASE: ${{ github.event.pull_request.base.sha }}
         run: |
           if [ -n "$PR_BASE" ]; then
-            python .github/scripts/validate_test_isolation.py --base "$PR_BASE"
+            python .github/scripts/checks/validate_test_isolation.py --base "$PR_BASE"
           else
-            python .github/scripts/validate_test_isolation.py
+            python .github/scripts/checks/validate_test_isolation.py
           fi

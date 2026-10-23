@@ -112,7 +112,7 @@ fi
 
 echo "Uploading ${APK_NAME} ($(stat -c%s "$APK") bytes) to Gitea..." >&2
 upload_json="$(curl "${upload_curl_opts[@]}" \
-  2> >(python3 .github/scripts/filter-upload-progress.py "Gitea upload") \
+  2> >(python3 .github/scripts/release/filter-upload-progress.py "Gitea upload") \
   -X POST -H "$auth_header" \
   -F "attachment=@${APK}" \
   "${api}/releases/${release_id}/assets?name=${encoded_apk_name}")"

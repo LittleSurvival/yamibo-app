@@ -228,7 +228,7 @@ jobs:
             local feed="$RUNNER_TEMP/mirror-tag-feed-$name/update"
             mkdir -p "$feed"
             cp -R update/. "$feed/"
-            bash .github/scripts/publish-feed-directory.sh "$remote" main "$feed" update
+            bash .github/scripts/release/publish-feed-directory.sh "$remote" main "$feed" update
             local dir="$RUNNER_TEMP/mirror-tag-$name"
             git clone --quiet --depth 1 --single-branch --branch main "$remote" "$dir"
             git -C "$dir" tag -f "${{ steps.meta.outputs.version_code }}"
@@ -251,7 +251,7 @@ jobs:
           APK_NAME: ${{ steps.meta.outputs.apk_name }}
         run: |
           set -euo pipefail
-          bash .github/scripts/publish-gitee-release-asset.sh
+          bash .github/scripts/release/publish-gitee-release-asset.sh
 
       - name: Publish Gitea release asset
         id: gitea_release
@@ -267,7 +267,7 @@ jobs:
           APK_NAME: ${{ steps.meta.outputs.apk_name }}
         run: |
           set -euo pipefail
-          bash .github/scripts/publish-gitea-release-asset.sh
+          bash .github/scripts/release/publish-gitea-release-asset.sh
 
       - name: Generate published update manifests
         shell: bash
@@ -279,21 +279,21 @@ jobs:
           ASSET_URL="${{ steps.meta.outputs.github_asset_url }}" \
           APK_SHA256="${{ steps.sign.outputs.sha256 }}" \
           APK_SIZE="${{ steps.sign.outputs.size }}" \
-            python3 .github/scripts/write-published-update-manifest.py
+            python3 .github/scripts/release/write-published-update-manifest.py
 
           OUTPUT_DIR="$RUNNER_TEMP/published-update/gitee/update" \
           RELEASE_URL="${{ steps.gitee_release.outputs.release_url }}" \
           ASSET_URL="${{ steps.gitee_release.outputs.asset_url }}" \
           APK_SHA256="${{ steps.sign.outputs.sha256 }}" \
           APK_SIZE="${{ steps.sign.outputs.size }}" \
-            python3 .github/scripts/write-published-update-manifest.py
+            python3 .github/scripts/release/write-published-update-manifest.py
 
           OUTPUT_DIR="$RUNNER_TEMP/published-update/gitea/update" \
           RELEASE_URL="${{ steps.gitea_release.outputs.release_url }}" \
           ASSET_URL="${{ steps.gitea_release.outputs.asset_url }}" \
           APK_SHA256="${{ steps.sign.outputs.sha256 }}" \
           APK_SIZE="${{ steps.sign.outputs.size }}" \
-            python3 .github/scripts/write-published-update-manifest.py
+            python3 .github/scripts/release/write-published-update-manifest.py
 
       - name: Validate published update manifests
         shell: bash
@@ -307,7 +307,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          bash .github/scripts/publish-feed-directory.sh \
+          bash .github/scripts/release/publish-feed-directory.sh \
             "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
             update-release "$RUNNER_TEMP/published-update/github/update" update
 
@@ -353,7 +353,7 @@ jobs:
           push_mirror() {
             local name="$1"
             local remote="$2"
-            bash .github/scripts/publish-feed-directory.sh \
+            bash .github/scripts/release/publish-feed-directory.sh \
               "$remote" main "$RUNNER_TEMP/published-update/$name/update" update
             local dir="$RUNNER_TEMP/mirror-release-tag-$name"
             git clone --quiet --depth 1 --single-branch --branch main "$remote" "$dir"

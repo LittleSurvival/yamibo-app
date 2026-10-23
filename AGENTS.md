@@ -28,7 +28,7 @@
 - `archived-tests` is the permanent archive name, exempt from version-based branch naming. Never merge it into `main`, and never merge `main` into it merely to update production code; doing so can remove archived tests.
 - Use a separate validation branch/worktree for test commits. Build the production PR branch from current `main` and cherry-pick only production commits. Do not hide test commits by deleting their files in a later PR commit.
 - Keep validation evidence in PR descriptions, including the production commit, validation commit/branch, commands, outcomes, and limitations. Do not treat the absence of tests on `main` as a passing test run.
-- Before delivering to `main`, run `python .github/scripts/validate_test_isolation.py --base origin/main`. See [Test isolation](dev-docs/test-isolation.md) for recovery and archive maintenance.
+- Before delivering to `main`, run `python .github/scripts/checks/validate_test_isolation.py --base origin/main`. See [Test isolation](dev-docs/test-isolation.md) for recovery and archive maintenance.
 
 ## Commit granularity
 
@@ -38,8 +38,13 @@
 - Before PR delivery, review the introduced commit history and consolidate temporary/fixup commits into the final logical changes while preserving unrelated work and test/OpenSpec isolation. Keep validation-only history out of the production PR.
 - Do not create a separate commit solely to record this preference or routine validation status. Include policy/documentation updates with the relevant logical change; record run outcomes in PR descriptions and Actions artifacts.
 
+## Script organization
+
+- Keep `.github/scripts/` scripts in purpose-based subfolders; see [Repository scripts](.github/scripts/README.md). Place new scripts in the relevant folder rather than the scripts root.
+- When moving scripts, update all callers and paths derived from the script location, including workflows, documentation, and IDE run configurations.
+
 ## Git identity guard
 
-- Before every commit, run `python .github/scripts/validate_git_name.py` from the project root.
+- Before every commit, run `python .github/scripts/checks/validate_git_name.py` from the project root.
 - Continue with the commit only when the validator exits successfully. Do not duplicate its identity prompt; its repository-local saved choice is authoritative.
-- The validator script is located at [`.github/scripts/validate_git_name.py`](.github/scripts/validate_git_name.py).
+- The validator script is located at [`.github/scripts/checks/validate_git_name.py`](.github/scripts/checks/validate_git_name.py).

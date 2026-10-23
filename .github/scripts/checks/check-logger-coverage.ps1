@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 $OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
 [Console]::InputEncoding = [System.Text.UTF8Encoding]::new()
 
-$root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$root = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
 $sourceRoots = @("composeApp", "shared", "buildSrc") | ForEach-Object { Join-Path $root $_ }
 $files = Get-ChildItem -Path $sourceRoots -Recurse -Include *.kt,*.kts -File |
     Where-Object {

@@ -1,4 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+.github/scripts/release/*.sh text eol=lf
 .github/scripts/apple-validate/**/*.sh text eol=lf
 .github/scripts/apple-validate/*.sh text eol=lf

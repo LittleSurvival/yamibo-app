@@ -51,7 +51,7 @@ can remove tests from the archive.
 5. Run the isolation check after staging and before delivery:
 
    ```text
-   python .github/scripts/validate_test_isolation.py --base origin/main
+   python .github/scripts/checks/validate_test_isolation.py --base origin/main
    ```
 
 The GitHub workflow checks production trees and every commit introduced by a PR.

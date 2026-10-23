@@ -90,7 +90,7 @@ fi
 
 echo "Uploading ${APK_NAME} ($(stat -c%s "$APK") bytes) to Gitee..." >&2
 upload_json="$(curl "${upload_curl_opts[@]}" \
-  2> >(python3 .github/scripts/filter-upload-progress.py "Gitee upload") \
+  2> >(python3 .github/scripts/release/filter-upload-progress.py "Gitee upload") \
   -X POST "${api}/releases/${release_id}/attach_files" \
   -F "access_token=${GITEE_TOKEN}" \
   -F "file=@${APK}")"
@@ -100,7 +100,7 @@ asset_url="$(
   {
     printf '%s\n' "$upload_json"
     printf '%s\n' "$release_json"
-  } | python3 .github/scripts/extract-release-asset-url.py "$APK_NAME" "$fallback_asset_url"
+  } | python3 .github/scripts/release/extract-release-asset-url.py "$APK_NAME" "$fallback_asset_url"
 )"
 
 if [ -z "$asset_url" ]; then
@@ -120,7 +120,7 @@ verify_gitee_asset() {
       --max-time 60 \
       --dump-header "$headers_file" \
       --output /dev/null \
-      "$asset_url" && python3 .github/scripts/validate-release-asset-headers.py \
+      "$asset_url" && python3 .github/scripts/release/validate-release-asset-headers.py \
         "$headers_file" "$APK_NAME" "$apk_size"; then
       return 0
     fi
