@@ -126,7 +126,7 @@ class MainActivity : ComponentActivity() {
             ) { }
 
             /** Navigator Logic */
-            val navigator = rememberRestorableNavigator()
+            val navigator = rememberRestorableNavigator(start = me.thenano.yamibo.yamibo_app.qa.downloadedReaderQaStart(intent.getStringExtra("qa-reader")))
             val appCoroutineScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main) }
             val appFeedbackController = remember { AppFeedbackController() }
             val appConfirmationController = remember(appCoroutineScope) {
@@ -189,7 +189,9 @@ class MainActivity : ComponentActivity() {
             val settingsStore = remember {
                 appSyncService.operationRecordingSettingsStore(appDatabase, rawSettingsStore)
             }
-            val appSettingsRepository = remember { AppSettingsRepository(settingsStore) }
+            val appSettingsRepository = remember { AppSettingsRepository(settingsStore).also {
+                if (intent.hasExtra("qa-reader")) it.backupFolderUri.setValue("content://$packageName.qa.documents/tree/root")
+            } }
             val novelReaderSettingsRepository = remember { NovelReaderSettingsRepository(settingsStore) }
             val mangaReaderSettingsRepository = remember { MangaReaderSettingsRepository(settingsStore) }
             val imageReaderModeOverrideRepository = remember { SettingsImageReaderModeOverrideRepository(settingsStore) }

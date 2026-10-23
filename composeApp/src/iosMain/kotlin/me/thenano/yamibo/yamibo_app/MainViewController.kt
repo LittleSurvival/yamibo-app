@@ -64,7 +64,7 @@ import me.thenano.yamibo.yamibo_app.appsync.detachIOSAppSyncLifecycle
 
 fun MainViewController() = ComposeUIViewController {
     /** Navigator Logic */
-    val navigator = rememberRestorableNavigator()
+    val navigator = rememberRestorableNavigator(start = me.thenano.yamibo.yamibo_app.qa.downloadedReaderQaStart(platform.Foundation.NSUserDefaults.standardUserDefaults.stringForKey("qa-reader")))
     DisposableEffect(navigator) {
         me.thenano.yamibo.yamibo_app.navigation.NativeNavigationBridge.onBack = { navigator.dispatchBack() }
         me.thenano.yamibo.yamibo_app.navigation.NativeNavigationBridge.canGoBack = { navigator.stack.size > 1 }

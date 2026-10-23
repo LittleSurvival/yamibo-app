@@ -1,0 +1,70 @@
+name: Download content Apple validation
+
+on:
+    push:
+        branches:
+            - stable-v0.0.9-fix-downloaded-content-loading-d76edbf-9be0117-validation
+
+permissions:
+    contents: read
+
+jobs:
+    apple-validation:
+        runs-on: macos-latest
+        timeout-minutes: 45
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-java@v4
+              with:
+                  distribution: temurin
+                  java-version: '17'
+            - uses: gradle/actions/setup-gradle@v4
+            - name: Kotlin simulator and device compilation and native regressions
+              run: |
+                  uname -m
+                  xcodebuild -version
+                  chmod +x gradlew
+                  ./gradlew :composeApp:compileKotlinIosSimulatorArm64 :composeApp:compileKotlinIosArm64 :shared:iosSimulatorArm64Test --console=plain --max-workers=2
+            - name: Configure isolated UI test target
+              run: |
+                  gem install xcodeproj -v 1.27.0 --no-document --user-install
+                  ruby .tmp/qa/download-content/ios/configure_tests.rb
+                  python3 - <<'PY'
+                  import json, os, subprocess
+                  data=json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','-j']))
+                  phones=[d for values in data['devices'].values() for d in values if 'iPhone' in d['name']]
+                  assert phones, 'No available iPhone simulator'
+                  udid=phones[0]['udid']
+                  subprocess.run(['xcrun','simctl','boot',udid],check=False)
+                  subprocess.run(['xcrun','simctl','bootstatus',udid,'-b'],check=True)
+                  with open(os.environ['GITHUB_ENV'],'a') as f: f.write('QA_SIMULATOR='+udid+'\n')
+                  PY
+            - name: Build simulator app and UI tests
+              run: xcodebuild -project iosApp/iosApp.xcodeproj -scheme DownloadedContentQA -configuration Debug -sdk iphonesimulator -destination "id=$QA_SIMULATOR" -derivedDataPath .tmp/qa/ios-derived CODE_SIGNING_ALLOWED=NO build-for-testing
+            - name: Install independent app and seed offline fixtures
+              run: |
+                  python3 - <<'PY'
+                  import os, pathlib, plistlib, subprocess
+                  products=pathlib.Path('.tmp/qa/ios-derived/Build/Products/Debug-iphonesimulator')
+                  apps=[p for p in products.glob('*.app') if plistlib.loads((p/'Info.plist').read_bytes()).get('CFBundleIdentifier')=='com.yamibo.bbs.downloadqa']
+                  assert len(apps)==1, apps
+                  device=os.environ['QA_SIMULATOR']
+                  subprocess.run(['xcrun','simctl','install',device,str(apps[0])],check=True)
+                  container=pathlib.Path(subprocess.check_output(['xcrun','simctl','get_app_container',device,'com.yamibo.bbs.downloadqa','data'],text=True).strip())
+                  fixture=container/'Documents/qa_downloads'
+                  subprocess.run(['python3','.tmp/qa/download-content/generate_fixtures.py',str(fixture)],check=True)
+                  prefs=container/'Library/Preferences/com.yamibo.bbs.downloadqa.plist'
+                  prefs.parent.mkdir(parents=True,exist_ok=True)
+                  prefs.write_bytes(plistlib.dumps({'appsettings.backupfolderuri':str(fixture)}))
+                  PY
+            - name: Run actual reader and management UI flows
+              run: xcodebuild -project iosApp/iosApp.xcodeproj -scheme DownloadedContentQA -configuration Debug -destination "id=$QA_SIMULATOR" -derivedDataPath .tmp/qa/ios-derived -resultBundlePath .tmp/qa/download-content/ios-ui.xcresult CODE_SIGNING_ALLOWED=NO test-without-building
+            - name: Preserve native results
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: download-content-ios-results
+                  path: |
+                      .tmp/qa/download-content/ios-ui.xcresult
+                      shared/build/test-results/iosSimulatorArm64Test
+                      shared/build/reports/tests/iosSimulatorArm64Test
