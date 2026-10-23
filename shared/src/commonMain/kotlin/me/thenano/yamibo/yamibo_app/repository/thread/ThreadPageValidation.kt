@@ -37,6 +37,15 @@ fun YamiboResult<ThreadPage>.validatedThreadPage(
     else -> YamiboResult.Failure("[THREAD_INVALID_CONTENT] 帖子內容不完整或版本不符，請重新載入")
 }
 
+/** A full-thread download can supply images for one author without reusing its pagination. */
+suspend fun DownloadRepository.getDownloadedImagePage(tid: ThreadId, authorId: UserId?): ThreadPage? {
+    val authorPage = getDownloadedPage(ThreadPageDownloadKey(tid.value, 1, authorId?.value))
+        ?.takeIf { it.isValidThreadPage(tid, page = 1, authorId = authorId) }
+    if (authorPage != null || authorId == null) return authorPage
+    return getDownloadedPage(ThreadPageDownloadKey(tid.value, 1))
+        ?.takeIf { it.isValidThreadPage(tid, page = 1) }
+}
+
 /** findpost uses full-thread pagination; fromuid is not an author filter. */
 suspend fun ThreadRepository.fetchReaderStartPage(
     tid: ThreadId,

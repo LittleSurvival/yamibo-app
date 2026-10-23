@@ -63,8 +63,7 @@ import me.thenano.yamibo.yamibo_app.repository.download.DownloadStatus
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadTaskKey
 import me.thenano.yamibo.yamibo_app.repository.download.RssMangaChapterDownloadKey
 import me.thenano.yamibo.yamibo_app.repository.download.TagMangaChapterDownloadKey
-import me.thenano.yamibo.yamibo_app.repository.download.ThreadPageDownloadKey
-import me.thenano.yamibo.yamibo_app.repository.thread.isValidThreadPage
+import me.thenano.yamibo.yamibo_app.repository.thread.getDownloadedImagePage
 import me.thenano.yamibo.yamibo_app.repository.settings.EffectiveReadingModeSource
 import me.thenano.yamibo.yamibo_app.repository.settings.ReadingMode
 import me.thenano.yamibo.yamibo_app.repository.settings.TouchZoneLayout
@@ -550,12 +549,7 @@ fun ImagesReaderScreen(
             }
 
             val downloadedPage = if (forceNetworkLoadTrigger == 0) {
-                val authorPage = downloadRepository.getDownloadedPage(ThreadPageDownloadKey(activeTid.value, 1, activeAuthorId?.value))
-                    ?.takeIf { it.isValidThreadPage(activeTid, page = 1, authorId = activeAuthorId) }
-                authorPage ?: if (activeAuthorId != null) {
-                    downloadRepository.getDownloadedPage(ThreadPageDownloadKey(activeTid.value, 1))
-                        ?.takeIf { it.isValidThreadPage(activeTid, page = 1) }
-                } else null
+                downloadRepository.getDownloadedImagePage(activeTid, activeAuthorId)
             } else null
             val cachedPage = downloadedPage ?: if (forceNetworkLoadTrigger == 0) threadRepository.getCachedThread(activeTid, null, 1) else null
             if (cachedPage != null) {
