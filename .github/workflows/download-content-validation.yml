@@ -45,7 +45,7 @@ jobs:
                     echo 'required=true' >> "$GITHUB_OUTPUT"
                   fi
             - name: Kotlin simulator and device compilation and native regressions
-              if: steps.native-inputs.outputs.required == 'true' 
+              if: steps.native-inputs.outputs.required == 'true'
               run: |
                   uname -m
                   xcodebuild -version
