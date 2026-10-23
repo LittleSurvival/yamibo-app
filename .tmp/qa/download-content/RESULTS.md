@@ -3,7 +3,7 @@
 ## Revisions and isolation
 
 - Production: `cd202b6facb90f9d0591ec09e7d0c3474be31c81`, PR https://github.com/LittleSurvival/yamibo-app/pull/62 (draft).
-- Validation code: `3852dce651ad11aac7f3a063ea7ab127719e261d` on `stable-v0.0.9-fix-downloaded-content-loading-d76edbf-9be0117-validation`.
+- Validation code: `f947873f923ad5b88c517bee3fb8094145280995` on `stable-v0.0.9-fix-downloaded-content-loading-d76edbf-9be0117-validation`.
 - `production-source-comparison.json`: all 11 changed production sources are byte-identical in validation. Validation alone adds test sources/dependencies, startup adapters in MainActivity/MainViewController, an independent application/bundle ID, a local DocumentsProvider, QA Activities and an Apple UI workflow.
 - Production test-isolation and OpenSpec guards pass; no test/QA code or OpenSpec files are proposed for main. Do not merge the validation branch.
 
@@ -17,7 +17,7 @@ Production `:composeApp:compileDebugKotlin` passed on cd202b6. Validation `:shar
 
 Pixel_8_Pro / Android 16 / emulator-5554, debug APK, 2 cores and 2 GB. Independent package `me.thenano.yamibo.yamibo_app.downloadqa.debug`; existing app data was untouched. Wi-Fi/mobile data were disabled for reader checks, then restored; the QA package/fixture tar were removed and this newly started emulator shut down after validation.
 
-Fixtures: 150 KB HTML novel and 300 synthetic cyan-striped 800x1200 local PNGs per manga chapter. `generate_fixtures.py` reproduces them. Actual product repository/storage/provider are used in reader flows; management stress tests use the actual product screen and a synthetic 5,000-page repository.
+Fixtures: 150 KB HTML novel and 300 synthetic cyan-striped 800x1200 local PNGs per manga chapter. `generate_fixtures.py` reproduces them. Actual product repository/storage/provider are used in reader flows; management stress tests use the actual product screen and a synthetic 5,000-page repository. The app-owned Android provider is addressed directly; these flows do not exercise the SAF picker or persisted URI-grant acquisition. Full-library restoration is covered by repository regressions rather than this app-owned provider setup.
 
 - Novel, ordinary thread, thread manga, tag manga and RSS manga loaded local content while offline and scrolled/flipped (`final-reader-checks.json`, screenshots/XML).
 - A restored author-specific manga reader also worked when only the all-author local folder existed.
@@ -38,10 +38,12 @@ Real AndroidDownloadStorageProvider against the validation DocumentsProvider, 30
 
 Medians: 13.1684 ms versus 2857.4705 ms. Main-thread queries: zero. This measures URI resolution, not whole-page latency or real cloud storage. Batch ran first each round, so the previous algorithm also benefited from warmed filesystem state.
 
+The initial inventory still requires a full manifest scan. External file changes require explicit refresh; no persistent index or storage migration is introduced.
+
 ## Frame sample and limits
 
 RSS reader: 8 UI-derived left swipes, reached page 9/300. gfxinfo: 235 total frames, 24 FrameTimeline janky (10.21%), p50 25 ms, p90 38 ms, p95 53 ms, p99 113 ms; see rss-frames.*. Legacy emulator jank/GPU timing counters were inconsistent and are not acceptance metrics. This is one debug emulator sample with no baseline frame comparison; it does not establish physical-device frame smoothness or elimination of all jank.
 
 ## Apple validation
 
-First run https://github.com/LittleSurvival/yamibo-app/actions/runs/40014840267 passed simulator/device Kotlin compilation and native regressions; it was superseded before full UI completion. Final-source run https://github.com/LittleSurvival/yamibo-app/actions/runs/40017068693 is pending. It compiles iOS simulator/device targets, runs native regressions, builds an independent app and XCTest target, seeds real local fixtures, and checks novel/thread/three manga/management flows. Manga tests assert rendered fixture pixels and next-page navigation, and export screenshots. Do not claim final iOS simulator acceptance until the run actually passes.
+First run https://github.com/LittleSurvival/yamibo-app/actions/runs/40014840267 passed simulator/device Kotlin compilation and 37 native regressions (zero failures/errors/skips, downloaded artifact summarized in ios-initial-unit-results.json); it was superseded before full UI completion. Final-source run https://github.com/LittleSurvival/yamibo-app/actions/runs/40017237771 is pending. It compiles iOS simulator/device targets, runs native regressions, builds an independent app and XCTest target, seeds real local fixtures, and checks novel/thread/three manga/management flows. Manga tests assert rendered fixture pixels and next-page navigation, and export screenshots. Do not claim final iOS simulator acceptance until the run actually passes.
