@@ -8,6 +8,10 @@ on:
 permissions:
     contents: read
 
+concurrency:
+    group: download-content-${{ github.ref }}
+    cancel-in-progress: true
+
 jobs:
     apple-validation:
         runs-on: macos-latest

@@ -43,6 +43,22 @@ class DownloadRepositoryTest {
     private val json = Json { encodeDefaults = true }
 
     @Test
+    fun pendingQueueWritesAreConflatedWhileStorageIsBusy() = runBlocking {
+        val storage = FakeStorage()
+        val repository = repository(FakeThreadRepository(), storage)
+        repository.getSummary()
+        val gate = CompletableDeferred<Unit>()
+        storage.queueWriteGate = gate
+        repository.pauseAll()
+        withTimeout(2_000) { storage.queuedWriteStarted.await() }
+        repeat(100) { repository.pauseAll() }
+        gate.complete(Unit)
+        withTimeout(2_000) { while (storage.queueWriteCount < 3) delay(10) }
+        delay(100)
+        assertEquals(3, storage.queueWriteCount) // Initial restore, in-flight write, latest pending state.
+    }
+
+    @Test
     fun queueAndContentViewsReuseTheInitialInventory() = runBlocking {
         val storage = FakeStorage()
         val repository = repository(FakeThreadRepository(), storage)
@@ -754,6 +770,9 @@ class DownloadRepositoryTest {
     }
 
     private class FakeStorage : DownloadStorageProvider {
+        var queueWriteGate: CompletableDeferred<Unit>? = null
+        val queuedWriteStarted = CompletableDeferred<Unit>()
+        var queueWriteCount = 0
         var storageKey = "test"
         var threadManifestScans = 0
         var tagManifestScans = 0
@@ -871,6 +890,11 @@ class DownloadRepositoryTest {
             return queue
         }
         override suspend fun writeQueue(entries: List<DownloadQueueEntry>) {
+            queueWriteCount++
+            queueWriteGate?.let { gate ->
+                queuedWriteStarted.complete(Unit)
+                gate.await()
+            }
             queue = entries
         }
 
