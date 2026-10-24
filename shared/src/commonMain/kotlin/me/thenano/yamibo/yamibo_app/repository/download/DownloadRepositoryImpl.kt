@@ -21,6 +21,7 @@ import me.thenano.yamibo.yamibo_app.repository.DownloadRepository
 import me.thenano.yamibo.yamibo_app.repository.RssSearchSubscriptionRepository
 import me.thenano.yamibo.yamibo_app.repository.TagRepository
 import me.thenano.yamibo.yamibo_app.repository.ThreadRepository
+import me.thenano.yamibo.yamibo_app.repository.thread.isValidThreadPage
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
 
 class DownloadRepositoryImpl(
@@ -323,6 +324,33 @@ class DownloadRepositoryImpl(
                     )
                 },
             )
+        }
+    }
+
+    override suspend fun updateDownloadedPage(key: ThreadPageDownloadKey, page: ThreadPage): Boolean = withContext(Dispatchers.IO) {
+        require(page.isValidThreadPage(ThreadId(key.tid), page = key.page, authorId = key.authorId?.let(::UserId)))
+        initialized.await()
+        contentMutex.withLock {
+            val manifest = storageProvider.readManifest(key) ?: return@withContext false
+            val totalPages = page.pageNav?.totalPages ?: 1
+            val updatedAt = currentTimeMillis()
+            storageProvider.updateThreadPage(
+                key,
+                json.encodeToString(manifest.copy(
+                    title = page.thread.title,
+                    downloadedAt = updatedAt,
+                    sourceTotalPages = totalPages,
+                    pageKind = if (key.page >= totalPages) DownloadPageKind.LastAtDownloadTime else DownloadPageKind.Normal,
+                    forumId = page.thread.forum.fid.value,
+                    forumName = page.thread.forum.name,
+                )).encodeToByteArray(),
+                json.encodeToString(page).encodeToByteArray(),
+            )
+            contentCatalog = null
+            queue.value.firstOrNull { it.key == key }?.let { entry ->
+                upsert(entry.copy(title = page.thread.title, updatedAt = updatedAt))
+            }
+            true
         }
     }
 
