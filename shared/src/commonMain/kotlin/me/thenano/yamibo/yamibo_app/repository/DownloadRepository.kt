@@ -31,6 +31,7 @@ interface DownloadRepository {
     suspend fun getStatus(key: TagMangaChapterDownloadKey): DownloadStatus
     suspend fun getStatus(key: RssMangaChapterDownloadKey): DownloadStatus
     suspend fun getDownloadedPage(key: ThreadPageDownloadKey): ThreadPage?
+    suspend fun updateDownloadedPage(key: ThreadPageDownloadKey, page: ThreadPage): Boolean
     suspend fun getManifest(key: ThreadPageDownloadKey): ThreadPageDownloadManifest?
     suspend fun getTagMangaChapterImages(key: TagMangaChapterDownloadKey): List<String>?
     suspend fun getTagMangaManifest(key: TagMangaChapterDownloadKey): TagMangaChapterManifest?
