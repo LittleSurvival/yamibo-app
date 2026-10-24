@@ -427,12 +427,6 @@ class MainActivity : ComponentActivity() {
                 val messageNotificationEnabled = appSettingsRepository.messageNotificationEnabled.state()
                 val messageNotificationInterval = appSettingsRepository.messageNotificationInterval.state()
                 
-                LaunchedEffect(Unit) {
-                    if (appSettingsRepository.clearCacheOnAppLaunch.getValue()) {
-                        delay(1_200.milliseconds)
-                        diskCacheFactory.clearAllCache()
-                    }
-                }
                 LaunchedEffect(favoriteUpdateInterval) {
                     delay(1_200.milliseconds)
                     favoriteUpdateRunner.schedulePeriodicUpdate(favoriteUpdateInterval)

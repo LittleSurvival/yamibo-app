@@ -30,6 +30,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil3.ImageLoader
 import coil3.PlatformContext
+import coil3.SingletonImageLoader
+import coil3.compose.LocalPlatformContext
 import coil3.compose.setSingletonImageLoaderFactory
 import coil3.memory.MemoryCache
 import coil3.network.ktor3.KtorNetworkFetcherFactory
@@ -37,6 +39,8 @@ import coil3.svg.SvgDecoder
 import io.github.littlesurvival.YamiboClient
 import io.github.littlesurvival.waf.YamiboWafChallengeHost
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -149,8 +153,33 @@ fun App() {
     }
     setSingletonImageLoaderFactory(imageLoaderFactory)
 
+    val diskCacheFactory = LocalDiskCacheFactory.current
+    val platformContext = LocalPlatformContext.current
+    SideEffect {
+        diskCacheFactory.imageCacheClearer = {
+            val imageLoader = SingletonImageLoader.get(platformContext)
+            imageLoader.memoryCache?.clear()
+            imageLoader.diskCache?.let { cache ->
+                cache.clear()
+                cache.directory
+            }
+        }
+    }
+
     val navigator = LocalNavigator.current
     val appSettingsRepository = LocalAppSettingsRepository.current
+    LaunchedEffect(diskCacheFactory) {
+        if (appSettingsRepository.clearCacheOnAppLaunch.getValue()) {
+            delay(1_200)
+            try {
+                diskCacheFactory.clearAllCache()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Logger.e("App", "Failed to clear caches on launch", error)
+            }
+        }
+    }
     val authRepository = LocalAuthRepository.current
     val signRepository = LocalSignRepository.current
     val signReminderScheduler = LocalSignReminderScheduler.current
