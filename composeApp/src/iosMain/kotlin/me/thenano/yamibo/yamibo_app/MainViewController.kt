@@ -328,11 +328,6 @@ fun MainViewController() = ComposeUIViewController {
         val messageNotificationEnabled = appSettingsRepository.messageNotificationEnabled.state()
         val messageNotificationInterval = appSettingsRepository.messageNotificationInterval.state()
 
-        androidx.compose.runtime.LaunchedEffect(Unit) {
-            if (appSettingsRepository.clearCacheOnAppLaunch.getValue()) {
-                diskCacheFactory.clearAllCache()
-            }
-        }
         androidx.compose.runtime.LaunchedEffect(messageNotificationEnabled, messageNotificationInterval) {
             messageNotificationScheduler.setEnabled(
                 enabled = messageNotificationEnabled,

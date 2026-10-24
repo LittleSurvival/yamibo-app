@@ -14,6 +14,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import me.thenano.yamibo.yamibo_app.*
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBar
 import me.thenano.yamibo.yamibo_app.components.storage.YamiboStorageUsageOverview
@@ -605,6 +606,7 @@ private fun StorageContent(feedbackController: me.thenano.yamibo.yamibo_app.feed
     var cacheSizeText by remember { mutableStateOf(i18n("正在計算中...")) }
     var cacheBreakdown by remember { mutableStateOf(CacheStorageBreakdown(rootPath = "", usages = emptyList())) }
     var downloadSummary by remember { mutableStateOf(DownloadedContentSummary()) }
+    var isClearingCache by remember { mutableStateOf(false) }
 
     suspend fun refreshCacheUsage() {
         folderLabel = backupRepository.getSelectedFolderLabel()
@@ -612,7 +614,7 @@ private fun StorageContent(feedbackController: me.thenano.yamibo.yamibo_app.feed
         downloadSummary = runCatching { downloadRepository.getDownloadedContentSummary() }
             .onFailure { Logger.w(TAG, "Failed to load downloaded content summary for storage settings", it) }
             .getOrDefault(DownloadedContentSummary())
-        cacheSizeText = formatStorageSize(cacheBreakdown.usages.sumOf { it.bytes })
+        cacheSizeText = formatStorageSize(cacheBreakdown.usages.filter { it.key != "backup" }.sumOf { it.bytes })
     }
 
     val folderActions = rememberBackupFileActions(
@@ -693,16 +695,26 @@ private fun StorageContent(feedbackController: me.thenano.yamibo.yamibo_app.feed
     Spacer(Modifier.height(18.dp))
 
     SettingsActionRow(
-        title = i18n("立即清除所有緩存"),
+        title = if (isClearingCache) i18n("處理中...") else i18n("立即清除所有緩存"),
         subtitle = i18n("清除圖片、頁面與其他暫存資料，釋放目前已使用的儲存空間。") +
             "\n" +
             i18n("目前緩存大小：{}", cacheSizeText),
         onClick = {
+            if (isClearingCache) return@SettingsActionRow
+            isClearingCache = true
             coroutineScope.launch {
-                diskCacheFactory.clearAllCache()
-                cacheSizeText = "0 kB"
-                cacheBreakdown = cacheBreakdown.copy(usages = emptyList())
-                feedbackController.post(i18n("已清除所有緩存"))
+                try {
+                    diskCacheFactory.clearAllCache()
+                    refreshCacheUsage()
+                    feedbackController.post(i18n("已清除所有緩存"))
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    Logger.e(TAG, "Failed to clear caches", error)
+                    feedbackController.post(i18n("清除失敗"))
+                } finally {
+                    isClearingCache = false
+                }
             }
         },
     )

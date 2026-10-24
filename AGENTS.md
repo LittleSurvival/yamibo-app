@@ -20,6 +20,10 @@
 - Treat the PR as a checkpoint. Its description must record the problem and root cause, implementation and design decisions, user-visible behavior, verification evidence, and known risks, limits, or rollback notes.
 - Before opening or merging the PR, enforce the OpenSpec isolation guard above. Merge only after required checks pass, and prefer a merge commit to preserve branch lineage unless the user requests another strategy.
 
+## Subagent worktree cleanup
+
+- After the entire task is complete, archive or remove worktrees created for its subagents only after commits are pushed, PRs are recorded, and needed QA artifacts are preserved outside those worktrees. Do not remove active or unrelated worktrees, or lose uncommitted work.
+
 ## Test isolation
 
 - Never commit or force-add `.tmp/` contents, including on validation branches. Keep reproducible validation scripts under `.github/scripts/`; keep generated reports, screenshots, traces and fixtures untracked, and publish run evidence through Actions artifacts and PR descriptions.

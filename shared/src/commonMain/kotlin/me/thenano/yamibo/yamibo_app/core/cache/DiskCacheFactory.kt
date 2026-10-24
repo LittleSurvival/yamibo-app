@@ -35,6 +35,9 @@ class DiskCacheFactory(
     val fileSystem = FileSystem.SYSTEM
     val rootCacheDir = cacheDirPath.toPath() / "yamibo_cache"
     var backupStorageUsageProvider: (suspend () -> Long)? = null
+    var imageCacheClearer: (suspend () -> okio.Path?)? = null
+    @PublishedApi
+    internal val memoryCacheClearers = mutableListOf<() -> Unit>()
 
     /**
      * Create a new DiskCache instance for a specific type <T>
@@ -63,7 +66,7 @@ class DiskCacheFactory(
             rootCacheDir = rootCacheDir,
             fileSystem = fileSystem,
             serializer = serializer
-        )
+        ).also { memoryCacheClearers += it::clearMemory }
     }
 
     suspend fun getCacheStorageBreakdown(): CacheStorageBreakdown = withContext(Dispatchers.IO) {
@@ -149,16 +152,26 @@ class DiskCacheFactory(
         }
     }
 
-    /** Clears all disk cache across all namespaces */
+    /** Clears application caches, leaving downloaded content and backups untouched. */
     suspend fun clearAllCache() = withContext(Dispatchers.IO) {
-        try {
-            database.diskCacheEntryQueries.clearAll()
-            if (fileSystem.exists(rootCacheDir)) {
-                fileSystem.deleteRecursively(rootCacheDir)
-                fileSystem.createDirectories(rootCacheDir)
+        val imageCacheDirectory = imageCacheClearer?.invoke()
+        memoryCacheClearers.forEach { it() }
+        database.diskCacheEntryQueries.clearAll()
+        if (fileSystem.exists(rootCacheDir)) {
+            // Keep namespace directories available to existing cache instances.
+            fileSystem.list(rootCacheDir).forEach { namespace ->
+                if (fileSystem.metadata(namespace).isDirectory) {
+                    fileSystem.list(namespace).forEach { fileSystem.deleteRecursively(it) }
+                } else {
+                    fileSystem.delete(namespace)
+                }
             }
-        } catch (e: Exception) {
-            Logger.e("DiskCacheFactory", "Failed to clear all disk cache", e)
+        }
+        val cacheRoot = cacheDirPath.toPath()
+        if (fileSystem.exists(cacheRoot)) {
+            fileSystem.list(cacheRoot)
+                .filter { it != rootCacheDir && it != imageCacheDirectory }
+                .forEach { fileSystem.deleteRecursively(it) }
         }
     }
 }
@@ -180,6 +193,9 @@ class DiskCacheImpl<T : Any>(
     
     private data class MemoryEntry<T>(val value: T, val createdAt: Long)
     private val memoryCache = mutableMapOf<String, MemoryEntry<T>>()
+
+    @PublishedApi
+    internal fun clearMemory() = memoryCache.clear()
 
     init {
         if (serializer != null) {
@@ -215,6 +231,7 @@ class DiskCacheImpl<T : Any>(
         // Write to File System synchronously
         val file = getFilePath(key)
         try {
+            fileSystem.createDirectories(namespaceDir)
             fileSystem.sink(file).buffer().use { sink ->
                 sink.writeUtf8(serializedValue)
             }
