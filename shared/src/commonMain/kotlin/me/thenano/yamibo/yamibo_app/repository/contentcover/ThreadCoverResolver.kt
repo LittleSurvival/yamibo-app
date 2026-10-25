@@ -1,6 +1,8 @@
 package me.thenano.yamibo.yamibo_app.repository.contentcover
 
-import io.github.littlesurvival.core.YamiboResult
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.IO
+import kotlinx.coroutines.withContext
 import io.github.littlesurvival.dto.page.Post
 import io.github.littlesurvival.dto.page.ThreadPage
 import io.github.littlesurvival.dto.value.ThreadId
@@ -10,35 +12,28 @@ import me.thenano.yamibo.yamibo_app.repository.ThreadRepository
 class ThreadCoverResolver(
     private val threadRepository: ThreadRepository,
 ) {
-    suspend fun resolve(tid: ThreadId): String? {
-        val firstPage = loadPage(tid, authorId = null, page = 1) ?: return null
-        val owner = firstPage.posts.firstOrNull { it.floor == 1 }?.author ?: return null
-        findThreadCoverCandidate(firstPage, owner.uid, owner.name)?.let { return it }
+    suspend fun resolve(tid: ThreadId): String? = withContext(Dispatchers.IO) {
+        // Cover lookup must not fetch extra thread pages just to decorate the reader.
+        val firstPage = threadRepository.getCachedThread(tid, authorId = null, page = 1) ?: return@withContext null
+        val owner = firstPage.posts.firstOrNull { it.floor == 1 }?.author ?: return@withContext null
+        findThreadCoverCandidate(firstPage, owner.uid, owner.name)?.let { return@withContext it }
 
         val totalPages = firstPage.pageNav?.totalPages ?: 1
         for (page in 2..totalPages) {
             val cached = threadRepository.getCachedThread(tid, null, page) ?: continue
-            findThreadCoverCandidate(cached, owner.uid, owner.name)?.let { return it }
+            findThreadCoverCandidate(cached, owner.uid, owner.name)?.let { return@withContext it }
         }
 
         val validUid = owner.uid.takeIf { it.value > 0 }
         var page = 1
         var scanTotal = totalPages
         while (page <= scanTotal) {
-            val result = loadPage(tid, validUid, page) ?: return null
+            val result = threadRepository.getCachedThread(tid, validUid, page) ?: return@withContext null
             scanTotal = result.pageNav?.totalPages ?: scanTotal
-            findThreadCoverCandidate(result, owner.uid, owner.name)?.let { return it }
+            findThreadCoverCandidate(result, owner.uid, owner.name)?.let { return@withContext it }
             page += 1
         }
-        return null
-    }
-
-    private suspend fun loadPage(tid: ThreadId, authorId: UserId?, page: Int): ThreadPage? {
-        threadRepository.getCachedThread(tid, authorId, page)?.let { return it }
-        return when (val result = threadRepository.fetchThread(tid, authorId, page)) {
-            is YamiboResult.Success -> result.value
-            else -> null
-        }
+        null
     }
 
 }

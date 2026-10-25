@@ -39,6 +39,7 @@ import coil3.SingletonImageLoader
 import coil3.compose.LocalPlatformContext
 import coil3.request.CachePolicy
 import coil3.request.SuccessResult
+import coil3.size.Dimension
 import io.github.littlesurvival.YamiboForum
 import io.github.littlesurvival.YamiboRoute
 import io.github.littlesurvival.core.YamiboResult
@@ -48,6 +49,7 @@ import io.github.littlesurvival.dto.page.ThreadPage
 import io.github.littlesurvival.dto.value.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Semaphore
@@ -383,7 +385,7 @@ private fun Post.hasSinglePageTagNavigation(
 
 private fun hasSinglePageCommentNavigation(isNovelThread: Boolean): Boolean = isNovelThread
 
-private data class VisiblePostRange(
+private data class VisibleEntryRange(
     val firstIndex: Int?,
     val lastIndex: Int?,
 )
@@ -463,6 +465,30 @@ private fun HtmlBlock.singlePageImageUrls(): Sequence<String> = when (this) {
         .flatMap(HtmlBlock::singlePageImageUrls)
 
     else -> emptySequence()
+}
+
+private fun readerImagePositions(entries: List<ReaderListEntry>): List<Pair<Int, String>> =
+    entries.flatMapIndexed { index, entry ->
+        val urls = if (entry.kind == ReaderEntryKind.WholePost) {
+            entry.post.images.asSequence().map { it.url }
+        } else {
+            entry.bodyBlocks.asSequence().flatMap(HtmlBlock::singlePageImageUrls)
+        }
+        urls.map { index to normalizeImageUrl(it) }.toList()
+    }
+
+private fun nearbyReaderImages(
+    images: List<Pair<Int, String>>,
+    firstVisibleEntry: Int,
+    lastVisibleEntry: Int,
+): List<String> {
+    val first = images.indexOfFirst { it.first >= firstVisibleEntry }.let { if (it < 0) images.size else it }
+    val after = images.indexOfFirst { it.first > lastVisibleEntry }.let { if (it < 0) images.size else it }
+    return buildList {
+        addAll(images.subList(first, after))
+        addAll(images.subList(after, (after + 3).coerceAtMost(images.size)))
+        addAll(images.subList((first - 2).coerceAtLeast(0), first).asReversed())
+    }.map { it.second }.distinct()
 }
 
 private fun groupReaderBlocks(blocks: List<HtmlBlock>): List<List<HtmlBlock>> {
@@ -684,7 +710,7 @@ internal fun ThreadReaderScreen(
     var imageGeometryPreflightReady by remember(tid, targetPid) { mutableStateOf(false) }
     val pendingPostHeights = remember(tid) { mutableStateMapOf<Long, Int>() }
     val loadedImageUrlsByPost = remember(tid) { mutableStateMapOf<Long, Set<String>>() }
-    val prefetchedImageUrls = remember(tid) { hashSetOf<String>() }
+    val imagePrefetchSemaphore = remember(tid) { Semaphore(permits = 2) }
     val failedAutoLoadPages = remember(tid) { mutableStateMapOf<Int, String>() }
     val failedImageMessages = remember(tid) { mutableStateMapOf<String, String>() }
     val imageRetryKeys = remember(tid) { mutableStateMapOf<String, Int>() }
@@ -698,6 +724,7 @@ internal fun ThreadReaderScreen(
     var showDownloadedLastPageWarning by remember { mutableStateOf(false) }
     var dismissedUpdateWarningPages by remember(tid, authorId) { mutableStateOf(emptySet<Int>()) }
     var scrollJumpButtonPointsDown by remember { mutableStateOf(false) }
+    var isJumpingToEdge by remember { mutableStateOf(false) }
     var showScrollJumpButtonAfterSlide by remember { mutableStateOf(false) }
     var singlePageSession by remember(tid, targetPid) {
         mutableStateOf<ThreadReaderSinglePageSession?>(null)
@@ -1221,6 +1248,7 @@ internal fun ThreadReaderScreen(
             }
         }
     }
+    val scrollImagePositions = remember(readerEntries) { readerImagePositions(readerEntries) }
     LaunchedEffect(
         tid,
         isSinglePageMode,
@@ -1255,21 +1283,13 @@ internal fun ThreadReaderScreen(
             ?: activePostId
             ?: targetPid?.value?.toLong()
             ?: posts.firstOrNull()?.pid?.value?.toLong()
-        val priorityIndex = posts.indexOfFirst { it.pid.value.toLong() == priorityPostId }
-        val prioritizedPosts = if (priorityIndex >= 0) {
-            buildList {
-                add(posts[priorityIndex])
-                posts.getOrNull(priorityIndex - 1)?.let(::add)
-                posts.getOrNull(priorityIndex + 1)?.let(::add)
-            }
-        } else {
-            posts.take(2)
-        }
-        val urls = prioritizedPosts.asSequence()
-            .flatMap { post -> expectedImageUrlsByPost[post.pid.value.toLong()].orEmpty().asSequence() }
-            .distinct()
-            .take(24)
-            .toList()
+        val anchorBlockId = pendingSavedPosition?.anchorBlockId ?: singlePageSession?.anchor?.blockId
+        val anchorEntry = readerEntries.indexOfFirst {
+            it.post.pid.value.toLong() == priorityPostId && it.anchorBlockId == anchorBlockId
+        }.takeIf { it >= 0 } ?: readerEntries.indexOfFirst {
+            it.post.pid.value.toLong() == priorityPostId
+        }.coerceAtLeast(0)
+        val urls = nearbyReaderImages(scrollImagePositions, anchorEntry, anchorEntry)
         if (urls.isEmpty()) {
             activeImageGeometrySnapshot = imageAspectRatioCache.toMap()
             imageGeometryPreflightReady = true
@@ -1279,12 +1299,11 @@ internal fun ThreadReaderScreen(
         val imageLoader = SingletonImageLoader.get(platformContext)
         val cookie = authRepo.cookieStore.load().orEmpty()
         val measuredRatios = mutableMapOf<String, Float>()
-        val semaphore = Semaphore(permits = 4)
         withTimeoutOrNull(500.milliseconds) {
             coroutineScope {
                 urls.map { imageUrl ->
                     async {
-                        semaphore.withPermit {
+                        imagePrefetchSemaphore.withPermit {
                             try {
                                 val request = buildImageRequest(
                                     context = platformContext,
@@ -3287,6 +3306,64 @@ internal fun ThreadReaderScreen(
             }
     }
 
+    val singlePageImagePositions = remember(singlePageEntries) {
+        readerImagePositions(singlePageEntries.map { it.renderEntry })
+    }
+    LaunchedEffect(
+        state, scrollImagePositions, singlePageImagePositions, isSinglePageMode,
+        readerViewportWidthPx, readerContentWidthFraction, imageGeometryPreflightReady,
+        hasRestoredPosition,
+    ) {
+        if (state != ReaderState.Success || readerViewportWidthPx <= 0) return@LaunchedEffect
+        if (!hasRestoredPosition) return@LaunchedEffect
+        if (isSinglePageMode && !imageGeometryPreflightReady) return@LaunchedEffect
+        val images = if (isSinglePageMode) singlePageImagePositions else scrollImagePositions
+        val imageLoader = SingletonImageLoader.get(platformContext)
+        val cookie = authRepo.cookieStore.load().orEmpty()
+        val widthPx = (readerViewportWidthPx * readerContentWidthFraction).toInt().coerceAtLeast(1)
+        snapshotFlow {
+            if (isJumpingToEdge) {
+                emptyList()
+            } else if (isSinglePageMode) {
+                val index = singlePageSession?.currentPageIndex ?: 0
+                nearbyReaderImages(images, index, index)
+            } else {
+                val visible = listState.layoutInfo.visibleItemsInfo
+                val first = visible.firstOrNull()?.index
+                val last = visible.lastOrNull()?.index
+                if (first == null || last == null) emptyList() else nearbyReaderImages(images, first, last)
+            }
+        }.distinctUntilChanged().collectLatest { urls ->
+            debugPerfLog("image_prefetch_window|count=${urls.size}|ahead=3|behind=2")
+            // A new window cancels outstanding work; completed images stay in Coil's bounded cache.
+            urls.filterNot { it in failedImageMessages }.chunked(2).forEach { batch ->
+                coroutineScope {
+                    batch.forEach { imageUrl ->
+                        launch {
+                            imagePrefetchSemaphore.withPermit {
+                                debugPerfLog("image_prefetch_start|url=${imageSourceForDiagnostics(imageUrl)}")
+                                try {
+                                    imageLoader.execute(
+                                        buildImageRequest(
+                                            context = platformContext,
+                                            url = imageUrl,
+                                            cookie = cookie,
+                                            enableCrossfade = false,
+                                        ).newBuilder()
+                                            .size(Dimension.Pixels(widthPx), Dimension.Undefined)
+                                            .build()
+                                    )
+                                } finally {
+                                    debugPerfLog("image_prefetch_end|cancelled=${!isActive}|url=${imageSourceForDiagnostics(imageUrl)}")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     LaunchedEffect(
         listState,
         state,
@@ -3301,47 +3378,20 @@ internal fun ThreadReaderScreen(
     ) {
         if (state != ReaderState.Success || posts.isEmpty() || readerEntries.isEmpty()) return@LaunchedEffect
 
-        val imageLoader = SingletonImageLoader.get(platformContext)
-        val cookie = authRepo.cookieStore.load().orEmpty()
-        val preloadBehindCount = 2
-        val preloadAheadCount = 2
         val pagePreloadThreshold = 5
 
-        fun handleVisiblePostRange(range: VisiblePostRange) {
+        fun handleVisibleEntryRange(range: VisibleEntryRange) {
             val firstVisibleItemIndex = range.firstIndex ?: return
             val lastVisibleItemIndex = range.lastIndex ?: return
-            val startIndex = (firstVisibleItemIndex - preloadBehindCount).coerceAtLeast(0)
-            val endIndex = (lastVisibleItemIndex + preloadAheadCount).coerceAtMost(posts.lastIndex)
-
-            if (startIndex <= endIndex) {
-                debugPerfLog("image_prefetch_window|first=$firstVisibleItemIndex|last=$lastVisibleItemIndex|start=$startIndex|end=$endIndex")
-                for (index in startIndex..endIndex) {
-                    val post = posts[index]
-                    expectedImageUrlsByPost[post.pid.value.toLong()].orEmpty().forEach { imageUrl ->
-                        if (imageUrl in failedImageMessages) return@forEach
-                        if (!prefetchedImageUrls.add(imageUrl)) return@forEach
-                        debugPerfLog(
-                            "image_prefetch_enqueue|post=${post.pid.value}|url=${imageSourceForDiagnostics(imageUrl)}"
-                        )
-                        imageLoader.enqueue(
-                            buildImageRequest(
-                                context = platformContext,
-                                url = imageUrl,
-                                cookie = cookie,
-                                enableCrossfade = false,
-                            )
-                        )
-                    }
-                }
-            }
 
             if (isLoadingNextPage) return
 
-            val firstPost = posts.getOrNull(firstVisibleItemIndex)
+            val firstEntry = readerEntries.getOrNull(firstVisibleItemIndex)
+            val firstPost = firstEntry?.post
             if (firstPost != null) {
                 val page = pageByPid[firstPost.pid.value.toLong()] ?: 1
                 val bounds = pageIndexBounds[page]
-                if (bounds != null && firstVisibleItemIndex - bounds.first <= pagePreloadThreshold) {
+                if (bounds != null && firstEntry.postIndex - bounds.first <= pagePreloadThreshold) {
                     val prevPage = page - 1
                     if (prevPage >= 1 && prevPage !in loadedPages && prevPage !in failedAutoLoadPages) {
                         currentPageFetching = prevPage
@@ -3352,11 +3402,12 @@ internal fun ThreadReaderScreen(
                 }
             }
 
-            val lastPost = posts.getOrNull(lastVisibleItemIndex)
+            val lastEntry = readerEntries.getOrNull(lastVisibleItemIndex)
+            val lastPost = lastEntry?.post
             if (lastPost != null) {
                 val page = pageByPid[lastPost.pid.value.toLong()] ?: 1
                 val bounds = pageIndexBounds[page]
-                if (bounds != null && bounds.last - lastVisibleItemIndex <= pagePreloadThreshold) {
+                if (bounds != null && bounds.last - lastEntry.postIndex <= pagePreloadThreshold) {
                     val nextPage = page + 1
                     if (nextPage <= totalPages && nextPage !in loadedPages && nextPage !in failedAutoLoadPages) {
                         currentPageFetching = nextPage
@@ -3369,27 +3420,26 @@ internal fun ThreadReaderScreen(
         }
 
         if (isSinglePageMode) {
-            val currentEntry = singlePageEntries.getOrNull(singlePageModelIndex)?.sourceEntry ?: return@LaunchedEffect
-            handleVisiblePostRange(
-                VisiblePostRange(
-                    firstIndex = currentEntry.postIndex,
-                    lastIndex = currentEntry.postIndex,
+            val currentEntry = singlePageEntries.getOrNull(singlePageModelIndex) ?: return@LaunchedEffect
+            handleVisibleEntryRange(
+                VisibleEntryRange(
+                    firstIndex = currentEntry.sourceEntryIndex,
+                    lastIndex = currentEntry.sourceEntryIndex,
                 )
             )
             return@LaunchedEffect
         }
 
         snapshotFlow {
-            val visiblePostIndices = listState.layoutInfo.visibleItemsInfo
-                .mapNotNull { item -> readerEntries.getOrNull(item.index)?.postIndex }
-                .distinct()
-            VisiblePostRange(
-                firstIndex = visiblePostIndices.minOrNull(),
-                lastIndex = visiblePostIndices.maxOrNull(),
+            val visibleEntryIndices = listState.layoutInfo.visibleItemsInfo
+                .map { it.index }
+            VisibleEntryRange(
+                firstIndex = visibleEntryIndices.minOrNull(),
+                lastIndex = visibleEntryIndices.maxOrNull(),
             )
         }
             .distinctUntilChanged()
-            .collect { range -> handleVisiblePostRange(range) }
+            .collect { range -> handleVisibleEntryRange(range) }
     }
 
     /** Save on back before popping so the previous detail screen reads fresh progress. */
@@ -4739,7 +4789,12 @@ internal fun ThreadReaderScreen(
                                 scope.launch {
                                     val targetIndex = scrollJumpTargetIndex()
                                     if (targetIndex != null) {
-                                        listState.animateScrollToItem(targetIndex)
+                                        isJumpingToEdge = true
+                                        try {
+                                            listState.animateScrollToItem(targetIndex)
+                                        } finally {
+                                            isJumpingToEdge = false
+                                        }
                                     } else {
                                         feedbackController.post(i18n("目前無法定位跳轉位置"))
                                     }
