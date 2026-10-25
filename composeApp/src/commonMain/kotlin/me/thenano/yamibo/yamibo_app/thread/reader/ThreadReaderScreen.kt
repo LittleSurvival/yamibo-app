@@ -4857,7 +4857,6 @@ internal fun ThreadReaderScreen(
                     NovelReaderSettingsPanel(
                         visible = showSettingsPanel,
                         appSettingsRepo = appSettingsRepo,
-                        showNovelReadingMode = threadType == ReadHistoryRepository.ThreadEntryType.Novel,
                         modifier = Modifier.align(Alignment.BottomCenter)
                     )
                 }
