@@ -760,6 +760,7 @@ internal fun ThreadReaderScreen(
     var canPersistReadingState by remember(tid, targetPid) { mutableStateOf(false) }
     var hasPresentedInitialSinglePage by remember(tid, targetPid) { mutableStateOf(false) }
     var pendingTargetPid by remember(tid, targetPid) { mutableStateOf(targetPid?.value?.toLong()) }
+    var pendingCatalogTargetPid by remember(tid) { mutableStateOf<Long?>(null) }
     var lastReadingSnapshot by remember(tid) {
         mutableStateOf<ReaderPersistenceSnapshot?>(null)
     }
@@ -3129,6 +3130,14 @@ internal fun ThreadReaderScreen(
         hasPresentedInitialSinglePage = true
     }
 
+    LaunchedEffect(readerEntries, pendingCatalogTargetPid) {
+        val pid = pendingCatalogTargetPid ?: return@LaunchedEffect
+        val index = entryIndexByPid[pid] ?: return@LaunchedEffect
+        // Resolve against the composition that contains the newly loaded page.
+        scrollToChapterTarget(index, pid)
+        pendingCatalogTargetPid = null
+    }
+
     LaunchedEffect(state, posts, readerEntries, pendingTargetPid) {
         val targetPidLong = pendingTargetPid ?: return@LaunchedEffect
         if (state != ReaderState.Success || posts.isEmpty() || readerEntries.isEmpty()) return@LaunchedEffect
@@ -3542,12 +3551,8 @@ internal fun ThreadReaderScreen(
                                     }
                                     if (post != null) {
                                         drawerState.close()
-                                        if (page !in loadedPages) {
-                                            loadPage(page)
-                                            delay(50.milliseconds) // Wait briefly for Compose to layout the new items
-                                        }
-                                        val targetIndex = entryIndexByPid[post.pid.value.toLong()] ?: -1
-                                        if (targetIndex >= 0) scrollToChapterTarget(targetIndex, post.pid.value.toLong())
+                                        if (page !in loadedPages && !loadPage(page)) return@launch
+                                        pendingCatalogTargetPid = post.pid.value.toLong()
                                     } else {
                                         // User just clicked the page header to expand catalog, load the page, don't close drawer
                                         if (page !in loadedPages) {
