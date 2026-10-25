@@ -387,9 +387,12 @@ class MainActivity : ComponentActivity() {
                 LocalAppUpdateRepository provides appUpdateRepository,
                 LocalForumErrorMessageResolver provides errorMessages,
                 LocalForumRepository provides forumRepository,
-                LocalThreadRepository provides threadRepository,
+                LocalThreadRepository provides remember(threadRepository) { if (intent.getStringExtra("qa_changelog") == "catalog") changelogQaThreads(threadRepository) else threadRepository },
                 LocalInAppLinkNavigationRepository provides inAppLinkNavigationRepository,
-                LocalUserSpaceRepository provides userSpaceRepository,
+                LocalUserSpaceRepository provides remember(userSpaceRepository) {
+                    val qa = intent.getStringExtra("qa_changelog").orEmpty()
+                    if (qa.startsWith("pm")) changelogQaMessages(userSpaceRepository, qa) else userSpaceRepository
+                },
                 LocalBlogRepository provides blogRepository,
                 LocalBackupRepository provides backupRepository,
                 LocalBackupScheduler provides backupScheduler,
@@ -421,6 +424,18 @@ class MainActivity : ComponentActivity() {
                 LocalImageReaderModeOverrideRepository provides imageReaderModeOverrideRepository,
                 LocalSignReminderScheduler provides signReminderScheduler,
             ) {
+                LaunchedEffect(Unit) {
+                    val qa = intent.getStringExtra("qa_changelog").orEmpty()
+                    if (qa.startsWith("pm")) {
+                        navigator.navigate(me.thenano.yamibo.yamibo_app.message.IPrivateMessageScreen(io.github.littlesurvival.dto.value.UserId(-1)))
+                    } else if (qa == "catalog") {
+                        navigator.navigate(me.thenano.yamibo.yamibo_app.thread.reader.IThreadReaderScreen(
+                            io.github.littlesurvival.dto.value.ThreadId(555382), "LOCAL QA catalog", authorId = io.github.littlesurvival.dto.value.UserId(351309)))
+                    } else if (qa.startsWith("524")) {
+                        delay(2000)
+                        appFeedbackController.post(changelogQaNotice(qa), duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Long)
+                    }
+                }
                 val favoriteUpdateInterval = appSettingsRepository.favoriteUpdateInterval.state()
                 val backupInterval = appSettingsRepository.backupInterval.state()
                 val signReminderFrequency = appSettingsRepository.signInReminderFrequency.state()
