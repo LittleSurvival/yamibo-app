@@ -1,8 +1,8 @@
 {
   "channel": "stable",
-  "versionName": "0.0.9",
-  "versionCode": 10,
+  "versionName": "0.0.10",
+  "versionCode": 11,
   "isReady": false,
-  "releaseNotes": "修復搜尋校驗碼過期造成的 HTTP 200 搜尋失敗、圖片重試與捲動佔位問題，調整漫畫閱讀器系統列邊界",
+  "releaseNotes": "改善下載內容與閱讀器圖片載入，修復離線閱讀入口、快取清除與目錄跨頁跳轉，新增可滑動關閉的提示訊息及論壇服務狀態公告",
   "assets": []
 }
