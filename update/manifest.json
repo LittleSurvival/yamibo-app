@@ -1,17 +1,17 @@
 {
   "channel": "stable",
-  "versionName": "0.0.9",
-  "versionCode": 10,
+  "versionName": "0.0.10",
+  "versionCode": 11,
   "isReady": true,
-  "releaseNotes": "# stable-v0.0.9\n\n喜歡這個App的話，歡迎到github上幫我打顆星星 ⭐ ~\n\n修復 :\n- 搜索時出現HTTP200但空回復搜索失敗\n- 圖片載入失敗時重新載入無反應\n- 圖片(漫畫)閱讀器捲動模式時，第一章圖片上出現載入中的佔位模板\n\n更改 :\n- 圖片(漫畫閱讀器)改為和系統列不重疊，圖片閱讀器邊界更正為對齊系統列",
+  "releaseNotes": "# stable-v0.0.10\n\n喜歡這個App的話，歡迎到github上幫我打顆星星 ⭐ ~\n\n新增 :\n- 提示訊息支援左右滑動關閉\n- 論壇 HTTP 524 錯誤新增服務狀態公告 (在論壇下線時能及時更新提示)\n\n修復 :\n- 私訊送出後未正常刷新對話\n- 從簽到通知進入App時，重複彈出啟動提醒彈窗\n- 收藏更新在背景執行受限或中斷後無法正常續跑\n- 清除緩存後圖片緩存仍未刪除，重新進入儲存空間時容量回升\n- 已下載小說在斷網時無法從介紹頁進入閱讀\n- 小說只看作者時的分頁、閱讀進度及章節留言歸屬\n- 閱讀器目錄載入與重試按鈕的顯示\n- 閱讀器首次從目錄跳到尚未載入的頁面時無法定位章節\n- 桌面通知Icon仍是默認Icon(Android)\n\n更改 :\n- 改善下載內容與下載管理清單載入緩慢、卡頓，閱讀時優先使用本地下載資料\n- 閱讀器依閱讀位置預載附近圖片，減少大量圖片同時解碼\n- 小說介紹頁優先顯示下載資料，詳情頁目錄新增已下載標示\n- 重新整理時保留已有內容，完成載入後再更新，減少畫面閃動\n- 下載佇列改為優先顯示最新加入的下載請求\n",
   "assets": [
     {
       "platform": "android",
       "type": "universal-apk",
-      "url": "https://github.com/LittleSurvival/yamibo-app/releases/download/10/yamibo-stable-v0.0.9.apk",
-      "sha256": "aea8518dcb8558effa26b38de5afc5508c2fa4fcd61343a1735b5206946dcb88",
-      "size": 19399595
+      "url": "https://github.com/LittleSurvival/yamibo-app/releases/download/11/yamibo-stable-v0.0.10.apk",
+      "sha256": "0104dc89b86cbd07e06793d462e78cfc98ae482fcac6ecab43405898c0b25070",
+      "size": 19448747
     }
   ],
-  "releaseUrl": "https://github.com/LittleSurvival/yamibo-app/releases/tag/10"
+  "releaseUrl": "https://github.com/LittleSurvival/yamibo-app/releases/tag/11"
 }
