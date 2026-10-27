@@ -1,4 +1,4 @@
-name: Release Android APK
+name: Release
 
 on:
   workflow_dispatch:
@@ -18,25 +18,25 @@ env:
   GITEA_SSH_PORT: ${{ vars.GITEA_SSH_PORT }}
 
 jobs:
-  release:
+  check:
     runs-on: ubuntu-latest
-
+    outputs:
+      version_code: ${{ steps.meta.outputs.version_code }}
+      apk_name: ${{ steps.meta.outputs.apk_name }}
+      ipa_name: ${{ steps.meta.outputs.ipa_name }}
+      release_title: ${{ steps.meta.outputs.release_title }}
+      release_url: ${{ steps.meta.outputs.release_url }}
+      github_asset_url: ${{ steps.meta.outputs.github_asset_url }}
+      changelog: ${{ steps.meta.outputs.changelog }}
     steps:
-      - name: Checkout source repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up JDK
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-
+      - uses: gradle/actions/setup-gradle@v4
       - name: Make gradlew executable
         run: chmod +x gradlew
 
@@ -61,6 +61,7 @@ jobs:
               raise SystemExit(f"Missing or empty {changelog}")
 
           apk_name = f"yamibo-{channel}-v{version_name}.apk"
+          ipa_name = f"yamibo-{channel}-v{version_name}-unsigned.ipa"
           release_title = f"{channel}-v{version_name}"
           release_url = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/tag/{version_code}"
           github_asset_url = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/{version_code}/{apk_name}"
@@ -70,33 +71,66 @@ jobs:
               out.write(f"version_name={version_name}\n")
               out.write(f"channel={channel}\n")
               out.write(f"apk_name={apk_name}\n")
+              out.write(f"ipa_name={ipa_name}\n")
               out.write(f"release_title={release_title}\n")
               out.write(f"release_url={release_url}\n")
               out.write(f"github_asset_url={github_asset_url}\n")
               out.write(f"changelog={changelog.as_posix()}\n")
           PY
 
-      - name: Create release tag
+      - name: Check release tag
         shell: bash
+        env:
+          TAG: ${{ steps.meta.outputs.version_code }}
         run: |
           set -euo pipefail
-          tag="${{ steps.meta.outputs.version_code }}"
-          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
-            tag_commit="$(git rev-list -n 1 "$tag")"
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            tag_commit="$(git rev-list -n 1 "refs/tags/$TAG")"
             head_commit="$(git rev-parse HEAD)"
             if [ "$tag_commit" != "$head_commit" ]; then
-              echo "Release tag $tag already exists at $tag_commit, but this workflow is running on $head_commit." >&2
+              echo "Release tag $TAG already exists at $tag_commit, but this workflow is running on $head_commit." >&2
               exit 1
             fi
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git tag "$tag"
-            git push origin "refs/tags/$tag"
           fi
+
+      - name: Check required release credentials
+        shell: bash
+        env:
+          MINE_KEYSTORE_BASE64: ${{ secrets.MINE_KEYSTORE_BASE64 }}
+          MINE_KEY_ALIAS: ${{ secrets.MINE_KEY_ALIAS }}
+          MINE_KEYSTORE_PASSWORD: ${{ secrets.MINE_KEYSTORE_PASSWORD }}
+          MINE_KEY_PASSWORD: ${{ secrets.MINE_KEY_PASSWORD }}
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+          GITEE_SSH_PRIVATE_KEY: ${{ secrets.GITEE_SSH_PRIVATE_KEY }}
+          GITEA_SSH_PRIVATE_KEY: ${{ secrets.GITEA_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          for name in MINE_KEYSTORE_BASE64 MINE_KEY_ALIAS MINE_KEYSTORE_PASSWORD MINE_KEY_PASSWORD GITEE_TOKEN GITEA_TOKEN GITEE_SSH_PRIVATE_KEY GITEA_SSH_PRIVATE_KEY; do
+            if [ -z "${!name}" ]; then
+              echo "$name is required" >&2
+              exit 1
+            fi
+          done
 
       - name: Sync and validate stable manifest
         run: ./gradlew syncStableManifest validateUpdateManifest --console=plain
+
+  build_android:
+    needs: check
+    runs-on: ubuntu-latest
+    outputs:
+      sha256: ${{ steps.sign.outputs.sha256 }}
+      size: ${{ steps.sign.outputs.size }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Make gradlew executable
+        run: chmod +x gradlew
 
       - name: Decode signing keystore
         shell: bash
@@ -130,7 +164,7 @@ jobs:
 
           build_tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
           aligned_apk="$RUNNER_TEMP/aligned.apk"
-          signed_apk="$RUNNER_TEMP/${{ steps.meta.outputs.apk_name }}"
+          signed_apk="$RUNNER_TEMP/${{ needs.check.outputs.apk_name }}"
 
           "$build_tools/zipalign" -f -p 4 "$unsigned_apk" "$aligned_apk"
           "$build_tools/apksigner" sign \
@@ -148,22 +182,113 @@ jobs:
           echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
           echo "size=$size" >> "$GITHUB_OUTPUT"
 
+      - name: Upload signed Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-android-apk
+          path: ${{ steps.sign.outputs.apk_path }}
+          if-no-files-found: error
+          retention-days: 14
+
+  build_ios:
+    needs: check
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx6g -Dorg.gradle.workers.max=2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build unsigned iPhone Release IPA
+        run: bash .github/scripts/release/build-unsigned-ios-ipa.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-ios-ipa
+          path: ${{ runner.temp }}/ios-release/*.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    needs: [check, build_android, build_ios]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+      - name: Sync stable manifest for mirror tags
+        run: ./gradlew syncStableManifest --console=plain
+      - name: Download signed Android APK
+        uses: actions/download-artifact@v4
+        with:
+          name: signed-android-apk
+          path: ${{ runner.temp }}/android-release
+      - name: Download unsigned iOS IPA
+        uses: actions/download-artifact@v4
+        with:
+          name: unsigned-ios-ipa
+          path: ${{ runner.temp }}/ios-release
+
+      - name: Verify release build artifacts
+        shell: bash
+        env:
+          APK_NAME: ${{ needs.check.outputs.apk_name }}
+          IPA_NAME: ${{ needs.check.outputs.ipa_name }}
+          APK_SHA256: ${{ needs.build_android.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          test -s "$RUNNER_TEMP/ios-release/$IPA_NAME"
+          printf '%s  %s\n' "$APK_SHA256" "$RUNNER_TEMP/android-release/$APK_NAME" | sha256sum --check
+
+      - name: Create release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ needs.check.outputs.version_code }}"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            tag_commit="$(git rev-list -n 1 "refs/tags/$tag")"
+            head_commit="$(git rev-parse HEAD)"
+            if [ "$tag_commit" != "$head_commit" ]; then
+              echo "Release tag $tag already exists at $tag_commit, but this workflow is running on $head_commit." >&2
+              exit 1
+            fi
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag "$tag"
+            git push origin "refs/tags/$tag"
+          fi
+
       - name: Create or update GitHub release
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          tag="${{ steps.meta.outputs.version_code }}"
-          title="${{ steps.meta.outputs.release_title }}"
-          changelog="${{ steps.meta.outputs.changelog }}"
-          apk="${{ steps.sign.outputs.apk_path }}"
-
+          tag="${{ needs.check.outputs.version_code }}"
+          title="${{ needs.check.outputs.release_title }}"
+          changelog="${{ needs.check.outputs.changelog }}"
+          apk="${{ runner.temp }}/android-release/${{ needs.check.outputs.apk_name }}"
+          ipa="$RUNNER_TEMP/ios-release/${{ needs.check.outputs.ipa_name }}"
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release edit "$tag" --title "$title" --notes-file "$changelog"
-            gh release upload "$tag" "$apk" --clobber
+            gh release upload "$tag" "$apk" "$ipa" --clobber
           else
-            gh release create "$tag" "$apk" --title "$title" --notes-file "$changelog" --verify-tag
+            gh release create "$tag" "$apk" "$ipa" --title "$title" --notes-file "$changelog" --verify-tag
           fi
 
       - name: Start SSH agent for mirrors
@@ -231,8 +356,8 @@ jobs:
             bash .github/scripts/release/publish-feed-directory.sh "$remote" main "$feed" update
             local dir="$RUNNER_TEMP/mirror-tag-$name"
             git clone --quiet --depth 1 --single-branch --branch main "$remote" "$dir"
-            git -C "$dir" tag -f "${{ steps.meta.outputs.version_code }}"
-            retry_git "$name tag push" git -C "$dir" push --force origin "refs/tags/${{ steps.meta.outputs.version_code }}"
+            git -C "$dir" tag -f "${{ needs.check.outputs.version_code }}"
+            retry_git "$name tag push" git -C "$dir" push --force origin "refs/tags/${{ needs.check.outputs.version_code }}"
           }
 
           prepare_mirror_tag "gitee" "git@gitee.com:${MIRROR_OWNER}/${MIRROR_REPO}.git"
@@ -244,11 +369,13 @@ jobs:
         shell: bash
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-          TAG: ${{ steps.meta.outputs.version_code }}
-          TITLE: ${{ steps.meta.outputs.release_title }}
-          CHANGELOG: ${{ steps.meta.outputs.changelog }}
-          APK: ${{ steps.sign.outputs.apk_path }}
-          APK_NAME: ${{ steps.meta.outputs.apk_name }}
+          TAG: ${{ needs.check.outputs.version_code }}
+          TITLE: ${{ needs.check.outputs.release_title }}
+          CHANGELOG: ${{ needs.check.outputs.changelog }}
+          APK: ${{ runner.temp }}/android-release/${{ needs.check.outputs.apk_name }}
+          APK_NAME: ${{ needs.check.outputs.apk_name }}
+          IPA: ${{ runner.temp }}/ios-release/${{ needs.check.outputs.ipa_name }}
+          IPA_NAME: ${{ needs.check.outputs.ipa_name }}
         run: |
           set -euo pipefail
           bash .github/scripts/release/publish-gitee-release-asset.sh
@@ -260,11 +387,13 @@ jobs:
         env:
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
           GITEA_BASE_URL: ${{ env.GITEA_BASE_URL }}
-          TAG: ${{ steps.meta.outputs.version_code }}
-          TITLE: ${{ steps.meta.outputs.release_title }}
-          CHANGELOG: ${{ steps.meta.outputs.changelog }}
-          APK: ${{ steps.sign.outputs.apk_path }}
-          APK_NAME: ${{ steps.meta.outputs.apk_name }}
+          TAG: ${{ needs.check.outputs.version_code }}
+          TITLE: ${{ needs.check.outputs.release_title }}
+          CHANGELOG: ${{ needs.check.outputs.changelog }}
+          APK: ${{ runner.temp }}/android-release/${{ needs.check.outputs.apk_name }}
+          APK_NAME: ${{ needs.check.outputs.apk_name }}
+          IPA: ${{ runner.temp }}/ios-release/${{ needs.check.outputs.ipa_name }}
+          IPA_NAME: ${{ needs.check.outputs.ipa_name }}
         run: |
           set -euo pipefail
           bash .github/scripts/release/publish-gitea-release-asset.sh
@@ -275,24 +404,24 @@ jobs:
           set -euo pipefail
 
           OUTPUT_DIR="$RUNNER_TEMP/published-update/github/update" \
-          RELEASE_URL="${{ steps.meta.outputs.release_url }}" \
-          ASSET_URL="${{ steps.meta.outputs.github_asset_url }}" \
-          APK_SHA256="${{ steps.sign.outputs.sha256 }}" \
-          APK_SIZE="${{ steps.sign.outputs.size }}" \
+          RELEASE_URL="${{ needs.check.outputs.release_url }}" \
+          ASSET_URL="${{ needs.check.outputs.github_asset_url }}" \
+          APK_SHA256="${{ needs.build_android.outputs.sha256 }}" \
+          APK_SIZE="${{ needs.build_android.outputs.size }}" \
             python3 .github/scripts/release/write-published-update-manifest.py
 
           OUTPUT_DIR="$RUNNER_TEMP/published-update/gitee/update" \
           RELEASE_URL="${{ steps.gitee_release.outputs.release_url }}" \
           ASSET_URL="${{ steps.gitee_release.outputs.asset_url }}" \
-          APK_SHA256="${{ steps.sign.outputs.sha256 }}" \
-          APK_SIZE="${{ steps.sign.outputs.size }}" \
+          APK_SHA256="${{ needs.build_android.outputs.sha256 }}" \
+          APK_SIZE="${{ needs.build_android.outputs.size }}" \
             python3 .github/scripts/release/write-published-update-manifest.py
 
           OUTPUT_DIR="$RUNNER_TEMP/published-update/gitea/update" \
           RELEASE_URL="${{ steps.gitea_release.outputs.release_url }}" \
           ASSET_URL="${{ steps.gitea_release.outputs.asset_url }}" \
-          APK_SHA256="${{ steps.sign.outputs.sha256 }}" \
-          APK_SIZE="${{ steps.sign.outputs.size }}" \
+          APK_SHA256="${{ needs.build_android.outputs.sha256 }}" \
+          APK_SIZE="${{ needs.build_android.outputs.size }}" \
             python3 .github/scripts/release/write-published-update-manifest.py
 
       - name: Validate published update manifests
@@ -357,8 +486,8 @@ jobs:
               "$remote" main "$RUNNER_TEMP/published-update/$name/update" update
             local dir="$RUNNER_TEMP/mirror-release-tag-$name"
             git clone --quiet --depth 1 --single-branch --branch main "$remote" "$dir"
-            git -C "$dir" tag -f "${{ steps.meta.outputs.version_code }}"
-            retry_git "$name tag push" git -C "$dir" push --force origin "refs/tags/${{ steps.meta.outputs.version_code }}"
+            git -C "$dir" tag -f "${{ needs.check.outputs.version_code }}"
+            retry_git "$name tag push" git -C "$dir" push --force origin "refs/tags/${{ needs.check.outputs.version_code }}"
           }
 
           push_mirror "gitee" "git@gitee.com:${MIRROR_OWNER}/${MIRROR_REPO}.git"

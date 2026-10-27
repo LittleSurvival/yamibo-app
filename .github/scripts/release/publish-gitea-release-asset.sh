@@ -9,6 +9,8 @@ set -euo pipefail
 : "${CHANGELOG:?CHANGELOG is required}"
 : "${APK:?APK is required}"
 : "${APK_NAME:?APK_NAME is required}"
+: "${IPA:?IPA is required}"
+: "${IPA_NAME:?IPA_NAME is required}"
 
 if [ ! -s "$CHANGELOG" ]; then
   echo "Changelog is missing or empty: $CHANGELOG" >&2
@@ -165,3 +167,18 @@ verify_gitea_asset
 
 echo "release_url=$release_url" >> "$GITHUB_OUTPUT"
 echo "asset_url=$asset_url" >> "$GITHUB_OUTPUT"
+
+encoded_ipa_name="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$IPA_NAME")"
+echo "Uploading ${IPA_NAME} ($(stat -c%s "$IPA") bytes) to Gitea..." >&2
+upload_json="$(curl "${upload_curl_opts[@]}" \
+  2> >(python3 .github/scripts/release/filter-upload-progress.py "Gitea IPA upload") \
+  -X POST -H "$auth_header" \
+  -F "attachment=@${IPA}" \
+  "${api}/releases/${release_id}/assets?name=${encoded_ipa_name}")"
+asset_url="$(printf '%s' "$upload_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("browser_download_url", ""))')"
+if [ -z "$asset_url" ]; then
+  echo "Gitea IPA upload response did not provide browser_download_url" >&2
+  exit 1
+fi
+verify_gitea_asset
+echo "ipa_asset_url=$asset_url" >> "$GITHUB_OUTPUT"
