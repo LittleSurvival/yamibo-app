@@ -83,6 +83,44 @@ Do not publish Gitee or Gitea ready manifests whose APK asset URL points back to
 
 iOS cannot install an IPA directly from inside a normal App Store/TestFlight app. The app updater therefore only checks the manifest and opens `releaseUrl`.
 
+The release workflow builds an unsigned iPhone device IPA with the Xcode
+`Release` configuration and publishes the same `yamibo-<channel>-v<version>-unsigned.ipa`
+to the GitHub, Gitee, and Gitea releases alongside the Android APK. Its bundle
+version and build number come from `update/manifest.json`.
+
+The manual `release.yml` workflow follows this dependency graph:
+
+```text
+check ─┬─ build_android ─┬─ release
+       └─ build_ios ─────┘
+```
+
+`check` validates the changelog, manifest/app version consistency, source manifest
+rules, existing tag target, and presence of the Android signing and mirror
+credentials. Both builds start only after it succeeds and use the same workflow
+commit. The Android job signs and verifies the APK; the iOS job packages the
+unsigned device Release build. `release` waits for both artifacts, verifies the
+APK checksum and IPA presence, rechecks/creates the source tag, then publishes
+both files to all three hosts. The tag is created only after successful builds;
+an existing tag for the same commit permits reruns, while a conflicting tag fails
+in `check`. Before preparing mirror tags, the release job regenerates
+`update/stable.json` in its own checkout. Published feeds are generated, validated,
+and synced after the asset uploads.
+
+A failed check prevents both builds; a failed or cancelled build prevents
+publication. If a later
+upload fails, inspect all three releases and rerun the failed release job to
+complete the publication before declaring the release complete. Mirror reruns
+recreate their releases and upload both assets together.
+
+The IPA is unsigned and cannot be installed as-is. Users must sign and install it
+using a compatible tool and their own Apple account or signing credentials. Free
+Apple personal-team provisioning expires after seven days and requires renewal.
+Compatibility depends on the signing tool, the user's provisioning profile,
+bundle identifier and capabilities. This distribution path is separate from
+App Store or TestFlight publication. The update manifests continue to describe
+the Android APK; iOS users open the release page to obtain the IPA.
+
 Recommended options:
 
 - App Store: use an App Store product URL as `releaseUrl`.
