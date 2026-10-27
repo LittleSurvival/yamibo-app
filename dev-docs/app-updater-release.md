@@ -83,6 +83,23 @@ Do not publish Gitee or Gitea ready manifests whose APK asset URL points back to
 
 iOS cannot install an IPA directly from inside a normal App Store/TestFlight app. The app updater therefore only checks the manifest and opens `releaseUrl`.
 
+The release workflow builds an unsigned iPhone device IPA with the Xcode
+`Release` configuration and publishes the same `yamibo-<channel>-v<version>-unsigned.ipa`
+to the GitHub, Gitee, and Gitea releases alongside the Android APK. Its bundle
+version and build number come from `update/manifest.json`. The iOS build runs
+before publishing starts; a build failure prevents a partial release. If a later
+upload fails, inspect all three releases and rerun the failed release job to
+complete the publication before declaring the release complete. Mirror reruns
+recreate their releases and upload both assets together.
+
+The IPA is unsigned and cannot be installed as-is. Users must sign and install it
+using a compatible tool and their own Apple account or signing credentials. Free
+Apple personal-team provisioning expires after seven days and requires renewal.
+Compatibility depends on the signing tool, the user's provisioning profile,
+bundle identifier and capabilities. This distribution path is separate from
+App Store or TestFlight publication. The update manifests continue to describe
+the Android APK; iOS users open the release page to obtain the IPA.
+
 Recommended options:
 
 - App Store: use an App Store product URL as `releaseUrl`.

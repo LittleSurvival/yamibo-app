@@ -9,6 +9,8 @@ set -euo pipefail
 : "${CHANGELOG:?CHANGELOG is required}"
 : "${APK:?APK is required}"
 : "${APK_NAME:?APK_NAME is required}"
+: "${IPA:?IPA is required}"
+: "${IPA_NAME:?IPA_NAME is required}"
 
 if [ ! -s "$CHANGELOG" ]; then
   echo "Changelog is missing or empty: $CHANGELOG" >&2
@@ -137,3 +139,20 @@ verify_gitee_asset
 
 echo "release_url=$release_url" >> "$GITHUB_OUTPUT"
 echo "asset_url=$asset_url" >> "$GITHUB_OUTPUT"
+
+echo "Uploading ${IPA_NAME} ($(stat -c%s "$IPA") bytes) to Gitee..." >&2
+upload_json="$(curl "${upload_curl_opts[@]}" \
+  2> >(python3 .github/scripts/release/filter-upload-progress.py "Gitee IPA upload") \
+  -X POST "${api}/releases/${release_id}/attach_files" \
+  -F "access_token=${GITEE_TOKEN}" \
+  -F "file=@${IPA}")"
+release_json="$(lookup_release)"
+asset_url="$(
+  { printf '%s\n' "$upload_json"; printf '%s\n' "$release_json"; } |
+    python3 .github/scripts/release/extract-release-asset-url.py "$IPA_NAME" \
+      "https://gitee.com/${MIRROR_OWNER}/${MIRROR_REPO}/releases/download/${TAG}/${IPA_NAME}"
+)"
+APK_NAME="$IPA_NAME"
+apk_size="$(stat -c%s "$IPA")"
+verify_gitee_asset
+echo "ipa_asset_url=$asset_url" >> "$GITHUB_OUTPUT"

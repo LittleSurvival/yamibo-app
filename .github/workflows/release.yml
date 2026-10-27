@@ -1,4 +1,4 @@
-name: Release Android APK
+name: Release
 
 on:
   workflow_dispatch:
@@ -18,7 +18,29 @@ env:
   GITEA_SSH_PORT: ${{ vars.GITEA_SSH_PORT }}
 
 jobs:
+  build_ios:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx6g -Dorg.gradle.workers.max=2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build unsigned iPhone Release IPA
+        run: bash .github/scripts/release/build-unsigned-ios-ipa.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-ios-ipa
+          path: ${{ runner.temp }}/ios-release/*.ipa
+          if-no-files-found: error
+          retention-days: 14
+
   release:
+    needs: build_ios
     runs-on: ubuntu-latest
 
     steps:
@@ -36,6 +58,12 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+
+      - name: Download unsigned iOS IPA
+        uses: actions/download-artifact@v4
+        with:
+          name: unsigned-ios-ipa
+          path: ${{ runner.temp }}/ios-release
 
       - name: Make gradlew executable
         run: chmod +x gradlew
@@ -61,6 +89,7 @@ jobs:
               raise SystemExit(f"Missing or empty {changelog}")
 
           apk_name = f"yamibo-{channel}-v{version_name}.apk"
+          ipa_name = f"yamibo-{channel}-v{version_name}-unsigned.ipa"
           release_title = f"{channel}-v{version_name}"
           release_url = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/tag/{version_code}"
           github_asset_url = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/{version_code}/{apk_name}"
@@ -70,6 +99,7 @@ jobs:
               out.write(f"version_name={version_name}\n")
               out.write(f"channel={channel}\n")
               out.write(f"apk_name={apk_name}\n")
+              out.write(f"ipa_name={ipa_name}\n")
               out.write(f"release_title={release_title}\n")
               out.write(f"release_url={release_url}\n")
               out.write(f"github_asset_url={github_asset_url}\n")
@@ -158,12 +188,14 @@ jobs:
           title="${{ steps.meta.outputs.release_title }}"
           changelog="${{ steps.meta.outputs.changelog }}"
           apk="${{ steps.sign.outputs.apk_path }}"
+          ipa="$RUNNER_TEMP/ios-release/${{ steps.meta.outputs.ipa_name }}"
+          test -s "$ipa"
 
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release edit "$tag" --title "$title" --notes-file "$changelog"
-            gh release upload "$tag" "$apk" --clobber
+            gh release upload "$tag" "$apk" "$ipa" --clobber
           else
-            gh release create "$tag" "$apk" --title "$title" --notes-file "$changelog" --verify-tag
+            gh release create "$tag" "$apk" "$ipa" --title "$title" --notes-file "$changelog" --verify-tag
           fi
 
       - name: Start SSH agent for mirrors
@@ -249,6 +281,8 @@ jobs:
           CHANGELOG: ${{ steps.meta.outputs.changelog }}
           APK: ${{ steps.sign.outputs.apk_path }}
           APK_NAME: ${{ steps.meta.outputs.apk_name }}
+          IPA: ${{ runner.temp }}/ios-release/${{ steps.meta.outputs.ipa_name }}
+          IPA_NAME: ${{ steps.meta.outputs.ipa_name }}
         run: |
           set -euo pipefail
           bash .github/scripts/release/publish-gitee-release-asset.sh
@@ -265,6 +299,8 @@ jobs:
           CHANGELOG: ${{ steps.meta.outputs.changelog }}
           APK: ${{ steps.sign.outputs.apk_path }}
           APK_NAME: ${{ steps.meta.outputs.apk_name }}
+          IPA: ${{ runner.temp }}/ios-release/${{ steps.meta.outputs.ipa_name }}
+          IPA_NAME: ${{ steps.meta.outputs.ipa_name }}
         run: |
           set -euo pipefail
           bash .github/scripts/release/publish-gitea-release-asset.sh
