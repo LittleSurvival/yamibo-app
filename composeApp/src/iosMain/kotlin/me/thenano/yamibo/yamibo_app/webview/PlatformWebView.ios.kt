@@ -2,14 +2,24 @@ package me.thenano.yamibo.yamibo_app.webview
 
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.UIKitView
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.ObjCSignatureOverride
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.coroutines.resume
+import io.github.littlesurvival.fetch.FetchFactory
 import me.thenano.yamibo.yamibo_app.LocalAuthRepository
 import me.thenano.yamibo.yamibo_app.network.WKWebViewCookieBridge
 import platform.Foundation.NSURL
@@ -20,6 +30,7 @@ import platform.WebKit.WKWebView
 import platform.darwin.NSObject
 
 class PlatformNavigationDelegate(
+    private val scope: CoroutineScope,
     private val syncAuthCookies: Boolean,
     private val captureHtml: Boolean,
     private val onPageFinished: (String) -> Unit,
@@ -30,15 +41,34 @@ class PlatformNavigationDelegate(
     private val onLoadError: (String?, String) -> Unit,
     private val authCookieSync: () -> Unit,
 ) : NSObject(), WKNavigationDelegateProtocol {
+    private var loadingTimeout: Job? = null
+
+    fun clearLoading() {
+        loadingTimeout?.cancel()
+        loadingTimeout = null
+        onLoadingChanged(false)
+    }
 
     @ObjCSignatureOverride
     override fun webView(webView: WKWebView, didStartProvisionalNavigation: WKNavigation?) {
+        loadingTimeout?.cancel()
         onLoadingChanged(true)
+        loadingTimeout = scope.launch {
+            delay(15_000L)
+            onLoadingChanged(false)
+        }
+    }
+
+    @ObjCSignatureOverride
+    override fun webView(webView: WKWebView, didCommitNavigation: WKNavigation?) {
+        // The document is visible; slow image/analytics requests must not cover the login form.
+        clearLoading()
+        webView.URL?.absoluteString?.let(onUrlChanged)
     }
 
     @ObjCSignatureOverride
     override fun webView(webView: WKWebView, didFinishNavigation: WKNavigation?) {
-        onLoadingChanged(false)
+        clearLoading()
         val currentUrl = webView.URL?.absoluteString ?: return
         onUrlChanged(currentUrl)
         webView.title?.let { onTitleChanged(it) }
@@ -76,7 +106,7 @@ class PlatformNavigationDelegate(
         didFailNavigation: WKNavigation?,
         withError: platform.Foundation.NSError
     ) {
-        onLoadingChanged(false)
+        clearLoading()
         onLoadError(webView.URL?.absoluteString, withError.localizedDescription)
     }
 
@@ -86,7 +116,7 @@ class PlatformNavigationDelegate(
         didFailProvisionalNavigation: WKNavigation?,
         withError: platform.Foundation.NSError
     ) {
-        onLoadingChanged(false)
+        clearLoading()
         onLoadError(webView.URL?.absoluteString, withError.localizedDescription)
     }
 }
@@ -109,10 +139,12 @@ actual fun PlatformWebViewContent(
     shouldOverrideUrlLoading: (String) -> Boolean,
 ) {
     val authRepo = LocalAuthRepository.current
+    val scope = rememberCoroutineScope()
     var webViewInstance by remember { mutableStateOf<WKWebView?>(null) }
 
     val delegate = remember {
         PlatformNavigationDelegate(
+            scope = scope,
             syncAuthCookies = syncAuthCookies,
             captureHtml = captureHtml,
             onPageFinished = onPageFinished,
@@ -123,6 +155,17 @@ actual fun PlatformWebViewContent(
             onLoadError = onLoadError,
             authCookieSync = { authRepo.syncCookieFromWebView() },
         )
+    }
+
+    DisposableEffect(delegate) {
+        onDispose {
+            delegate.clearLoading()
+            webViewInstance?.apply {
+                navigationDelegate = null
+                stopLoading()
+            }
+            webViewInstance = null
+        }
     }
 
     RegisterPlatformWebViewNavigation(
@@ -141,11 +184,21 @@ actual fun PlatformWebViewContent(
         modifier = Modifier.fillMaxSize(),
         factory = {
             WKWebView().apply {
+                customUserAgent = FetchFactory.Device.MOBILE.userAgent
                 webViewInstance = this
                 this.navigationDelegate = delegate
                 if (syncAuthCookies) {
-                    authRepo.restoreCookiesToWebView {
-                        loadRequest(NSURLRequest(NSURL(string = url)))
+                    scope.launch {
+                        withTimeoutOrNull(3_000L) {
+                            suspendCancellableCoroutine<Unit> { continuation ->
+                                authRepo.restoreCookiesToWebView {
+                                    if (continuation.isActive) continuation.resume(Unit)
+                                }
+                            }
+                        }
+                        if (webViewInstance === this@apply) {
+                            loadRequest(NSURLRequest(NSURL(string = url)))
+                        }
                     }
                 } else {
                     loadRequest(NSURLRequest(NSURL(string = url)))

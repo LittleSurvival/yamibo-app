@@ -118,6 +118,7 @@ L式,L shaped,L式,L式
 伺服器正在維護中,The server is under maintenance.,伺服器正在維護中,服务器正在维护中
 查無登入資料，請重新登入,No login data found. Please sign in again.,查無登入資料，請重新登入,查无登录资料，请重新登录
 獲取用戶資料失敗: {},Failed to load profile: {},獲取用戶資料失敗: {},获取用户资料失败: {}
+獲取用戶資料逾時，請稍後重試,Loading your profile timed out. Please try again later.,獲取用戶資料逾時，請稍後重試,获取用户资料超时，请稍后重试
 名稱不能為空白,Name cannot be blank,名稱不能為空白,名称不能为空
 名稱「{}」已被類別使用,"Name ""{}"" is already used by a category",名稱「{}」已被類別使用,名称「{}」已被类别使用
 名稱「{}」已被集合使用,"Name ""{}"" is already used by a collection",名稱「{}」已被集合使用,名称「{}」已被集合使用
