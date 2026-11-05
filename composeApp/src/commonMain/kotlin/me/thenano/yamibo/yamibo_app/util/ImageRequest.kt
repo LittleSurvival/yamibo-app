@@ -11,8 +11,9 @@ import coil3.request.ImageRequest
 import coil3.request.crossfade
 import coil3.size.Precision
 import io.github.littlesurvival.YamiboRoute
+import io.github.littlesurvival.fetch.FetchFactory
 import me.thenano.yamibo.yamibo_app.LocalAuthRepository
-import me.thenano.yamibo.yamibo_app.network.ForumBrowser
+import me.thenano.yamibo.yamibo_app.factory.IMAGE_ACCEPT
 
 /**
  * Converts an image source into the URL or URI passed to Coil.
@@ -60,8 +61,8 @@ internal fun buildImageNetworkHeaders(
     referer: String,
 ): NetworkHeaders = NetworkHeaders.Builder().apply {
     if (normalizedUrl.startsWith("http://") || normalizedUrl.startsWith("https://")) {
-        add("User-Agent", ForumBrowser.userAgent)
-        add("Accept", ForumBrowser.IMAGE_ACCEPT)
+        add("User-Agent", FetchFactory.Device.MOBILE.userAgent)
+        add("Accept", IMAGE_ACCEPT)
     }
     if (normalizedUrl.startsWith(YamiboRoute.Domain.build())) {
         if (cookie.isNotBlank()) add("Cookie", cookie)

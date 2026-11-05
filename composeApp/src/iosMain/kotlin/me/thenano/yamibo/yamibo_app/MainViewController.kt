@@ -7,8 +7,16 @@ import me.thenano.yamibo.yamibo_app.repository.servernotice.DefaultServerNoticeR
 import me.thenano.yamibo.yamibo_app.repository.servernotice.ServerNoticeStore
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.window.ComposeUIViewController
+import io.github.littlesurvival.YamiboClient
 import io.github.littlesurvival.core.YamiboResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -103,7 +111,15 @@ fun MainViewController() = ComposeUIViewController {
     }
 
     /** Repository Logic */
-    val yamiboClient = remember { IOSYamiboClientProvider.get(cookieStore) }
+    val readyClient by produceState<YamiboClient?>(null, cookieStore) {
+        value = IOSYamiboClientProvider.get(cookieStore)
+    }
+    val yamiboClient = readyClient ?: run {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        return@ComposeUIViewController
+    }
     val authRepository = remember { IOSAuthRepository(cookieStore, userStore, yamiboClient, forumFavoriteStore) }
 
     val dbFactory = remember { DatabaseFactory() }
