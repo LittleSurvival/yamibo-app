@@ -4,9 +4,12 @@ import io.ktor.client.*
 import io.ktor.client.engine.okhttp.*
 import io.ktor.client.plugins.*
 import io.ktor.client.plugins.contentnegotiation.*
+import io.ktor.client.request.header
+import io.ktor.http.HttpHeaders
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.json.Json
 import me.thenano.yamibo.yamibo_app.factory.plugin.WafCookieHandshakePlugin
+import me.thenano.yamibo.yamibo_app.network.ForumBrowser
 
 @Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
 actual object HttpClientFactory {
@@ -16,6 +19,7 @@ actual object HttpClientFactory {
     ): HttpClient = HttpClient(OkHttp) {
 
         install(DefaultRequest) {
+            header(HttpHeaders.UserAgent, ForumBrowser.userAgent)
             defaultHeaders()
         }
         install(HttpTimeout) {
