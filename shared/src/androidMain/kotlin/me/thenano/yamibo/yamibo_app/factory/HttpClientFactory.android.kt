@@ -4,6 +4,8 @@ import io.ktor.client.*
 import io.ktor.client.engine.okhttp.*
 import io.ktor.client.plugins.*
 import io.ktor.client.plugins.contentnegotiation.*
+import io.github.littlesurvival.fetch.FetchFactory
+import io.ktor.http.HttpHeaders
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.json.Json
 import me.thenano.yamibo.yamibo_app.factory.plugin.WafCookieHandshakePlugin
@@ -17,6 +19,9 @@ actual object HttpClientFactory {
 
         install(DefaultRequest) {
             defaultHeaders()
+            if (headers[HttpHeaders.UserAgent] == null) {
+                headers[HttpHeaders.UserAgent] = FetchFactory.Device.MOBILE.userAgent
+            }
         }
         install(HttpTimeout) {
             connectTimeoutMillis = 15_000

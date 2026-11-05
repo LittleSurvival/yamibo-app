@@ -4,6 +4,7 @@ import io.ktor.client.*
 import io.ktor.client.engine.darwin.*
 import io.ktor.client.plugins.*
 import io.ktor.client.plugins.contentnegotiation.*
+import io.ktor.http.HttpHeaders
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.json.Json
 import io.github.littlesurvival.fetch.FetchFactory
@@ -17,10 +18,18 @@ actual object HttpClientFactory {
         HttpClient(Darwin) {
             install(DefaultRequest) {
                 defaultHeaders()
+                if (headers[HttpHeaders.UserAgent] == null) {
+                    headers[HttpHeaders.UserAgent] = FetchFactory.Device.MOBILE.userAgent
+                }
             }
             // Explicit request cookies and the WAF plugin own this session. NSURLSession must
             // not replace them with a separate, possibly stale Foundation cookie jar.
-            engine { configureRequest { setHTTPShouldHandleCookies(false) } }
+            engine {
+                configureRequest {
+                    setHTTPShouldHandleCookies(false)
+                    setAllowsCellularAccess(true)
+                }
+            }
             install(HttpTimeout) {
                 connectTimeoutMillis = 15_000
                 socketTimeoutMillis = 30_000
