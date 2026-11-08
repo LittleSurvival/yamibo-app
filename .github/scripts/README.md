@@ -7,7 +7,7 @@ repository root unless a script documents another working directory.
 | --- | --- |
 | `apple-validate/` | Apple simulator validation conventions; scenario scripts remain on validation branches. |
 | `checks/` | Git identity, production test isolation, and logger coverage checks. |
-| `release/` | Release assets, upload progress, update feeds, and mirror publishing. |
+| `release/` | Release assets, upload progress, update feeds, mirror publishing, and App Store Connect upload. |
 | `server-notice/` | Server notice generation. |
 
 When moving a script, update workflows, script-to-script calls, documentation,

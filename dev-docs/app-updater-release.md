@@ -83,43 +83,28 @@ Do not publish Gitee or Gitea ready manifests whose APK asset URL points back to
 
 iOS cannot install an IPA directly from inside a normal App Store/TestFlight app. The app updater therefore only checks the manifest and opens `releaseUrl`.
 
-The release workflow builds an unsigned iPhone device IPA with the Xcode
-`Release` configuration and publishes the same `yamibo-<channel>-v<version>-unsigned.ipa`
-to the GitHub, Gitee, and Gitea releases alongside the Android APK. Its bundle
-version and build number come from `update/manifest.json`.
+The manual `Release` workflow builds an Android APK and two iPhone Release
+IPAs. The bundle version and build number come from `update/manifest.json`.
 
-The manual `release.yml` workflow follows this dependency graph:
+- `yamibo-<channel>-v<version>-unsigned.ipa` is for self-signing.
+- `yamibo-<channel>-v<version>-signed.ipa` is signed for App Store Connect.
+  Install the distributed build through TestFlight.
 
-```text
-check ─┬─ build_android ─┬─ release
-       └─ build_ios ─────┘
-```
+`check` validates the manifest, changelog, release tag, and Android and mirror
+credentials. Then `build_android` signs the APK and `build_ios` builds the
+unsigned IPA and exports the signed IPA using the Apple signing credentials.
+`release` waits for all three artifacts, verifies their presence and the APK
+checksum, and publishes all three to the same release on GitHub, Gitee, and
+Gitea. It generates the Android update feeds after the asset uploads.
 
-`check` validates the changelog, manifest/app version consistency, source manifest
-rules, existing tag target, and presence of the Android signing and mirror
-credentials. Both builds start only after it succeeds and use the same workflow
-commit. The Android job signs and verifies the APK; the iOS job packages the
-unsigned device Release build. `release` waits for both artifacts, verifies the
-APK checksum and IPA presence, rechecks/creates the source tag, then publishes
-both files to all three hosts. The tag is created only after successful builds;
-an existing tag for the same commit permits reruns, while a conflicting tag fails
-in `check`. Before preparing mirror tags, the release job regenerates
-`update/stable.json` in its own checkout. Published feeds are generated, validated,
-and synced after the asset uploads.
+`publish_app_store` uses the signed IPA from `build_ios` and the App Store
+Connect API credentials. Its upload runs independently of release publication
+and can be retried separately if Apple has yet to accept the build. See the
+[TestFlight guide](testflight.md) for setup and retry details.
 
-A failed check prevents both builds; a failed or cancelled build prevents
-publication. If a later
-upload fails, inspect all three releases and rerun the failed release job to
-complete the publication before declaring the release complete. Mirror reruns
-recreate their releases and upload both assets together.
-
-The IPA is unsigned and cannot be installed as-is. Users must sign and install it
-using a compatible tool and their own Apple account or signing credentials. Free
-Apple personal-team provisioning expires after seven days and requires renewal.
-Compatibility depends on the signing tool, the user's provisioning profile,
-bundle identifier and capabilities. This distribution path is separate from
-App Store or TestFlight publication. The update manifests continue to describe
-the Android APK; iOS users open the release page to obtain the IPA.
+A failed build prevents publication. If an asset upload fails, check each
+release and rerun the failed release job. Mirror reruns recreate their release
+and upload all three assets again.
 
 Recommended options:
 

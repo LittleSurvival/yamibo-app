@@ -50,8 +50,10 @@ Trigger the release:
 
 1. Push the prepared release commit to the source repository.
 2. Open GitHub Actions.
-3. Select `Release Android APK`.
+3. Select `Release`.
 4. Click `Run workflow`.
+
+App Store Connect upload is the `publish_app_store` job in this workflow. See the [TestFlight guide](../dev-docs/testflight.md).
 
 Workflow steps:
 
@@ -62,9 +64,9 @@ Workflow steps:
 5. Build the release APK.
 6. Zipalign, sign, and verify the APK with `mine.keystore`.
 7. Create or update the GitHub Release.
-8. Upload the APK asset.
+8. Upload the APK, unsigned IPA, and signed IPA.
 9. Calculate the APK `sha256` and `size`.
-10. Upload the same APK to the Gitee and Gitea release assets.
+10. Upload the same APK and both IPAs to the Gitee and Gitea release assets.
 11. Generate target-specific published update folders in runner temp:
    - `isReady=true`
    - `releaseUrl`

@@ -12,6 +12,12 @@ set -euo pipefail
 : "${IPA:?IPA is required}"
 : "${IPA_NAME:?IPA_NAME is required}"
 
+if [ -n "${SIGNED_IPA:-}" ] || [ -n "${SIGNED_IPA_NAME:-}" ]; then
+  : "${SIGNED_IPA:?SIGNED_IPA is required with SIGNED_IPA_NAME}"
+  : "${SIGNED_IPA_NAME:?SIGNED_IPA_NAME is required with SIGNED_IPA}"
+  test -s "$SIGNED_IPA"
+fi
+
 if [ ! -s "$CHANGELOG" ]; then
   echo "Changelog is missing or empty: $CHANGELOG" >&2
   exit 1
@@ -134,6 +140,7 @@ fi
 
 probe_file="$RUNNER_TEMP/gitea-apk-probe.bin"
 verify_gitea_asset() {
+  local asset_url="$1"
   local attempt
   for attempt in 1 2 3; do
     if curl --silent --show-error --fail-with-body \
@@ -163,22 +170,32 @@ PY
   return 1
 }
 
-verify_gitea_asset
+verify_gitea_asset "$asset_url"
 
 echo "release_url=$release_url" >> "$GITHUB_OUTPUT"
 echo "asset_url=$asset_url" >> "$GITHUB_OUTPUT"
 
-encoded_ipa_name="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$IPA_NAME")"
-echo "Uploading ${IPA_NAME} ($(stat -c%s "$IPA") bytes) to Gitea..." >&2
-upload_json="$(curl "${upload_curl_opts[@]}" \
-  2> >(python3 .github/scripts/release/filter-upload-progress.py "Gitea IPA upload") \
-  -X POST -H "$auth_header" \
-  -F "attachment=@${IPA}" \
-  "${api}/releases/${release_id}/assets?name=${encoded_ipa_name}")"
-asset_url="$(printf '%s' "$upload_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("browser_download_url", ""))')"
-if [ -z "$asset_url" ]; then
-  echo "Gitea IPA upload response did not provide browser_download_url" >&2
-  exit 1
-fi
-verify_gitea_asset
+upload_ipa() {
+  local ipa="$1" ipa_name="$2"
+  local upload_json
+  local encoded_ipa_name
+  encoded_ipa_name="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$ipa_name")"
+  echo "Uploading ${ipa_name} ($(stat -c%s "$ipa") bytes) to Gitea..." >&2
+  upload_json="$(curl "${upload_curl_opts[@]}" \
+    2> >(python3 .github/scripts/release/filter-upload-progress.py "Gitea IPA upload") \
+    -X POST -H "$auth_header" \
+    -F "attachment=@${ipa}" \
+    "${api}/releases/${release_id}/assets?name=${encoded_ipa_name}")"
+  asset_url="$(printf '%s' "$upload_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("browser_download_url", ""))')"
+  if [ -z "$asset_url" ]; then
+    echo "Gitea IPA upload response did not provide browser_download_url" >&2
+    exit 1
+  fi
+  verify_gitea_asset "$asset_url"
+}
+
+upload_ipa "$IPA" "$IPA_NAME"
 echo "ipa_asset_url=$asset_url" >> "$GITHUB_OUTPUT"
+if [ -n "${SIGNED_IPA:-}" ]; then
+  upload_ipa "$SIGNED_IPA" "$SIGNED_IPA_NAME"
+fi
