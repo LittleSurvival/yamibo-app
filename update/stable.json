@@ -1,7 +1,7 @@
 {
   "channel": "stable",
   "versionName": "0.0.10",
-  "versionCode": 12,
+  "versionCode": 11,
   "isReady": false,
   "releaseNotes": "改善下載內容與閱讀器圖片載入，修復離線閱讀入口、快取清除與目錄跨頁跳轉，新增可滑動關閉的提示訊息及論壇服務狀態公告",
   "assets": []

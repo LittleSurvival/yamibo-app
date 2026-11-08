@@ -297,7 +297,7 @@ if [ "$ipa_count" != 1 ]; then
   echo "Expected one exported IPA, found $ipa_count" >&2
   exit 1
 fi
-ipa="$work/yamibo-${channel}-v${version_name}-${version_code}.ipa"
+ipa="$work/yamibo-${channel}-v${version_name}-signed.ipa"
 cp "$(find "$work/export" -maxdepth 1 -name '*.ipa' -type f)" "$ipa"
 
 inspect="$work/inspect"
@@ -334,4 +334,3 @@ fi
 
 shasum -a 256 "$ipa"
 echo "Signed IPA: $ipa"
-

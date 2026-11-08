@@ -12,6 +12,12 @@ set -euo pipefail
 : "${IPA:?IPA is required}"
 : "${IPA_NAME:?IPA_NAME is required}"
 
+if [ -n "${SIGNED_IPA:-}" ] || [ -n "${SIGNED_IPA_NAME:-}" ]; then
+  : "${SIGNED_IPA:?SIGNED_IPA is required with SIGNED_IPA_NAME}"
+  : "${SIGNED_IPA_NAME:?SIGNED_IPA_NAME is required with SIGNED_IPA}"
+  test -s "$SIGNED_IPA"
+fi
+
 if [ ! -s "$CHANGELOG" ]; then
   echo "Changelog is missing or empty: $CHANGELOG" >&2
   exit 1
@@ -113,6 +119,7 @@ fi
 apk_size="$(stat -c%s "$APK")"
 headers_file="$RUNNER_TEMP/gitee-apk-headers.txt"
 verify_gitee_asset() {
+  local asset_url="$1" asset_name="$2" asset_size="$3"
   local attempt
   for attempt in 1 2 3; do
     if curl --silent --show-error --fail-with-body \
@@ -123,7 +130,7 @@ verify_gitee_asset() {
       --dump-header "$headers_file" \
       --output /dev/null \
       "$asset_url" && python3 .github/scripts/release/validate-release-asset-headers.py \
-        "$headers_file" "$APK_NAME" "$apk_size"; then
+        "$headers_file" "$asset_name" "$asset_size"; then
       return 0
     fi
     if [ "$attempt" -lt 3 ]; then
@@ -135,24 +142,32 @@ verify_gitee_asset() {
   return 1
 }
 
-verify_gitee_asset
+verify_gitee_asset "$asset_url" "$APK_NAME" "$apk_size"
 
 echo "release_url=$release_url" >> "$GITHUB_OUTPUT"
 echo "asset_url=$asset_url" >> "$GITHUB_OUTPUT"
 
-echo "Uploading ${IPA_NAME} ($(stat -c%s "$IPA") bytes) to Gitee..." >&2
-upload_json="$(curl "${upload_curl_opts[@]}" \
-  2> >(python3 .github/scripts/release/filter-upload-progress.py "Gitee IPA upload") \
-  -X POST "${api}/releases/${release_id}/attach_files" \
-  -F "access_token=${GITEE_TOKEN}" \
-  -F "file=@${IPA}")"
-release_json="$(lookup_release)"
-asset_url="$(
-  { printf '%s\n' "$upload_json"; printf '%s\n' "$release_json"; } |
-    python3 .github/scripts/release/extract-release-asset-url.py "$IPA_NAME" \
-      "https://gitee.com/${MIRROR_OWNER}/${MIRROR_REPO}/releases/download/${TAG}/${IPA_NAME}"
-)"
-APK_NAME="$IPA_NAME"
-apk_size="$(stat -c%s "$IPA")"
-verify_gitee_asset
+upload_ipa() {
+  local ipa="$1" ipa_name="$2"
+  local upload_json
+  local release_json
+  echo "Uploading ${ipa_name} ($(stat -c%s "$ipa") bytes) to Gitee..." >&2
+  upload_json="$(curl "${upload_curl_opts[@]}" \
+    2> >(python3 .github/scripts/release/filter-upload-progress.py "Gitee IPA upload") \
+    -X POST "${api}/releases/${release_id}/attach_files" \
+    -F "access_token=${GITEE_TOKEN}" \
+    -F "file=@${ipa}")"
+  release_json="$(lookup_release)"
+  asset_url="$(
+    { printf '%s\n' "$upload_json"; printf '%s\n' "$release_json"; } |
+      python3 .github/scripts/release/extract-release-asset-url.py "$ipa_name" \
+        "https://gitee.com/${MIRROR_OWNER}/${MIRROR_REPO}/releases/download/${TAG}/${ipa_name}"
+  )"
+  verify_gitee_asset "$asset_url" "$ipa_name" "$(stat -c%s "$ipa")"
+}
+
+upload_ipa "$IPA" "$IPA_NAME"
 echo "ipa_asset_url=$asset_url" >> "$GITHUB_OUTPUT"
+if [ -n "${SIGNED_IPA:-}" ]; then
+  upload_ipa "$SIGNED_IPA" "$SIGNED_IPA_NAME"
+fi
