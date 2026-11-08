@@ -121,6 +121,10 @@ bundle identifier and capabilities. This distribution path is separate from
 App Store or TestFlight publication. The update manifests continue to describe
 the Android APK; iOS users open the release page to obtain the IPA.
 
+Signed TestFlight uploads use the separate manual workflow
+`.github/workflows/testflight.yml`. See [TestFlight](testflight.md), [简体](testflight.zh-Hans.md), or [繁體](testflight.zh-Hant.md).
+That workflow does not publish the signed IPA.
+
 Recommended options:
 
 - App Store: use an App Store product URL as `releaseUrl`.
