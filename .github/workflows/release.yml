@@ -104,9 +104,22 @@ jobs:
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
           GITEE_SSH_PRIVATE_KEY: ${{ secrets.GITEE_SSH_PRIVATE_KEY }}
           GITEA_SSH_PRIVATE_KEY: ${{ secrets.GITEA_SSH_PRIVATE_KEY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_DISTRIBUTION_P12_BASE64: ${{ secrets.APPLE_DISTRIBUTION_P12_BASE64 }}
+          APPLE_DISTRIBUTION_P12_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_P12_PASSWORD }}
+          APP_STORE_CONNECT_PROFILE_BASE64: ${{ secrets.APP_STORE_CONNECT_PROFILE_BASE64 }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
         run: |
           set -euo pipefail
-          for name in MINE_KEYSTORE_BASE64 MINE_KEY_ALIAS MINE_KEYSTORE_PASSWORD MINE_KEY_PASSWORD GITEE_TOKEN GITEA_TOKEN GITEE_SSH_PRIVATE_KEY GITEA_SSH_PRIVATE_KEY; do
+          for name in \
+            MINE_KEYSTORE_BASE64 MINE_KEY_ALIAS MINE_KEYSTORE_PASSWORD MINE_KEY_PASSWORD \
+            GITEE_TOKEN GITEA_TOKEN GITEE_SSH_PRIVATE_KEY GITEA_SSH_PRIVATE_KEY \
+            APPLE_TEAM_ID APPLE_DISTRIBUTION_P12_BASE64 APPLE_DISTRIBUTION_P12_PASSWORD \
+            APP_STORE_CONNECT_PROFILE_BASE64 APP_STORE_CONNECT_KEY_ID \
+            APP_STORE_CONNECT_ISSUER_ID APP_STORE_CONNECT_API_KEY
+          do
             if [ -z "${!name}" ]; then
               echo "$name is required" >&2
               exit 1
@@ -192,17 +205,29 @@ jobs:
 
   build_ios:
     needs: check
-    runs-on: macos-latest
-    timeout-minutes: 60
+    runs-on: macos-26
+    timeout-minutes: 120
     env:
       GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx6g -Dorg.gradle.workers.max=2
     steps:
       - uses: actions/checkout@v4
+      - name: Select Xcode 26.6
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s /Applications/Xcode_26.6.app
+          xcodebuild -version
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
       - uses: gradle/actions/setup-gradle@v4
+      - name: Identify Xcode cache inputs
+        id: toolchain
+        run: echo "xcode=$(xcodebuild -version | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: ios-konan-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('gradle/libs.versions.toml', 'gradle/wrapper/gradle-wrapper.properties') }}
       - name: Build unsigned iPhone Release IPA
         run: bash .github/scripts/release/build-unsigned-ios-ipa.sh
       - uses: actions/upload-artifact@v4
@@ -211,6 +236,41 @@ jobs:
           path: ${{ runner.temp }}/ios-release/*.ipa
           if-no-files-found: error
           retention-days: 14
+      - name: Archive and sign App Store IPA
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_DISTRIBUTION_P12_BASE64: ${{ secrets.APPLE_DISTRIBUTION_P12_BASE64 }}
+          APPLE_DISTRIBUTION_P12_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_P12_PASSWORD }}
+          APP_STORE_CONNECT_PROFILE_BASE64: ${{ secrets.APP_STORE_CONNECT_PROFILE_BASE64 }}
+        run: bash .github/scripts/release/build-signed-ios-ipa.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signed-ios-ipa
+          path: ${{ runner.temp }}/ios-signed/yamibo-*.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+  publish_app_store:
+    needs: [check, build_ios]
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download signed iOS IPA
+        uses: actions/download-artifact@v4
+        with:
+          name: signed-ios-ipa
+          path: ${{ runner.temp }}/ios-signed
+      - name: Upload signed IPA to App Store Connect
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+        run: |
+          set -euo pipefail
+          ipa="$(find "$RUNNER_TEMP/ios-signed" -maxdepth 1 -name '*.ipa' -type f)"
+          test -s "$ipa"
+          bash .github/scripts/release/upload-app-store-ipa.sh "$ipa"
 
   release:
     needs: [check, build_android, build_ios]

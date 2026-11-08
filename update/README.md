@@ -53,7 +53,7 @@ Trigger the release:
 3. Select `Release Android APK`.
 4. Click `Run workflow`.
 
-TestFlight is not part of this workflow. Use the manual `TestFlight` workflow and `dev-docs/testflight.md`, `dev-docs/testflight.zh-Hans.md`, or `dev-docs/testflight.zh-Hant.md`.
+App Store Connect upload is the `publish_app_store` job in this workflow. See `dev-docs/testflight.md`, `dev-docs/testflight.zh-Hans.md`, or `dev-docs/testflight.zh-Hant.md`.
 
 Workflow steps:
 

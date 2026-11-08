@@ -1,10 +1,10 @@
 # TestFlight 發布流程
 
-`.github/workflows/testflight.yml` 會簽署 iPhone Release 建置，並可上傳到 App Store Connect 供 TestFlight 使用。它是手動觸發的獨立流程，不屬於 `.github/workflows/release.yml`。
+`.github/workflows/release.yml` 在 `build_ios` 裡簽署 iPhone Release 建置，再由 `publish_app_store` 把這個 IPA 上傳到 App Store Connect。沒有單獨的 TestFlight workflow。
 
 英文版見 [TestFlight](testflight.md)，簡體版見 [TestFlight 发布流程](testflight.zh-Hans.md)。
 
-`release.yml` 仍會建置未簽名 IPA，並與 Android APK 一起發布到 GitHub、Gitee 與 Gitea。不要把已簽名 IPA 附到這三個 Release。App Store 簽名包只能透過 TestFlight 安裝，不能當作側載檔。
+同一個 iOS job 仍會建置未簽名 IPA。`release` 把它和 Android APK 一起發布到 GitHub、Gitee 與 Gitea。不要把已簽名 IPA 附到這三個 Release。App Store 簽名包只能透過 TestFlight 安裝，不能當作側載檔。
 
 ## 一次性 Apple 準備
 
@@ -43,7 +43,7 @@ base64 -i AuthKey_XXXXXXXXXX.p8 | pbcopy
 
 `APP_STORE_CONNECT_API_KEY` 優先使用 Base64。GitHub secret 欄位經常破壞 PEM 的換行。腳本也接受仍含有 `-----BEGIN PRIVATE KEY-----` 的 PEM。
 
-只簽名、不上傳時，不需要三個 API secret。上傳時七個都要。
+七個 secret 都要。缺任何一個，`check` 都不會開始發版。
 
 ## 版本
 
@@ -52,38 +52,38 @@ base64 -i AuthKey_XXXXXXXXXX.p8 | pbcopy
 - `versionName` 成為 `CFBundleShortVersionString`
 - `versionCode` 成為 `CFBundleVersion`
 
-簽名前，workflow 會執行 `syncStableManifest validateUpdateManifest`。`composeApp/build.gradle.kts`、`update/manifest.json`、`update/stable.json` 與 `update/changelogs/{versionCode}.changelog` 必須已經一致，source manifest 也必須維持 `isReady=false`。
+`check` 會在兩個構建之前執行 `syncStableManifest validateUpdateManifest`。`composeApp/build.gradle.kts`、`update/manifest.json`、`update/stable.json` 與 `update/changelogs/{versionCode}.changelog` 必須已經一致，source manifest 也必須維持 `isReady=false`。
 
-同一個 `versionName` 可以有多個 build，但每個 `versionCode` 只能上傳一次。每次新上傳都要提高 `versionCode`，包括 Apple 已經接受該 build 之後的重試。這個 workflow 不會建立 git tag，也不會發布 Android 更新源。
+同一個 `versionName` 可以有多個 build，但每個 `versionCode` 只能上傳一次。每次發版都要提高 `versionCode`，包括 Apple 已經接受該 build 之後的重試。`release` 會建立 git tag，並發布 Android 更新源。`publish_app_store` 不會。
 
 ## 執行
 
-1. 推送測試者要安裝的那個版本所在的 commit。
-2. 開啟 GitHub Actions，選擇 `TestFlight`。
-3. 在該分支上執行 workflow。保持 `Upload the signed IPA to App Store Connect` 開啟。
-4. 只有在想封存並簽名、但不呼叫 App Store Connect 時，才關掉這個上傳選項。
+1. 推送要發布的那個版本所在的 commit。
+2. 開啟 GitHub Actions，選擇 `Release`。
+3. 在該分支上執行 workflow。
 
-Job 跑在 `macos-26`，並選用 Xcode 26.6。Apple 要求上傳到 TestFlight 的 iOS 建置必須使用 Xcode 26 或更新版本。如果 runner image 移除了這個 Xcode，job 會在編譯前失敗，並列出 runner 上現有的 Xcode。
+`build_ios` 和 `publish_app_store` 跑在 `macos-26`，並選用 Xcode 26.6。Apple 要求上傳到 TestFlight 的 iOS 建置必須使用 Xcode 26 或更新版本。如果 runner image 移除了這個 Xcode，job 會在編譯前失敗，並列出 runner 上現有的 Xcode。
 
 ## Job 做什麼
 
 ```text
-檢查 secrets
-→ 驗證 manifest
-→ 把發行用 p12 匯入臨時鑰匙圈
-→ 安裝 App Store Connect 描述檔
-→ xcodebuild archive（手動簽名、Release、generic iOS device）
-→ 匯出 App Store Connect IPA
-→ 除非 IPA 由 Apple Distribution 簽名且使用該描述檔，否則拒絕
-→ altool --validate-app
-→ altool --upload-app
+check
+→ build_ios
+    未簽名 IPA
+    匯入發行用 p12
+    安裝 App Store Connect 描述檔
+    xcodebuild archive（手動簽名、Release、generic iOS device）
+    匯出已簽名 IPA
+→ publish_app_store
+    altool --validate-app
+    altool --upload-app
 ```
 
-腳本會在編譯前檢查描述檔。它必須符合 `APPLE_TEAM_ID` 與 `com.yamibo.bbs`，包含 p12 裡的憑證，允許 TestFlight（`beta-reports-active`），而且不能是 development、Ad Hoc 或 enterprise 描述檔。
+`build_ios` 會在編譯前檢查描述檔。它必須符合 `APPLE_TEAM_ID` 與 `com.yamibo.bbs`，包含 p12 裡的憑證，允許 TestFlight（`beta-reports-active`），而且不能是 development、Ad Hoc 或 enterprise 描述檔。
 
 簽名只在這個 job 裡把 checkout 出來的專案改成手動簽名。版本庫仍保留本機建置用的 `CODE_SIGN_STYLE = Automatic` 與 `CODE_SIGN_IDENTITY = Apple Development`。CI 會把 `TEAM_ID` 寫進已被 gitignore 的 `iosApp/Configuration/Config.local.xcconfig`，並在 job 結束時刪除或還原該檔。
 
-已簽名 IPA 會成為私有 Actions artifact `testflight-ipa`，保留 7 天。它只用來檢查失敗的上傳，不要公開發布。如果上傳在 App Store Connect 接受 build 之前失敗，直接重跑 workflow。如果 Apple 已經接受該 build number，先提高 `versionCode`。
+已簽名 IPA 會成為私有 Actions artifact `signed-ios-ipa`，保留 14 天。它只用來檢查失敗的上傳，不要公開發布。`publish_app_store` 不會擋住 `release`，所以上傳失敗時 Android 發版仍然保留。如果上傳在 App Store Connect 接受 build 之前失敗，重跑 `publish_app_store`。如果 Apple 已經接受該 build number，先提高 `versionCode`。
 
 ## Apple 接受上傳之後
 

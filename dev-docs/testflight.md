@@ -2,9 +2,9 @@
 
 中文：[简体](testflight.zh-Hans.md)、[繁體](testflight.zh-Hant.md)。
 
-`.github/workflows/testflight.yml` signs an iPhone Release build and can upload it to App Store Connect for TestFlight. It is manual and independent of `.github/workflows/release.yml`.
+`.github/workflows/release.yml` signs an iPhone Release build in `build_ios` and uploads that IPA to App Store Connect from `publish_app_store`. There is no separate TestFlight workflow.
 
-The release workflow still builds the unsigned IPA and publishes it with the Android APK to GitHub, Gitee, and Gitea. Do not attach the signed IPA to those releases. A signed App Store build is installed through TestFlight, not as a sideload file.
+The same iOS job also builds the unsigned IPA. `release` publishes that file with the Android APK to GitHub, Gitee, and Gitea. Do not attach the signed IPA to those releases. A signed App Store build is installed through TestFlight, not as a sideload file.
 
 ## One-time Apple setup
 
@@ -43,7 +43,7 @@ base64 -i AuthKey_XXXXXXXXXX.p8 | pbcopy
 
 Prefer Base64 for `APP_STORE_CONNECT_API_KEY`. The GitHub secret field often damages raw PEM line breaks. The script also accepts PEM that still contains `-----BEGIN PRIVATE KEY-----`.
 
-Sign-only runs do not need the three API secrets. An upload run needs all seven.
+All seven secrets are required. `check` refuses to start the release when any one is missing.
 
 ## Version
 
@@ -52,38 +52,38 @@ Sign-only runs do not need the three API secrets. An upload run needs all seven.
 - `versionName` becomes `CFBundleShortVersionString`
 - `versionCode` becomes `CFBundleVersion`
 
-The workflow runs `syncStableManifest validateUpdateManifest` before signing. `composeApp/build.gradle.kts`, `update/manifest.json`, `update/stable.json`, and `update/changelogs/{versionCode}.changelog` must already agree, and the source manifest must stay `isReady=false`.
+`check` runs `syncStableManifest validateUpdateManifest` before either build. `composeApp/build.gradle.kts`, `update/manifest.json`, `update/stable.json`, and `update/changelogs/{versionCode}.changelog` must already agree, and the source manifest must stay `isReady=false`.
 
-App Store Connect accepts many builds for one `versionName`, but each `versionCode` can be uploaded once. Increase `versionCode` for every new upload, including a retry after Apple has already accepted the build. This workflow does not create a git tag and does not publish the Android update feed.
+App Store Connect accepts many builds for one `versionName`, but each `versionCode` can be uploaded once. Increase `versionCode` for every release, including a retry after Apple has already accepted the build. `release` creates the git tag and publishes the Android update feed. `publish_app_store` does not.
 
 ## Run
 
-1. Push the commit that contains the version you want testers to install.
-2. Open GitHub Actions and select `TestFlight`.
-3. Run the workflow on that branch. Leave `Upload the signed IPA to App Store Connect` enabled.
-4. Turn the upload input off only to archive and sign without calling App Store Connect.
+1. Push the commit that contains the version you want to release.
+2. Open GitHub Actions and select `Release`.
+3. Run the workflow on that branch.
 
-The job runs on `macos-26` and selects Xcode 26.6. Apple requires an iOS build uploaded for TestFlight to be built with Xcode 26 or later. If that Xcode is removed from the runner image, the job fails before compilation and lists the Xcode apps present on the runner.
+`build_ios` and `publish_app_store` run on `macos-26` and select Xcode 26.6. Apple requires an iOS build uploaded for TestFlight to be built with Xcode 26 or later. If that Xcode is removed from the runner image, the job fails before compilation and lists the Xcode apps present on the runner.
 
-## What the job does
+## What the jobs do
 
 ```text
-check secrets
-→ validate manifest
-→ import the distribution p12 into a temporary keychain
-→ install the App Store Connect profile
-→ xcodebuild archive (manual signing, Release, generic iOS device)
-→ export an App Store Connect IPA
-→ reject the IPA unless it is Apple Distribution signed with that profile
-→ altool --validate-app
-→ altool --upload-app
+check
+→ build_ios
+    unsigned IPA
+    import the distribution p12
+    install the App Store Connect profile
+    xcodebuild archive (manual signing, Release, generic iOS device)
+    export the signed IPA
+→ publish_app_store
+    altool --validate-app
+    altool --upload-app
 ```
 
-The script checks the profile before compilation. It must match `APPLE_TEAM_ID` and `com.yamibo.bbs`, include the p12 certificate, allow TestFlight (`beta-reports-active`), and not be a development, Ad Hoc, or enterprise profile.
+`build_ios` checks the profile before compilation. It must match `APPLE_TEAM_ID` and `com.yamibo.bbs`, include the p12 certificate, allow TestFlight (`beta-reports-active`), and not be a development, Ad Hoc, or enterprise profile.
 
 Signing uses the checked-out project as manual signing for this job only. The repository keeps `CODE_SIGN_STYLE = Automatic` and `CODE_SIGN_IDENTITY = Apple Development` for local builds. CI writes `TEAM_ID` into the gitignored `iosApp/Configuration/Config.local.xcconfig` and deletes or restores that file when the job ends.
 
-The signed IPA is uploaded as the private Actions artifact `testflight-ipa` and kept for 7 days. Use it to inspect a failed upload. Do not publish it. If upload fails before App Store Connect accepts the build, rerun the workflow. If Apple already accepted the build number, increase `versionCode` first.
+The signed IPA is kept as the private Actions artifact `signed-ios-ipa` for 14 days. Use it to inspect a failed upload. Do not publish it. `publish_app_store` does not block `release`, so an App Store Connect failure leaves the Android release in place. If upload fails before App Store Connect accepts the build, rerun `publish_app_store`. If Apple already accepted the build number, increase `versionCode` first.
 
 ## After Apple accepts the upload
 
