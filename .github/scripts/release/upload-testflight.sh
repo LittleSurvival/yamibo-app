@@ -185,14 +185,27 @@ uuid = str(profile.get("UUID") or "").strip()
 if not name or not uuid:
     fail("Provisioning profile is missing Name or UUID.")
 
-pem = subprocess.check_output(
-    [
-        "openssl", "pkcs12",
-        "-in", os.environ["P12_PATH"],
-        "-nokeys", "-clcerts",
-        "-passin", "env:APPLE_DISTRIBUTION_P12_PASSWORD",
-    ]
-)
+def read_p12_certs():
+    p12_path = os.environ["P12_PATH"]
+    attempts = []
+    if os.path.isfile("/usr/bin/openssl"):
+        attempts.append([
+            "/usr/bin/openssl", "pkcs12", "-in", p12_path,
+            "-nokeys", "-clcerts", "-passin", "env:APPLE_DISTRIBUTION_P12_PASSWORD",
+        ])
+    attempts.append([
+        "openssl", "pkcs12", "-legacy", "-in", p12_path,
+        "-nokeys", "-clcerts", "-passin", "env:APPLE_DISTRIBUTION_P12_PASSWORD",
+    ])
+    errors = []
+    for command in attempts:
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if result.returncode == 0:
+            return result.stdout
+        errors.append(result.stderr.decode(errors="replace").strip())
+    fail("Could not read the distribution p12. " + " | ".join(error for error in errors if error))
+
+pem = read_p12_certs()
 leafs = [
     base64.b64decode(re.sub(r"\s+", "", body))
     for body in re.findall(
