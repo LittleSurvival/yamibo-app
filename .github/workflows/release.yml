@@ -2,20 +2,9 @@ name: Release
 
 on:
   workflow_dispatch:
-    inputs:
-      scope:
-        description: release publishes Android and the unsigned IPA; app-store only signs and uploads the iOS build
-        required: true
-        type: choice
-        default: release
-        options:
-          - release
-          - app-store
-
-run-name: Release / ${{ github.ref_name }} / ${{ inputs.scope }}
 
 concurrency:
-  group: ${{ inputs.scope == 'app-store' && format('app-store-{0}', github.repository) || format('mirror-publish-{0}', github.repository) }}
+  group: mirror-publish-${{ github.repository }}
   cancel-in-progress: false
 
 permissions:
@@ -90,7 +79,6 @@ jobs:
           PY
 
       - name: Check release tag
-        if: inputs.scope == 'release'
         shell: bash
         env:
           TAG: ${{ steps.meta.outputs.version_code }}
@@ -123,14 +111,15 @@ jobs:
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
-          SCOPE: ${{ inputs.scope }}
         run: |
           set -euo pipefail
-          required="APPLE_TEAM_ID APPLE_DISTRIBUTION_P12_BASE64 APPLE_DISTRIBUTION_P12_PASSWORD APP_STORE_CONNECT_PROFILE_BASE64 APP_STORE_CONNECT_KEY_ID APP_STORE_CONNECT_ISSUER_ID APP_STORE_CONNECT_API_KEY"
-          if [ "$SCOPE" = release ]; then
-            required="$required MINE_KEYSTORE_BASE64 MINE_KEY_ALIAS MINE_KEYSTORE_PASSWORD MINE_KEY_PASSWORD GITEE_TOKEN GITEA_TOKEN GITEE_SSH_PRIVATE_KEY GITEA_SSH_PRIVATE_KEY"
-          fi
-          for name in $required; do
+          for name in \
+            MINE_KEYSTORE_BASE64 MINE_KEY_ALIAS MINE_KEYSTORE_PASSWORD MINE_KEY_PASSWORD \
+            GITEE_TOKEN GITEA_TOKEN GITEE_SSH_PRIVATE_KEY GITEA_SSH_PRIVATE_KEY \
+            APPLE_TEAM_ID APPLE_DISTRIBUTION_P12_BASE64 APPLE_DISTRIBUTION_P12_PASSWORD \
+            APP_STORE_CONNECT_PROFILE_BASE64 APP_STORE_CONNECT_KEY_ID \
+            APP_STORE_CONNECT_ISSUER_ID APP_STORE_CONNECT_API_KEY
+          do
             if [ -z "${!name}" ]; then
               echo "$name is required" >&2
               exit 1
@@ -141,7 +130,6 @@ jobs:
         run: ./gradlew syncStableManifest validateUpdateManifest --console=plain
 
   build_android:
-    if: inputs.scope == 'release'
     needs: check
     runs-on: ubuntu-latest
     outputs:
@@ -241,10 +229,8 @@ jobs:
           path: ~/.konan
           key: ios-konan-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('gradle/libs.versions.toml', 'gradle/wrapper/gradle-wrapper.properties') }}
       - name: Build unsigned iPhone Release IPA
-        if: inputs.scope == 'release'
         run: bash .github/scripts/release/build-unsigned-ios-ipa.sh
       - uses: actions/upload-artifact@v4
-        if: inputs.scope == 'release'
         with:
           name: unsigned-ios-ipa
           path: ${{ runner.temp }}/ios-release/*.ipa
@@ -287,7 +273,6 @@ jobs:
           bash .github/scripts/release/upload-app-store-ipa.sh "$ipa"
 
   release:
-    if: inputs.scope == 'release'
     needs: [check, build_android, build_ios]
     runs-on: ubuntu-latest
     steps:

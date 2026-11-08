@@ -62,8 +62,6 @@ App Store Connect accepts many builds for one `versionName`, but each `versionCo
 2. Open GitHub Actions and select `Release`.
 3. Run the workflow on that branch.
 
-To verify only the Apple path, set `scope` to `app-store`. That runs the signed `build_ios` archive and `publish_app_store`, and skips the tag, Android build, and mirror publish. App Store Connect rejects a `versionCode` it has already accepted, so increase it before verifying an upload.
-
 `build_ios` and `publish_app_store` run on `macos-26` and select Xcode 26.6. Apple requires an iOS build uploaded for TestFlight to be built with Xcode 26 or later. If that Xcode is removed from the runner image, the job fails before compilation and lists the Xcode apps present on the runner.
 
 ## What the jobs do

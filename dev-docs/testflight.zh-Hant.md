@@ -62,8 +62,6 @@ base64 -i AuthKey_XXXXXXXXXX.p8 | pbcopy
 2. 開啟 GitHub Actions，選擇 `Release`。
 3. 在該分支上執行 workflow。
 
-只驗證 Apple 發布時，Run workflow 裡把 `scope` 選成 `app-store`。這時只跑 `build_ios` 的簽名包和 `publish_app_store`，不打 tag，也不發布 Android。App Store Connect 拒絕已經接受過的 `versionCode`；要驗證上傳，先提高它。
-
 `build_ios` 和 `publish_app_store` 跑在 `macos-26`，並選用 Xcode 26.6。Apple 要求上傳到 TestFlight 的 iOS 建置必須使用 Xcode 26 或更新版本。如果 runner image 移除了這個 Xcode，job 會在編譯前失敗，並列出 runner 上現有的 Xcode。
 
 ## Job 做什麼
