@@ -258,7 +258,9 @@ fun SearchScreen(fid: ForumId?) {
     }
 
     DisposableEffect(navigator) {
-        val handler = { restorePreviousSearchPage() }
+        val handler = {
+            if (navigator.currentScreen is ISearchScreen) restorePreviousSearchPage() else false
+        }
         navigator.backHandlers.add(handler)
         onDispose { navigator.backHandlers.remove(handler) }
     }

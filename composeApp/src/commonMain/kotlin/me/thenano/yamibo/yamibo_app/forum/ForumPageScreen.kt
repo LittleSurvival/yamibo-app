@@ -155,7 +155,10 @@ fun ForumPageScreen(fid: ForumId, name: String) {
     }
 
     DisposableEffect(navigator) {
-        val handler = { restorePreviousPage() }
+        val handler = {
+            val current = navigator.currentScreen
+            if (current is IForumScreen && current.fid == fid) restorePreviousPage() else false
+        }
         navigator.backHandlers.add(handler)
         onDispose { navigator.backHandlers.remove(handler) }
     }
