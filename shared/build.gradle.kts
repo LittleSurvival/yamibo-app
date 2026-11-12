@@ -66,3 +66,14 @@ sqldelight {
         }
     }
 }
+
+// Validate the selected production checkout using this branch's existing tests.
+val productionCheckout = providers.gradleProperty("productionCheckout").orNull
+if (productionCheckout != null) {
+    kotlin.sourceSets.getByName("commonMain").kotlin.setSrcDirs(listOf(
+        "$productionCheckout/shared/src/commonMain/kotlin",
+        "$productionCheckout/shared/build/generated/sqldelight/code/Database/commonMain",
+    ))
+    kotlin.sourceSets.getByName("androidMain").kotlin.setSrcDirs(listOf("$productionCheckout/shared/src/androidMain/kotlin"))
+    tasks.configureEach { if (name == "generateCommonMainDatabaseInterface") enabled = false }
+}
