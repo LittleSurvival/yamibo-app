@@ -16,7 +16,7 @@ class IDownloadQueueScreen : RestorableNavigatable {
 
     @Composable
     override fun Content() {
-        DownloadQueueScreen()
+        DownloadQueueScreen(screenId = id)
     }
 
     companion object Decoder : TypedRestorableNavigatableDecoder<IDownloadQueueScreen>(IDownloadQueueScreen::class) {

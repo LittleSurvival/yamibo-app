@@ -56,6 +56,9 @@ interface DownloadRepository {
     suspend fun clearTagManga(tagId: TagId): Result<Unit>
     suspend fun clearRssMangaChapter(key: RssMangaChapterDownloadKey): Result<Unit>
     suspend fun clearRssManga(subscriptionId: Long): Result<Unit>
+    /** Cancel an unfinished task without deleting already downloaded content. */
+    suspend fun removeTask(key: DownloadTaskKey): Result<Unit>
+
     suspend fun retry(key: DownloadTaskKey): Result<Unit>
     fun pauseAll()
     fun resumeAll()

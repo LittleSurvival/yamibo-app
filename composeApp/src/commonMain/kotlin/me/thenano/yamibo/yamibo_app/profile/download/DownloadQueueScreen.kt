@@ -21,14 +21,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.littlesurvival.core.YamiboResult
-import io.github.littlesurvival.dto.value.TagId
 import io.github.littlesurvival.dto.value.ThreadId
 import io.github.littlesurvival.dto.value.UserId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -55,8 +57,8 @@ import me.thenano.yamibo.yamibo_app.task.isActive
 import me.thenano.yamibo.yamibo_app.util.state
 
 private enum class DownloadManagerTab(val title: String) {
-    Queue(i18n("下載佇列")),
-    Content(i18n("下載內容管理")),
+    Queue("下載佇列"),
+    Content("下載內容管理"),
 }
 
 private sealed interface DownloadContentManagementState {
@@ -68,14 +70,29 @@ private sealed interface DownloadContentManagementState {
     data class Error(val message: String) : DownloadContentManagementState
 }
 
+private data class DownloadRemovalTarget(val key: DownloadTaskKey, val title: String, val imageBytes: Long = 0)
+private data class DownloadRemovalRequest(val tasksOnly: Boolean, val targets: List<DownloadRemovalTarget>)
+private data class DownloadRemovalOutcome(val target: DownloadRemovalTarget, val error: String? = null)
+private data class DownloadRemovalProgress(
+    val request: DownloadRemovalRequest? = null,
+    val outcomes: List<DownloadRemovalOutcome> = emptyList(),
+)
+// Retain the current batch result when navigating away or changing app language.
+private val downloadRemovalProgress = MutableStateFlow(DownloadRemovalProgress())
+private val downloadRemovalTaskKey = AppTaskKey("download-control:batch-remove")
+
+private fun DownloadStatus.canRemoveTask(): Boolean =
+    this == DownloadStatus.Queued || this == DownloadStatus.Downloading || this == DownloadStatus.Paused || this == DownloadStatus.Failed
+
 @Composable
-fun DownloadQueueScreen() {
+fun DownloadQueueScreen(screenId: String) {
     val errorMessages = LocalForumErrorMessageResolver.current
     val colors = YamiboTheme.colors
     val navigator = LocalNavigator.current
     val repository = LocalDownloadRepository.current
     val appSettingsRepository = LocalAppSettingsRepository.current
     val downloadedContentRefreshAutoUpdate = appSettingsRepository.downloadedContentRefreshAutoUpdate.state()
+    val storageFolderUri = appSettingsRepository.backupFolderUri.state()
     val entries by repository.queue.collectAsState()
     val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
     val appTaskManager = LocalAppTaskManager.current
@@ -91,6 +108,71 @@ fun DownloadQueueScreen() {
     var selectedContentFilterKeys by rememberSaveable { mutableStateOf(emptyList<String>()) }
     val queueStatuses = remember(entries) { entries.map { it.key to it.status } }
     val contentRevision = remember(entries) { downloadedContentRevision(entries) }
+    var selectionMode by remember { mutableStateOf(false) }
+    var selectedKeys by remember { mutableStateOf(emptySet<DownloadTaskKey>()) }
+    var pendingRemoval by remember { mutableStateOf<DownloadRemovalRequest?>(null) }
+    val removalProgress by downloadRemovalProgress.collectAsState()
+    val lastRemoval = removalProgress.request
+    val outcomes = removalProgress.outcomes
+    val progress = outcomes.size
+    var showResults by remember { mutableStateOf(false) }
+    val appTasks by appTaskManager.tasks.collectAsState()
+    val busy = appTasks[downloadRemovalTaskKey]?.isActive == true
+    val contentGroups = (contentState as? DownloadContentManagementState.Ready)?.groups.orEmpty()
+    val filterOptions = remember(contentGroups) { buildDownloadedContentFilterOptions(contentGroups) }
+    val normalizedFilterKeys = selectedContentFilterKeys.filterTo(mutableSetOf()) { key ->
+        key != DOWNLOADED_CONTENT_FILTER_ALL && filterOptions.any { it.key == key }
+    }
+    val selectableTargets = remember(entries, selectedTab, contentGroups, normalizedFilterKeys, contentSortMode, contentSortDescending) {
+        if (selectedTab == DownloadManagerTab.Queue) {
+            entries.filter { it.status.canRemoveTask() }.map { DownloadRemovalTarget(it.key, it.title) }
+        } else {
+            filterAndSortDownloadedContentGroups(contentGroups, normalizedFilterKeys, contentSortMode, contentSortDescending)
+                .flatMap { it.items }.distinctBy { it.key }
+                .map { DownloadRemovalTarget(it.key, it.title, it.imageBytes) }
+        }
+    }
+    val selectableKeys = selectableTargets.mapTo(mutableSetOf()) { it.key }
+    LaunchedEffect(selectableKeys) { selectedKeys = selectedKeys.intersect(selectableKeys) }
+
+    fun leaveSelection(): Boolean {
+        if (!selectionMode) return false
+        selectionMode = false
+        selectedKeys = emptySet()
+        return true
+    }
+    DisposableEffect(navigator, screenId) {
+        val handler = { navigator.currentScreen.id == screenId && leaveSelection() }
+        navigator.backHandlers.add(handler)
+        onDispose { navigator.backHandlers.remove(handler) }
+    }
+    fun toggleKeys(keys: Set<DownloadTaskKey>) {
+        if (!busy) selectedKeys = if (selectedKeys.containsAll(keys)) selectedKeys - keys else selectedKeys + keys
+    }
+    fun requestRemoval(tasksOnly: Boolean, targets: List<DownloadRemovalTarget>) {
+        if (!busy && targets.isNotEmpty()) pendingRemoval = DownloadRemovalRequest(tasksOnly, targets.distinctBy { it.key })
+    }
+    fun executeRemoval(request: DownloadRemovalRequest) {
+        if (appTaskManager.state(downloadRemovalTaskKey)?.isActive == true) return
+        pendingRemoval = null
+        downloadRemovalProgress.value = DownloadRemovalProgress(request)
+        appTaskManager.launch(downloadRemovalTaskKey) {
+            try {
+                request.targets.forEach { target ->
+                    val result = if (request.tasksOnly) repository.removeTask(target.key) else clearItem(target.key, repository)
+                    val outcome = DownloadRemovalOutcome(target, result.exceptionOrNull()?.let { it.message ?: "清除失敗" })
+                    downloadRemovalProgress.update { it.copy(outcomes = it.outcomes + outcome) }
+                    if (result.isSuccess) selectedKeys = selectedKeys - target.key
+                }
+                val results = downloadRemovalProgress.value.outcomes
+                val failed = results.count { it.error != null }
+                feedbackController.post(i18n("成功 {} 項，失敗 {} 項", results.size - failed, failed))
+            } finally {
+                contentReloadToken++
+            }
+        }
+    }
+
 
     suspend fun reloadContentManagement(forceRefresh: Boolean) {
         if (contentState !is DownloadContentManagementState.Ready) {
@@ -112,14 +194,14 @@ fun DownloadQueueScreen() {
         }
     }
 
-    LaunchedEffect(selectedTab, queueStatuses, contentReloadToken) {
+    LaunchedEffect(selectedTab, queueStatuses, contentReloadToken, storageFolderUri) {
         if (selectedTab == DownloadManagerTab.Queue) {
             summary = repository.getSummary()
             folderReady = repository.isStorageReady()
         }
     }
 
-    LaunchedEffect(selectedTab, contentRevision, contentReloadToken) {
+    LaunchedEffect(selectedTab, contentRevision, contentReloadToken, storageFolderUri) {
         if (selectedTab == DownloadManagerTab.Content) {
             val forceRefresh = lastContentReloadToken != contentReloadToken
             reloadContentManagement(forceRefresh)
@@ -131,7 +213,7 @@ fun DownloadQueueScreen() {
         topBar = {
             YamiboTopBar(
                 title = i18n("下載管理"),
-                onBack = navigator::pop,
+                onBack = { if (!leaveSelection()) navigator.pop() },
             )
         },
         containerColor = colors.creamBackground,
@@ -142,10 +224,49 @@ fun DownloadQueueScreen() {
                 .padding(padding)
                 .background(colors.creamBackground),
         ) {
-            DownloadManagerTabRow(selectedTab) { selectedTab = it }
+            DownloadManagerTabRow(selectedTab) {
+                if (!busy && it != selectedTab) {
+                    leaveSelection()
+                    selectedTab = it
+                }
+            }
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { if (!leaveSelection()) selectionMode = true }, enabled = !busy) {
+                        Text(if (selectionMode) i18n("取消選取") else i18n("多選"))
+                    }
+                    if (selectionMode) Text(i18n("已選取 {} 項", selectedKeys.size), color = colors.textStrong)
+                }
+                if (selectionMode) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        TextButton(onClick = { selectedKeys = selectableKeys }, enabled = !busy) { Text(i18n("全選")) }
+                        TextButton(onClick = { selectedKeys = emptySet() }, enabled = !busy) { Text(i18n("全不選")) }
+                        TextButton(onClick = { selectedKeys = selectableKeys - selectedKeys }, enabled = !busy) { Text(i18n("反選")) }
+                    }
+                    TextButton(
+                        enabled = !busy && selectedKeys.isNotEmpty(),
+                        onClick = { requestRemoval(selectedTab == DownloadManagerTab.Queue, selectableTargets.filter { it.key in selectedKeys }) },
+                    ) { Text(if (selectedTab == DownloadManagerTab.Queue) i18n("移除任務") else i18n("刪除下載內容")) }
+                }
+                if (busy) {
+                    Text(i18n("處理中 {}/{}", progress, lastRemoval?.targets?.size ?: 0))
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                } else if (outcomes.isNotEmpty()) {
+                    val failed = outcomes.count { it.error != null }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(i18n("成功 {} 項，失敗 {} 項", outcomes.size - failed, failed), modifier = Modifier.weight(1f))
+                        TextButton(onClick = { showResults = true }) { Text(i18n("查看結果")) }
+                    }
+                }
+            }
             when (selectedTab) {
                 DownloadManagerTab.Queue -> DownloadQueueTab(
                     entries = entries,
+                    selectionMode = selectionMode,
+                    selectedKeys = selectedKeys,
+                    busy = busy,
+                    onToggle = { toggleKeys(setOf(it)) },
+                    onRemove = { requestRemoval(true, listOf(DownloadRemovalTarget(it.key, it.title))) },
                     summary = summary,
                     folderReady = folderReady,
                     onOpenStorageSettings = { navigator.navigate(ISettingsCategoryScreen("storage")) },
@@ -171,6 +292,10 @@ fun DownloadQueueScreen() {
                 )
                 DownloadManagerTab.Content -> DownloadContentManagementTab(
                     state = contentState,
+                    selectionMode = selectionMode,
+                    selectedKeys = selectedKeys,
+                    busy = busy,
+                    onToggle = ::toggleKeys,
                     sortMode = contentSortMode,
                     sortDescending = contentSortDescending,
                     selectedFilterKeys = selectedContentFilterKeys.toSet(),
@@ -182,7 +307,10 @@ fun DownloadQueueScreen() {
                             contentSortDescending = true
                         }
                     },
-                    onSelectFilterKeys = { keys -> selectedContentFilterKeys = keys.toList() },
+                    onSelectFilterKeys = { keys ->
+                        selectedKeys = emptySet()
+                        selectedContentFilterKeys = keys.toList()
+                    },
                     onRetryLoad = {
                         scope.launch {
                             if (downloadedContentRefreshAutoUpdate) {
@@ -195,36 +323,10 @@ fun DownloadQueueScreen() {
                         }
                     },
                     onClearGroup = { group ->
-                        val handle = appTaskManager.launch(AppTaskKey("download-control:clear-group:${group.id}")) {
-                            clearGroup(group, repository)
-                                .onSuccess {
-                                    feedbackController.post(i18n("已清除下載內容"))
-                                }
-                                .onFailure { error ->
-                                    Logger.e("DownloadQueueScreen", "Failed to clear download group id=${group.id}", error)
-                                    feedbackController.post(error.message ?: i18n("清除失敗"))
-                                }
-                        }
-                        scope.launch {
-                            handle.state.first { !it.isActive }
-                            contentReloadToken++
-                        }
+                        requestRemoval(false, group.items.map { DownloadRemovalTarget(it.key, it.title, it.imageBytes) })
                     },
                     onClearItem = { item ->
-                        val handle = appTaskManager.launch(AppTaskKey("download-control:clear-item:${item.key.stableId}")) {
-                            clearItem(item.key, repository)
-                                .onSuccess {
-                                    feedbackController.post(i18n("已清除下載內容"))
-                                }
-                                .onFailure { error ->
-                                    Logger.e("DownloadQueueScreen", "Failed to clear download item key=${item.key.stableId}", error)
-                                    feedbackController.post(error.message ?: i18n("清除失敗"))
-                                }
-                        }
-                        scope.launch {
-                            handle.state.first { !it.isActive }
-                            contentReloadToken++
-                        }
+                        requestRemoval(false, listOf(DownloadRemovalTarget(item.key, item.title, item.imageBytes)))
                     },
                     onRefreshItem = { item ->
                         val handle = appTaskManager.launch(AppTaskKey("download-control:refresh:${item.key.stableId}")) {
@@ -254,6 +356,45 @@ fun DownloadQueueScreen() {
             }
         }
     }
+    pendingRemoval?.let { request ->
+        AlertDialog(
+            onDismissRequest = { pendingRemoval = null },
+            title = { Text(if (request.tasksOnly) i18n("移除任務") else i18n("刪除下載內容")) },
+            text = {
+                Column {
+                    Text(i18n("共 {} 項", request.targets.size))
+                    Text(if (request.tasksOnly) i18n("停止所選任務並從佇列移除，保留已下載的完整內容。")
+                        else i18n("刪除所選離線內容及圖片，此操作無法復原。"))
+                    if (!request.tasksOnly) Text(i18n("已知圖片大小：{}", formatDownloadedByteSize(request.targets.sumOf { it.imageBytes })))
+                }
+            },
+            confirmButton = { TextButton(onClick = { executeRemoval(request) }, enabled = !busy) { Text(i18n("確定")) } },
+            dismissButton = { TextButton(onClick = { pendingRemoval = null }) { Text(i18n("取消")) } },
+        )
+    }
+    if (showResults) {
+        AlertDialog(
+            onDismissRequest = { showResults = false },
+            title = { Text(i18n("處理結果")) },
+            text = {
+                LazyColumn(Modifier.heightIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(outcomes, key = { it.target.key.stableId }) { outcome ->
+                        Column {
+                            Text(outcome.target.title, fontWeight = FontWeight.Medium)
+                            Text(outcome.error?.let { i18n(forumErrorMessage(it)) } ?: i18n("成功"))
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showResults = false }) { Text(i18n("關閉")) } },
+            dismissButton = {
+                if (outcomes.any { it.error != null }) TextButton(onClick = {
+                    showResults = false
+                    lastRemoval?.let { requestRemoval(it.tasksOnly, outcomes.filter { result -> result.error != null }.map { result -> result.target }) }
+                }, enabled = !busy) { Text(i18n("重試失敗項目")) }
+            },
+        )
+    }
 }
 
 @Composable
@@ -270,7 +411,7 @@ private fun DownloadManagerTabRow(
                 onClick = { onSelect(tab) },
                 text = {
                     Text(
-                        text = tab.title,
+                        text = i18n(tab.title),
                         color = colors.textOnSurface,
                         fontSize = 14.sp,
                         maxLines = 1,
@@ -284,6 +425,11 @@ private fun DownloadManagerTabRow(
 @Composable
 private fun DownloadQueueTab(
     entries: List<DownloadQueueEntry>,
+    selectionMode: Boolean,
+    selectedKeys: Set<DownloadTaskKey>,
+    busy: Boolean,
+    onToggle: (DownloadTaskKey) -> Unit,
+    onRemove: (DownloadQueueEntry) -> Unit,
     summary: DownloadQueueSummary,
     folderReady: Boolean,
     onOpenStorageSettings: () -> Unit,
@@ -303,8 +449,8 @@ private fun DownloadQueueTab(
             DownloadSummaryCard(
                 summary = summary,
                 entries = entries,
-                onPauseAll = onPauseAll,
-                onResumeAll = onResumeAll,
+                onPauseAll = { if (!busy) onPauseAll() },
+                onResumeAll = { if (!busy) onResumeAll() },
             )
         }
         item { DownloadFolderSettingsCard(folderReady, onOpenStorageSettings) }
@@ -312,7 +458,10 @@ private fun DownloadQueueTab(
             item { EmptyDownloadQueueCard() }
         } else {
             items(newestFirstEntries, key = { it.key.stableId }) { entry ->
-                DownloadQueueEntryCard(entry = entry, onRetry = { onRetry(entry) })
+                DownloadQueueEntryCard(
+                    entry = entry, selectionMode = selectionMode, selected = entry.key in selectedKeys, busy = busy,
+                    onToggle = { onToggle(entry.key) }, onRemove = { onRemove(entry) }, onRetry = { onRetry(entry) },
+                )
             }
         }
     }
@@ -397,6 +546,11 @@ private fun EmptyDownloadQueueCard() {
 @Composable
 private fun DownloadQueueEntryCard(
     entry: DownloadQueueEntry,
+    selectionMode: Boolean,
+    selected: Boolean,
+    busy: Boolean,
+    onToggle: () -> Unit,
+    onRemove: () -> Unit,
     onRetry: () -> Unit,
 ) {
     val colors = YamiboTheme.colors
@@ -407,6 +561,7 @@ private fun DownloadQueueEntryCard(
     }
     YamiboDownloadCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            if (selectionMode && entry.status.canRemoveTask()) Checkbox(selected, { onToggle() }, enabled = !busy)
             Icon(
                 imageVector = if (entry.status == DownloadStatus.Downloaded) YamiboIcons.Downloaded else YamiboIcons.Download,
                 contentDescription = null,
@@ -416,14 +571,17 @@ private fun DownloadQueueEntryCard(
             Column(Modifier.weight(1f).padding(start = 12.dp)) {
                 Text(entry.title, color = colors.textStrong, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    "${downloadEntryLabel(entry)} · ${entryDetailLabel(entry)}${entry.message?.let { " · ${forumErrorMessage(it)}" }.orEmpty()}",
+                    "${downloadEntryLabel(entry)} · ${entryDetailLabel(entry)}${entry.message?.let { " · ${i18n(forumErrorMessage(it))}" }.orEmpty()}",
                     color = if (entry.status == DownloadStatus.Failed) colors.redAccent else colors.textDark.copy(alpha = 0.68f),
                     fontSize = 12.sp,
                 )
             }
-            if (entry.status == DownloadStatus.Failed) {
-                SmallQueueButton(i18n("重試"), onRetry)
+            if (!selectionMode && entry.status == DownloadStatus.Failed) {
+                SmallQueueButton(i18n("重試"), onRetry, enabled = !busy)
             }
+        }
+        if (!selectionMode && entry.status.canRemoveTask()) {
+            SmallQueueButton(i18n("移除任務"), onRemove, destructive = true, enabled = !busy)
         }
     }
 }
@@ -431,6 +589,10 @@ private fun DownloadQueueEntryCard(
 @Composable
 private fun DownloadContentManagementTab(
     state: DownloadContentManagementState,
+    selectionMode: Boolean,
+    selectedKeys: Set<DownloadTaskKey>,
+    busy: Boolean,
+    onToggle: (Set<DownloadTaskKey>) -> Unit,
     sortMode: DownloadedContentSortMode,
     sortDescending: Boolean,
     selectedFilterKeys: Set<String>,
@@ -487,8 +649,8 @@ private fun DownloadContentManagementTab(
                         sortMode = sortMode,
                         sortDescending = sortDescending,
                         filterActive = normalizedFilterKeys.isNotEmpty(),
-                        onSortClick = { showSortDialog = true },
-                        onFilterClick = { showFilterDialog = true },
+                        onSortClick = { if (!busy) showSortDialog = true },
+                        onFilterClick = { if (!busy) showFilterDialog = true },
                     )
                 }
                 item { DownloadContentSummaryCard(state.summary) }
@@ -510,6 +672,10 @@ private fun DownloadContentManagementTab(
                         item(key = "group:${group.id}", contentType = "group") {
                             DownloadContentGroupCard(
                                 group = group,
+                                selectionMode = selectionMode,
+                                selectedKeys = selectedKeys,
+                                busy = busy,
+                                onToggleSelection = { onToggle(group.items.mapTo(mutableSetOf()) { it.key }) },
                                 expanded = expanded,
                                 onToggleExpanded = {
                                     expandedGroups = if (expanded) expandedGroups - group.id else expandedGroups + group.id
@@ -519,13 +685,14 @@ private fun DownloadContentManagementTab(
                         if (expanded) {
                             items(group.items, key = { "item:${group.id}:${it.key.stableId}" }, contentType = { "content" }) { item ->
                                 YamiboDownloadCard {
-                                    DownloadContentItemRow(item, onClearItem, onRefreshItem)
+                                    DownloadContentItemRow(item, selectionMode, item.key in selectedKeys, busy, { onToggle(setOf(item.key)) }, onClearItem, onRefreshItem)
                                 }
                             }
-                            item(key = "clear:${group.id}", contentType = "clear") {
+                            if (!selectionMode) item(key = "clear:${group.id}", contentType = "clear") {
                                 YamiboDownloadCard {
                                     SmallQueueButton(
-                                        text = if (group.type == DownloadedContentGroupType.TagManga) i18n("清除整個標籤") else i18n("清除整個 Thread"),
+                                        text = i18n("刪除整組下載內容"),
+                                        enabled = !busy,
                                         onClick = { onClearGroup(group) },
                                         destructive = true,
                                     )
@@ -576,7 +743,7 @@ private fun DownloadContentManagementTab(
                 )
             },
             onCancel = { showFilterDialog = false },
-            label = { option -> i18n("{} ({})", option.label, option.count) },
+            label = { option -> i18n("{} ({})", i18n(option.label), option.count) },
             toggleSelection = { option, current ->
                 when {
                     option.key == DOWNLOADED_CONTENT_FILTER_ALL -> setOf(option)
@@ -664,6 +831,10 @@ private fun DownloadContentSummaryCard(summary: DownloadedContentSummary) {
 @Composable
 private fun DownloadContentGroupCard(
     group: DownloadedContentGroup,
+    selectionMode: Boolean,
+    selectedKeys: Set<DownloadTaskKey>,
+    busy: Boolean,
+    onToggleSelection: () -> Unit,
     expanded: Boolean,
     onToggleExpanded: () -> Unit,
 ) {
@@ -677,6 +848,15 @@ private fun DownloadContentGroupCard(
             modifier = Modifier.fillMaxWidth().clickable(onClick = onToggleExpanded),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (selectionMode) TriStateCheckbox(
+                state = when {
+                    group.items.all { it.key in selectedKeys } -> ToggleableState.On
+                    group.items.any { it.key in selectedKeys } -> ToggleableState.Indeterminate
+                    else -> ToggleableState.Off
+                },
+                onClick = onToggleSelection,
+                enabled = !busy,
+            )
             Icon(
                 imageVector = YamiboIcons.Book,
                 contentDescription = null,
@@ -704,6 +884,10 @@ private fun DownloadContentGroupCard(
 @Composable
 private fun DownloadContentItemRow(
     item: DownloadedContentItem,
+    selectionMode: Boolean,
+    selected: Boolean,
+    busy: Boolean,
+    onToggle: () -> Unit,
     onClearItem: (DownloadedContentItem) -> Unit,
     onRefreshItem: (DownloadedContentItem) -> Unit,
 ) {
@@ -712,17 +896,23 @@ private fun DownloadContentItemRow(
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (selectionMode) Checkbox(selected, { onToggle() }, enabled = !busy)
         Column(Modifier.weight(1f)) {
-            Text(item.detail, color = colors.textStrong, fontWeight = FontWeight.Medium, fontSize = 13.sp)
+            Text(when (val key = item.key) {
+                is ThreadPageDownloadKey -> i18n("第 {} 頁", key.page)
+                else -> item.title
+            }, color = colors.textStrong, fontWeight = FontWeight.Medium, fontSize = 13.sp)
             Text(
                 i18n("{} 張圖片 · {}", item.imageCount, formatDownloadedByteSize(item.imageBytes)),
                 color = colors.textDark.copy(alpha = 0.62f),
                 fontSize = 12.sp,
             )
         }
-        SmallQueueButton(i18n("重新載入"), { onRefreshItem(item) })
+        if (!selectionMode) {
+        SmallQueueButton(i18n("重新載入"), { onRefreshItem(item) }, enabled = !busy)
         Spacer(Modifier.size(6.dp))
-        SmallQueueButton(i18n("清除"), { onClearItem(item) }, destructive = true)
+        SmallQueueButton(i18n("清除"), { onClearItem(item) }, destructive = true, enabled = !busy)
+        }
     }
 }
 
@@ -744,10 +934,12 @@ private fun SmallQueueButton(
     text: String,
     onClick: () -> Unit,
     destructive: Boolean = false,
+    enabled: Boolean = true,
 ) {
     val colors = YamiboTheme.colors
     OutlinedButton(
         onClick = onClick,
+        enabled = enabled,
         colors = ButtonDefaults.outlinedButtonColors(
             contentColor = if (destructive) colors.redAccent else colors.brownPrimary,
             containerColor = Color.Transparent,
@@ -817,18 +1009,6 @@ private suspend fun clearItem(
     is ThreadPageDownloadKey -> repository.clearPage(key)
     is TagMangaChapterDownloadKey -> repository.clearTagMangaChapter(key)
     is RssMangaChapterDownloadKey -> repository.clearRssMangaChapter(key)
-}
-
-private suspend fun clearGroup(
-    group: DownloadedContentGroup,
-    repository: DownloadRepository,
-): Result<Unit> {
-    val firstKey = group.items.firstOrNull()?.key ?: return Result.success(Unit)
-    return when (firstKey) {
-        is ThreadPageDownloadKey -> repository.clearThread(firstKey)
-        is TagMangaChapterDownloadKey -> repository.clearTagManga(TagId(firstKey.tagId))
-        is RssMangaChapterDownloadKey -> repository.clearRssManga(firstKey.subscriptionId)
-    }
 }
 
 private suspend fun refreshUpdateAvailableDownloads(
