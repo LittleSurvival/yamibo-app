@@ -20,7 +20,7 @@ class IRssSearchSubscriptionDetailScreen(
     private val subscriptionId: Long,
     private val page: Int? = null,
 ) : RestorableNavigatable {
-    override val id: String = buildId(subscriptionId, page)
+    override val id = buildId(subscriptionId, page)
     override val restoreDecoder = Decoder
 
     override fun toRestoreSnapshot(): RestorableScreenSnapshot = restoreSnapshot(

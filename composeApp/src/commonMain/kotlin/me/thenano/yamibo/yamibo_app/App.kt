@@ -299,7 +299,7 @@ fun App() {
                             visibleState.targetState = true
                         }
 
-                        holder.SaveableStateProvider(navigatable.id) {
+                        holder.SaveableStateProvider(navigatable.id.value) {
                             AnimatedVisibility(
                                 visibleState = visibleState,
                                 enter = slideInHorizontally(

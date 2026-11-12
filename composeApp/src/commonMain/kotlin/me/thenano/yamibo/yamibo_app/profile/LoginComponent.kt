@@ -44,7 +44,7 @@ import me.thenano.yamibo.yamibo_app.webview.PlatformWebViewScreen
 
 @RestorableScreenEntry
 class ILoginScreen : RestorableNavigatable {
-    override val id: String = buildId("login")
+    override val id = buildId("login")
     override val restoreDecoder = Decoder
 
     override fun toRestoreSnapshot(): RestorableScreenSnapshot = emptyRestoreSnapshot(restoreDecoder)

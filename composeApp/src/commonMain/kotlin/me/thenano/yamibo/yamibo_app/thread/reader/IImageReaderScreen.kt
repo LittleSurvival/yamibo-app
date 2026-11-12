@@ -60,7 +60,7 @@ class IImageReaderScreen(
     val rssPage: Int? = null,
     val rssTotalPages: Int? = null,
 ) : RestorableNavigatable {
-    override val id: String = buildId(tid.value, postId?.value, tagId?.value, rssSubscriptionId)
+    override val id = buildId(tid.value, postId?.value, tagId?.value, rssSubscriptionId)
     override val restoreDecoder = Decoder
 
     override fun toRestoreSnapshot(): RestorableScreenSnapshot = restoreSnapshot(

@@ -43,6 +43,7 @@ import me.thenano.yamibo.yamibo_app.forum.components.*
 import me.thenano.yamibo.yamibo_app.forum.search.ISearchScreen
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
+import me.thenano.yamibo.yamibo_app.navigation.ScreenId
 import me.thenano.yamibo.yamibo_app.thread.detail.novel.INovelThreadDetailScreen
 import me.thenano.yamibo.yamibo_app.thread.reader.IThreadReaderScreen
 import me.thenano.yamibo.yamibo_app.userspace.IUserSpaceScreen
@@ -64,7 +65,7 @@ private data class ForumPageSnapshot(
 
 /** Main Forum Screen Entry */
 @Composable
-fun ForumPageScreen(fid: ForumId, name: String, screenId: String) {
+fun ForumPageScreen(fid: ForumId, name: String, screenId: ScreenId) {
     val errorMessages = LocalForumErrorMessageResolver.current
     val colors = YamiboTheme.colors
     val forumRepository = LocalForumRepository.current
