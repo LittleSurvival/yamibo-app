@@ -37,7 +37,7 @@ jobs:
           NOTICE_MESSAGE: ${{ inputs.message }}
           NOTICE_DURATION: ${{ inputs.duration }}
           NOTICE_OUTPUT_DIR: ${{ runner.temp }}/notice
-        run: python3 .github/scripts/publish-server-notice.py
+        run: python3 .github/scripts/server-notice/publish-server-notice.py
       - uses: actions/upload-artifact@v4
         with:
           name: server-notice
@@ -93,7 +93,7 @@ jobs:
             gitee) remote="git@gitee.com:LittleSurvival/ymb-apk-release.git" ;;
             gitea) remote="ssh://git@${GITEA_SSH_HOST:-gitea.com}:${GITEA_SSH_PORT:-22}/LittleSurvival/ymb-apk-release.git" ;;
           esac
-          bash .github/scripts/publish-feed-directory.sh "$remote" "$branch" "$RUNNER_TEMP/notice/status" status
+          bash .github/scripts/release/publish-feed-directory.sh "$remote" "$branch" "$RUNNER_TEMP/notice/status" status
       - name: Record mirror result
         if: always()
         env:

@@ -17,6 +17,7 @@ import io.github.littlesurvival.dto.page.Post
 import io.github.littlesurvival.dto.page.ThreadPage
 import io.github.littlesurvival.dto.value.ThreadId
 import io.github.littlesurvival.dto.value.UserId
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import me.thenano.yamibo.yamibo_app.*
@@ -27,6 +28,10 @@ import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.repository.*
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository.ThreadReadingHistory
 import me.thenano.yamibo.yamibo_app.repository.contentcover.findThreadCoverCandidate
+import me.thenano.yamibo.yamibo_app.repository.download.DownloadQueueEntry
+import me.thenano.yamibo.yamibo_app.repository.download.ThreadPageDownloadKey
+import me.thenano.yamibo.yamibo_app.repository.thread.isValidThreadPage
+import me.thenano.yamibo.yamibo_app.repository.thread.validatedThreadPage
 import me.thenano.yamibo.yamibo_app.thread.detail.components.DetailNoteCard
 import me.thenano.yamibo.yamibo_app.thread.detail.components.DetailNoteEditorDialog
 import me.thenano.yamibo.yamibo_app.thread.detail.novel.components.*
@@ -49,6 +54,14 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
     val colors = YamiboTheme.colors
     val appSettingsRepo = LocalAppSettingsRepository.current
     val threadRepository = LocalThreadRepository.current
+    val downloadRepository = LocalDownloadRepository.current
+    val downloadQueue by downloadRepository.queue.collectAsState()
+    val downloadEntriesByPage = remember(downloadQueue, tid, authorId) {
+        downloadQueue.mapNotNull { entry ->
+            val key = entry.key as? ThreadPageDownloadKey ?: return@mapNotNull null
+            if (key.tid == tid.value && key.authorId == authorId?.value) key.page to entry else null
+        }.toMap()
+    }
     val favoriteRepository = LocalFavoriteRepository.current
     val favoriteSyncRepository = LocalFavoriteSyncRepository.current
     val detailNoteRepository = LocalDetailNoteRepository.current
@@ -66,6 +79,8 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
     var state by remember { mutableStateOf<ThreadState>(ThreadState.Loading) }
     var isRefreshing by remember { mutableStateOf(false) }
     val pagePostsCache = remember { mutableStateMapOf<Int, List<Post>>() }
+    val loadingPages = remember { mutableStateMapOf<Int, Boolean>() }
+    val pageErrors = remember { mutableStateMapOf<Int, Boolean>() }
     var expandedPages by remember { mutableStateOf(setOf(1)) }
     var readHistory by remember { mutableStateOf<ThreadReadingHistory?>(null) }
     var showFavoriteDialog by remember { mutableStateOf(false) }
@@ -287,34 +302,57 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
         refreshFavoriteState()
     }
 
-    suspend fun loadThread(page: Int = 1) {
-        val cached = threadRepository.getCachedThread(tid, authorId, page)
-        if (cached != null) {
-            pagePostsCache[page] = cached.posts
-            state = ThreadState.Success(cached)
-            return
+    suspend fun loadThread(page: Int = 1, useLocal: Boolean = true, notifyUpdate: Boolean = false) {
+        if (loadingPages[page] == true) return
+        loadingPages[page] = true
+        pageErrors.remove(page)
+        val key = ThreadPageDownloadKey(tid.value, page, authorId?.value)
+        fun showPage(value: ThreadPage) {
+            pagePostsCache[page] = value.posts
+            if (page == 1) state = ThreadState.Success(value)
         }
-
-        val result = threadRepository.fetchThread(tid, authorId, page)
-        state =
-            when (result) {
-                is YamiboResult.Success -> {
-                    pagePostsCache[page] = result.value.posts
-                    ThreadState.Success(result.value)
-                }
-                else -> ThreadState.Error(i18n(errorMessages.resolve(result)))
+        try {
+            if (useLocal) {
+                val downloaded = downloadRepository.getDownloadedPage(key)
+                    ?.takeIf { it.isValidThreadPage(tid, page = page, authorId = authorId) }
+                val local = downloaded ?: threadRepository.getCachedThread(tid, authorId, page)
+                    ?.takeIf { it.isValidThreadPage(tid, page = page, authorId = authorId) }
+                local?.let(::showPage)
             }
+            when (val result = threadRepository.fetchThread(tid, authorId, page).validatedThreadPage(tid, page = page, authorId = authorId)) {
+                is YamiboResult.Success -> {
+                    showPage(result.value)
+                    try {
+                        if (downloadRepository.updateDownloadedPage(key, result.value) && notifyUpdate) {
+                            feedbackController.post(i18n("更新小說詳情中"))
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        Logger.w("NovelThreadDetailScreen", "Failed to update downloaded detail key=${key.stableId}", error)
+                    }
+                }
+                else -> {
+                    if (!useLocal) feedbackController.post(i18n("重新整理帖子失敗：{}", i18n(errorMessages.resolve(result))))
+                    if (pagePostsCache[page] == null) pageErrors[page] = true
+                    if (page == 1 && state !is ThreadState.Success) {
+                        state = ThreadState.Error(i18n(errorMessages.resolve(result)))
+                    }
+                }
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Logger.w("NovelThreadDetailScreen", "Failed to load detail page tid=${tid.value} page=$page", error)
+            if (pagePostsCache[page] == null) pageErrors[page] = true
+            if (page == 1 && state !is ThreadState.Success) state = ThreadState.Error(i18n("載入失敗，請重試"))
+        } finally {
+            loadingPages.remove(page)
+        }
     }
 
-    /** initial load ??use cache if available, only fetch on cold start */
-    LaunchedEffect(tid) {
-        val cached = threadRepository.getCachedThread(tid, authorId)
-        if (cached != null) {
-            pagePostsCache[1] = cached.posts
-            state = ThreadState.Success(cached)
-            return@LaunchedEffect
-        }
-        loadThread()
+    LaunchedEffect(tid, authorId) {
+        loadThread(notifyUpdate = true)
     }
 
     Scaffold(
@@ -354,31 +392,11 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
                         onRefresh = {
                             isRefreshing = true
                             scope.launch {
-                                when (val result =
-                                    threadRepository.fetchThread(tid, authorId)
-                                ) {
-                                    is YamiboResult.Success -> {
-                                        threadRepository.clearCachedThread(tid)
-                                        threadRepository.setCachedThread(
-                                            tid,
-                                            authorId,
-                                            1,
-                                            result.value
-                                        )
-                                        pagePostsCache.clear() // Clear local cache as well
-                                        pagePostsCache[1] = result.value.posts
-                                        expandedPages = setOf(1)
-                                        state = ThreadState.Success(result.value)
-                                    }
-
-                                    else -> {
-                                        feedbackController.post(
-                                            message = i18n("重新整理帖子失敗：{}", i18n(errorMessages.resolve(result))),
-                                            duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short,
-                                        )
-                                    }
+                                try {
+                                    loadThread(useLocal = false, notifyUpdate = true)
+                                } finally {
+                                    isRefreshing = false
                                 }
-                                isRefreshing = false
                             }
                         },
                         modifier = Modifier.fillMaxSize()
@@ -387,6 +405,9 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
                         threadPage = current.page,
                         coverUrl = canonicalCover?.resolvedUrl ?: readHistory?.threadCover,
                             pagePostsCache = pagePostsCache,
+                            loadingPages = loadingPages.keys,
+                            pageErrors = pageErrors.keys,
+                            downloadEntriesByPage = downloadEntriesByPage,
                             expandedPages = expandedPages,
                             onTogglePage = { page ->
                                 expandedPages =
@@ -396,29 +417,7 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
                                         expandedPages + page
                                     }
                             },
-                            onLoadPage = { page ->
-                                scope.launch {
-                                    val cached = threadRepository.getCachedThread(tid, authorId, page)
-                                    if (cached != null) {
-                                        pagePostsCache[page] = cached.posts
-                                    } else {
-                                        val result =
-                                            threadRepository.fetchThread(
-                                                tid,
-                                                authorId,
-                                                page
-                                            )
-                                        if (result is YamiboResult.Success) {
-                                            pagePostsCache[page] = result.value.posts
-                                        } else {
-                                            feedbackController.post(
-                                                message = i18n("載入第 {} 頁失敗: {}", page, i18n(errorMessages.resolve(result))),
-                                                duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short
-                                            )
-                                        }
-                                    }
-                                }
-                            },
+                            onLoadPage = { page -> scope.launch { loadThread(page) } },
                             onPostClick = { page, post ->
                                 navigator.navigate(
                                     IThreadReaderScreen(
@@ -760,6 +759,9 @@ private fun ThreadContent(
     threadPage: ThreadPage,
     coverUrl: String?,
     pagePostsCache: Map<Int, List<Post>>,
+    loadingPages: Set<Int>,
+    pageErrors: Set<Int>,
+    downloadEntriesByPage: Map<Int, DownloadQueueEntry>,
     expandedPages: Set<Int>,
     onTogglePage: (Int) -> Unit,
     onLoadPage: (Int) -> Unit,
@@ -844,13 +846,17 @@ private fun ThreadContent(
                 page = page,
                 isExpanded = isExpanded,
                 posts = posts,
+                loading = page in loadingPages,
+                loadFailed = page in pageErrors,
+                downloadEntry = downloadEntriesByPage[page],
+                onRetry = { onLoadPage(page) },
                 bookmarkedPostIds = bookmarkedPostIds,
                 readPostIds = readPostIds,
                 chapterStates = chapterStates,
                 isFirstPage = page == 1,
                 onToggle = {
                     onTogglePage(page)
-                    if (posts == null) {
+                    if (!isExpanded && posts == null) {
                         onLoadPage(page)
                     }
                 },

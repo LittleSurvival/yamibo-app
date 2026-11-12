@@ -64,7 +64,7 @@ private data class ForumPageSnapshot(
 
 /** Main Forum Screen Entry */
 @Composable
-fun ForumPageScreen(fid: ForumId, name: String) {
+fun ForumPageScreen(fid: ForumId, name: String, screenId: String) {
     val errorMessages = LocalForumErrorMessageResolver.current
     val colors = YamiboTheme.colors
     val forumRepository = LocalForumRepository.current
@@ -154,8 +154,10 @@ fun ForumPageScreen(fid: ForumId, name: String) {
         loadPage(1, requestGeneration = requestGeneration)
     }
 
-    DisposableEffect(navigator) {
-        val handler = { restorePreviousPage() }
+    DisposableEffect(navigator, screenId) {
+        val handler = {
+            if (navigator.currentScreen.id == screenId) restorePreviousPage() else false
+        }
         navigator.backHandlers.add(handler)
         onDispose { navigator.backHandlers.remove(handler) }
     }

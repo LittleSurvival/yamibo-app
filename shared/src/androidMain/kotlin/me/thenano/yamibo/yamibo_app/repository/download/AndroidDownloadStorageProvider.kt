@@ -70,6 +70,14 @@ class AndroidDownloadStorageProvider(
         return resolver.openInputStream(file)?.use { it.readBytes() }
     }
 
+    override suspend fun updateThreadPage(key: ThreadPageDownloadKey, manifestBytes: ByteArray, threadPageBytes: ByteArray) {
+        val treeUri = selectedTreeUri() ?: error("尚未選擇備份資料夾")
+        val pageDir = findChild(treeUri, downloadsRoot(treeUri) ?: error("下載內容不存在"), key.stableId)
+            ?: error("下載內容不存在")
+        replaceFile(treeUri, pageDir, "thread_page.json", threadPageBytes)
+        replaceFile(treeUri, pageDir, "manifest.json", manifestBytes)
+    }
+
     override suspend fun resolveImageUri(key: ThreadPageDownloadKey, fileName: String): String? {
         val treeUri = selectedTreeUri() ?: return null
         val pageDir = findChild(treeUri, downloadsRoot(treeUri) ?: return null, key.stableId) ?: return null
@@ -318,12 +326,27 @@ class AndroidDownloadStorageProvider(
             ?: DocumentsContract.createDocument(resolver, parent, DocumentsContract.Document.MIME_TYPE_DIR, name)
             ?: error("無法建立資料夾：$name")
 
-    private fun writeFile(treeUri: Uri, parent: Uri, name: String, mimeType: String, bytes: ByteArray) {
+    private fun replaceFile(treeUri: Uri, parent: Uri, name: String, bytes: ByteArray) {
+        val pending = writeFile(treeUri, parent, "$name.tmp", "application/json", bytes)
+        val previous = findChild(treeUri, parent, name)?.let {
+            DocumentsContract.renameDocument(resolver, it, "$name.previous") ?: error("無法更新下載檔案：$name")
+        }
+        try {
+            DocumentsContract.renameDocument(resolver, pending, name) ?: error("無法更新下載檔案：$name")
+            previous?.let { deleteDocumentSafely(it, "delete previous downloaded file name=$name") }
+        } catch (error: Exception) {
+            previous?.let { renameDocumentSafely(it, name, "restore previous downloaded file name=$name") }
+            throw error
+        }
+    }
+
+    private fun writeFile(treeUri: Uri, parent: Uri, name: String, mimeType: String, bytes: ByteArray): Uri {
         deleteChildByName(treeUri, parent, name)
         val file = DocumentsContract.createDocument(resolver, parent, mimeType, name)
             ?: error("無法建立檔案：$name")
         resolver.openOutputStream(file, "wt")?.use { it.write(bytes) }
             ?: error("無法寫入檔案：$name")
+        return file
     }
 
     private fun readManifestFromDir(treeUri: Uri, dir: Uri): ThreadPageDownloadManifest? {

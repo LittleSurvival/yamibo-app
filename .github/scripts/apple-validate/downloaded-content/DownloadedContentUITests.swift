@@ -91,4 +91,36 @@ final class DownloadedContentUITests: XCTestCase {
         app.swipeUp()
         XCTAssertEqual(app.state, .runningForeground)
     }
+    private func text(_ labels: [String]) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", labels)).firstMatch
+    }
+
+    func testBatchDeletionFromDefaultFolder() {
+        open("management")
+        let tab = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ OR label CONTAINS[c] %@", "內容管理", "content management")).firstMatch
+        XCTAssertTrue(tab.waitForExistence(timeout: 30), app.debugDescription)
+        tab.tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "QA NOVEL")).firstMatch.waitForExistence(timeout: 30), app.debugDescription)
+        text(["多選", "Select", "多选"]).tap()
+        text(["全選", "Select all", "全选"]).tap()
+        XCTAssertTrue(text(["已選取 6 項", "6 selected", "已选择 6 项"]).waitForExistence(timeout: 10), app.debugDescription)
+        text(["反選", "Invert selection", "反选"]).tap()
+        XCTAssertTrue(text(["已選取 0 項", "0 selected", "已选择 0 项"]).exists, app.debugDescription)
+        text(["全選", "Select all", "全选"]).tap()
+        text(["刪除下載內容", "Delete downloads", "删除下载内容"]).tap()
+        capture("batch-confirmation-six-items")
+        text(["取消", "Cancel"]).tap()
+        XCTAssertTrue(text(["已選取 6 項", "6 selected", "已选择 6 项"]).exists)
+        text(["刪除下載內容", "Delete downloads", "删除下载内容"]).tap()
+        text(["確定", "Sure", "确定"]).tap()
+        XCTAssertTrue(text(["成功 6 項，失敗 0 項", "6 succeeded; 0 failed", "成功 6 项，失败 0 项"]).waitForExistence(timeout: 60), app.debugDescription)
+        XCTAssertTrue(text(["目前沒有已下載內容", "No downloaded content", "当前没有已下载内容"]).waitForExistence(timeout: 15), app.debugDescription)
+        capture("batch-six-deletions-complete")
+        open("management")
+        XCTAssertTrue(tab.waitForExistence(timeout: 30))
+        tab.tap()
+        XCTAssertTrue(text(["目前沒有已下載內容", "No downloaded content", "当前没有已下载内容"]).waitForExistence(timeout: 30), app.debugDescription)
+        capture("batch-deletion-persists-after-relaunch")
+    }
+
 }

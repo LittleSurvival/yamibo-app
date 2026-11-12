@@ -11,6 +11,7 @@ interface DownloadStorageProvider {
         images: List<PendingDownloadedImage>,
     )
     suspend fun readThreadPage(key: ThreadPageDownloadKey): ByteArray?
+    suspend fun updateThreadPage(key: ThreadPageDownloadKey, manifestBytes: ByteArray, threadPageBytes: ByteArray)
     suspend fun resolveImageUri(key: ThreadPageDownloadKey, fileName: String): String?
     suspend fun resolveImageUris(key: ThreadPageDownloadKey, fileNames: List<String>): Map<String, String> =
         fileNames.mapNotNull { name -> resolveImageUri(key, name)?.let { name to it } }.toMap()

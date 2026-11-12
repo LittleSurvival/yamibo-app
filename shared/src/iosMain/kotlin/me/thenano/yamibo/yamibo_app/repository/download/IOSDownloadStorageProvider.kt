@@ -1,6 +1,9 @@
 package me.thenano.yamibo.yamibo_app.repository.download
 
 import kotlinx.serialization.json.Json
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.IO
+import kotlinx.coroutines.withContext
 import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.repository.settings.AppSettingsRepository
 import okio.FileSystem
@@ -19,12 +22,15 @@ class IOSDownloadStorageProvider(
     private val fileSystem = FileSystem.SYSTEM
 
     override suspend fun getSelectedFolderLabel(): String? =
-        appSettingsRepository.backupFolderUri.getValue().takeIf { it.isNotBlank() }
+        runCatching { selectedFolder().name }.getOrNull()
 
-    override suspend fun getStorageKey(): String? = getSelectedFolderLabel()
+    override suspend fun getStorageKey(): String = selectedFolder().toString()
 
-    override suspend fun isReady(): Boolean =
-        appSettingsRepository.backupFolderUri.getValue().isNotBlank()
+    override suspend fun isReady(): Boolean = withContext(Dispatchers.IO) {
+        runCatching { fileSystem.createDirectories(rootDir()) }
+            .onFailure { Logger.w(TAG, "Download folder is unavailable", it) }
+            .isSuccess
+    }
 
     override suspend fun writeThreadPage(
         key: ThreadPageDownloadKey,
@@ -49,6 +55,14 @@ class IOSDownloadStorageProvider(
         val path = rootDir() / key.stableId / "thread_page.json"
         if (!fileSystem.exists(path)) return null
         return fileSystem.source(path).buffer().use { it.readByteArray() }
+    }
+
+    override suspend fun updateThreadPage(key: ThreadPageDownloadKey, manifestBytes: ByteArray, threadPageBytes: ByteArray) {
+        val pageDir = rootDir() / key.stableId
+        write(pageDir / "thread_page.json.tmp", threadPageBytes)
+        write(pageDir / "manifest.json.tmp", manifestBytes)
+        fileSystem.atomicMove(pageDir / "thread_page.json.tmp", pageDir / "thread_page.json")
+        fileSystem.atomicMove(pageDir / "manifest.json.tmp", pageDir / "manifest.json")
     }
 
     override suspend fun resolveImageUri(key: ThreadPageDownloadKey, fileName: String): String? {
@@ -226,20 +240,24 @@ class IOSDownloadStorageProvider(
 
     private fun rootDir(): Path = selectedFolder() / "YamiboDownloads"
 
-    private fun selectedFolder(): Path {
-        val stored = appSettingsRepository.backupFolderUri.getValue()
-        if (stored.isNotBlank()) return stored.toPath()
-        return defaultDocumentsPath() / "YamiboApp"
-    }
-
-    private fun defaultDocumentsPath(): Path {
-        val path = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, true)
-            .firstOrNull() as? String
-        return (path ?: ".").toPath()
-    }
+    private fun selectedFolder(): Path = resolveIosStorageFolder(appSettingsRepository.backupFolderUri.getValue())
 
     private companion object {
         const val TAG = "IOSDownloadStorageProvider"
         const val QUEUE_FILE = "queue.json"
     }
+}
+
+/** Resolve the current sandbox each time; its absolute path must not become a synced preference. */
+internal fun resolveIosStorageFolder(stored: String): Path {
+    val folder = if (stored.isNotBlank()) {
+        stored.toPath()
+    } else {
+        val documents = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, true)
+            .firstOrNull() as? String
+        check(!documents.isNullOrBlank()) { "App Documents directory is unavailable" }
+        documents.toPath() / "YamiboApp"
+    }
+    require(folder.isAbsolute) { "Storage folder must be an absolute path" }
+    return folder
 }

@@ -21,6 +21,7 @@ import me.thenano.yamibo.yamibo_app.repository.DownloadRepository
 import me.thenano.yamibo.yamibo_app.repository.RssSearchSubscriptionRepository
 import me.thenano.yamibo.yamibo_app.repository.TagRepository
 import me.thenano.yamibo.yamibo_app.repository.ThreadRepository
+import me.thenano.yamibo.yamibo_app.repository.thread.isValidThreadPage
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
 
 class DownloadRepositoryImpl(
@@ -38,6 +39,11 @@ class DownloadRepositoryImpl(
 ) : DownloadRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val workerMutex = Mutex()
+    private val taskMutex = Mutex()
+    private val removalMutex = Mutex()
+    private val queueWriteMutex = Mutex()
+    private val activeTasks = mutableMapOf<DownloadTaskKey, Job>()
+    private val removing = mutableListOf<(DownloadTaskKey) -> Boolean>()
     private val queueWrites = Channel<Unit>(Channel.CONFLATED)
     private val contentMutex = Mutex()
     private var contentCatalog: DownloadedContentCatalog? = null
@@ -131,7 +137,7 @@ class DownloadRepositoryImpl(
         scope.launch {
             initialized.await()
             for (request in queueWrites) {
-                downloadResult("persistQueue") { storageProvider.writeQueue(queue.value) }
+                downloadResult("persistQueue") { writeQueueSnapshot() }
             }
         }
     }
@@ -326,6 +332,33 @@ class DownloadRepositoryImpl(
         }
     }
 
+    override suspend fun updateDownloadedPage(key: ThreadPageDownloadKey, page: ThreadPage): Boolean = withContext(Dispatchers.IO) {
+        require(page.isValidThreadPage(ThreadId(key.tid), page = key.page, authorId = key.authorId?.let(::UserId)))
+        initialized.await()
+        contentMutex.withLock {
+            val manifest = storageProvider.readManifest(key) ?: return@withContext false
+            val totalPages = page.pageNav?.totalPages ?: 1
+            val updatedAt = currentTimeMillis()
+            storageProvider.updateThreadPage(
+                key,
+                json.encodeToString(manifest.copy(
+                    title = page.thread.title,
+                    downloadedAt = updatedAt,
+                    sourceTotalPages = totalPages,
+                    pageKind = if (key.page >= totalPages) DownloadPageKind.LastAtDownloadTime else DownloadPageKind.Normal,
+                    forumId = page.thread.forum.fid.value,
+                    forumName = page.thread.forum.name,
+                )).encodeToByteArray(),
+                json.encodeToString(page).encodeToByteArray(),
+            )
+            contentCatalog = null
+            queue.value.firstOrNull { it.key == key }?.let { entry ->
+                upsert(entry.copy(title = page.thread.title, updatedAt = updatedAt))
+            }
+            true
+        }
+    }
+
     override suspend fun getManifest(key: ThreadPageDownloadKey): ThreadPageDownloadManifest? =
         withContext(Dispatchers.IO) { storageProvider.readManifest(key) }
 
@@ -492,164 +525,237 @@ class DownloadRepositoryImpl(
 
     override suspend fun refreshPage(tid: ThreadId, title: String, authorId: UserId?, page: Int): YamiboResult<ThreadPage> = withContext(Dispatchers.IO) {
         initialized.await()
-        if (!storageProvider.isReady()) return@withContext YamiboResult.Failure("尚未選擇備份資料夾")
-        return@withContext when (val result = threadRepository.fetchThread(tid, authorId, page = page)) {
-            is YamiboResult.Success -> {
-                val key = ThreadPageDownloadKey(tid.value, page, authorId?.value)
-                knownTitles[key] = title
-                try {
-                    upsert(DownloadQueueEntry(key, title, DownloadStatus.Downloading, stage = DownloadStage.Preparing, updatedAt = currentTimeMillis()))
-                    persistPage(key, title, result.value)
-                    upsert(DownloadQueueEntry(key, title, DownloadStatus.Downloaded, updatedAt = currentTimeMillis()))
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    Logger.e(TAG, "refreshPage failed key=${key.stableId}", e)
-                    upsert(DownloadQueueEntry(key, title, DownloadStatus.Failed, message = e.message, updatedAt = currentTimeMillis()))
-                    return@withContext YamiboResult.Failure(e.message ?: "下載內容寫入失敗", e)
+        val key = ThreadPageDownloadKey(tid.value, page, authorId?.value)
+        runDownloadTask(key) task@{
+            if (!storageProvider.isReady()) return@task YamiboResult.Failure("尚未選擇備份資料夾")
+            return@task when (val result = threadRepository.fetchThread(tid, authorId, page = page)) {
+                is YamiboResult.Success -> {
+                    knownTitles[key] = title
+                    try {
+                        upsert(DownloadQueueEntry(key, title, DownloadStatus.Downloading, stage = DownloadStage.Preparing, updatedAt = currentTimeMillis()))
+                        persistPage(key, title, result.value)
+                        upsert(DownloadQueueEntry(key, title, DownloadStatus.Downloaded, updatedAt = currentTimeMillis()))
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Logger.e(TAG, "refreshPage failed key=${key.stableId}", e)
+                        upsert(DownloadQueueEntry(key, title, DownloadStatus.Failed, message = e.message, updatedAt = currentTimeMillis()))
+                        return@task YamiboResult.Failure(e.message ?: "下載內容寫入失敗", e)
+                    }
+                    result
                 }
-                result
+                else -> YamiboResult.Failure(result.message())
             }
-            else -> YamiboResult.Failure(result.message())
-        }
+        } ?: YamiboResult.Failure("下載任務正在處理，請稍後重試")
     }
 
     override suspend fun refreshTagMangaChapter(key: TagMangaChapterDownloadKey): YamiboResult<List<String>> = withContext(Dispatchers.IO) {
         initialized.await()
-        if (!storageProvider.isReady()) return@withContext YamiboResult.Failure("尚未選擇備份資料夾")
-        val oldManifest = storageProvider.readTagMangaManifest(key)
-        val task = tagMangaTasks[key]
-        val tagName = oldManifest?.tagName ?: task?.tagName ?: ""
-        val title = oldManifest?.title ?: task?.chapterTitle ?: knownTitles[key] ?: key.stableId
-        val tagPage = oldManifest?.tagPage ?: task?.tagPage ?: 1
-        val result = threadRepository.fetchThread(ThreadId(key.tid), key.authorId?.let(::UserId), page = 1)
-        if (result !is YamiboResult.Success) {
-            return@withContext YamiboResult.Failure(result.message())
-        }
-        return@withContext try {
-            upsert(DownloadQueueEntry(key, tagMangaQueueTitle(tagName, title), DownloadStatus.Downloading, stage = DownloadStage.Preparing, updatedAt = currentTimeMillis()))
-            val images = persistTagMangaChapter(key, tagName, title, tagPage, result.value)
-            val queueTitle = tagMangaQueueTitle(tagName, title)
-            upsert(DownloadQueueEntry(key, queueTitle, DownloadStatus.Downloaded, images.size, images.size, updatedAt = currentTimeMillis()))
-            YamiboResult.Success(images)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            Logger.e(TAG, "refreshTagMangaChapter failed key=${key.stableId}", e)
-            upsert(DownloadQueueEntry(key, tagMangaQueueTitle(tagName, title), DownloadStatus.Failed, message = e.message, updatedAt = currentTimeMillis()))
-            YamiboResult.Failure(e.message ?: "下載內容寫入失敗", e)
-        }
+        runDownloadTask(key) task@{
+            if (!storageProvider.isReady()) return@task YamiboResult.Failure("尚未選擇備份資料夾")
+            val oldManifest = storageProvider.readTagMangaManifest(key)
+            val task = tagMangaTasks[key]
+            val tagName = oldManifest?.tagName ?: task?.tagName ?: ""
+            val title = oldManifest?.title ?: task?.chapterTitle ?: knownTitles[key] ?: key.stableId
+            val tagPage = oldManifest?.tagPage ?: task?.tagPage ?: 1
+            val result = threadRepository.fetchThread(ThreadId(key.tid), key.authorId?.let(::UserId), page = 1)
+            if (result !is YamiboResult.Success) {
+                return@task YamiboResult.Failure(result.message())
+            }
+            return@task try {
+                upsert(DownloadQueueEntry(key, tagMangaQueueTitle(tagName, title), DownloadStatus.Downloading, stage = DownloadStage.Preparing, updatedAt = currentTimeMillis()))
+                val images = persistTagMangaChapter(key, tagName, title, tagPage, result.value)
+                val queueTitle = tagMangaQueueTitle(tagName, title)
+                upsert(DownloadQueueEntry(key, queueTitle, DownloadStatus.Downloaded, images.size, images.size, updatedAt = currentTimeMillis()))
+                YamiboResult.Success(images)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Logger.e(TAG, "refreshTagMangaChapter failed key=${key.stableId}", e)
+                upsert(DownloadQueueEntry(key, tagMangaQueueTitle(tagName, title), DownloadStatus.Failed, message = e.message, updatedAt = currentTimeMillis()))
+                YamiboResult.Failure(e.message ?: "下載內容寫入失敗", e)
+            }
+        } ?: YamiboResult.Failure("下載任務正在處理，請稍後重試")
     }
 
     override suspend fun refreshRssMangaChapter(key: RssMangaChapterDownloadKey): YamiboResult<List<String>> = withContext(Dispatchers.IO) {
         initialized.await()
-        if (!storageProvider.isReady()) return@withContext YamiboResult.Failure("尚未選擇備份資料夾")
-        val oldManifest = storageProvider.readRssMangaManifest(key)
-        val task = rssMangaTasks[key]
-        val subscriptionTitle = oldManifest?.subscriptionTitle ?: task?.subscriptionTitle ?: ""
-        val subscriptionQuery = oldManifest?.subscriptionQuery ?: task?.subscriptionQuery ?: subscriptionTitle
-        val title = oldManifest?.title ?: task?.chapterTitle ?: knownTitles[key] ?: key.stableId
-        val page = oldManifest?.subscriptionPage ?: task?.subscriptionPage ?: 1
-        val result = threadRepository.fetchThread(ThreadId(key.tid), key.authorId?.let(::UserId), page = 1)
-        if (result !is YamiboResult.Success) return@withContext YamiboResult.Failure(result.message())
-        return@withContext try {
-            val queueTitle = rssMangaQueueTitle(subscriptionTitle, title)
-            upsert(DownloadQueueEntry(key, queueTitle, DownloadStatus.Downloading, stage = DownloadStage.Preparing, updatedAt = currentTimeMillis()))
-            val images = persistRssMangaChapter(key, subscriptionTitle, subscriptionQuery, title, page, result.value)
-            upsert(DownloadQueueEntry(key, queueTitle, DownloadStatus.Downloaded, images.size, images.size, updatedAt = currentTimeMillis()))
-            YamiboResult.Success(images)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            Logger.e(TAG, "refreshRssMangaChapter failed key=${key.stableId}", e)
-            upsert(DownloadQueueEntry(key, rssMangaQueueTitle(subscriptionTitle, title), DownloadStatus.Failed, message = e.message, updatedAt = currentTimeMillis()))
-            YamiboResult.Failure(e.message ?: "下載內容寫入失敗", e)
-        }
+        runDownloadTask(key) task@{
+            if (!storageProvider.isReady()) return@task YamiboResult.Failure("尚未選擇備份資料夾")
+            val oldManifest = storageProvider.readRssMangaManifest(key)
+            val task = rssMangaTasks[key]
+            val subscriptionTitle = oldManifest?.subscriptionTitle ?: task?.subscriptionTitle ?: ""
+            val subscriptionQuery = oldManifest?.subscriptionQuery ?: task?.subscriptionQuery ?: subscriptionTitle
+            val title = oldManifest?.title ?: task?.chapterTitle ?: knownTitles[key] ?: key.stableId
+            val page = oldManifest?.subscriptionPage ?: task?.subscriptionPage ?: 1
+            val result = threadRepository.fetchThread(ThreadId(key.tid), key.authorId?.let(::UserId), page = 1)
+            if (result !is YamiboResult.Success) return@task YamiboResult.Failure(result.message())
+            return@task try {
+                val queueTitle = rssMangaQueueTitle(subscriptionTitle, title)
+                upsert(DownloadQueueEntry(key, queueTitle, DownloadStatus.Downloading, stage = DownloadStage.Preparing, updatedAt = currentTimeMillis()))
+                val images = persistRssMangaChapter(key, subscriptionTitle, subscriptionQuery, title, page, result.value)
+                upsert(DownloadQueueEntry(key, queueTitle, DownloadStatus.Downloaded, images.size, images.size, updatedAt = currentTimeMillis()))
+                YamiboResult.Success(images)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Logger.e(TAG, "refreshRssMangaChapter failed key=${key.stableId}", e)
+                upsert(DownloadQueueEntry(key, rssMangaQueueTitle(subscriptionTitle, title), DownloadStatus.Failed, message = e.message, updatedAt = currentTimeMillis()))
+                YamiboResult.Failure(e.message ?: "下載內容寫入失敗", e)
+            }
+        } ?: YamiboResult.Failure("下載任務正在處理，請稍後重試")
     }
 
     override suspend fun markThreadUpdateAvailable(tid: ThreadId, authorId: UserId?) {
         initialized.await()
-        withContext(Dispatchers.IO) { storageProvider.listManifests() }
-            .filter { it.key.tid == tid.value && it.key.authorId == authorId?.value }
-            .forEach { manifest ->
-                upsert(
-                    DownloadQueueEntry(
-                        key = manifest.key,
-                        title = manifest.title,
-                        status = DownloadStatus.UpdateAvailable,
-                        message = "下載內容可刷新",
-                        updatedAt = currentTimeMillis(),
-                    )
-                )
-            }
-    }
-
-    override suspend fun clearPage(key: ThreadPageDownloadKey): Result<Unit> = downloadResult("clearPage key=${key.stableId}") {
-        initialized.await()
         contentMutex.withLock {
-            contentCatalog = null
-            prefetchedPages.remove(key)
-            remove(key)
-            withContext(Dispatchers.IO) { storageProvider.deleteThreadPage(key) }
+            withContext(Dispatchers.IO) { storageProvider.listManifests() }
+                .filter { it.key.tid == tid.value && it.key.authorId == authorId?.value }
+                .forEach { manifest ->
+                    upsert(
+                        DownloadQueueEntry(
+                            key = manifest.key,
+                            title = manifest.title,
+                            status = DownloadStatus.UpdateAvailable,
+                            message = "下載內容可刷新",
+                            updatedAt = currentTimeMillis(),
+                        )
+                    )
+                }
         }
     }
 
-    override suspend fun clearThread(key: ThreadPageDownloadKey): Result<Unit> = downloadResult("clearThread key=${key.stableId}") {
-        initialized.await()
-        contentMutex.withLock {
-            contentCatalog = null
-            prefetchedPages.keys.removeAll { it.tid == key.tid && it.authorId == key.authorId }
-            _queue.update { entries ->
-                entries.filterNot {
-                    val entryKey = it.key as? ThreadPageDownloadKey
-                    entryKey?.tid == key.tid && entryKey.authorId == key.authorId
+    override suspend fun removeTask(key: DownloadTaskKey): Result<Unit> = downloadResult("removeTask key=${key.stableId}") {
+        withStoppedTasks({ it == key }) {
+            val entry = queue.value.firstOrNull { it.key == key }
+            check(entry == null || entry.status in setOf(DownloadStatus.Queued, DownloadStatus.Downloading, DownloadStatus.Paused, DownloadStatus.Failed)) {
+                "任務已完成，請在下載內容管理中刪除"
+            }
+            forgetTasks { it == key }
+        }
+    }
+
+    override suspend fun clearPage(key: ThreadPageDownloadKey): Result<Unit> =
+        clearDownloads({ it == key }) { storageProvider.deleteThreadPage(key) }
+
+    override suspend fun clearThread(key: ThreadPageDownloadKey): Result<Unit> =
+        clearDownloads({ it is ThreadPageDownloadKey && it.tid == key.tid && it.authorId == key.authorId }) {
+            storageProvider.deleteThread(key)
+        }
+
+    override suspend fun clearTagMangaChapter(key: TagMangaChapterDownloadKey): Result<Unit> =
+        clearDownloads({ it == key }) { storageProvider.deleteTagMangaChapter(key) }
+
+    override suspend fun clearTagManga(tagId: TagId): Result<Unit> =
+        clearDownloads({ it is TagMangaChapterDownloadKey && it.tagId == tagId.value }) {
+            storageProvider.deleteTagManga(tagId.value)
+        }
+
+    override suspend fun clearRssMangaChapter(key: RssMangaChapterDownloadKey): Result<Unit> =
+        clearDownloads({ it == key }) { storageProvider.deleteRssMangaChapter(key) }
+
+    override suspend fun clearRssManga(subscriptionId: Long): Result<Unit> =
+        clearDownloads({ it is RssMangaChapterDownloadKey && it.subscriptionId == subscriptionId }) {
+            storageProvider.deleteRssManga(subscriptionId)
+        }
+
+    private suspend fun clearDownloads(matches: (DownloadTaskKey) -> Boolean, delete: suspend () -> Unit): Result<Unit> =
+        downloadResult("clearDownloads") {
+            withStoppedTasks(matches) {
+                withContext(Dispatchers.IO) {
+                    contentMutex.withLock {
+                        contentCatalog = null
+                        ensureStorageReady()
+                        val storageKey = storageProvider.getStorageKey()
+                        // Providers may swallow deletion errors. Verify both manifests and known image files.
+                        val threads = storageProvider.listManifests().filter { matches(it.key) }
+                        val tags = storageProvider.listTagMangaManifests().filter { matches(it.key) }
+                        val rss = storageProvider.listRssMangaManifests().filter { matches(it.key) }
+                        delete()
+                        ensureStorageReady()
+                        check(storageProvider.getStorageKey() == storageKey) { "儲存資料夾已變更，請重新載入" }
+                        val remaining = storageProvider.listManifests().any { matches(it.key) } ||
+                            storageProvider.listTagMangaManifests().any { matches(it.key) } ||
+                            storageProvider.listRssMangaManifests().any { matches(it.key) } ||
+                            threads.any { storageProvider.readThreadPage(it.key) != null || storageProvider.resolveImageUris(it.key, it.images.map { image -> image.fileName }).isNotEmpty() } ||
+                            tags.any { storageProvider.resolveTagMangaImageUris(it.key, it.images.map { image -> image.fileName }).isNotEmpty() } ||
+                            rss.any { storageProvider.resolveRssMangaImageUris(it.key, it.images.map { image -> image.fileName }).isNotEmpty() }
+                        check(!remaining) { "下載內容未完全刪除，請重試" }
+                        forgetTasks(matches)
+                    }
                 }
             }
-            persistQueue()
-            withContext(Dispatchers.IO) { storageProvider.deleteThread(key) }
+        }
+
+    private suspend fun <T> runDownloadTask(
+        key: DownloadTaskKey,
+        expected: DownloadQueueEntry? = null,
+        block: suspend () -> T,
+    ): T? = supervisorScope {
+        val task = taskMutex.withLock {
+            if (removing.any { it(key) } || activeTasks.containsKey(key) ||
+                expected != null && queue.value.firstOrNull { it.key == key } != expected) return@supervisorScope null
+            async(start = CoroutineStart.LAZY) { block() }.also {
+                activeTasks[key] = it
+                it.start()
+            }
+        }
+        try {
+            task.await()
+        } finally {
+            withContext(NonCancellable) {
+                taskMutex.withLock { if (activeTasks[key] === task) activeTasks.remove(key) }
+            }
         }
     }
 
-    override suspend fun clearTagMangaChapter(key: TagMangaChapterDownloadKey): Result<Unit> = downloadResult("clearTagMangaChapter key=${key.stableId}") {
+    private suspend fun withStoppedTasks(matches: (DownloadTaskKey) -> Boolean, block: suspend () -> Unit) {
         initialized.await()
-        contentMutex.withLock {
-            contentCatalog = null
-            tagMangaTasks.remove(key)
-            remove(key)
-            withContext(Dispatchers.IO) { storageProvider.deleteTagMangaChapter(key) }
+        removalMutex.withLock {
+            val tasks = taskMutex.withLock {
+                removing.add(matches)
+                activeTasks.filterKeys(matches).values.toList().also { jobs -> jobs.forEach { it.cancel() } }
+            }
+            try {
+                // Never join while holding the catalog/task lock: a finishing writer may need it.
+                tasks.joinAll()
+                block()
+            } finally {
+                withContext(NonCancellable) {
+                    taskMutex.withLock {
+                        // Failed removals remain visible and retryable, never stuck as Downloading.
+                        _queue.update { entries -> entries.map {
+                            if (matches(it.key) && it.status == DownloadStatus.Downloading) it.copy(status = DownloadStatus.Paused, stage = null)
+                            else it
+                        } }
+                        removing.remove(matches)
+                    }
+                    backgroundController.onQueueChanged(queue.value)
+                    persistQueue()
+                    drainQueue()
+                }
+            }
         }
     }
 
-    override suspend fun clearTagManga(tagId: TagId): Result<Unit> = downloadResult("clearTagManga tagId=${tagId.value}") {
-        initialized.await()
-        contentMutex.withLock {
-            contentCatalog = null
-            tagMangaTasks.keys.removeAll { it.tagId == tagId.value }
-            _queue.update { entries -> entries.filterNot { (it.key as? TagMangaChapterDownloadKey)?.tagId == tagId.value } }
-            persistQueue()
-            withContext(Dispatchers.IO) { storageProvider.deleteTagManga(tagId.value) }
+    private suspend fun forgetTasks(matches: (DownloadTaskKey) -> Boolean) {
+        queueWriteMutex.withLock {
+            // Persist removal first. On failure the task remains visible and retryable.
+            storageProvider.writeQueue(queue.value.filterNot { matches(it.key) })
+            taskMutex.withLock {
+                prefetchedPages.keys.removeAll(matches)
+                tagMangaTasks.keys.removeAll(matches)
+                rssMangaTasks.keys.removeAll(matches)
+                knownTitles.keys.removeAll(matches)
+                _queue.update { entries -> entries.filterNot { matches(it.key) } }
+            }
         }
+        backgroundController.onQueueChanged(queue.value)
+        persistQueue()
     }
 
-    override suspend fun clearRssMangaChapter(key: RssMangaChapterDownloadKey): Result<Unit> = downloadResult("clearRssMangaChapter key=${key.stableId}") {
-        initialized.await()
-        contentMutex.withLock {
-            contentCatalog = null
-            rssMangaTasks.remove(key)
-            remove(key)
-            withContext(Dispatchers.IO) { storageProvider.deleteRssMangaChapter(key) }
-        }
-    }
-
-    override suspend fun clearRssManga(subscriptionId: Long): Result<Unit> = downloadResult("clearRssManga subscriptionId=$subscriptionId") {
-        initialized.await()
-        contentMutex.withLock {
-            contentCatalog = null
-            rssMangaTasks.keys.removeAll { it.subscriptionId == subscriptionId }
-            _queue.update { entries -> entries.filterNot { (it.key as? RssMangaChapterDownloadKey)?.subscriptionId == subscriptionId } }
-            persistQueue()
-            withContext(Dispatchers.IO) { storageProvider.deleteRssManga(subscriptionId) }
-        }
+    private suspend fun writeQueueSnapshot() = queueWriteMutex.withLock {
+        storageProvider.writeQueue(queue.value)
     }
 
     override suspend fun retry(key: DownloadTaskKey): Result<Unit> = downloadResult("retry key=${key.stableId}") {
@@ -689,7 +795,10 @@ class DownloadRepositoryImpl(
         scope.launch {
             workerMutex.withLock {
                 while (!paused) {
-                    val next = queue.value.firstOrNull { it.status == DownloadStatus.Queued } ?: break
+                    val next = taskMutex.withLock {
+                        queue.value.firstOrNull { entry -> entry.status == DownloadStatus.Queued &&
+                            entry.key !in activeTasks && removing.none { it(entry.key) } }
+                    } ?: break
                     process(next)
                 }
             }
@@ -697,11 +806,27 @@ class DownloadRepositoryImpl(
     }
 
     private suspend fun process(entry: DownloadQueueEntry) {
-        upsert(entry.copy(status = DownloadStatus.Downloading, stage = DownloadStage.Preparing, progressCurrent = 0, progressTotal = 0, message = null, updatedAt = currentTimeMillis()))
-        when (val key = entry.key) {
-            is ThreadPageDownloadKey -> processThreadPage(entry, key)
-            is TagMangaChapterDownloadKey -> processTagMangaChapter(entry, key)
-            is RssMangaChapterDownloadKey -> processRssMangaChapter(entry, key)
+        try {
+            runDownloadTask(entry.key, expected = entry) {
+                upsert(entry.copy(status = DownloadStatus.Downloading, stage = DownloadStage.Preparing, progressCurrent = 0, progressTotal = 0, message = null, updatedAt = currentTimeMillis()))
+                when (val key = entry.key) {
+                    is ThreadPageDownloadKey -> processThreadPage(entry, key)
+                    is TagMangaChapterDownloadKey -> processTagMangaChapter(entry, key)
+                    is RssMangaChapterDownloadKey -> processRssMangaChapter(entry, key)
+                }
+            }
+        } catch (cancelled: CancellationException) {
+            currentCoroutineContext().ensureActive()
+        } catch (error: Exception) {
+            Logger.e(TAG, "Download task failed key=${entry.key.stableId}", error)
+            taskMutex.withLock {
+                if (removing.none { it(entry.key) }) {
+                    _queue.update { entries -> entries.map {
+                        if (it.key == entry.key) it.copy(status = DownloadStatus.Failed, stage = null, message = error.message) else it
+                    } }
+                }
+            }
+            persistQueue()
         }
     }
 
@@ -919,11 +1044,11 @@ class DownloadRepositoryImpl(
         )
     }
 
-    private fun queueTagMangaPage(tagId: TagId, tagName: String, page: TagPage, pageNumber: Int) {
+    private suspend fun queueTagMangaPage(tagId: TagId, tagName: String, page: TagPage, pageNumber: Int) {
         queueTagMangaThreads(tagId, tagName, page.threadSummaries, pageNumber)
     }
 
-    private fun queueTagMangaThreads(
+    private suspend fun queueTagMangaThreads(
         tagId: TagId,
         tagName: String,
         threads: List<ThreadSummary>,
@@ -939,7 +1064,7 @@ class DownloadRepositoryImpl(
         upsertAll(entries)
     }
 
-    private fun queueRssMangaPage(
+    private suspend fun queueRssMangaPage(
         subscriptionId: Long,
         title: String,
         query: String,
@@ -949,7 +1074,7 @@ class DownloadRepositoryImpl(
         queueRssMangaThreads(subscriptionId, title, query, page.threadSummaries, pageNumber)
     }
 
-    private fun queueRssMangaThreads(
+    private suspend fun queueRssMangaThreads(
         subscriptionId: Long,
         title: String,
         query: String,
@@ -1010,7 +1135,7 @@ class DownloadRepositoryImpl(
     private fun rssMangaQueueTitle(subscriptionTitle: String, title: String): String =
         if (subscriptionTitle.isBlank()) title else "RSS / $subscriptionTitle / $title"
 
-    private fun updateStage(
+    private suspend fun updateStage(
         key: DownloadTaskKey,
         stage: DownloadStage,
         progressCurrent: Int = 0,
@@ -1033,31 +1158,33 @@ class DownloadRepositoryImpl(
         if (!storageProvider.isReady()) error("尚未選擇備份資料夾")
     }
 
-    private fun upsert(entry: DownloadQueueEntry) {
-        _queue.update { entries ->
-            val previous = entries.firstOrNull { it.key == entry.key }
-            val without = entries.filterNot { it.key == entry.key }
-            (without + entry.preserveQueuedAt(previous)).sortedWith(compareBy { it.key.stableId })
+    private suspend fun upsert(entry: DownloadQueueEntry) {
+        currentCoroutineContext().ensureActive()
+        taskMutex.withLock {
+            check(removing.none { it(entry.key) }) { "下載任務正在移除，請稍後重試" }
+            _queue.update { entries ->
+                val previous = entries.firstOrNull { it.key == entry.key }
+                val without = entries.filterNot { it.key == entry.key }
+                (without + entry.preserveQueuedAt(previous)).sortedWith(compareBy { it.key.stableId })
+            }
         }
         backgroundController.onQueueChanged(queue.value)
         persistQueue()
     }
 
-    private fun upsertAll(newEntries: List<DownloadQueueEntry>) {
+    private suspend fun upsertAll(newEntries: List<DownloadQueueEntry>) {
         if (newEntries.isEmpty()) return
         val newEntriesByKey = newEntries.associateBy { it.key }
-        _queue.update { entries ->
-            val previousByKey = entries.associateBy { it.key }
-            val without = entries.filterNot { it.key in newEntriesByKey }
-            val replacements = newEntriesByKey.values.map { it.preserveQueuedAt(previousByKey[it.key]) }
-            (without + replacements).sortedWith(compareBy { it.key.stableId })
+        currentCoroutineContext().ensureActive()
+        taskMutex.withLock {
+            check(newEntries.none { entry -> removing.any { it(entry.key) } }) { "下載任務正在移除，請稍後重試" }
+            _queue.update { entries ->
+                val previousByKey = entries.associateBy { it.key }
+                val without = entries.filterNot { it.key in newEntriesByKey }
+                val replacements = newEntriesByKey.values.map { it.preserveQueuedAt(previousByKey[it.key]) }
+                (without + replacements).sortedWith(compareBy { it.key.stableId })
+            }
         }
-        backgroundController.onQueueChanged(queue.value)
-        persistQueue()
-    }
-
-    private fun remove(key: DownloadTaskKey) {
-        _queue.update { entries -> entries.filterNot { it.key == key } }
         backgroundController.onQueueChanged(queue.value)
         persistQueue()
     }

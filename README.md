@@ -137,6 +137,7 @@ Gitee / Gitea mirror 的 ready manifest 必須指向各自 mirror release 的 AP
 
 - `update/README.md`
 - `dev-docs/app-updater-release.md`
+- `dev-docs/testflight.md`
 
 ## Support This Project
 

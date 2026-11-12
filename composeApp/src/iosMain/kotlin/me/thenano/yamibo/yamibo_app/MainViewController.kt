@@ -7,8 +7,16 @@ import me.thenano.yamibo.yamibo_app.repository.servernotice.DefaultServerNoticeR
 import me.thenano.yamibo.yamibo_app.repository.servernotice.ServerNoticeStore
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.window.ComposeUIViewController
+import io.github.littlesurvival.YamiboClient
 import io.github.littlesurvival.core.YamiboResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -96,16 +104,9 @@ fun MainViewController() = ComposeUIViewController {
     val rawSettingsStore = remember {
         IOSSettingsStore().also { store ->
             if (platform.Foundation.NSUserDefaults.standardUserDefaults.stringForKey("qa-reader") != null) {
-                val documents = platform.Foundation.NSSearchPathForDirectoriesInDomains(
-                    platform.Foundation.NSDocumentDirectory, platform.Foundation.NSUserDomainMask, true,
-                ).first() as String
-                val root = "$documents/qa_downloads"
-                check(platform.Foundation.NSFileManager.defaultManager.fileExistsAtPath(
-                    "$root/YamiboDownloads/thread_42_page_1_author_7/thread_page.json",
-                )) { "QA fixtures missing in current application container: $root" }
-                store.putString("appsettings.backupfolderuri", root)
+                // Intentionally exercise the production default, without selecting a folder.
+                store.putString("appsettings.backupfolderuri", "")
                 store.putString("appsettings.appupdatelaunchcheckthreshold", "MANUAL")
-                println("QA download root verified: $root")
             }
         }
     }
@@ -118,7 +119,15 @@ fun MainViewController() = ComposeUIViewController {
     }
 
     /** Repository Logic */
-    val yamiboClient = remember { IOSYamiboClientProvider.get(cookieStore) }
+    val readyClient by produceState<YamiboClient?>(null, cookieStore) {
+        value = IOSYamiboClientProvider.get(cookieStore)
+    }
+    val yamiboClient = readyClient ?: run {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        return@ComposeUIViewController
+    }
     val authRepository = remember { IOSAuthRepository(cookieStore, userStore, yamiboClient, forumFavoriteStore) }
 
     val dbFactory = remember { DatabaseFactory() }
@@ -242,6 +251,22 @@ fun MainViewController() = ComposeUIViewController {
     remember(appSyncService, backupRepository) {
         appSyncService.registerLocalSnapshotSource(backupRepository)
     }
+    androidx.compose.runtime.LaunchedEffect(backupStorageProvider) {
+        if (platform.Foundation.NSUserDefaults.standardUserDefaults.stringForKey("qa-reader") != null) {
+            check(appSettingsRepository.backupFolderUri.getValue().isBlank())
+            val downloads = IOSDownloadStorageProvider(appSettingsRepository)
+            check(downloads.isReady())
+            check(downloads.getSelectedFolderLabel() == "YamiboApp")
+            check(backupStorageProvider.getSelectedFolderLabel() == "YamiboApp")
+            val bytes = "default-folder-roundtrip".encodeToByteArray()
+            val file = backupStorageProvider.writeBackupFile("qa-probe.yamibobak", bytes).getOrThrow()
+            check(file.uri == "${downloads.getStorageKey()}/qa-probe.yamibobak")
+            check(backupStorageProvider.readBackupFile(file.uri).getOrThrow().contentEquals(bytes))
+            backupStorageProvider.deleteBackupFile(file).getOrThrow()
+            check(backupStorageProvider.listBackupFiles().none { it.name == file.name })
+            backupStorageProvider.writeBackupFile("qa-storage-passed.yamibobak", bytes).getOrThrow()
+        }
+    }
     val downloadRepository = remember {
         DownloadRepositoryImpl(
             threadRepository = threadRepository,
@@ -343,11 +368,6 @@ fun MainViewController() = ComposeUIViewController {
         val messageNotificationEnabled = appSettingsRepository.messageNotificationEnabled.state()
         val messageNotificationInterval = appSettingsRepository.messageNotificationInterval.state()
 
-        androidx.compose.runtime.LaunchedEffect(Unit) {
-            if (appSettingsRepository.clearCacheOnAppLaunch.getValue()) {
-                diskCacheFactory.clearAllCache()
-            }
-        }
         androidx.compose.runtime.LaunchedEffect(messageNotificationEnabled, messageNotificationInterval) {
             messageNotificationScheduler.setEnabled(
                 enabled = messageNotificationEnabled,

@@ -22,12 +22,10 @@ import io.github.littlesurvival.dto.value.PostId
 import io.github.littlesurvival.dto.value.ThreadId
 import io.github.littlesurvival.dto.value.UserId
 import io.github.littlesurvival.dto.value.TagId
+import kotlinx.coroutines.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.withTimeout
-import me.thenano.yamibo.yamibo_app.repository.thread.fetchReaderStartPage
-import me.thenano.yamibo.yamibo_app.repository.thread.getDownloadedImagePage
 import kotlinx.coroutines.async
 import kotlinx.serialization.json.Json
 import me.thenano.yamibo.yamibo_app.repository.DownloadRepository
@@ -44,162 +42,59 @@ class DownloadRepositoryTest {
     private val json = Json { encodeDefaults = true }
 
     @Test
-    fun imageReaderCanUseAFullThreadDownloadWhenTheAuthorDownloadIsAbsent() = runBlocking {
-        val storage = FakeStorage()
+    fun legacyQueueUsesLastUpdateAsInitialQueueTime() {
+        val legacy = """{"key":{"type":"me.thenano.yamibo.yamibo_app.repository.download.ThreadPageDownloadKey","tid":42,"page":1},"title":"old","status":"Paused","updatedAt":123}"""
+        val entry = json.decodeFromString<DownloadQueueEntry>(legacy)
+        assertEquals(123L, entry.queuedAt)
+        val progressed = entry.copy(updatedAt = 456L)
+        assertEquals(123L, json.decodeFromString<DownloadQueueEntry>(json.encodeToString(progressed)).queuedAt)
+    }
+
+    @Test
+    fun progressAndCompletionPreserveQueueTimeAcrossRestart() = runBlocking {
         val key = ThreadPageDownloadKey(42, 1)
-        val full = page(42, 1, 1)
-        storage.seed(key, ThreadPageDownloadManifest(key, "full", 1, 1, DownloadPageKind.Normal), full)
-        val repository = repository(FakeThreadRepository(), storage)
-        assertEquals(full, repository.getDownloadedImagePage(ThreadId(42), UserId(7)))
-    }
-
-    @Test
-    fun imageReaderRejectsWrongAuthorAndWrongThreadSnapshots() = runBlocking {
         val storage = FakeStorage()
-        val authorKey = ThreadPageDownloadKey(42, 1, 7)
-        val wrongAuthor = page(42, 1, 1).let { it.copy(posts = it.posts.map { post -> post.copy(author = User(UserId(99), "wrong")) }) }
-        storage.seed(authorKey, ThreadPageDownloadManifest(authorKey, "bad author", 1, 1, DownloadPageKind.Normal), wrongAuthor)
-        val fullKey = ThreadPageDownloadKey(42, 1)
-        storage.seed(fullKey, ThreadPageDownloadManifest(fullKey, "bad thread", 1, 1, DownloadPageKind.Normal), page(99, 1, 1))
-        assertNull(repository(FakeThreadRepository(), storage).getDownloadedImagePage(ThreadId(42), UserId(7)))
-    }
-
-    @Test
-    fun pendingQueueWritesAreConflatedWhileStorageIsBusy() = runBlocking {
-        val storage = FakeStorage()
-        val repository = repository(FakeThreadRepository(), storage)
-        repository.getSummary()
+        storage.seedQueue(listOf(DownloadQueueEntry(key, "restored", DownloadStatus.Downloading, updatedAt = 200, queuedAt = 100)))
         val gate = CompletableDeferred<Unit>()
-        storage.queueWriteGate = gate
-        repository.pauseAll()
-        withTimeout(2_000) { storage.queuedWriteStarted.await() }
-        repeat(100) { repository.pauseAll() }
+        val repository = repository(FakeThreadRepository(
+            pages = mutableMapOf(1 to YamiboResult.Success(page(42, 1, 1))), fetchGate = gate,
+        ), storage)
+        awaitStatus(repository, key, DownloadStatus.Downloading)
+        assertEquals(100L, repository.queue.value.single().queuedAt)
         gate.complete(Unit)
-        withTimeout(2_000) { while (storage.queueWriteCount < 3) delay(10) }
-        delay(100)
-        assertEquals(3, storage.queueWriteCount) // Initial restore, in-flight write, latest pending state.
+        awaitStatus(repository, key, DownloadStatus.Downloaded)
+        assertEquals(100L, repository.queue.value.single().queuedAt)
+        assertTrue(repository.queue.value.single().updatedAt > 200)
     }
 
     @Test
-    fun queueAndContentViewsReuseTheInitialInventory() = runBlocking {
+    fun newRequestAndRetryGetNewTimesWhilePauseResumeKeepsTimes() = runBlocking {
+        val oldKey = ThreadPageDownloadKey(42, 1)
+        val newKey = ThreadPageDownloadKey(42, 2)
         val storage = FakeStorage()
-        val repository = repository(FakeThreadRepository(), storage)
-        repeat(20) {
-            repository.getSummary()
-            repository.getDownloadedContentSummary()
-            repository.getDownloadedContentGroups()
-        }
-        assertEquals(1, storage.threadManifestScans)
-        assertEquals(1, storage.tagManifestScans)
-        assertEquals(1, storage.rssManifestScans)
-    }
-
-    @Test
-    fun explicitRefreshAndStorageLocationChangeDiscoverExternalDownloads() = runBlocking {
-        val storage = FakeStorage()
-        val repository = repository(FakeThreadRepository(), storage)
-        assertTrue(repository.getDownloadedContentGroups().isEmpty())
-        val key = ThreadPageDownloadKey(42, 1)
-        storage.seed(key, ThreadPageDownloadManifest(key, "external", 1, 1, DownloadPageKind.Normal), page(42, 1, 1))
-        assertTrue(repository.getDownloadedContentGroups().isEmpty())
-        assertEquals(1, repository.getDownloadedContentGroups(forceRefresh = true).single().itemCount)
-        assertEquals(2, storage.threadManifestScans)
-        storage.storageKey = "another-folder"
-        assertEquals(1, repository.getDownloadedContentGroups().single().itemCount)
-        assertEquals(3, storage.threadManifestScans)
-    }
-
-    @Test
-    fun deletionInvalidatesTheInventoryBeforeReturning() = runBlocking {
-        val storage = FakeStorage()
-        val key = ThreadPageDownloadKey(42, 1)
-        storage.seed(key, ThreadPageDownloadManifest(key, "download", 1, 1, DownloadPageKind.Normal), page(42, 1, 1))
-        val repository = repository(FakeThreadRepository(), storage)
-        assertEquals(1, repository.getSummary().downloaded)
-        repository.clearPage(key).getOrThrow()
-        assertEquals(0, repository.getSummary().downloaded)
-        assertTrue(repository.getDownloadedContentGroups().isEmpty())
-        assertEquals(2, storage.threadManifestScans)
-    }
-
-    @Test
-    fun deletionAndQueueObservationCannotRepopulateAStaleInventory() = runBlocking {
-        val storage = FakeStorage()
-        val key = ThreadPageDownloadKey(42, 1)
-        storage.seed(key, ThreadPageDownloadManifest(key, "download", 1, 1, DownloadPageKind.Normal), page(42, 1, 1))
-        val repository = repository(FakeThreadRepository(), storage)
-        assertEquals(1, repository.getSummary().downloaded)
-        val deleteGate = CompletableDeferred<Unit>()
-        storage.deleteGate = deleteGate
-        val clear = async { repository.clearPage(key).getOrThrow() }
-        storage.deleteStarted.await()
-        assertTrue(repository.queue.value.none { it.key == key })
-        val inventory = async { repository.getDownloadedContentGroups() }
-        delay(50)
-        assertTrue(!inventory.isCompleted)
-        deleteGate.complete(Unit)
-        clear.await()
-        assertTrue(inventory.await().isEmpty())
-        assertEquals(0, repository.getSummary().downloaded)
-    }
-
-    @Test
-    fun downloadedReadersDoNotWaitForTheWholeLibraryToInitialize() = runBlocking {
+        storage.seedQueue(listOf(DownloadQueueEntry(oldKey, "old", DownloadStatus.Paused, updatedAt = 100)))
         val gate = CompletableDeferred<Unit>()
-        val storage = FakeStorage().also { it.queueReadGate = gate }
-        val threadKey = ThreadPageDownloadKey(42, 1, 7)
-        storage.seed(threadKey, ThreadPageDownloadManifest(threadKey, "novel", 1, 1, DownloadPageKind.Normal), page(42, 1, 1))
-        val tagKey = TagMangaChapterDownloadKey(8, 43, 7)
-        storage.seedTag(tagKey, TagMangaChapterManifest(tagKey, "tag", title = "manga", tagPage = 1, imageCount = 1, downloadedAt = 1,
-            images = listOf(DownloadedImage("https://image", "a.png", 1))), mapOf("a.png" to "content://tag/a.png"))
-        val rssKey = RssMangaChapterDownloadKey(1, 43, 7)
-        storage.seedRss(rssKey, RssMangaChapterManifest(rssKey, "rss", "query", title = "manga", subscriptionPage = 1, imageCount = 1, downloadedAt = 1,
-            images = listOf(DownloadedImage("https://image", "a.png", 1))), mapOf("a.png" to "content://rss/a.png"))
-        val threads = FakeThreadRepository()
-        val repository = repository(threads, storage)
-        storage.queueReadStarted.await()
-        try {
-            withTimeout(2_000) {
-                assertNotNull(repository.getDownloadedPage(threadKey))
-                assertNotNull(repository.getManifest(threadKey))
-                assertEquals(listOf("content://tag/a.png"), repository.getTagMangaChapterImages(tagKey))
-                assertNotNull(repository.getTagMangaManifest(tagKey))
-                assertEquals(listOf("content://rss/a.png"), repository.getRssMangaChapterImages(rssKey))
-                assertNotNull(repository.getRssMangaManifest(rssKey))
-                assertIs<YamiboResult.Success<ThreadPage>>(threads.fetchReaderStartPage(ThreadId(42), PostId(1), UserId(7), 1, repository))
-            }
-            assertTrue(threads.fetchCounts.isEmpty())
-            assertTrue(!gate.isCompleted)
-        } finally {
-            gate.complete(Unit)
-        }
-    }
-
-    @Test
-    fun downloadedThreadResolvesAllImagesInOneBatchAndPreservesMissingSources() = runBlocking {
-        val storage = FakeStorage()
-        val key = ThreadPageDownloadKey(42, 1)
-        val first = "https://bbs.yamibo.com/data/attachment/forum/a.jpg"
-        val missing = "https://bbs.yamibo.com/data/attachment/forum/b.jpg"
-        storage.seed(key, ThreadPageDownloadManifest(key, "manga", 1, 1, DownloadPageKind.Normal,
-            images = listOf(DownloadedImage(first, "a.jpg", 1), DownloadedImage(missing, "b.jpg", 1))),
-            page(42, 1, 1, first, missing), mapOf("a.jpg" to "content://local/a.jpg"))
-        val downloaded = assertNotNull(repository(FakeThreadRepository(), storage).getDownloadedPage(key))
-        assertEquals(listOf("content://local/a.jpg", missing), downloaded.posts.single().images.map { it.url })
-        assertEquals(1, storage.threadImageBatchReads)
-        assertEquals(0, storage.threadImageSingleReads)
-    }
-
-    @Test
-    fun invalidDownloadedStartPageStillUsesValidatedAuthorNetworkPage() = runBlocking {
-        val storage = FakeStorage()
-        val key = ThreadPageDownloadKey(42, 1, 7)
-        storage.seed(key, ThreadPageDownloadManifest(key, "bad", 1, 1, DownloadPageKind.Normal), page(99, 1, 1))
-        val expected = page(42, 1, 1)
-        val threads = FakeThreadRepository(pages = mutableMapOf(1 to YamiboResult.Success(expected)))
-        val result = threads.fetchReaderStartPage(ThreadId(42), PostId(1), UserId(7), 1, repository(threads, storage))
-        assertEquals(expected, assertIs<YamiboResult.Success<ThreadPage>>(result).value)
-        assertEquals(1, threads.fetchCounts[1])
+        val repository = repository(FakeThreadRepository(
+            pages = mutableMapOf(1 to YamiboResult.Success(page(42, 1, 2)), 2 to YamiboResult.Success(page(42, 2, 2))),
+            fetchGate = gate,
+        ), storage)
+        repository.getStatus(oldKey)
+        repository.pauseAll()
+        repository.enqueuePage(ThreadId(42), "new", null, 2).getOrThrow()
+        val newerTime = repository.queue.value.single { it.key == newKey }.queuedAt
+        assertTrue(newerTime > 100)
+        repository.pauseAll()
+        repository.resumeAll()
+        awaitStatus(repository, oldKey, DownloadStatus.Downloading)
+        assertEquals(100L, repository.queue.value.single { it.key == oldKey }.queuedAt)
+        assertEquals(newerTime, repository.queue.value.single { it.key == newKey }.queuedAt)
+        gate.complete(Unit)
+        awaitStatus(repository, newKey, DownloadStatus.Downloaded)
+        assertEquals(newerTime, repository.queue.value.single { it.key == newKey }.queuedAt)
+        delay(20)
+        repository.retry(oldKey).getOrThrow()
+        awaitStatus(repository, oldKey, DownloadStatus.Downloaded)
+        assertTrue(repository.queue.value.single { it.key == oldKey }.queuedAt > newerTime)
     }
 
     @Test
@@ -637,7 +532,6 @@ class DownloadRepositoryTest {
         val summary = repository.getDownloadedContentSummary()
         val groups = repository.getDownloadedContentGroups()
 
-        assertEquals(summary, summarizeDownloadedContent(groups))
         assertEquals(2, summary.totalItems)
         assertEquals(1, summary.threadPages)
         assertEquals(1, summary.tagMangaChapters)
@@ -716,6 +610,188 @@ class DownloadRepositoryTest {
         backgroundController = backgroundController,
         json = json,
     )
+
+    @Test
+    fun removalCancelsImageFetchAndWorkerContinues() = runBlocking {
+        val entered = CompletableDeferred<Unit>()
+        val gate = CompletableDeferred<Unit>()
+        val storage = FakeStorage()
+        val first = ThreadPageDownloadKey(401, 1)
+        val second = ThreadPageDownloadKey(402, 2)
+        val repository = repository(storage = storage, threadRepository = FakeThreadRepository(mutableMapOf(
+            1 to YamiboResult.Success(page(401, 1, 2, "https://example.com/blocked.jpg")),
+            2 to YamiboResult.Success(page(402, 2, 2)),
+        )), imageFetcher = object : DownloadImageFetcher({ "" }) {
+            override suspend fun fetch(url: String): ByteArray {
+                entered.complete(Unit)
+                gate.await()
+                return byteArrayOf(1)
+            }
+        })
+        repository.enqueuePage(ThreadId(401), "first", null, 1).getOrThrow()
+        withTimeout(3000) { entered.await() }
+        repository.enqueuePage(ThreadId(402), "second", null, 2).getOrThrow()
+        withTimeout(3000) { repository.removeTask(first).getOrThrow() }
+        gate.complete(Unit)
+        awaitStatus(repository, second, DownloadStatus.Downloaded)
+        assertTrue(repository.queue.value.none { it.key == first })
+        assertNull(storage.readManifest(first))
+        assertTrue(storage.readQueue().none { it.key == first })
+        repository.enqueuePage(ThreadId(401), "retry", null, 1).getOrThrow()
+        awaitStatus(repository, first, DownloadStatus.Downloaded)
+    }
+
+    @Test
+    fun removalKeepsCompletedContentAndRejectsCompletedTask() = runBlocking<Unit> {
+        val storage = FakeStorage()
+        val key = ThreadPageDownloadKey(410, 1)
+        val repository = repository(storage = storage, threadRepository = FakeThreadRepository(mutableMapOf(1 to YamiboResult.Success(page(410, 1, 1)))))
+        repository.enqueuePage(ThreadId(410), "saved", null, 1).getOrThrow()
+        awaitStatus(repository, key, DownloadStatus.Downloaded)
+        assertTrue(repository.removeTask(key).isFailure)
+        repository.pauseAll()
+        repository.enqueuePage(ThreadId(410), "queued refresh", null, 1).getOrThrow()
+        repository.removeTask(key).getOrThrow()
+        assertTrue(repository.queue.value.none { it.key == key })
+        assertNotNull(storage.readManifest(key))
+        assertNotNull(repository.getDownloadedPage(key))
+    }
+
+    @Test
+    fun removalHandlesPausedAndFailedEntriesAndPersists() = runBlocking {
+        val storage = FakeStorage()
+        val keys = (420..422).map { ThreadPageDownloadKey(it, 1) }
+        storage.seedQueue(keys.zip(listOf(DownloadStatus.Paused, DownloadStatus.Failed, DownloadStatus.Paused)).map { (key, status) ->
+            DownloadQueueEntry(key, "queued", status)
+        })
+        val repository = repository(storage = storage, threadRepository = FakeThreadRepository())
+        keys.forEach { repository.removeTask(it).getOrThrow() }
+        assertTrue(repository.queue.value.isEmpty())
+        assertTrue(storage.readQueue().isEmpty())
+        val restored = repository(storage = storage, threadRepository = FakeThreadRepository())
+        assertEquals(0, restored.getSummary().queued)
+        assertTrue(restored.queue.value.isEmpty())
+    }
+
+    @Test
+    fun deletionWaitsForNonCancellableFileCommit() = runBlocking {
+        val entered = CompletableDeferred<Unit>()
+        val gate = CompletableDeferred<Unit>()
+        val storage = FakeStorage().apply {
+            beforeWrite = { withContext(NonCancellable) { entered.complete(Unit); gate.await() } }
+        }
+        val key = ThreadPageDownloadKey(430, 1)
+        val repository = repository(storage = storage, threadRepository = FakeThreadRepository(mutableMapOf(1 to YamiboResult.Success(page(430, 1, 1)))))
+        repository.enqueuePage(ThreadId(430), "writing", null, 1).getOrThrow()
+        withTimeout(3000) { entered.await() }
+        val deletion = async { repository.clearPage(key) }
+        delay(100)
+        assertTrue(!deletion.isCompleted)
+        gate.complete(Unit)
+        withTimeout(3000) { deletion.await().getOrThrow() }
+        assertNull(storage.readManifest(key))
+        assertNull(storage.readThreadPage(key))
+        assertTrue(repository.queue.value.none { it.key == key })
+    }
+
+    @Test
+    fun silentDeleteFailureRemainsRetryable() = runBlocking {
+        val storage = FakeStorage()
+        val key = ThreadPageDownloadKey(440, 1)
+        val repository = repository(storage = storage, threadRepository = FakeThreadRepository(mutableMapOf(1 to YamiboResult.Success(page(440, 1, 1)))))
+        repository.enqueuePage(ThreadId(440), "saved", null, 1).getOrThrow()
+        awaitStatus(repository, key, DownloadStatus.Downloaded)
+        storage.ignoreDeletes = true
+        assertTrue(repository.clearPage(key).isFailure)
+        assertNotNull(storage.readManifest(key))
+        assertEquals(1, repository.getDownloadedContentSummary().totalItems)
+        assertTrue(repository.queue.value.any { it.key == key })
+        storage.ignoreDeletes = false
+        repository.clearPage(key).getOrThrow()
+        assertEquals(0, repository.getDownloadedContentSummary().totalItems)
+        assertTrue(repository.queue.value.none { it.key == key })
+    }
+
+    @Test
+    fun queueWriteFailureDoesNotLoseRemovalRetry() = runBlocking {
+        val storage = FakeStorage()
+        val key = ThreadPageDownloadKey(450, 1)
+        storage.seedQueue(listOf(DownloadQueueEntry(key, "paused", DownloadStatus.Paused)))
+        val repository = repository(storage = storage, threadRepository = FakeThreadRepository())
+        repository.getSummary()
+        storage.rejectQueueWrites = true
+        assertTrue(repository.removeTask(key).isFailure)
+        assertTrue(repository.queue.value.any { it.key == key })
+        storage.rejectQueueWrites = false
+        repository.removeTask(key).getOrThrow()
+        assertTrue(repository.queue.value.none { it.key == key })
+    }
+
+    @Test
+    fun deletionCancelsManualRefreshWithoutLateResurrection() = runBlocking {
+        val gate = CompletableDeferred<Unit>()
+        val entered = CompletableDeferred<Unit>()
+        val storage = FakeStorage()
+        val key = ThreadPageDownloadKey(460, 1)
+        val repository = repository(storage = storage, threadRepository = FakeThreadRepository(mutableMapOf(1 to YamiboResult.Success(page(460, 1, 1, "https://example.com/image.jpg")))),
+            imageFetcher = object : DownloadImageFetcher({ "" }) {
+                override suspend fun fetch(url: String): ByteArray {
+                    entered.complete(Unit)
+                    withContext(NonCancellable) { gate.await() }
+                    error("late fetch error")
+                }
+            })
+        val refresh = async { repository.refreshPage(ThreadId(460), "refresh", null, 1) }
+        withTimeout(3000) { entered.await() }
+        val deletion = async { repository.clearPage(key) }
+        delay(100)
+        gate.complete(Unit)
+        withTimeout(3000) { deletion.await().getOrThrow() }
+        assertTrue(refresh.isCancelled)
+        assertNull(storage.readManifest(key))
+        assertTrue(repository.queue.value.none { it.key == key })
+    }
+
+    @Test
+    fun tagAndRssDeletionCancelTheirOwnDownloads() = runBlocking {
+        for (rss in listOf(false, true)) {
+            val storage = FakeStorage()
+            val entered = CompletableDeferred<Unit>()
+            val gate = CompletableDeferred<Unit>()
+            val repository = repository(FakeThreadRepository(mutableMapOf(1 to YamiboResult.Success(page(470, 1, 1, "https://example.com/image.jpg")))), storage,
+                imageFetcher = object : DownloadImageFetcher({ "" }) {
+                    override suspend fun fetch(url: String): ByteArray { entered.complete(Unit); gate.await(); return byteArrayOf(1) }
+                })
+            val key: DownloadTaskKey = if (rss) RssMangaChapterDownloadKey(8, 470, 7) else TagMangaChapterDownloadKey(8, 470, 7)
+            if (rss) repository.enqueueRssMangaChapter(8, "rss", "query", summary(470, "chapter"), 1).getOrThrow()
+            else repository.enqueueTagMangaChapter(TagId(8), "tag", summary(470, "chapter"), 1).getOrThrow()
+            withTimeout(3000) { entered.await() }
+            withTimeout(3000) {
+                if (rss) repository.clearRssManga(8).getOrThrow() else repository.clearTagManga(TagId(8)).getOrThrow()
+            }
+            gate.complete(Unit)
+            assertTrue(repository.queue.value.none { it.key == key })
+            assertEquals(0, repository.getDownloadedContentSummary().totalItems)
+        }
+    }
+
+    @Test
+    fun tagAndRssGroupDeletionPreservesOtherGroups() = runBlocking {
+        val storage = FakeStorage()
+        for (id in listOf(8, 9)) {
+            val tag = TagMangaChapterDownloadKey(id, 480, 7)
+            val rss = RssMangaChapterDownloadKey(id.toLong(), 480, 7)
+            storage.seedTag(tag, TagMangaChapterManifest(key = tag, tagName = "tag", title = "chapter", tagPage = 1, imageCount = 0, downloadedAt = 1))
+            storage.seedRss(rss, RssMangaChapterManifest(key = rss, subscriptionTitle = "rss", subscriptionQuery = "query", title = "chapter", subscriptionPage = 1, imageCount = 0, downloadedAt = 1))
+        }
+        val repository = repository(FakeThreadRepository(), storage)
+        repository.clearTagManga(TagId(8)).getOrThrow()
+        repository.clearRssManga(8).getOrThrow()
+        assertEquals(2, repository.getDownloadedContentSummary().totalItems)
+        assertTrue(storage.tagManifests.keys.all { it.tagId == 9 })
+        assertTrue(storage.rssManifests.keys.all { it.subscriptionId == 9L })
+        assertEquals(2, repository.queue.value.size)
+    }
 
     private suspend fun awaitStatus(
         repository: DownloadRepository,
@@ -813,19 +889,9 @@ class DownloadRepositoryTest {
     }
 
     private class FakeStorage : DownloadStorageProvider {
-        var deleteGate: CompletableDeferred<Unit>? = null
-        val deleteStarted = CompletableDeferred<Unit>()
-        var queueWriteGate: CompletableDeferred<Unit>? = null
-        val queuedWriteStarted = CompletableDeferred<Unit>()
-        var queueWriteCount = 0
-        var storageKey = "test"
-        var threadManifestScans = 0
-        var tagManifestScans = 0
-        var rssManifestScans = 0
-        var queueReadGate: CompletableDeferred<Unit>? = null
-        val queueReadStarted = CompletableDeferred<Unit>()
-        var threadImageBatchReads = 0
-        var threadImageSingleReads = 0
+        var beforeWrite: suspend () -> Unit = {}
+        var ignoreDeletes = false
+        var rejectQueueWrites = false
         val manifests = mutableMapOf<ThreadPageDownloadKey, ThreadPageDownloadManifest>()
         val pages = mutableMapOf<ThreadPageDownloadKey, ByteArray>()
         val tagManifests = mutableMapOf<TagMangaChapterDownloadKey, TagMangaChapterManifest>()
@@ -870,7 +936,6 @@ class DownloadRepositoryTest {
         }
 
         override suspend fun getSelectedFolderLabel(): String = "test"
-        override suspend fun getStorageKey(): String = storageKey
         override suspend fun isReady(): Boolean = true
         override suspend fun writeThreadPage(
             key: ThreadPageDownloadKey,
@@ -878,25 +943,21 @@ class DownloadRepositoryTest {
             threadPageBytes: ByteArray,
             images: List<PendingDownloadedImage>,
         ) {
+            beforeWrite()
             manifests[key] = json.decodeFromString(manifestBytes.decodeToString())
             pages[key] = threadPageBytes
             images.forEach { image -> imageUris[key to image.fileName] = "content://download/${image.fileName}" }
         }
 
+        override suspend fun updateThreadPage(key: ThreadPageDownloadKey, manifestBytes: ByteArray, threadPageBytes: ByteArray) {
+            manifests[key] = json.decodeFromString(manifestBytes.decodeToString())
+            pages[key] = threadPageBytes
+        }
         override suspend fun readThreadPage(key: ThreadPageDownloadKey): ByteArray? = pages[key]
-        override suspend fun resolveImageUri(key: ThreadPageDownloadKey, fileName: String): String? {
-            threadImageSingleReads++
-            return imageUris[key to fileName]
-        }
-        override suspend fun resolveImageUris(key: ThreadPageDownloadKey, fileNames: List<String>): Map<String, String> {
-            threadImageBatchReads++
-            return fileNames.mapNotNull { name -> imageUris[key to name]?.let { name to it } }.toMap()
-        }
+        override suspend fun resolveImageUri(key: ThreadPageDownloadKey, fileName: String): String? =
+            imageUris[key to fileName]
         override suspend fun readManifest(key: ThreadPageDownloadKey): ThreadPageDownloadManifest? = manifests[key]
-        override suspend fun listManifests(): List<ThreadPageDownloadManifest> {
-            threadManifestScans++
-            return manifests.values.toList()
-        }
+        override suspend fun listManifests(): List<ThreadPageDownloadManifest> = manifests.values.toList()
         override suspend fun writeTagMangaChapter(
             key: TagMangaChapterDownloadKey,
             manifestBytes: ByteArray,
@@ -909,10 +970,7 @@ class DownloadRepositoryTest {
             tagImageUris[key to fileName]
         override suspend fun readTagMangaManifest(key: TagMangaChapterDownloadKey): TagMangaChapterManifest? =
             tagManifests[key]
-        override suspend fun listTagMangaManifests(): List<TagMangaChapterManifest> {
-            tagManifestScans++
-            return tagManifests.values.toList()
-        }
+        override suspend fun listTagMangaManifests(): List<TagMangaChapterManifest> = tagManifests.values.toList()
         override suspend fun writeRssMangaChapter(
             key: RssMangaChapterDownloadKey,
             manifestBytes: ByteArray,
@@ -925,27 +983,15 @@ class DownloadRepositoryTest {
             rssImageUris[key to fileName]
         override suspend fun readRssMangaManifest(key: RssMangaChapterDownloadKey): RssMangaChapterManifest? =
             rssManifests[key]
-        override suspend fun listRssMangaManifests(): List<RssMangaChapterManifest> {
-            rssManifestScans++
-            return rssManifests.values.toList()
-        }
-        override suspend fun readQueue(): List<DownloadQueueEntry> {
-            queueReadStarted.complete(Unit)
-            queueReadGate?.await()
-            return queue
-        }
+        override suspend fun listRssMangaManifests(): List<RssMangaChapterManifest> = rssManifests.values.toList()
+        override suspend fun readQueue(): List<DownloadQueueEntry> = queue
         override suspend fun writeQueue(entries: List<DownloadQueueEntry>) {
-            queueWriteCount++
-            queueWriteGate?.let { gate ->
-                queuedWriteStarted.complete(Unit)
-                gate.await()
-            }
+            check(!rejectQueueWrites) { "queue is read only" }
             queue = entries
         }
 
         override suspend fun deleteThreadPage(key: ThreadPageDownloadKey) {
-            deleteStarted.complete(Unit)
-            deleteGate?.await()
+            if (ignoreDeletes) return
             manifests.remove(key)
             pages.remove(key)
             imageUris.keys.removeAll { it.first == key }

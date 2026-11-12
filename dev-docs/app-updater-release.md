@@ -83,6 +83,29 @@ Do not publish Gitee or Gitea ready manifests whose APK asset URL points back to
 
 iOS cannot install an IPA directly from inside a normal App Store/TestFlight app. The app updater therefore only checks the manifest and opens `releaseUrl`.
 
+The manual `Release` workflow builds an Android APK and two iPhone Release
+IPAs. The bundle version and build number come from `update/manifest.json`.
+
+- `yamibo-<channel>-v<version>-unsigned.ipa` is for self-signing.
+- `yamibo-<channel>-v<version>-signed.ipa` is signed for App Store Connect.
+  Install the distributed build through TestFlight.
+
+`check` validates the manifest, changelog, release tag, and Android and mirror
+credentials. Then `build_android` signs the APK and `build_ios` builds the
+unsigned IPA and exports the signed IPA using the Apple signing credentials.
+`release` waits for all three artifacts, verifies their presence and the APK
+checksum, and publishes all three to the same release on GitHub, Gitee, and
+Gitea. It generates the Android update feeds after the asset uploads.
+
+`publish_app_store` uses the signed IPA from `build_ios` and the App Store
+Connect API credentials. Its upload runs independently of release publication
+and can be retried separately if Apple has yet to accept the build. See the
+[TestFlight guide](testflight.md) for setup and retry details.
+
+A failed build prevents publication. If an asset upload fails, check each
+release and rerun the failed release job. Mirror reruns recreate their release
+and upload all three assets again.
+
 Recommended options:
 
 - App Store: use an App Store product URL as `releaseUrl`.

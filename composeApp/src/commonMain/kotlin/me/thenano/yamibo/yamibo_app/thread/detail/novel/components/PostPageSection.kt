@@ -14,6 +14,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -33,6 +35,9 @@ import me.thenano.yamibo.yamibo_app.components.text.rememberConvertedText
 import me.thenano.yamibo.yamibo_app.repository.ChapterStateRepository
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.thread.components.chapterPercentProgressLabel
+import me.thenano.yamibo.yamibo_app.thread.components.catalogDownloadLabel
+import me.thenano.yamibo.yamibo_app.repository.download.DownloadQueueEntry
+import me.thenano.yamibo.yamibo_app.repository.download.DownloadStatus
 
 /** Expandable page section with post titles */
 @Composable
@@ -40,6 +45,10 @@ internal fun PostPageSection(
     page: Int,
     isExpanded: Boolean,
     posts: List<Post>?,
+    loading: Boolean,
+    loadFailed: Boolean,
+    downloadEntry: DownloadQueueEntry?,
+    onRetry: () -> Unit,
     bookmarkedPostIds: Set<Long>,
     readPostIds: Set<Long>,
     chapterStates: Map<Long, ChapterStateRepository.Entry> = emptyMap(),
@@ -81,6 +90,21 @@ internal fun PostPageSection(
 
                 /** Expand / collapse chevron, or ">" for future reader nav */
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (downloadEntry != null && downloadEntry.status != DownloadStatus.NotDownloaded) {
+                        Icon(
+                            imageVector = YamiboIcons.Downloaded,
+                            contentDescription = null,
+                            tint = if (downloadEntry.status == DownloadStatus.Failed) colors.redAccent else colors.orangeAccent,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = catalogDownloadLabel(downloadEntry),
+                            color = if (downloadEntry.status == DownloadStatus.Failed) colors.redAccent else colors.orangeAccent,
+                            fontSize = 12.sp,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    }
                     Text(
                         text = "▼",
                         modifier = Modifier.graphicsLayer { rotationZ = rotation },
@@ -108,11 +132,22 @@ internal fun PostPageSection(
                         modifier = Modifier.fillMaxWidth().height(60.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp),
-                            color = colors.brownDeep,
-                            strokeWidth = 2.dp
-                        )
+                        Button(
+                            onClick = onRetry,
+                            enabled = !loading,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = colors.brownDeep,
+                                contentColor = colors.textOnDeepHigh,
+                                disabledContainerColor = colors.brownDeep,
+                                disabledContentColor = colors.textOnDeepHigh,
+                            ),
+                        ) {
+                            if (loading) {
+                                CircularProgressIndicator(Modifier.size(18.dp), color = colors.textOnDeepHigh, strokeWidth = 2.dp)
+                                Spacer(Modifier.width(8.dp))
+                            }
+                            Text(if (loading) i18n("載入中...") else if (loadFailed) i18n("載入失敗，點擊重試") else i18n("載入此頁"))
+                        }
                     }
                 } else {
                     posts.forEach { post ->

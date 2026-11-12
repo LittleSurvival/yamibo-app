@@ -35,10 +35,18 @@ def preserve_native_results():
 
 
 def main():
+    (OUTPUT / "production-refs.json").write_text(json.dumps({
+        "80": "297d2a6d3d821c8fb0fd9d5a2493562c8c760d2f",
+        "81": "d53c41065592dddf30a016b568ab41e9efe77646",
+        "82": "7e0dc73edc3837399dfa00ef9c05963f4e6e8da4",
+        "base": "ceb085be0b3ad3a50777141716c6f3bfa723433b",
+        "qaOverrides": ["shared/build.gradle.kts", "iosApp/Configuration/AppIdentifiers.xcconfig",
+            "composeApp/src/iosMain/kotlin/me/thenano/yamibo/yamibo_app/MainViewController.kt"]
+    }, indent=2), encoding="utf-8")
     simulator = None
     Path("gradlew").chmod(0o755)
     try:
-        run("Native compilation and 40 regressions", ["./gradlew",
+        run("Native compilation and 42 regressions", ["./gradlew",
             ":composeApp:compileKotlinIosSimulatorArm64", ":composeApp:compileKotlinIosArm64",
             ":shared:iosSimulatorArm64Test", "--console=plain", "--max-workers=2"], 1200)
         preserve_native_results()
@@ -49,7 +57,7 @@ def main():
                   "errors": sum(case.find("error") is not None for case in cases),
                   "skipped": sum(case.find("skipped") is not None for case in cases)}
         (OUTPUT / "native-summary.json").write_text(json.dumps(native, indent=2), encoding="utf-8")
-        assert native == {"tests": 40, "failures": 0, "errors": 0, "skipped": 0}, native
+        assert native == {"tests": 42, "failures": 0, "errors": 0, "skipped": 0}, native
 
         run("Configure independent XCTest target", ["gem", "install", "xcodeproj",
             "-v", "1.27.0", "--no-document", "--user-install"], 180)
@@ -89,18 +97,33 @@ def main():
         run("Install independent QA App", ["xcrun", "simctl", "install", simulator, str(apps[0])], 120)
         container = Path(subprocess.check_output(
             ["xcrun", "simctl", "get_app_container", simulator, BUNDLE, "data"], text=True).strip())
-        fixture = container / "Documents/qa_downloads"
+        fixture = container / "Documents/YamiboApp"
         run("Seed real storage manifests and images", [sys.executable,
             str(PROFILE / "generate_fixtures.py"), str(fixture)], 120)
         assert (fixture / "YamiboDownloads/thread_42_page_1_author_7/thread_page.json").is_file()
         print(f"Fixture root: {fixture}; manifests: {len(list(fixture.rglob('manifest.json')))}", flush=True)
         run("Run six actual reader and management UI cases", xcode + ["-resultBundlePath",
-            str(OUTPUT / "ios-ui.xcresult"), "-parallel-testing-enabled", "NO", "test-without-building"], 720)
+            str(OUTPUT / "ios-ui.xcresult"), "-parallel-testing-enabled", "NO", "-skip-testing:DownloadedContentUITests/DownloadedContentUITests/testBatchDeletionFromDefaultFolder", "test-without-building"], 720)
         summary = json.loads(run("Read individual UI execution summary", ["xcrun", "xcresulttool",
             "get", "test-results", "summary", "--path", str(OUTPUT / "ios-ui.xcresult")],
             60, capture=True).stdout)
         (OUTPUT / "ui-summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
         assert summary["passedTests"] == 6 and summary["failedTests"] == 0 and summary["skippedTests"] == 0, summary
+        run("Run destructive batch UI case separately from reader fixtures", xcode + ["-resultBundlePath",
+            str(OUTPUT / "ios-batch.xcresult"), "-parallel-testing-enabled", "NO",
+            "-only-testing:DownloadedContentUITests/DownloadedContentUITests/testBatchDeletionFromDefaultFolder",
+            "test-without-building"], 360)
+        batch = json.loads(run("Read batch UI summary", ["xcrun", "xcresulttool", "get", "test-results",
+            "summary", "--path", str(OUTPUT / "ios-batch.xcresult")], 60, capture=True).stdout)
+        (OUTPUT / "batch-summary.json").write_text(json.dumps(batch, indent=2), encoding="utf-8")
+        assert batch["passedTests"] == 1 and batch["failedTests"] == 0 and batch["skippedTests"] == 0, batch
+        assert (fixture / "qa-storage-passed.yamibobak").read_bytes() == b"default-folder-roundtrip"
+        remaining = [str(p.relative_to(fixture)) for p in fixture.rglob("*") if p.is_file()
+                     and (p.name in ("manifest.json", "thread_page.json") or p.suffix == ".png")]
+        (OUTPUT / "storage-summary.json").write_text(json.dumps({"defaultFolder": str(fixture),
+            "backupRoundTrip": "passed", "remainingDownloadedFiles": remaining}, indent=2), encoding="utf-8")
+        assert not remaining, remaining
+
     finally:
         preserve_native_results()
         if simulator:

@@ -20,7 +20,7 @@ class ISearchScreen(private val fid: ForumId? = null) : RestorableNavigatable {
 
     @Composable
     override fun Content() {
-        SearchScreen(fid = fid)
+        SearchScreen(fid = fid, screenId = id)
     }
 
     companion object Decoder : TypedRestorableNavigatableDecoder<ISearchScreen>(ISearchScreen::class) {

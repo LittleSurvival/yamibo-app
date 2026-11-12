@@ -407,18 +407,26 @@ internal fun ReaderCatalogPanel(
                                 modifier = Modifier.fillMaxWidth().height(60.dp),
                                 contentAlignment = Alignment.Center
                             ) {
-                                if (loadErrors[page] == true || loadingPages[page] != true) {
-                                    TextButton(onClick = {
+                                val loading = loadingPages[page] == true
+                                Button(
+                                    enabled = !loading,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = colors.brownDeep,
+                                        contentColor = colors.textOnDeepHigh,
+                                        disabledContainerColor = colors.brownDeep,
+                                        disabledContentColor = colors.textOnDeepHigh,
+                                    ),
+                                    onClick = {
                                         val pendingFloor = retryFloor?.takeIf { it.first == page }?.second
                                         navigate(page, pendingFloor)
-                                    }) {
-                                        Text(if (loadErrors[page] == true) i18n("載入失敗，點擊重試") else i18n("載入此頁"))
+                                    },
+                                ) {
+                                    if (loading) {
+                                        CircularProgressIndicator(Modifier.size(18.dp), color = colors.textOnDeepHigh, strokeWidth = 2.dp)
+                                        Spacer(Modifier.width(8.dp))
                                     }
-                                } else CircularProgressIndicator(
-                                    modifier = Modifier.size(24.dp),
-                                    color = colors.brownPrimary,
-                                    strokeWidth = 2.dp
-                                )
+                                    Text(if (loading) i18n("載入中...") else if (loadErrors[page] == true) i18n("載入失敗，點擊重試") else i18n("載入此頁"))
+                                }
                             }
                             HorizontalDivider(color = colors.brownPrimary.copy(alpha = 0.2f))
                         }

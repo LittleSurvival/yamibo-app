@@ -8,6 +8,7 @@ import io.github.littlesurvival.YamiboRoute
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.page.ProfilePage
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.network.WKWebViewCookieBridge
 import me.thenano.yamibo.yamibo_app.store.auth.CookieStore
@@ -41,7 +42,10 @@ class IOSAuthRepository(
         if (!isLoggedIn()) return YamiboResult.Failure(i18n("查無登入資料，請重新登入"))
 
         yamiboClient.setNativeCookies(cookieStore.load() ?: "")
-        when (val profileResult = yamiboClient.fetchProfileInfo()) {
+        // Profile enrichment must not hold the completed WebView login behind WAF/network retries.
+        val profileResult = withTimeoutOrNull(20_000L) { yamiboClient.fetchProfileInfo() }
+            ?: return YamiboResult.Failure(i18n("獲取用戶資料逾時，請稍後重試"))
+        when (profileResult) {
             is YamiboResult.Success -> {
                 userStore.save(profileResult.value)
                 return YamiboResult.Success(true)
@@ -70,18 +74,17 @@ class IOSAuthRepository(
     }
 
     override suspend fun startLoginDetect(onSuccess: suspend () -> Unit, onTimeOut: () -> Unit) {
-        var elapsed = 0L
-
-        while (elapsed < loginTimeout) {
-            if (isLoggedIn()) {
-                onSuccess()
-                return
+        val detected = withTimeoutOrNull(loginTimeout) {
+            while (true) {
+                // Login may complete through XHR while subresources keep didFinish pending.
+                WKWebViewCookieBridge.cookieHeaderForUrl(YamiboRoute.Domain.build())?.let {
+                    importCookieHeader(it)
+                }
+                if (isLoggedIn()) return@withTimeoutOrNull true
+                delay(loginDetectInterval.milliseconds)
             }
-            delay(loginDetectInterval.milliseconds)
-            elapsed += loginDetectInterval
         }
-
-        onTimeOut()
+        if (detected == true) onSuccess() else onTimeOut()
     }
 
     override fun restoreCookiesToWebView(onComplete: () -> Unit) {
@@ -114,8 +117,15 @@ class IOSAuthRepository(
                 }
             }
             val cookieHeader = cookieStrings.joinToString("; ")
-            cookieStore.save(cookieHeader)
-            yamiboClient.setNativeCookies(cookieHeader, importNox = true)
+            importCookieHeader(cookieHeader)
+        }
+    }
+
+    private fun importCookieHeader(cookieHeader: String) {
+        val previousAuth = AuthRepository.completeAuthenticationCookies(cookieStore.load())
+        cookieStore.save(cookieHeader)
+        yamiboClient.setNativeCookies(cookieHeader, importNox = true)
+        if (AuthRepository.completeAuthenticationCookies(cookieHeader) != previousAuth) {
             restoreCookiesToWebView()
         }
     }

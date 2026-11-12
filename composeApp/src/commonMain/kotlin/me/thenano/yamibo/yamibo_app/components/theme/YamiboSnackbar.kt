@@ -8,6 +8,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -34,38 +36,44 @@ fun YamiboSnackbarHost(
         modifier = modifier,
         snackbar = { data ->
             BoxWithConstraints {
-                Snackbar(
-                    containerColor = colors.brownDeep,
-                    contentColor = Color.White,
-                    actionContentColor = colors.orangeAccent,
-                    dismissActionContentColor = Color.White.copy(alpha = 0.85f),
-                    shape = RoundedCornerShape(12.dp),
-                    action = data.visuals.actionLabel?.let { label ->
-                        {
-                            TextButton(onClick = data::performAction) {
-                                Text(text = label, color = colors.orangeAccent)
-                            }
-                        }
-                    },
-                    dismissAction = if (data.visuals.withDismissAction) {
-                        {
-                            IconButton(
-                                onClick = data::dismiss,
-                                modifier = Modifier.semantics { contentDescription = "Dismiss" },
-                            ) {
-                                Text(text = "×", color = Color.White.copy(alpha = 0.85f))
-                            }
-                        }
-                    } else {
-                        null
-                    },
+                SwipeToDismissBox(
+                    state = rememberSwipeToDismissBoxState(),
+                    backgroundContent = {},
+                    onDismiss = { data.dismiss() },
                 ) {
-                    Text(
-                        text = data.visuals.message,
-                        modifier = Modifier
-                            .heightIn(max = snackbarMessageMaxHeight(maxHeight))
-                            .verticalScroll(rememberScrollState()),
-                    )
+                    Snackbar(
+                        containerColor = colors.brownDeep,
+                        contentColor = Color.White,
+                        actionContentColor = colors.orangeAccent,
+                        dismissActionContentColor = Color.White.copy(alpha = 0.85f),
+                        shape = RoundedCornerShape(12.dp),
+                        action = data.visuals.actionLabel?.let { label ->
+                            {
+                                TextButton(onClick = data::performAction) {
+                                    Text(text = label, color = colors.orangeAccent)
+                                }
+                            }
+                        },
+                        dismissAction = if (data.visuals.withDismissAction) {
+                            {
+                                IconButton(
+                                    onClick = data::dismiss,
+                                    modifier = Modifier.semantics { contentDescription = "Dismiss" },
+                                ) {
+                                    Text(text = "×", color = Color.White.copy(alpha = 0.85f))
+                                }
+                            }
+                        } else {
+                            null
+                        },
+                    ) {
+                        Text(
+                            text = data.visuals.message,
+                            modifier = Modifier
+                                .heightIn(max = snackbarMessageMaxHeight(this@BoxWithConstraints.maxHeight))
+                                .verticalScroll(rememberScrollState()),
+                        )
+                    }
                 }
             }
         }
