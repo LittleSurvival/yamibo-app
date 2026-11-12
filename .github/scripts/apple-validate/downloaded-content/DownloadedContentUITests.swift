@@ -68,10 +68,29 @@ final class DownloadedContentUITests: XCTestCase {
         sleep(2)
         assertLocalImage()
         capture(mode + "-300-local-images")
+        let firstPage = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "1 / 300")).firstMatch
+        XCTAssertTrue(firstPage.waitForExistence(timeout: 10), app.debugDescription)
+        for duration in [0.05, 0.9] {
+            for downward in [true, false] {
+                let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.985, dy: downward ? 0.30 : 0.70))
+                let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.985, dy: downward ? 0.70 : 0.30))
+                start.press(forDuration: duration, thenDragTo: end)
+                // Preserve the normal image long-press menu; only side seeking is removed.
+                let imageMenu = app.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", ["複製", "Copy", "复制"])).firstMatch
+                if imageMenu.exists {
+                    app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
+                }
+                XCTAssertTrue(firstPage.waitForExistence(timeout: 10), "Side drag changed the page: " + app.debugDescription)
+                capture(mode + "-edge-" + String(duration) + (downward ? "-down" : "-up"))
+            }
+        }
         app.swipeLeft()
         let secondPage = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "2 / 300")).firstMatch
         XCTAssertTrue(secondPage.waitForExistence(timeout: 10), app.debugDescription)
         capture(mode + "-after-navigation")
+        app.swipeRight()
+        XCTAssertTrue(firstPage.waitForExistence(timeout: 10), app.debugDescription)
+        capture(mode + "-normal-backward-page")
         XCTAssertEqual(app.state, .runningForeground)
     }
 

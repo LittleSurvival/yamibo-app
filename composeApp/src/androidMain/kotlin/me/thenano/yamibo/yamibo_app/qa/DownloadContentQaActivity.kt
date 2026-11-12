@@ -114,7 +114,7 @@ class DownloadContentQaActivity : ComponentActivity() {
                                 queue.value = queue.value.filterNot { it.key == items[items.lastIndex - 1].key }
                             }) { Text("ERROR") }
                         }
-                        Box(Modifier.weight(1f)) { DownloadQueueScreen() }
+                        Box(Modifier.weight(1f)) { DownloadQueueScreen(screenId = LocalNavigator.current.currentScreen.id) }
                     }
                 }
             }

@@ -39,8 +39,10 @@ def main():
         "80": "297d2a6d3d821c8fb0fd9d5a2493562c8c760d2f",
         "81": "d53c41065592dddf30a016b568ab41e9efe77646",
         "82": "7e0dc73edc3837399dfa00ef9c05963f4e6e8da4",
+        "imageReader": "3a20baa267b917b83080916230258a69d1922bb9",
         "base": "ceb085be0b3ad3a50777141716c6f3bfa723433b",
-        "qaOverrides": ["shared/build.gradle.kts", "iosApp/Configuration/AppIdentifiers.xcconfig",
+        "qaOverrides": ["composeApp/build.gradle.kts", "composeApp/src/debug/AndroidManifest.xml",
+            "composeApp/src/androidMain/kotlin/me/thenano/yamibo/yamibo_app/MainActivity.kt", "shared/build.gradle.kts", "iosApp/Configuration/AppIdentifiers.xcconfig",
             "composeApp/src/iosMain/kotlin/me/thenano/yamibo/yamibo_app/MainViewController.kt"]
     }, indent=2), encoding="utf-8")
     simulator = None
