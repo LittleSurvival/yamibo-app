@@ -117,6 +117,12 @@ def main():
             "summary", "--path", str(OUTPUT / "ios-batch.xcresult")], 60, capture=True).stdout)
         (OUTPUT / "batch-summary.json").write_text(json.dumps(batch, indent=2), encoding="utf-8")
         assert batch["passedTests"] == 1 and batch["failedTests"] == 0 and batch["skippedTests"] == 0, batch
+        # XCTest may reinstall the app and relocate its preserved data container.
+        # Resolve it again after UI execution; the pre-test UUID is not stable.
+        container = Path(subprocess.check_output(
+            ["xcrun", "simctl", "get_app_container", simulator, BUNDLE, "data"], text=True).strip())
+        fixture = container / "Documents/YamiboApp"
+        print(f"Post-test current data container: {container}", flush=True)
         assert (fixture / "qa-storage-passed.yamibobak").read_bytes() == b"default-folder-roundtrip"
         remaining = [str(p.relative_to(fixture)) for p in fixture.rglob("*") if p.is_file()
                      and (p.name in ("manifest.json", "thread_page.json") or p.suffix == ".png")]
