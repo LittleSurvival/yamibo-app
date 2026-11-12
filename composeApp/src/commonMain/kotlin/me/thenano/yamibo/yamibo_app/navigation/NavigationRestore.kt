@@ -51,7 +51,7 @@ annotation class RestorableScreenEntry
 
 interface NavigationRestoreLogger {
     fun onSnapshotStart(stackSize: Int)
-    fun onSnapshotItemSkipped(screenId: String, reason: String)
+    fun onSnapshotItemSkipped(screenId: ScreenId, reason: String)
     fun onSnapshotBuilt(restorableStackSize: Int)
     fun onSnapshotSaved(restorableStackSize: Int, bytes: Int)
     fun onRestoreStart(snapshotSize: Int)
@@ -66,8 +66,8 @@ object LoggerNavigationRestoreLogger : NavigationRestoreLogger {
         Logger.d(TAG, "snapshot_start stackSize=$stackSize")
     }
 
-    override fun onSnapshotItemSkipped(screenId: String, reason: String) {
-        Logger.d(TAG, "snapshot_skip screenId=$screenId reason=$reason")
+    override fun onSnapshotItemSkipped(screenId: ScreenId, reason: String) {
+        Logger.d(TAG, "snapshot_skip screenId=${screenId.value} reason=$reason")
     }
 
     override fun onSnapshotBuilt(restorableStackSize: Int) {

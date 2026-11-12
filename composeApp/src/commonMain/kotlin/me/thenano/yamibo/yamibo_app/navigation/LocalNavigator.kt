@@ -139,7 +139,7 @@ class ComposableNavigator private constructor(
         snapshotStack.add(screen.toRestoreSnapshot())
     }
 
-    private fun removeExistingScreen(screenId: String) {
+    private fun removeExistingScreen(screenId: ScreenId) {
         val existingIndex = stack.indexOfFirst { it.id == screenId }
         if (existingIndex < 0) return
 
