@@ -22,7 +22,7 @@ class ITagDetailScreen(
     val title: String,
     val page: Int? = null
 ) : RestorableNavigatable {
-    override val id: String = buildId(tagId.value, page)
+    override val id = buildId(tagId.value, page)
     override val restoreDecoder = Decoder
 
     override fun toRestoreSnapshot(): RestorableScreenSnapshot = restoreSnapshot(

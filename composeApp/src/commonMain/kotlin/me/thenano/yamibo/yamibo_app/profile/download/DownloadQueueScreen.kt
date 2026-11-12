@@ -48,6 +48,7 @@ import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.core.cache.CacheStorageUsage
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
+import me.thenano.yamibo.yamibo_app.navigation.ScreenId
 import me.thenano.yamibo.yamibo_app.profile.settings.ISettingsCategoryScreen
 import me.thenano.yamibo.yamibo_app.repository.DownloadRepository
 import me.thenano.yamibo.yamibo_app.repository.download.*
@@ -85,7 +86,7 @@ private fun DownloadStatus.canRemoveTask(): Boolean =
     this == DownloadStatus.Queued || this == DownloadStatus.Downloading || this == DownloadStatus.Paused || this == DownloadStatus.Failed
 
 @Composable
-fun DownloadQueueScreen(screenId: String) {
+fun DownloadQueueScreen(screenId: ScreenId) {
     val errorMessages = LocalForumErrorMessageResolver.current
     val colors = YamiboTheme.colors
     val navigator = LocalNavigator.current
