@@ -10,7 +10,7 @@ private data class SearchScreenRestorePayload(val fid: Int?)
 
 @RestorableScreenEntry
 class ISearchScreen(private val fid: ForumId? = null) : RestorableNavigatable {
-    override val id: String = buildId(fid?.value ?: "all")
+    override val id = buildId(fid?.value ?: "all")
     override val restoreDecoder = Decoder
 
     override fun toRestoreSnapshot(): RestorableScreenSnapshot = restoreSnapshot(
