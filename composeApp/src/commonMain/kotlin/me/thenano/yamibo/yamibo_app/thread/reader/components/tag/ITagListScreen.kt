@@ -22,7 +22,7 @@ class ITagListScreen(
     val tid: ThreadId,
     private val initialTags: List<TagValue> = emptyList()
 ) : RestorableNavigatable {
-    override val id: String = buildId(tid.value)
+    override val id = buildId(tid.value)
     override val restoreDecoder = Decoder
 
     override fun toRestoreSnapshot(): RestorableScreenSnapshot = restoreSnapshot(
