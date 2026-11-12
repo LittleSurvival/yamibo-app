@@ -15,7 +15,7 @@ def dismiss_image_menu(tree):
         x1,y1,x2,y2=map(int,re.findall(r"\d+",root.get("bounds")))
         q.adb("shell","input","tap",str((x1+x2)//2),str(y1+(y2-y1)*15//100))
 
-for mode in (["manga"] if negative else ["novel","thread","manga","tag","rss"]):
+for mode in (["manga"] if negative else os.environ.get("SIDE_SEEK_MODES", "novel,thread,manga,tag,rss").split(",")):
     q.adb("shell","am","start","-S","-f","0x10008000","-n",PKG+"/me.thenano.yamibo.yamibo_app.MainActivity","--es","qa-reader",mode)
     for attempt in range(8):
         tree=q.dump("final-"+mode)
