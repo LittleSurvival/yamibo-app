@@ -730,24 +730,25 @@ class DownloadRepositoryTest {
     @Test
     fun deletionCancelsManualRefreshWithoutLateResurrection() = runBlocking {
         val gate = CompletableDeferred<Unit>()
-        val entered = CompletableDeferred<Unit>()
+        val entered = CompletableDeferred<Job>()
         val storage = FakeStorage()
         val key = ThreadPageDownloadKey(460, 1)
         val repository = repository(storage = storage, threadRepository = FakeThreadRepository(mutableMapOf(1 to YamiboResult.Success(page(460, 1, 1, "https://example.com/image.jpg")))),
             imageFetcher = object : DownloadImageFetcher({ "" }) {
                 override suspend fun fetch(url: String): ByteArray {
-                    entered.complete(Unit)
+                    entered.complete(currentCoroutineContext().job)
                     withContext(NonCancellable) { gate.await() }
                     error("late fetch error")
                 }
             })
         val refresh = async { repository.refreshPage(ThreadId(460), "refresh", null, 1) }
-        withTimeout(3000) { entered.await() }
+        val refreshJob = withTimeout(3000) { entered.await() }
         val deletion = async { repository.clearPage(key) }
-        delay(100)
+        withTimeout(3000) { while (refreshJob.isActive) delay(1) }
         gate.complete(Unit)
         withTimeout(3000) { deletion.await().getOrThrow() }
-        assertTrue(refresh.isCancelled)
+        withTimeout(3000) { refresh.join() }
+        assertTrue(refresh.isCancelled, "The outer refresh must finish cancellation before checking its state")
         assertNull(storage.readManifest(key))
         assertTrue(repository.queue.value.none { it.key == key })
     }

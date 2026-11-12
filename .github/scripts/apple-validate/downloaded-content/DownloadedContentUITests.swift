@@ -82,7 +82,7 @@ final class DownloadedContentUITests: XCTestCase {
     func testDownloadedRssManga() { manga("rss") }
     func testDownloadedManagement() {
         open("management")
-        let tab = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ OR label CONTAINS[c] %@", "內容管理", "content management")).firstMatch
+        let tab = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ OR label CONTAINS %@ OR label CONTAINS[c] %@", "內容管理", "内容管理", "downloaded content")).firstMatch
         XCTAssertTrue(tab.waitForExistence(timeout: 30), app.debugDescription)
         tab.tap()
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "QA NOVEL")).firstMatch.waitForExistence(timeout: 30), app.debugDescription)
@@ -97,7 +97,7 @@ final class DownloadedContentUITests: XCTestCase {
 
     func testBatchDeletionFromDefaultFolder() {
         open("management")
-        let tab = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ OR label CONTAINS[c] %@", "內容管理", "content management")).firstMatch
+        let tab = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ OR label CONTAINS %@ OR label CONTAINS[c] %@", "內容管理", "内容管理", "downloaded content")).firstMatch
         XCTAssertTrue(tab.waitForExistence(timeout: 30), app.debugDescription)
         tab.tap()
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "QA NOVEL")).firstMatch.waitForExistence(timeout: 30), app.debugDescription)
