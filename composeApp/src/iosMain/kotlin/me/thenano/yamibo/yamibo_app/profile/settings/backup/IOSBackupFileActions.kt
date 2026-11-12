@@ -10,6 +10,7 @@ actual fun rememberBackupFileActions(
 ): BackupFileActions {
     return remember {
         BackupFileActions(
+            canSelectFolder = false,
             selectFolder = {},
             pickBackupFile = {},
         )

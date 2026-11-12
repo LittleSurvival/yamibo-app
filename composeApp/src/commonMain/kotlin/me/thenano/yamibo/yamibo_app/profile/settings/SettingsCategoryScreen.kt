@@ -521,6 +521,7 @@ private fun SettingsActionRow(
 @Composable
 private fun SharedStorageFolderCard(
     folderLabel: String?,
+    canSelectFolder: Boolean,
     onSelectFolder: () -> Unit,
 ) {
     val colors = YamiboTheme.colors
@@ -550,19 +551,21 @@ private fun SharedStorageFolderCard(
                     color = colors.textDark.copy(alpha = 0.65f),
                     modifier = Modifier.weight(1f),
                 )
-                Spacer(Modifier.width(12.dp))
-                Surface(
-                    onClick = onSelectFolder,
-                    shape = RoundedCornerShape(8.dp),
-                    color = colors.brownLight.copy(alpha = 0.26f),
-                ) {
-                    Text(
-                        text = i18n(if (folderLabel == null) "選擇資料夾" else "變更資料夾"),
-                        fontSize = 13.sp,
-                        color = colors.brownDeep,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    )
+                if (canSelectFolder) {
+                    Spacer(Modifier.width(12.dp))
+                    Surface(
+                        onClick = onSelectFolder,
+                        shape = RoundedCornerShape(8.dp),
+                        color = colors.brownLight.copy(alpha = 0.26f),
+                    ) {
+                        Text(
+                            text = i18n(if (folderLabel == null) "選擇資料夾" else "變更資料夾"),
+                            fontSize = 13.sp,
+                            color = colors.brownDeep,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        )
+                    }
                 }
             }
         }
@@ -640,6 +643,7 @@ private fun StorageContent(feedbackController: me.thenano.yamibo.yamibo_app.feed
 
     SharedStorageFolderCard(
         folderLabel = folderLabel,
+        canSelectFolder = folderActions.canSelectFolder,
         onSelectFolder = folderActions.selectFolder,
     )
     Spacer(Modifier.height(24.dp))

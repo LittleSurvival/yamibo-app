@@ -2,15 +2,13 @@ package me.thenano.yamibo.yamibo_app.repository
 
 import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.repository.backup.BackupStorageProvider
+import me.thenano.yamibo.yamibo_app.repository.download.resolveIosStorageFolder
 import me.thenano.yamibo.yamibo_app.repository.settings.AppSettingsRepository
 import okio.FileSystem
 import okio.Path
 import okio.Path.Companion.toPath
 import okio.buffer
 import okio.use
-import platform.Foundation.NSDocumentDirectory
-import platform.Foundation.NSSearchPathForDirectoriesInDomains
-import platform.Foundation.NSUserDomainMask
 
 class IOSBackupStorageProvider(
     private val appSettingsRepository: AppSettingsRepository,
@@ -21,8 +19,8 @@ class IOSBackupStorageProvider(
         runCatching(block)
             .onFailure { Logger.e(TAG, "$operation failed", it) }
 
-    override suspend fun getSelectedFolderLabel(): String =
-        selectedFolder().toString()
+    override suspend fun getSelectedFolderLabel(): String? =
+        runCatching { selectedFolder().name }.getOrNull()
 
     override suspend fun setSelectedFolder(uri: String): Result<Unit> = backupResult("setSelectedFolder") {
         appSettingsRepository.backupFolderUri.setValue(uri)
@@ -71,20 +69,10 @@ class IOSBackupStorageProvider(
         fileSystem.delete(fileInfo.uri.toPath())
     }
 
-    private fun selectedFolder(): Path {
-        val stored = appSettingsRepository.backupFolderUri.getValue()
-        if (stored.isNotBlank()) return stored.toPath()
-        return defaultDocumentsPath() / "YamiboApp"
-    }
+    private fun selectedFolder(): Path = resolveIosStorageFolder(appSettingsRepository.backupFolderUri.getValue())
 
     private fun ensureFolder(path: Path) {
         if (!fileSystem.exists(path)) fileSystem.createDirectories(path)
-    }
-
-    private fun defaultDocumentsPath(): Path {
-        val path = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, true)
-            .firstOrNull() as? String
-        return (path ?: ".").toPath()
     }
 
     private companion object {
