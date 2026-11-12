@@ -16,6 +16,7 @@ actual fun rememberBackupFileActions(
         uri?.let { onBackupPicked(it.toString()) }
     }
     return BackupFileActions(
+        canSelectFolder = true,
         selectFolder = { folderLauncher.launch(null) },
         pickBackupFile = { backupLauncher.launch(arrayOf("*/*")) },
     )
