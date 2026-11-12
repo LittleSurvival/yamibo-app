@@ -32,7 +32,7 @@ class IForumScreen(
 
     @Composable
     override fun Content() {
-        ForumPageScreen(fid = fid, name = name)
+        ForumPageScreen(fid = fid, name = name, screenId = id)
     }
 
     companion object Decoder : TypedRestorableNavigatableDecoder<IForumScreen>(IForumScreen::class) {

@@ -77,7 +77,7 @@ private data class SavedRssFavorite(
 )
 
 @Composable
-fun SearchScreen(fid: ForumId?) {
+fun SearchScreen(fid: ForumId?, screenId: String) {
     val errorMessages = LocalForumErrorMessageResolver.current
     val colors = YamiboTheme.colors
     val forumRepository = LocalForumRepository.current
@@ -257,9 +257,9 @@ fun SearchScreen(fid: ForumId?) {
         pendingRssFavorite = PendingRssFavorite(keyword, searchPage)
     }
 
-    DisposableEffect(navigator) {
+    DisposableEffect(navigator, screenId) {
         val handler = {
-            if (navigator.currentScreen is ISearchScreen) restorePreviousSearchPage() else false
+            if (navigator.currentScreen.id == screenId) restorePreviousSearchPage() else false
         }
         navigator.backHandlers.add(handler)
         onDispose { navigator.backHandlers.remove(handler) }
