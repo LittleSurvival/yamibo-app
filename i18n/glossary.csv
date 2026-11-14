@@ -11,6 +11,8 @@ source,en,zh-tw,zh-cn
 載入失敗，點擊重試,Loading failed. Tap to retry.,載入失敗，點擊重試,加载失败，点击重试
 載入此頁,Load this page,載入此頁,加载此页
 首頁資料不完整，請重試；若持續發生，請回報下方診斷代碼。,Homepage data is incomplete. Retry; if it persists please report the diagnostic code below.,首頁資料不完整，請重試；若持續發生，請回報下方診斷代碼。,首页数据不完整，请重试；若持续发生，请反馈下方诊断代码。
+版塊資料不完整，請重試,Forum data is incomplete. Please retry.,版塊資料不完整，請重試,版块数据不完整，请重试
+版塊暫無內容,This forum has no content yet.,版塊暫無內容,版块暂无内容
 Login,Login,登入,登录
 Save,Save,儲存,保存
 Cancel,Cancel,取消,取消
