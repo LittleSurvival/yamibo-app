@@ -36,6 +36,7 @@ import me.thenano.yamibo.yamibo_app.LocalForumRepository
 import me.thenano.yamibo.yamibo_app.MainTab
 import me.thenano.yamibo.yamibo_app.components.controls.YamiboSingleSelectDialog
 import me.thenano.yamibo.yamibo_app.components.feedback.YamiboDetailedErrorContent
+import me.thenano.yamibo.yamibo_app.components.feedback.YamiboEmptyContent
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBar
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBarIconAction
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
@@ -62,6 +63,8 @@ private data class ForumPageSnapshot(
     val filterType: FilterType?,
     val orderType: OrderType?,
 )
+private fun ForumPage.isValidFor(fid: ForumId): Boolean =
+    forum.fid == fid && forum.name.isNotBlank()
 
 /** Main Forum Screen Entry */
 @Composable
@@ -97,9 +100,12 @@ fun ForumPageScreen(fid: ForumId, name: String, screenId: ScreenId) {
         val cached = if (preferCache) forumRepository.getCachedForumPage(fid, page, filterType, orderType) else null
         if (cached != null) {
             if (requestGeneration != loadGeneration) return
-            currentPage = cached.pageNav?.currentPage ?: page
-            state = ForumState.Success(cached)
-            return
+            if (cached.isValidFor(fid)) {
+                currentPage = cached.pageNav?.currentPage ?: page
+                state = ForumState.Success(cached)
+                return
+            }
+            forumRepository.clearCachedForum(fid)
         }
 
         val result = forumRepository.fetchForum(fid, page, filterType, orderType)
@@ -107,8 +113,14 @@ fun ForumPageScreen(fid: ForumId, name: String, screenId: ScreenId) {
         state =
             when (result) {
                 is YamiboResult.Success -> {
-                    currentPage = result.value.pageNav?.currentPage ?: page
-                    ForumState.Success(result.value)
+                    val pageResult = result.value
+                    if (pageResult.isValidFor(fid)) {
+                        currentPage = pageResult.pageNav?.currentPage ?: page
+                        ForumState.Success(pageResult)
+                    } else {
+                        forumRepository.clearCachedForum(fid)
+                        ForumState.Error(i18n("版塊資料不完整，請重試"))
+                    }
                 }
 
                 else -> ForumState.Error(i18n(errorMessages.resolve(result)))
@@ -145,13 +157,6 @@ fun ForumPageScreen(fid: ForumId, name: String, screenId: ScreenId) {
         pageHistory.clear()
         loadGeneration += 1
         val requestGeneration = loadGeneration
-        val cached = forumRepository.getCachedForumPage(fid, filterType = selectedFilterType, orderType = selectedOrderType)
-        if (cached != null) {
-            if (requestGeneration != loadGeneration) return@LaunchedEffect
-            currentPage = cached.pageNav?.currentPage ?: 1
-            state = ForumState.Success(cached)
-            return@LaunchedEffect
-        }
         loadPage(1, requestGeneration = requestGeneration)
     }
 
@@ -268,14 +273,23 @@ fun ForumPageScreen(fid: ForumId, name: String, screenId: ScreenId) {
                                     forumRepository.fetchForum(fid, currentPage, selectedFilterType, selectedOrderType)
                                 ) {
                                     is YamiboResult.Success -> {
-                                        forumRepository.setCachedForumPage(
-                                            fid,
-                                            currentPage,
-                                            result.value,
-                                            selectedFilterType,
-                                            selectedOrderType,
-                                        )
-                                        state = ForumState.Success(result.value)
+                                        val refreshedPage = result.value
+                                        if (refreshedPage.isValidFor(fid)) {
+                                            forumRepository.setCachedForumPage(
+                                                fid,
+                                                currentPage,
+                                                refreshedPage,
+                                                selectedFilterType,
+                                                selectedOrderType,
+                                            )
+                                            state = ForumState.Success(refreshedPage)
+                                        } else {
+                                            forumRepository.clearCachedForum(fid)
+                                            feedbackController.post(
+                                                message = i18n("版塊資料不完整，請重試"),
+                                                duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short,
+                                            )
+                                        }
                                     }
 
                                     else -> {
@@ -541,6 +555,15 @@ private fun ForumContent(
                     onClick = { onThreadClick(thread) },
                     onAuthorClick = onAuthorClick,
                 )
+            }
+
+            if (forumPage.subForums.isEmpty() && forumPage.pinnedItems.isEmpty() && forumPage.threads.isEmpty()) {
+                item {
+                    YamiboEmptyContent(
+                        message = i18n("版塊暫無內容"),
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 80.dp),
+                    )
+                }
             }
 
             /** page navigation */
