@@ -30,10 +30,6 @@ interface ForumRepository {
             orderFilter ?: "default",
             orderBy ?: "default",
         ).joinToString("_")
-
-        companion object {
-            fun keyPrefix(fid: Int): String = "${fid}_"
-        }
     }
 
     suspend fun fetchHomePage(): YamiboResult<HomePage>
@@ -65,12 +61,4 @@ interface ForumRepository {
         filterType: FilterType? = null,
         orderType: OrderType? = null,
     ): ForumPage?
-    fun setCachedForumPage(
-        fid: ForumId,
-        page: Int,
-        forumPage: ForumPage,
-        filterType: FilterType? = null,
-        orderType: OrderType? = null,
-    )
-    fun clearCachedForum(fid: ForumId)
 }

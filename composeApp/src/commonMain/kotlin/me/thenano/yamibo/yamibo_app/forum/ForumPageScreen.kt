@@ -36,6 +36,7 @@ import me.thenano.yamibo.yamibo_app.LocalForumRepository
 import me.thenano.yamibo.yamibo_app.MainTab
 import me.thenano.yamibo.yamibo_app.components.controls.YamiboSingleSelectDialog
 import me.thenano.yamibo.yamibo_app.components.feedback.YamiboDetailedErrorContent
+import me.thenano.yamibo.yamibo_app.components.feedback.YamiboEmptyContent
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBar
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBarIconAction
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
@@ -53,7 +54,7 @@ import me.thenano.yamibo.yamibo_app.webview.action.IActionWebView
 private sealed interface ForumState {
     data object Loading : ForumState
     data class Success(val page: ForumPage) : ForumState
-    data class Error(val message: String) : ForumState
+    data class Error(val message: String, val page: Int) : ForumState
 }
 
 private data class ForumPageSnapshot(
@@ -91,10 +92,9 @@ fun ForumPageScreen(fid: ForumId, name: String, screenId: ScreenId) {
         page: Int,
         filterType: FilterType? = selectedFilterType,
         orderType: OrderType? = selectedOrderType,
-        preferCache: Boolean = true,
         requestGeneration: Int = loadGeneration,
     ) {
-        val cached = if (preferCache) forumRepository.getCachedForumPage(fid, page, filterType, orderType) else null
+        val cached = forumRepository.getCachedForumPage(fid, page, filterType, orderType)
         if (cached != null) {
             if (requestGeneration != loadGeneration) return
             currentPage = cached.pageNav?.currentPage ?: page
@@ -111,7 +111,7 @@ fun ForumPageScreen(fid: ForumId, name: String, screenId: ScreenId) {
                     ForumState.Success(result.value)
                 }
 
-                else -> ForumState.Error(i18n(errorMessages.resolve(result)))
+                else -> ForumState.Error(i18n(errorMessages.resolve(result)), page)
             }
     }
 
@@ -145,13 +145,6 @@ fun ForumPageScreen(fid: ForumId, name: String, screenId: ScreenId) {
         pageHistory.clear()
         loadGeneration += 1
         val requestGeneration = loadGeneration
-        val cached = forumRepository.getCachedForumPage(fid, filterType = selectedFilterType, orderType = selectedOrderType)
-        if (cached != null) {
-            if (requestGeneration != loadGeneration) return@LaunchedEffect
-            currentPage = cached.pageNav?.currentPage ?: 1
-            state = ForumState.Success(cached)
-            return@LaunchedEffect
-        }
         loadPage(1, requestGeneration = requestGeneration)
     }
 
@@ -254,7 +247,7 @@ fun ForumPageScreen(fid: ForumId, name: String, screenId: ScreenId) {
                         message = current.message,
                         onRetry = {
                             state = ForumState.Loading
-                            scope.launch { loadPage(currentPage) }
+                            scope.launch { loadPage(current.page) }
                         }
                     )
 
@@ -268,13 +261,6 @@ fun ForumPageScreen(fid: ForumId, name: String, screenId: ScreenId) {
                                     forumRepository.fetchForum(fid, currentPage, selectedFilterType, selectedOrderType)
                                 ) {
                                     is YamiboResult.Success -> {
-                                        forumRepository.setCachedForumPage(
-                                            fid,
-                                            currentPage,
-                                            result.value,
-                                            selectedFilterType,
-                                            selectedOrderType,
-                                        )
                                         state = ForumState.Success(result.value)
                                     }
 
@@ -541,6 +527,15 @@ private fun ForumContent(
                     onClick = { onThreadClick(thread) },
                     onAuthorClick = onAuthorClick,
                 )
+            }
+
+            if (forumPage.subForums.isEmpty() && forumPage.pinnedItems.isEmpty() && forumPage.threads.isEmpty()) {
+                item {
+                    YamiboEmptyContent(
+                        message = i18n("版塊暫無內容"),
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 80.dp),
+                    )
+                }
             }
 
             /** page navigation */

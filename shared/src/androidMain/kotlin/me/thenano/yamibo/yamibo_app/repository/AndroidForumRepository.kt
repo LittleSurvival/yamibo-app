@@ -15,6 +15,8 @@ import io.github.littlesurvival.dto.value.SearchId
 import me.thenano.yamibo.yamibo_app.store.auth.CookieStore
 import me.thenano.yamibo.yamibo_app.repository.forum.ForumFavoriteSynchronizer
 import me.thenano.yamibo.yamibo_app.repository.forum.HomePageLoader
+import me.thenano.yamibo.yamibo_app.repository.forum.getValidForumPage
+import me.thenano.yamibo.yamibo_app.repository.forum.storeForumResult
 import me.thenano.yamibo.yamibo_app.store.forum.ForumFavoriteStore
 import kotlin.time.Duration.Companion.hours
 
@@ -53,10 +55,7 @@ class AndroidForumRepository(
         yamiboClient.setCookie(cookieStore.load() ?: "")
         val result = yamiboClient.fetchForumById(fid, filterType, orderType, page)
 
-        if (result is YamiboResult.Success) {
-            forumCache.set(forumCacheKey(fid, page, filterType, orderType), result.value)
-        }
-        return result
+        return forumCache.storeForumResult(forumCacheKey(fid, page, filterType, orderType), fid, result)
     }
 
     override suspend fun fetchSearch(
@@ -101,21 +100,7 @@ class AndroidForumRepository(
         filterType: FilterType?,
         orderType: OrderType?,
     ): ForumPage? =
-        forumCache.get(forumCacheKey(fid, page, filterType, orderType))
-
-    override fun setCachedForumPage(
-        fid: ForumId,
-        page: Int,
-        forumPage: ForumPage,
-        filterType: FilterType?,
-        orderType: OrderType?,
-    ) {
-        forumCache.set(forumCacheKey(fid, page, filterType, orderType), forumPage)
-    }
-
-    override fun clearCachedForum(fid: ForumId) {
-        forumCache.removeByPrefix(ForumRepository.ForumCacheKey.keyPrefix(fid.value))
-    }
+        forumCache.getValidForumPage(forumCacheKey(fid, page, filterType, orderType), fid)
 
     private fun forumCacheKey(
         fid: ForumId,
