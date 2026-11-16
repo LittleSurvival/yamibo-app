@@ -1,8 +1,8 @@
 {
   "channel": "stable",
-  "versionName": "0.0.10",
-  "versionCode": 11,
+  "versionName": "0.1.0",
+  "versionCode": 12,
   "isReady": false,
-  "releaseNotes": "改善下載內容與閱讀器圖片載入，修復離線閱讀入口、快取清除與目錄跨頁跳轉，新增可滑動關閉的提示訊息及論壇服務狀態公告",
+  "releaseNotes": "修復圖片載入 HTTP 403、漫畫閱讀器誤觸側邊跳頁和版塊頁偶發空白，改善下載任務批次管理",
   "assets": []
 }
