@@ -119,5 +119,5 @@ private fun Color.bestReadableOn(background: Color): Color {
     return candidates.maxBy { it.contrastAgainst(background) }
 }
 
-private fun Color.ensureContrastOn(background: Color, minimumRatio: Double): Color =
+internal fun Color.ensureContrastOn(background: Color, minimumRatio: Double): Color =
     if (contrastAgainst(background) >= minimumRatio) this else bestReadableOn(background)

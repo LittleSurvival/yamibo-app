@@ -99,6 +99,7 @@ private sealed interface InAppLinkResolvingState {
 private fun InAppLinkResolvingScreen(url: String, context: InAppLinkContext) {
     val errorMessages = me.thenano.yamibo.yamibo_app.LocalForumErrorMessageResolver.current
     val colors = YamiboTheme.colors
+    val cardColors = CardDefaults.elevatedCardColors(containerColor = colors.creamSurface)
     val navigator = LocalNavigator.current
     val repository = LocalInAppLinkNavigationRepository.current
     var state by remember(url, context) { mutableStateOf<InAppLinkResolvingState>(InAppLinkResolvingState.Loading) }
@@ -143,6 +144,7 @@ private fun InAppLinkResolvingScreen(url: String, context: InAppLinkContext) {
             when (val current = state) {
                 InAppLinkResolvingState.Loading -> {
                     ElevatedCard(
+                        colors = cardColors,
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(16.dp),
                     ) {
@@ -154,12 +156,12 @@ private fun InAppLinkResolvingScreen(url: String, context: InAppLinkContext) {
                             Text(progressText, color = colors.brownPrimary, fontSize = 14.sp)
                             LinearProgressIndicator(
                                 modifier = Modifier.fillMaxWidth(),
-                                color = colors.brownDeep,
+                                color = colors.brownPrimary,
                                 trackColor = colors.brownPrimary.copy(alpha = 0.18f),
                             )
                             Text(
                                 text = url,
-                                color = colors.textDark.copy(alpha = 0.55f),
+                                color = colors.textOnSurface.copy(alpha = 0.72f),
                                 fontSize = 12.sp,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
@@ -170,6 +172,7 @@ private fun InAppLinkResolvingScreen(url: String, context: InAppLinkContext) {
 
                 is InAppLinkResolvingState.Error -> {
                     ElevatedCard(
+                        colors = cardColors,
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(16.dp),
                     ) {
@@ -185,7 +188,7 @@ private fun InAppLinkResolvingScreen(url: String, context: InAppLinkContext) {
                                 Text(current.message, color = colors.brownPrimary, fontSize = 14.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
                                 Text(
                                     text = url,
-                                    color = colors.textDark.copy(alpha = 0.55f),
+                                    color = colors.textOnSurface.copy(alpha = 0.72f),
                                     fontSize = 12.sp,
                                     maxLines = 3,
                                     overflow = TextOverflow.Ellipsis,
