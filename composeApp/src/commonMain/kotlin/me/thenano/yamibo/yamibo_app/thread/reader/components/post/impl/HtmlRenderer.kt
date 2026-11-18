@@ -16,6 +16,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -59,6 +60,7 @@ import me.thenano.yamibo.yamibo_app.navigation.looksLikeSupportedYamiboInAppLink
 import me.thenano.yamibo.yamibo_app.repository.inapplinknavigation.InAppLinkContext
 import me.thenano.yamibo.yamibo_app.repository.inapplinknavigation.normalizeYamiboUrl
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
+import me.thenano.yamibo.yamibo_app.components.theme.ensureContrastOn
 import me.thenano.yamibo.yamibo_app.thread.image.ImageViewer
 import me.thenano.yamibo.yamibo_app.thread.reader.debug.DebugRecomposeProbe
 import me.thenano.yamibo.yamibo_app.util.normalizeImageUrl
@@ -225,7 +227,7 @@ private fun applySpoilerAnnotations(
         builder.addStringAnnotation(SPOILER_ANNOTATION_TAG, key, range.start, range.end)
         if (key in revealedKeys) {
             builder.addStyle(
-                SpanStyle(color = readableSpoilerTextColor(range.background, defaultTextColor)),
+                SpanStyle(color = defaultTextColor.ensureContrastOn(range.background, 4.5)),
                 range.start,
                 range.end,
             )
@@ -284,9 +286,24 @@ private fun Color.isVisuallySameAs(other: Color): Boolean {
         kotlin.math.abs(blue - other.blue) < 0.015f
 }
 
-private fun readableSpoilerTextColor(background: Color, fallback: Color): Color {
-    val luminance = (0.299f * background.red) + (0.587f * background.green) + (0.114f * background.blue)
-    return if (luminance < 0.45f) Color.White else fallback
+private fun AnnotatedString.adjustDarkText(defaultText: Color, pageBackground: Color): AnnotatedString {
+    val styles = spanStyles.filter { it.item.color != Color.Unspecified || it.item.background != Color.Unspecified }
+    if (styles.isEmpty()) return this
+    val builder = AnnotatedString.Builder(this)
+    // Foreground and background can come from different, nested HTML elements.
+    styles.flatMap { listOf(it.start, it.end) }.distinct().sorted().zipWithNext { start, end ->
+        val foreground = styles.lastOrNull { it.start <= start && it.end >= end && it.item.color != Color.Unspecified }?.item?.color
+        val background = styles.lastOrNull { it.start <= start && it.end >= end && it.item.background != Color.Unspecified }?.item?.background
+        val text = foreground ?: defaultText
+        val adjusted = when {
+            background != null && foreground?.isVisuallySameAs(background) == true -> text // Tap-to-reveal spoiler
+            background != null -> text.ensureContrastOn(background.compositeOver(pageBackground), 4.5)
+            text.red <= 0.2f && text.green <= 0.2f && text.blue <= 0.2f && text.alpha > 0f -> Color.White.copy(alpha = 0.9f)
+            else -> text
+        }
+        if (adjusted != text) builder.addStyle(SpanStyle(color = adjusted), start, end)
+    }
+    return builder.toAnnotatedString()
 }
 
 private fun htmlTextLineHeightSp(
@@ -648,26 +665,8 @@ private fun HtmlBlockRenderer(
     val isDarkTheme = (colors.creamBackground.red + colors.creamBackground.green + colors.creamBackground.blue) < 1.5f
 
     val adjustAnnotatedString: @Composable (AnnotatedString) -> AnnotatedString = { input ->
-        remember(input, isDarkTheme) {
-            if (!isDarkTheme) {
-                input
-            } else {
-                val newBuilder = AnnotatedString.Builder(input.text)
-                input.spanStyles.forEach { range ->
-                    var style = range.item
-                    if (style.color != Color.Unspecified) {
-                        if (style.color.red <= 0.2f && style.color.green <= 0.2f && style.color.blue <= 0.2f && style.color.alpha > 0f) {
-                            style = style.copy(color = Color.White.copy(alpha = 0.9f))
-                        }
-                    }
-                    newBuilder.addStyle(style, range.start, range.end)
-                }
-                input.paragraphStyles.forEach { newBuilder.addStyle(it.item, it.start, it.end) }
-                input.getStringAnnotations(0, input.length).forEach {
-                    newBuilder.addStringAnnotation(it.tag, it.item, it.start, it.end) 
-                }
-                newBuilder.toAnnotatedString()
-            }
+        remember(input, colors.htmlTextDark, colors.creamBackground) {
+            if (isDarkTheme) input.adjustDarkText(colors.htmlTextDark, colors.creamBackground) else input
         }
     }
 
@@ -681,13 +680,13 @@ private fun HtmlBlockRenderer(
             val displayBlock = remember(block, firstLineIndent, firstLineIndentChars) {
                 applyFirstLineIndent(block, firstLineIndent, firstLineIndentChars)
             }
-            val baseAdjustedAnnotatedString = adjustAnnotatedString(displayBlock.annotatedString)
-            val linkedAnnotatedString = remember(baseAdjustedAnnotatedString, colors.htmlTextDark) {
-                applyThemedLinkStyle(baseAdjustedAnnotatedString, colors.htmlTextDark)
+            val linkedAnnotatedString = remember(displayBlock.annotatedString, colors.htmlTextDark) {
+                applyThemedLinkStyle(displayBlock.annotatedString, colors.htmlTextDark)
             }
-            val adjustedAnnotatedString = remember(linkedAnnotatedString, revealedSpoilerKeys, colors.htmlTextDark) {
+            val readableText = adjustAnnotatedString(linkedAnnotatedString)
+            val adjustedAnnotatedString = remember(readableText, revealedSpoilerKeys, colors.htmlTextDark) {
                 applySpoilerAnnotations(
-                    text = linkedAnnotatedString,
+                    text = readableText,
                     revealedKeys = revealedSpoilerKeys,
                     defaultTextColor = colors.htmlTextDark,
                 )
