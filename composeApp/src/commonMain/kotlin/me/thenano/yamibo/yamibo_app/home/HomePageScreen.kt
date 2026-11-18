@@ -63,11 +63,11 @@ import org.jetbrains.compose.resources.painterResource
 import yamibo_app.composeapp.generated.resources.Res
 import yamibo_app.composeapp.generated.resources.logo_homepage
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 /** Sealed state for the home page */
 internal sealed interface HomeState {
-    data object WaitingForNetwork : HomeState
-    data object Loading : HomeState
+    data class Loading(val networkError: String? = null) : HomeState
     data class Success(val page: HomePage) : HomeState
     data class Error(val message: String) : HomeState
 }
@@ -89,7 +89,7 @@ fun HomePageScreen(
     val scope = rememberCoroutineScope()
     val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
 
-    var state by remember { mutableStateOf<HomeState>(HomeState.Loading) }
+    var state by remember { mutableStateOf<HomeState>(HomeState.Loading()) }
     var isRefreshing by remember { mutableStateOf(false) }
     var isFetching by remember { mutableStateOf(false) }
     val requestMutex = remember { Mutex() }
@@ -125,7 +125,7 @@ fun HomePageScreen(
             if (initialLoad) forumRepository.getCachedHomePage()?.let { state = HomeState.Success(it) }
             val hadContent = state is HomeState.Success
             isRefreshing = hadContent && !initialLoad && !automaticRetry
-            if (!hadContent && !automaticRetry) state = HomeState.Loading
+            if (!hadContent) state = HomeState.Loading()
             val result = forumRepository.fetchHomePage()
             if (result is YamiboResult.Success) {
                 state = HomeState.Success(result.value)
@@ -137,7 +137,7 @@ fun HomePageScreen(
                 state = if (!hadContent && networkFailure && networkAvailability != null &&
                     (!recovery.available || recovery.retryReady || reason.contains("Code=-1009"))
                 ) {
-                    HomeState.WaitingForNetwork
+                    HomeState.Loading(networkError = i18n(failureMessage))
                 } else {
                     state.afterRefresh(result, failureMessage)
                 }
@@ -166,6 +166,17 @@ fun HomePageScreen(
         }
     }
 
+    // Keep the same skeleton during a brief outage, then offer the usual retry action.
+    val pendingError = (state as? HomeState.Loading)?.networkError
+    LaunchedEffect(pendingError, isForeground) {
+        if (pendingError != null && isForeground) {
+            kotlinx.coroutines.delay(10.seconds)
+            if ((state as? HomeState.Loading)?.networkError == pendingError) {
+                state = HomeState.Error(pendingError)
+            }
+        }
+    }
+
     /** Initial load: show cache immediately, then refresh once so message badge is current. */
     LaunchedEffect(Unit) { loadHomePage(initialLoad = true) }
 
@@ -183,13 +194,6 @@ fun HomePageScreen(
     Box(modifier = Modifier.fillMaxSize().background(colors.creamBackground)) {
         when (val currentState = state) {
             is HomeState.Loading -> LoadingSkeleton()
-            HomeState.WaitingForNetwork -> Column(
-                modifier = Modifier.align(Alignment.Center).padding(horizontal = 16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(i18n("等待網路連線，連線後會自動載入。"), color = colors.brownPrimary)
-                TextButton(onClick = { scope.launch { loadHomePage() } }) { Text(i18n("重試")) }
-            }
             is HomeState.Error ->
                 ErrorContent(
                     message = currentState.message,
