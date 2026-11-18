@@ -124,18 +124,6 @@ internal fun YamiboDetailedErrorContent(
                             )
                         }
                         if (expanded) {
-                            SelectionContainer {
-                                Text(
-                                    text = diagnostics,
-                                    modifier = Modifier.fillMaxWidth()
-                                        .heightIn(max = minOf(240.dp, availableHeight * 0.4f))
-                                        .verticalScroll(rememberScrollState()),
-                                    color = colors.brownPrimary,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 12.sp,
-                                    lineHeight = 16.sp,
-                                )
-                            }
                             TextButton(onClick = {
                                 clipboard.setText(AnnotatedString(diagnostics))
                                 copied = true
@@ -143,6 +131,16 @@ internal fun YamiboDetailedErrorContent(
                                 Text(
                                     if (copied) i18n("已複製診斷詳情") else i18n("複製診斷詳情"),
                                     color = colors.brownPrimary,
+                                )
+                            }
+                            SelectionContainer {
+                                Text(
+                                    text = diagnostics,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    color = colors.brownPrimary,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 12.sp,
+                                    lineHeight = 16.sp,
                                 )
                             }
                         }
