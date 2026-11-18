@@ -77,6 +77,35 @@ internal fun HomeState.afterRefresh(result: YamiboResult<HomePage>, failureMessa
     else -> if (this is HomeState.Success) this else HomeState.Error(i18n(failureMessage))
 }
 
+/** A failed request consumes at most one retry per newly available network path. */
+private class HomeNetworkRecovery {
+    var available by mutableStateOf(false)
+        private set
+    private var generation by mutableStateOf(0L)
+    private var failedRequestGeneration by mutableStateOf<Long?>(null)
+
+    val retryReady: Boolean
+        get() = available && failedRequestGeneration?.let { it < generation } == true
+
+    fun returnedToForeground() {
+        if (available && failedRequestGeneration == generation) generation++
+    }
+
+    fun availabilityChanged(isAvailable: Boolean) {
+        if (isAvailable && !available) generation++
+        available = isAvailable
+    }
+
+    fun requestStarted(): Long {
+        failedRequestGeneration = null
+        return generation
+    }
+
+    fun requestFailed(requestGeneration: Long, isNetworkFailure: Boolean) {
+        failedRequestGeneration = requestGeneration.takeIf { isNetworkFailure }
+    }
+}
+
 /** Main Entry */
 @Composable
 fun HomePageScreen(
