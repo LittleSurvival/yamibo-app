@@ -341,6 +341,18 @@ fun MainViewController() = ComposeUIViewController {
         LocalImageReaderModeOverrideRepository provides imageReaderModeOverrideRepository,
         LocalSignReminderScheduler provides signReminderScheduler,
     ) {
-        RecoveryValidationScreen()
+        val messageNotificationEnabled = appSettingsRepository.messageNotificationEnabled.state()
+        val messageNotificationInterval = appSettingsRepository.messageNotificationInterval.state()
+
+        androidx.compose.runtime.LaunchedEffect(messageNotificationEnabled, messageNotificationInterval) {
+            messageNotificationScheduler.setEnabled(
+                enabled = messageNotificationEnabled,
+                interval = messageNotificationInterval,
+            )
+            if (messageNotificationEnabled) requestIOSNotificationAuthorizationIfNeeded()
+        }
+        YamiboWafRecoveryRoot(yamiboClient) {
+            App()
+        }
     }
 }
