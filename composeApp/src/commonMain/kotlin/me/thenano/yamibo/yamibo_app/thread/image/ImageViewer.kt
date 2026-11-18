@@ -409,22 +409,27 @@ private fun ImageErrorContent(
             Text(
                 text = i18n("圖片載入失敗"),
                 color = errorTextColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 fontSize = 14.sp,
+                lineHeight = 17.sp,
                 fontWeight = FontWeight.SemiBold
             )
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(2.dp))
             Text(
                 text = errorMessage,
                 color = errorSubTextColor,
                 fontSize = 11.sp,
+                lineHeight = 14.sp,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(2.dp))
             Text(
                 text = fullUrl,
                 color = errorUrlColor,
                 fontSize = 10.sp,
+                lineHeight = 12.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 style = TextStyle(textDecoration = TextDecoration.Underline)
@@ -435,7 +440,7 @@ private fun ImageErrorContent(
             colors = ButtonDefaults.outlinedButtonColors(
                 contentColor = colors.brownPrimary
             ),
-            contentPadding = PaddingValues(horizontal = 28.dp, vertical = 8.dp)
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
         ) {
             Text(
                 text = i18n("重新載入"),

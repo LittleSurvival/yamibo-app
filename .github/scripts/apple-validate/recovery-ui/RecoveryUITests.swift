@@ -29,7 +29,9 @@ final class RecoveryUITests: XCTestCase {
     }
 
     func shot(_ name: String) {
-        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        // Compose can publish accessibility updates one frame before Metal presents them.
+        Thread.sleep(forTimeInterval: 0.7)
+        let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
@@ -78,6 +80,10 @@ final class RecoveryUITests: XCTestCase {
     func testInlineImageAction() {
         launch("image")
         see(["QA attempts=0"])
+        see(["Fixture text"], contains: true)
+        let message = label(["Fixture text"], contains: true)
+        XCTAssertGreaterThan(message.frame.height, 18)
+        XCTAssertLessThanOrEqual(message.frame.maxX, label(reloadNames).frame.minX)
         shot("compact-inline-image")
         tapVisible(reloadNames)
         see(["QA attempts=1"])
@@ -111,6 +117,7 @@ final class RecoveryUITests: XCTestCase {
     func testHistoryAction() {
         launch("history")
         see(["QA attempts=1"])
+        see(retryNames)
         shot("history-error-large-text")
         tapVisible(retryNames)
         see(["QA attempts=2"])
