@@ -56,7 +56,19 @@ final class RecoveryUITests: XCTestCase {
 
     func testExpandedDiagnosticsAction() {
         launch("diagnostic")
-        tapVisible(["查看診斷詳情", "查看诊断详情", "Show diagnostic details"])
+        see(retryNames)
+        let retry = label(retryNames)
+        XCTAssertTrue(retry.isHittable && app.frame.contains(retry.frame))
+        let details = ["查看診斷詳情", "查看诊断详情", "Show diagnostic details"]
+        let title = label(["載入失敗", "加载失败", "Loading failed"])
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        // Scroll the optional message pane, leaving the recovery action in its original position.
+        if !label(details).exists || !label(details).isHittable {
+            let start = origin.withOffset(CGVector(dx: retry.frame.midX, dy: retry.frame.minY - 20))
+            let end = origin.withOffset(CGVector(dx: retry.frame.midX, dy: title.frame.minY + 4))
+            start.press(forDuration: 0.1, thenDragTo: end)
+        }
+        tapVisible(details)
         see(["收起診斷詳情", "收起诊断详情", "Hide diagnostic details"])
         shot("expanded-diagnostics")
         tapVisible(retryNames)
