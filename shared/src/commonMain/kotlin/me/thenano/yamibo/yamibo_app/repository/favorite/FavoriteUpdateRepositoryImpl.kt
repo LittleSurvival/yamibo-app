@@ -12,12 +12,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.repository.*
 import me.thenano.yamibo.yamibo_app.repository.FavoriteUpdateRepository.*
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncMutationRecorder
-import me.thenano.yamibo.yamibo_app.repository.appsync.backfillFavoriteUpdateSyncState
+import me.thenano.yamibo.yamibo_app.repository.appsync.backfillLocalFavoriteData
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDomainId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncEntityId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationKind
@@ -52,7 +51,7 @@ class FavoriteUpdateRepositoryImpl internal constructor(
     override val state: StateFlow<RunState> = stateFlow.asStateFlow()
 
     init {
-        backfillFavoriteUpdateSyncState(db)
+        backfillLocalFavoriteData(db)
         stateFlow.value = runQueries.getLatestRecoverable()
             .executeAsOneOrNull()
             ?.toSnapshot()

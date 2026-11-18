@@ -1,5 +1,18 @@
 # Repository Instructions
 
+## App UI theming
+
+- Use shared Yamibo controls and `YamiboTheme.colors` for user-facing UI. When using Material components directly, set the surface, matching content colors, and action colors for the states the component supports, including selected and disabled states.
+- When changing a flow, open its affected dialogs and feedback states, including failure details and retry when applicable. Check the rendered controls in the default theme and a contrasting built-in theme, and record which states and themes were verified.
+
+- When the user asks to reuse an existing UI, identify its actual entry point and trigger the reference state on the pre-change version. Compare screenshots of the reference and the new case in the same reader, theme and layout. Reuse the renderer and its existing controls. Verify any new retry or recovery behavior separately.
+
+## Delivery authorization
+
+- Agents may commit and push work within the requested scope to a validation branch at their discretion. This standing authorization includes candidate fixes needed for validation and follow-up test fixes.
+- For other branches, match commits and pushes to the current delivery request. Match manual Actions dispatches to the requested validation, including reruns when asked to verify a fix through completion. An instruction to implement or test also authorizes local edits, builds and tests.
+- Use existing delivery authorization for the actions it covers. Ask before the first uncovered publication or dispatch.
+
 ## OpenSpec isolation
 
 - Keep `/openspec/` in the repository-local exclude file returned by `git rev-parse --git-path info/exclude`. Unlike `.gitignore`, this rule survives switching to older branches; ensure it is present before switching branches. Local exclude rules are not included in commits and must be set up per clone.
@@ -20,6 +33,12 @@
 - Treat the PR as a checkpoint. Its description must record the problem and root cause, implementation and design decisions, user-visible behavior, verification evidence, and known risks, limits, or rollback notes.
 - Before opening or merging the PR, enforce the OpenSpec isolation guard above. Merge only after required checks pass, and prefer a merge commit to preserve branch lineage unless the user requests another strategy.
 
+## Subagent delegation
+
+- Start subagents with `reasoning_effort="medium"` and `fork_turns="none"` by default. Include the relevant task context in each brief.
+- Prefer subagents when unfinished features and validation can proceed independently. Give each agent a concrete deliverable, owned files or a separate worktree, acceptance criteria, and the evidence to return. Check outstanding planning items when assigning work so implementation and verification both have an owner.
+- Assign one operator per emulator, simulator or other shared mutable resource. The lead integrates the changes, reviews the combined diff and verifies the complete user flow. Delegation carries the same delivery authorization as the parent task.
+
 ## Subagent worktree cleanup
 
 - After the entire task is complete, archive or remove worktrees created for its subagents only after commits are pushed, PRs are recorded, and needed QA artifacts are preserved outside those worktrees. Do not remove active or unrelated worktrees, or lose uncommitted work.
@@ -27,7 +46,7 @@
 ## Test isolation
 
 - Never commit or force-add `.tmp/` contents, including on validation branches. Keep reproducible validation scripts under `.github/scripts/`; keep generated reports, screenshots, traces and fixtures untracked, and publish run evidence through Actions artifacts and PR descriptions.
-- Permanent Apple validation infrastructure is an explicit exception: `.github/workflows/apple-validate.yml` and its documentation may be merged through a PR. Validation scripts use `.github/scripts/apple-validate/<full-branch-name>-<NN>.sh` and remain on validation branches with their supporting files, test sources, fixtures, QA startup adapters, and one-off workflows. Use the single manual workflow with a validation ref rather than adding a workflow per experiment; see [Apple emulator validation](dev-docs/apple-emulator-validation.md).
+- Permanent Apple validation infrastructure is an explicit exception: `.github/workflows/apple-validate.yml` and its documentation may be merged through a PR. Validation scripts use `.github/scripts/apple-validate/<branch-basename>-<NN>.sh` (replace each `/` in the full branch name with `-`) and remain on validation branches with their supporting files, test sources, fixtures, QA startup adapters, and one-off workflows. Use the single manual workflow with a validation ref rather than adding a workflow per experiment; see [Apple emulator validation](dev-docs/apple-emulator-validation.md).
 - Keep test sources, fixtures, QA receivers, simulator scripts, test-only dependencies, and test run configurations off `main` and production PR branches.
 - `archived-tests` is the permanent archive name, exempt from version-based branch naming. Never merge it into `main`, and never merge `main` into it merely to update production code; doing so can remove archived tests.
 - Use a separate validation branch/worktree for test commits. Build the production PR branch from current `main` and cherry-pick only production commits. Do not hide test commits by deleting their files in a later PR commit.

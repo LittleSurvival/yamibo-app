@@ -2,21 +2,18 @@
 
 package me.thenano.yamibo.yamibo_app.appsync
 
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
 import me.thenano.yamibo.yamibo_app.AppVersion
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.db.DatabaseFactory
-import me.thenano.yamibo.yamibo_app.repository.IOSAuthRepository
+import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.network.IOSYamiboClientProvider
+import me.thenano.yamibo.yamibo_app.repository.IOSAuthRepository
 import me.thenano.yamibo.yamibo_app.repository.IOSBackupStorageProvider
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncService
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncServicePhase
 import me.thenano.yamibo.yamibo_app.repository.appsync.isDurableAutomaticTriggerOutcome
+import me.thenano.yamibo.yamibo_app.repository.appsync.operationRecordingSettingsStore
 import me.thenano.yamibo.yamibo_app.repository.backup.BackupRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.settings.AppSettingsRepository
 import me.thenano.yamibo.yamibo_app.repository.settings.MangaReaderSettingsRepository
@@ -25,16 +22,11 @@ import me.thenano.yamibo.yamibo_app.store.IOSCookieStore
 import me.thenano.yamibo.yamibo_app.store.IOSForumFavoriteStore
 import me.thenano.yamibo.yamibo_app.store.IOSUserStore
 import me.thenano.yamibo.yamibo_app.store.settings.IOSSettingsStore
+import me.thenano.yamibo.yamibo_app.util.time.FixedScheduleInterval
 import platform.BackgroundTasks.BGProcessingTaskRequest
 import platform.BackgroundTasks.BGTaskScheduler
 import platform.Foundation.NSDate
-import me.thenano.yamibo.yamibo_app.util.time.FixedScheduleInterval
-import me.thenano.yamibo.yamibo_app.i18n.i18n
-import platform.UserNotifications.UNAuthorizationStatusAuthorized
-import platform.UserNotifications.UNAuthorizationStatusProvisional
-import platform.UserNotifications.UNMutableNotificationContent
-import platform.UserNotifications.UNNotificationRequest
-import platform.UserNotifications.UNUserNotificationCenter
+import platform.UserNotifications.*
 
 const val APP_SYNC_BACKGROUND_TASK_IDENTIFIER =
     "me.thenano.yamibo.yamibo-app.app-sync"
@@ -79,7 +71,13 @@ class IOSAppSyncBackgroundScheduler : AppSyncBackgroundScheduler {
 
 private var activeBackgroundJob: Job? = null
 
+val appSyncAvailable: Boolean get() = AppSyncService.MODULE_ENABLED
+
 fun runAppSyncBackground(completion: (Boolean) -> Unit) {
+    if (!appSyncAvailable) {
+        completion(true)
+        return
+    }
     activeBackgroundJob?.cancel()
     activeBackgroundJob = CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
         val outcome = runCatching { runAppSyncOnce() }.getOrNull()

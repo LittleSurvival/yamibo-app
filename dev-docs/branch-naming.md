@@ -1,5 +1,10 @@
 # Branch Naming Rules
 
+New branches use `stable/v<version>/<lineage-and-purpose>`. In IntelliJ IDEA,
+enable **Group by Directory** in the branch menu to collapse branches by version.
+Reserve `stable` and `stable/v<version>` as folder prefixes. Existing flat branch
+names can keep their published references.
+
 ## Permanent test archive
 
 `archived-tests` is the explicit exception to version/lineage naming. It is the
@@ -18,30 +23,30 @@ for a release. See [Test isolation](test-isolation.md) for the delivery workflow
 When the release/version base commit has a tag, use:
 
 ```text
-{version-name}-{module-propose-name}
+stable/v{version}/{module-propose-name}
 ```
 
 Example:
 
 ```text
-stable-v0.0.8-fix-search-formhash
+stable/v0.0.8/fix-search-formhash
 ```
 
 When the base commit has no tag, use:
 
 ```text
-{version-name}-{base-sha}-{module-propose-name}
+stable/v{version}/{base-sha}-{module-propose-name}
 ```
 
 Example:
 
 ```text
-stable-v0.0.3-87c4229-favorite-batch-download
+stable/v0.0.3/87c4229-favorite-batch-download
 ```
 
 Rules:
 
-- `{version-name}` is the full version name, such as `stable-v0.0.3`.
+- `{version}` is the numeric version, such as `0.0.3`.
 - `{base-sha}` identifies the commit used as the branch base and is included only when that commit has no tag.
 - `{module-propose-name}` is a short kebab-case feature or OpenSpec change name.
 
@@ -50,7 +55,7 @@ Rules:
 Use this pattern for second-level, third-level, or deeper branches that continue from earlier feature branches:
 
 ```text
-{version-name}-{branch1}-{level1-sha}-{level2-sha}-.....-{module-propose-name}
+stable/v{version}/{branch1}-{level1-sha}-{level2-sha}-.....-{module-propose-name}
 ```
 
 Rules:
@@ -63,11 +68,11 @@ Rules:
 Example:
 
 ```text
-stable-v0.0.3-favorite-batch-download-87c4229-03fa4d5-download-dialog-polish
+stable/v0.0.3/favorite-batch-download-87c4229-03fa4d5-download-dialog-polish
 ```
 
 If the first-level base commit has a tag but the next-level base commit `03fa4d5` does not, omit only the first-level hash:
 
 ```text
-stable-v0.0.3-favorite-batch-download-03fa4d5-download-dialog-polish
+stable/v0.0.3/favorite-batch-download-03fa4d5-download-dialog-polish
 ```

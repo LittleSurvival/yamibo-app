@@ -1,11 +1,23 @@
 package me.thenano.yamibo.yamibo_app.repository.download
 
+import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.addressOf
+import kotlinx.cinterop.reinterpret
+import kotlinx.cinterop.usePinned
+import platform.CoreFoundation.CFDataCreate
+import platform.CoreFoundation.CFRelease
+import platform.ImageIO.CGImageSourceCreateWithData
+import platform.ImageIO.CGImageSourceCreateImageAtIndex
+import platform.ImageIO.CGImageSourceGetStatusAtIndex
+import platform.ImageIO.kCGImageStatusComplete
 import kotlinx.serialization.json.Json
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.withContext
 import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.repository.settings.AppSettingsRepository
+import no.synth.kmpzip.io.SeekableSource
+import no.synth.kmpzip.okio.asSeekableSource
 import okio.FileSystem
 import okio.Path
 import okio.Path.Companion.toPath
@@ -24,7 +36,20 @@ class IOSDownloadStorageProvider(
     override suspend fun getSelectedFolderLabel(): String? =
         runCatching { selectedFolder().name }.getOrNull()
 
-    override suspend fun getStorageKey(): String = selectedFolder().toString()
+    private val documentsDir by lazy { resolveIosStorageFolder("").parent!! }
+
+    private fun storageKeyFor(folder: Path): String {
+        // The sandbox container UUID can change on an app update. Covers retain this key across launches.
+        val path = folder.toString()
+        val documents = documentsDir.toString()
+        return when {
+            path == documents -> "ios:Documents"
+            path.startsWith("$documents/") -> "ios:Documents/" + path.removePrefix("$documents/")
+            else -> path
+        }
+    }
+
+    override suspend fun getStorageKey(): String = storageKeyFor(selectedFolder())
 
     override suspend fun isReady(): Boolean = withContext(Dispatchers.IO) {
         runCatching { fileSystem.createDirectories(rootDir()) }
@@ -32,127 +57,128 @@ class IOSDownloadStorageProvider(
             .isSuccess
     }
 
-    override suspend fun writeThreadPage(
-        key: ThreadPageDownloadKey,
-        manifestBytes: ByteArray,
-        threadPageBytes: ByteArray,
-        images: List<PendingDownloadedImage>,
-    ) {
-        val root = rootDir()
-        fileSystem.createDirectories(root)
-        val final = root / key.stableId
-        val tmp = root / "${key.stableId}.tmp"
+    private fun itemPath(key: DownloadTaskKey, root: Path = rootDir()): Path {
+        val parent = key.parentDirectory?.let { root / it } ?: root
+        return parent / key.itemDirectory
+    }
+
+    private fun readablePath(key: DownloadTaskKey): Path {
+        val final = itemPath(key)
+        return if (fileSystem.exists(final)) final else final.parent!! / "${final.name}.previous"
+    }
+
+    override suspend fun publishItem(storageKey: String, key: DownloadTaskKey, manifest: ByteArray, page: ByteArray?,
+                                     archive: Path?, verifyArchive: ((SeekableSource) -> Unit)?) {
+        val folder = selectedFolder().also { check(storageKeyFor(it) == storageKey) }
+        val final = itemPath(key, folder / "YamiboDownloads")
+        val parent = final.parent!!
+        val tmp = parent / "${final.name}.tmp"
+        val previous = parent / "${final.name}.previous"
+        if (fileSystem.exists(previous)) {
+            if (fileSystem.exists(final)) fileSystem.deleteRecursively(previous) else fileSystem.atomicMove(previous, final)
+        }
         if (fileSystem.exists(tmp)) fileSystem.deleteRecursively(tmp)
-        fileSystem.createDirectories(tmp / "images")
-        write(tmp / "manifest.json", manifestBytes)
-        write(tmp / "thread_page.json", threadPageBytes)
-        images.forEach { write(tmp / "images" / it.fileName, it.bytes) }
-        if (fileSystem.exists(final)) fileSystem.deleteRecursively(final)
-        fileSystem.atomicMove(tmp, final)
+        fileSystem.createDirectories(tmp)
+        try {
+            if (archive != null) {
+                fileSystem.copy(archive, tmp / "images.cbz")
+                verifyArchive?.invoke(fileSystem.openReadOnly(tmp / "images.cbz").asSeekableSource())
+            }
+            if (page != null) write(tmp / "thread_page.json", page)
+            write(tmp / "manifest.json", manifest)
+            check(getStorageKey() == storageKey)
+            if (fileSystem.exists(final)) fileSystem.atomicMove(final, previous)
+            fileSystem.atomicMove(tmp, final)
+        } catch (error: Throwable) {
+            if (!fileSystem.exists(final) && fileSystem.exists(previous)) fileSystem.atomicMove(previous, final)
+            throw error
+        } finally {
+            if (fileSystem.exists(tmp)) fileSystem.deleteRecursively(tmp)
+        }
+        if (fileSystem.exists(previous)) fileSystem.deleteRecursively(previous)
+    }
+
+    override suspend fun looseImages(key: DownloadTaskKey, names: List<String>?): Map<String, String> {
+        if (names != null && names.isEmpty()) return emptyMap()
+        val dir = readablePath(key) / "images"
+        return (names ?: fileSystem.listOrNull(dir).orEmpty().map { it.name }).mapNotNull { name -> (dir / name).takeIf(fileSystem::exists)?.let { name to "file://$it" } }.toMap()
+    }
+
+    override fun openLoose(uri: String) = fileSystem.source(uri.removePrefix("file://").toPath())
+
+    override suspend fun openArchive(key: DownloadTaskKey, generation: String): SeekableSource? {
+        val path = readablePath(key) / "images.cbz"
+        return if (fileSystem.exists(path)) fileSystem.openReadOnly(path).asSeekableSource() else null
+    }
+
+    override suspend fun writeImage(
+        storageKey: String, key: DownloadTaskKey, image: PendingDownloadedImage, manifestBytes: ByteArray,
+    ): String {
+        check(getStorageKey() == storageKey)
+        val page = readablePath(key)
+        check(fileSystem.exists(page / "manifest.json") || (key is ThreadPageDownloadKey && fileSystem.exists(page / "thread_page.json")))
+        val images = page / "images"
+        fileSystem.createDirectories(images)
+        val file = images / image.fileName
+        val pending = images / "${image.fileName}.tmp"
+        write(pending, image.bytes)
+        fileSystem.atomicMove(pending, file)
+        write(page / "manifest.json.tmp", manifestBytes)
+        fileSystem.atomicMove(page / "manifest.json.tmp", page / "manifest.json")
+        return "file://$file"
     }
 
     override suspend fun readThreadPage(key: ThreadPageDownloadKey): ByteArray? {
-        val path = rootDir() / key.stableId / "thread_page.json"
+        val path = readablePath(key) / "thread_page.json"
         if (!fileSystem.exists(path)) return null
         return fileSystem.source(path).buffer().use { it.readByteArray() }
     }
 
     override suspend fun updateThreadPage(key: ThreadPageDownloadKey, manifestBytes: ByteArray, threadPageBytes: ByteArray) {
-        val pageDir = rootDir() / key.stableId
+        val pageDir = readablePath(key)
         write(pageDir / "thread_page.json.tmp", threadPageBytes)
         write(pageDir / "manifest.json.tmp", manifestBytes)
         fileSystem.atomicMove(pageDir / "thread_page.json.tmp", pageDir / "thread_page.json")
         fileSystem.atomicMove(pageDir / "manifest.json.tmp", pageDir / "manifest.json")
     }
 
-    override suspend fun resolveImageUri(key: ThreadPageDownloadKey, fileName: String): String? {
-        val path = rootDir() / key.stableId / "images" / fileName
-        return path.takeIf(fileSystem::exists)?.let { "file://$it" }
-    }
-
-    override suspend fun resolveImageUris(key: ThreadPageDownloadKey, fileNames: List<String>): Map<String, String> {
-        val imagesDir = rootDir() / key.stableId / "images"
-        return fileNames.mapNotNull { name ->
-            val path = imagesDir / name
-            path.takeIf(fileSystem::exists)?.let { name to "file://$it" }
-        }.toMap()
-    }
-
     override suspend fun readManifest(key: ThreadPageDownloadKey): ThreadPageDownloadManifest? =
-        readManifest(rootDir() / key.stableId)
+        readManifest(readablePath(key))
+
+    private fun completedDirectories(parent: Path, prefix: String): List<Path> {
+        val children = fileSystem.list(parent).filter { it.name.startsWith(prefix) && !it.name.endsWith(".tmp") }
+        val current = children.filterNot { it.name.endsWith(".previous") }.associateByTo(linkedMapOf()) { it.name }
+        for (child in children.filter { it.name.endsWith(".previous") }) current.getOrPut(child.name.removeSuffix(".previous")) { child }
+        return current.values.toList()
+    }
 
     override suspend fun listManifests(): List<ThreadPageDownloadManifest> {
         val root = rootDir()
         if (!fileSystem.exists(root)) return emptyList()
-        return fileSystem.list(root)
-            .filter { it.name.startsWith("thread_") }
-            .mapNotNull(::readManifest)
-    }
-
-    override suspend fun writeTagMangaChapter(
-        key: TagMangaChapterDownloadKey,
-        manifestBytes: ByteArray,
-        images: List<PendingDownloadedImage>,
-    ) {
-        val tagDir = rootDir() / key.tagStableId
-        fileSystem.createDirectories(tagDir)
-        val final = tagDir / key.chapterStableId
-        val tmp = tagDir / "${key.chapterStableId}.tmp"
-        if (fileSystem.exists(tmp)) fileSystem.deleteRecursively(tmp)
-        fileSystem.createDirectories(tmp / "images")
-        write(tmp / "manifest.json", manifestBytes)
-        images.forEach { write(tmp / "images" / it.fileName, it.bytes) }
-        if (fileSystem.exists(final)) fileSystem.deleteRecursively(final)
-        fileSystem.atomicMove(tmp, final)
-    }
-
-    override suspend fun resolveTagMangaImageUri(key: TagMangaChapterDownloadKey, fileName: String): String? {
-        val path = rootDir() / key.tagStableId / key.chapterStableId / "images" / fileName
-        return path.takeIf(fileSystem::exists)?.let { "file://$it" }
+        return completedDirectories(root, "thread_")
+            .mapNotNull { readManifest(it) ?: recoverListing(it.name, json) }
     }
 
     override suspend fun readTagMangaManifest(key: TagMangaChapterDownloadKey): TagMangaChapterManifest? =
-        readTagMangaManifest(rootDir() / key.tagStableId / key.chapterStableId)
+        readTagMangaManifest(readablePath(key))
 
     override suspend fun listTagMangaManifests(): List<TagMangaChapterManifest> {
         val root = rootDir()
         if (!fileSystem.exists(root)) return emptyList()
         return fileSystem.list(root)
             .filter { it.name.startsWith("tag_manga_") }
-            .flatMap { tagDir -> fileSystem.list(tagDir).mapNotNull(::readTagMangaManifest) }
-    }
-
-    override suspend fun writeRssMangaChapter(
-        key: RssMangaChapterDownloadKey,
-        manifestBytes: ByteArray,
-        images: List<PendingDownloadedImage>,
-    ) {
-        val rssDir = rootDir() / key.rssStableId
-        fileSystem.createDirectories(rssDir)
-        val final = rssDir / key.chapterStableId
-        val tmp = rssDir / "${key.chapterStableId}.tmp"
-        if (fileSystem.exists(tmp)) fileSystem.deleteRecursively(tmp)
-        fileSystem.createDirectories(tmp / "images")
-        write(tmp / "manifest.json", manifestBytes)
-        images.forEach { write(tmp / "images" / it.fileName, it.bytes) }
-        if (fileSystem.exists(final)) fileSystem.deleteRecursively(final)
-        fileSystem.atomicMove(tmp, final)
-    }
-
-    override suspend fun resolveRssMangaImageUri(key: RssMangaChapterDownloadKey, fileName: String): String? {
-        val path = rootDir() / key.rssStableId / key.chapterStableId / "images" / fileName
-        return path.takeIf(fileSystem::exists)?.let { "file://$it" }
+            .flatMap { tagDir -> completedDirectories(tagDir, "chapter_").mapNotNull(::readTagMangaManifest) }
     }
 
     override suspend fun readRssMangaManifest(key: RssMangaChapterDownloadKey): RssMangaChapterManifest? =
-        readRssMangaManifest(rootDir() / key.rssStableId / key.chapterStableId)
+        readRssMangaManifest(readablePath(key))
 
     override suspend fun listRssMangaManifests(): List<RssMangaChapterManifest> {
         val root = rootDir()
         if (!fileSystem.exists(root)) return emptyList()
         return fileSystem.list(root)
             .filter { it.name.startsWith("rss_") }
-            .flatMap { rssDir -> fileSystem.list(rssDir).mapNotNull(::readRssMangaManifest) }
+            .flatMap { rssDir -> completedDirectories(rssDir, "chapter_").mapNotNull(::readRssMangaManifest) }
     }
 
     override suspend fun readQueue(): List<DownloadQueueEntry> {
@@ -170,41 +196,33 @@ class IOSDownloadStorageProvider(
         val target = root / QUEUE_FILE
         val tmp = root / "$QUEUE_FILE.tmp"
         write(tmp, json.encodeToString(entries).encodeToByteArray())
-        if (fileSystem.exists(target)) fileSystem.delete(target)
         fileSystem.atomicMove(tmp, target)
     }
 
-    override suspend fun deleteThreadPage(key: ThreadPageDownloadKey) {
-        val path = rootDir() / key.stableId
-        if (fileSystem.exists(path)) fileSystem.deleteRecursively(path)
+    override suspend fun groupKeys(storageKey: String, group: DownloadTaskKey): Set<DownloadTaskKey> {
+        val root = selectedFolder().also { check(storageKeyFor(it) == storageKey) } / "YamiboDownloads"
+        val parent = group.parentDirectory?.let { root / it } ?: root
+        return fileSystem.listOrNull(parent).orEmpty().mapNotNullTo(mutableSetOf()) { groupMember(group, it.name) }
     }
 
-    override suspend fun deleteThread(key: ThreadPageDownloadKey) {
-        val root = rootDir()
-        if (!fileSystem.exists(root)) return
-        fileSystem.list(root)
-            .filter { it.name.startsWith(key.threadPrefix) }
-            .forEach { fileSystem.deleteRecursively(it) }
-    }
-
-    override suspend fun deleteTagMangaChapter(key: TagMangaChapterDownloadKey) {
-        val path = rootDir() / key.tagStableId / key.chapterStableId
-        if (fileSystem.exists(path)) fileSystem.deleteRecursively(path)
-    }
-
-    override suspend fun deleteTagManga(tagId: Int) {
-        val path = rootDir() / "tag_manga_$tagId"
-        if (fileSystem.exists(path)) fileSystem.deleteRecursively(path)
-    }
-
-    override suspend fun deleteRssMangaChapter(key: RssMangaChapterDownloadKey) {
-        val path = rootDir() / key.rssStableId / key.chapterStableId
-        if (fileSystem.exists(path)) fileSystem.deleteRecursively(path)
-    }
-
-    override suspend fun deleteRssManga(subscriptionId: Long) {
-        val path = rootDir() / "rss_$subscriptionId"
-        if (fileSystem.exists(path)) fileSystem.deleteRecursively(path)
+    override suspend fun deleteItems(storageKey: String, keys: Set<DownloadTaskKey>, onProgress: (Int) -> Unit): Map<DownloadTaskKey, Throwable> {
+        val folder = selectedFolder().also { check(storageKeyFor(it) == storageKey) }
+        val root = folder / "YamiboDownloads"
+        val errors = mutableMapOf<DownloadTaskKey, Throwable>()
+        for ((index, key) in keys.withIndex()) {
+            val parent = key.parentDirectory?.let { root / it } ?: root
+            try {
+                for (name in itemDirectoryNames(key)) {
+                    val path = parent / name
+                    if (fileSystem.exists(path)) fileSystem.deleteRecursively(path)
+                    check(!fileSystem.exists(path)) { "下載內容未完全刪除，請重試" }
+                }
+            } catch (error: Exception) {
+                errors[key] = error
+            }
+            onProgress(index + 1)
+        }
+        return errors
     }
 
     private fun write(path: Path, bytes: ByteArray) {
@@ -260,4 +278,21 @@ internal fun resolveIosStorageFolder(stored: String): Path {
     }
     require(folder.isAbsolute) { "Storage folder must be an absolute path" }
     return folder
+}
+
+@OptIn(ExperimentalForeignApi::class)
+internal actual fun isReadableDownloadedBitmap(bytes: ByteArray): Boolean = bytes.usePinned { pinned ->
+    val data = CFDataCreate(null, pinned.addressOf(0).reinterpret(), bytes.size.toLong()) ?: return@usePinned false
+    try {
+        val source = CGImageSourceCreateWithData(data, null) ?: return@usePinned false
+        try {
+            val image = CGImageSourceCreateImageAtIndex(source, 0uL, null) ?: return@usePinned false
+            CFRelease(image)
+            CGImageSourceGetStatusAtIndex(source, 0uL) == kCGImageStatusComplete
+        } finally {
+            CFRelease(source)
+        }
+    } finally {
+        CFRelease(data)
+    }
 }

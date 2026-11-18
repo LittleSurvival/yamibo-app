@@ -461,8 +461,7 @@ class AppSyncService(
             }
         }
         val installation = store.initialize(generation)
-        backfillStableContainerIds(db)
-        backfillFavoriteUpdateSyncState(db)
+        backfillLocalFavoriteData(db)
         store.reconcileResolvedStateCoverage()
         domainState.reconcileProjections()
         mutableStatus = MutableStateFlow(
@@ -473,49 +472,6 @@ class AppSyncService(
             ),
         )
     }
-
-    fun operationRecordingSettingsStore(
-        db: Database,
-        delegate: SettingsStore,
-    ): SettingsStore = OperationRecordingSettingsStore(db, delegate, mutationRecorder)
-
-    fun detailNoteRepository(db: Database): DetailNoteRepository =
-        DetailNoteRepositoryImpl(db, mutationRecorder)
-
-    fun bookMarkRepository(db: Database): BookMarkRepository =
-        BookMarkRepositoryImpl(db, mutationRecorder)
-
-    fun favoriteStoreRepository(db: Database): FavoriteStoreRepository =
-        FavoriteStoreRepositoryImpl(db, mutationRecorder)
-
-    fun rssSearchSubscriptionRepository(
-        db: Database,
-        authRepository: AuthRepository,
-        forumRepository: ForumRepository,
-    ): RssSearchSubscriptionRepository = RssSearchSubscriptionRepositoryImpl(
-        db = db,
-        authRepository = authRepository,
-        forumRepository = forumRepository,
-        mutationRecorder = mutationRecorder,
-    )
-
-    fun favoriteUpdateRepository(
-        db: Database,
-        localFavoriteRepository: FavoriteStoreRepository,
-        threadRepository: ThreadRepository,
-        tagRepository: TagRepository,
-        rssSearchSubscriptionRepository: RssSearchSubscriptionRepository,
-    ): FavoriteUpdateRepository = FavoriteUpdateRepositoryImpl(
-        db = db,
-        localFavoriteRepository = localFavoriteRepository,
-        threadRepository = threadRepository,
-        tagRepository = tagRepository,
-        rssSearchSubscriptionRepository = rssSearchSubscriptionRepository,
-        mutationRecorder = mutationRecorder,
-    )
-
-    fun readHistoryRepository(delegate: ReadHistoryRepository): ReadHistoryRepository =
-        OperationRecordingReadHistoryRepository(delegate, mutationRecorder)
 
     fun registerSyncableSettings(registries: List<SettingsRegistry>) {
         db.transaction {
@@ -1403,34 +1359,65 @@ class AppSyncService(
         }
     }
 
-    private fun backfillStableContainerIds(db: Database) {
-        db.transaction {
-            db.localFavoriteCategoryQueries.getAll().executeAsList()
-                .filter { it.syncId == null }
-                .forEach {
-                    db.localFavoriteCategoryQueries.setSyncId(
-                        SyncIdentityGenerator.stableEntityId().value,
-                        it.id,
-                    )
-                }
-            db.localFavoriteCollectionQueries.getAll().executeAsList()
-                .filter { it.syncId == null }
-                .forEach {
-                    db.localFavoriteCollectionQueries.setSyncId(
-                        SyncIdentityGenerator.stableEntityId().value,
-                        it.id,
-                    )
-                }
-        }
-    }
+    companion object {
+        // Release switch for cloud sync, including local change recording and background jobs.
+        const val MODULE_ENABLED = false
 
-    private companion object {
-        const val APPSYNC_LOG_TAG = "AppSyncService"
-        const val DATABASE_GENERATION_KEY = "appsync.database_generation"
-        const val JOURNAL_RETIREMENT_DELETE_ENABLED_KEY =
+        fun createIfAvailable(
+            db: Database,
+            settingsStore: SettingsStore,
+            authRepository: AuthRepository,
+        ): AppSyncService? = if (MODULE_ENABLED) AppSyncService(db, settingsStore, authRepository) else null
+
+        private const val APPSYNC_LOG_TAG = "AppSyncService"
+        private const val DATABASE_GENERATION_KEY = "appsync.database_generation"
+        private const val JOURNAL_RETIREMENT_DELETE_ENABLED_KEY =
             "appsync.journal_retirement_delete_enabled"
     }
 }
+
+fun AppSyncService?.operationRecordingSettingsStore(
+    db: Database,
+    delegate: SettingsStore,
+): SettingsStore = this?.let { OperationRecordingSettingsStore(db, delegate, it.mutationRecorder) } ?: delegate
+
+fun AppSyncService?.detailNoteRepository(db: Database): DetailNoteRepository =
+    DetailNoteRepositoryImpl(db, this?.mutationRecorder)
+
+fun AppSyncService?.bookMarkRepository(db: Database): BookMarkRepository =
+    BookMarkRepositoryImpl(db, this?.mutationRecorder)
+
+fun AppSyncService?.favoriteStoreRepository(db: Database): FavoriteStoreRepository =
+    FavoriteStoreRepositoryImpl(db, this?.mutationRecorder)
+
+fun AppSyncService?.rssSearchSubscriptionRepository(
+    db: Database,
+    authRepository: AuthRepository,
+    forumRepository: ForumRepository,
+): RssSearchSubscriptionRepository = RssSearchSubscriptionRepositoryImpl(
+    db = db,
+    authRepository = authRepository,
+    forumRepository = forumRepository,
+    mutationRecorder = this?.mutationRecorder,
+)
+
+fun AppSyncService?.favoriteUpdateRepository(
+    db: Database,
+    localFavoriteRepository: FavoriteStoreRepository,
+    threadRepository: ThreadRepository,
+    tagRepository: TagRepository,
+    rssSearchSubscriptionRepository: RssSearchSubscriptionRepository,
+): FavoriteUpdateRepository = FavoriteUpdateRepositoryImpl(
+    db = db,
+    localFavoriteRepository = localFavoriteRepository,
+    threadRepository = threadRepository,
+    tagRepository = tagRepository,
+    rssSearchSubscriptionRepository = rssSearchSubscriptionRepository,
+    mutationRecorder = this?.mutationRecorder,
+)
+
+fun AppSyncService?.readHistoryRepository(delegate: ReadHistoryRepository): ReadHistoryRepository =
+    this?.let { OperationRecordingReadHistoryRepository(delegate, it.mutationRecorder) } ?: delegate
 
 internal fun AppSyncRecoveryPublicPhase.toServicePhase(): AppSyncServicePhase = when (this) {
     AppSyncRecoveryPublicPhase.Classifying -> AppSyncServicePhase.RecoveryClassifying

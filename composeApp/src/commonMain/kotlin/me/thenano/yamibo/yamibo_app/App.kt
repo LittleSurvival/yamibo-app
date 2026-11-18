@@ -17,6 +17,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.input.pointer.pointerInput
@@ -28,6 +30,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import me.thenano.yamibo.yamibo_app.util.ArchivedImageFetcher
 import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
@@ -134,6 +137,11 @@ fun HomeScreenContent(
 @Composable
 fun App() {
     val errorMessages = LocalForumErrorMessageResolver.current
+    val downloads = LocalDownloadRepository.current
+    DisposableEffect(downloads) {
+        ArchivedImageFetcher.downloads.value = downloads
+        onDispose { ArchivedImageFetcher.downloads.compareAndSet(downloads, null) }
+    }
     val imageLoaderFactory = remember {
         { context: PlatformContext ->
             ImageLoader.Builder(context)
@@ -146,6 +154,7 @@ fun App() {
                     // Coil lazily retains this client for the singleton ImageLoader, allowing the
                     // in-memory WAF cookie to be reused without another app-level singleton.
                     add(KtorNetworkFetcherFactory(httpClient = { HttpClientFactory.create() }))
+                    add(ArchivedImageFetcher)
                     add(SvgDecoder.Factory())
                 }
                 .build()
@@ -274,6 +283,7 @@ fun App() {
                 stack.forEachIndexed { index, navigatable ->
                     val isPopping = index == poppingIdx
                     val isTop = index == stack.lastIndex
+                    val active = index == if (poppingIdx >= 0) poppingIdx - 1 else topIndex
                     val isNewPush =
                         navigator.lastAction == NavAction.Push &&
                             isTop &&
@@ -312,11 +322,12 @@ fun App() {
                                 ) + fadeOut(animationSpec = tween(duration)),
                                 modifier = Modifier
                                     .fillMaxSize()
+                                    .then(if (active) Modifier else Modifier.clearAndSetSemantics { hideFromAccessibility() })
                                     .drawOnlyWhen(shouldDraw)
                                     .blockPointerPassthrough(isTop || isPopping)
                                     .zIndex(index.toFloat())
                             ) {
-                                SystemBarsScope(active = index == if (poppingIdx >= 0) poppingIdx - 1 else topIndex) {
+                                SystemBarsScope(active = active) {
                                     navigatable.Content()
                                 }
                             }

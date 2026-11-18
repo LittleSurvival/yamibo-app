@@ -22,6 +22,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.catch
+import me.thenano.yamibo.yamibo_app.LocalDownloadRepository
+import me.thenano.yamibo.yamibo_app.repository.download.MissingThreadImage
 import coil3.compose.AsyncImagePainter
 import coil3.compose.rememberAsyncImagePainter
 import coil3.compose.rememberConstraintsSizeResolver
@@ -128,16 +132,84 @@ fun ImageViewer(
     onRenderedHeightChanged: ((Int) -> Unit)? = null,
     onRenderedAspectRatioChanged: ((Float) -> Unit)? = null,
 ) {
-    val fullUrl = normalizeImageUrl(url)
+    val missing = remember(url) { MissingThreadImage.fromReaderUri(url) }
+    val original = normalizeImageUrl(url)
+    val colors = YamiboTheme.colors
+    val errorBgColor = if (isDarkTheme) Color.White.copy(alpha = 0.08f) else colors.creamSurface
+    val errorTextColor = if (isDarkTheme) Color.White else colors.textDark
+    val errorSubTextColor = if (isDarkTheme) Color.White.copy(alpha = 0.5f) else colors.textDark.copy(alpha = 0.6f)
+    val errorUrlColor = if (isDarkTheme) Color.White.copy(alpha = 0.3f) else colors.brownDeep
+
+    val repository = LocalDownloadRepository.current
+    val scope = rememberCoroutineScope()
+    var repairedUri by remember(url) { mutableStateOf<String?>(null) }
+    var repairing by remember(url) { mutableStateOf(false) }
+    var repairError by remember(url) { mutableStateOf<String?>(null) }
+    val localUrl = if (missing == null) original else key(missing) {
+        val local by remember(repository, missing) {
+            repository.observeLocalImage(missing).catch { emit(null) }
+        }.collectAsState(initial = null)
+        val source = repairedUri ?: local
+        if (source == null) {
+            BoxWithConstraints(modifier = modifier, contentAlignment = Alignment.Center) {
+                if (repairing) {
+                    ImageLoadingContent(160.dp, onImageRetry = null)
+                } else {
+                    ImageErrorContent(
+                        fullUrl = missing.sourceUrl,
+                        errorMessage = repairError.orEmpty(),
+                        compact = maxWidth <= 140.dp || maxHeight <= 140.dp,
+                        errorBgColor = errorBgColor,
+                        errorTextColor = errorTextColor,
+                        errorSubTextColor = errorSubTextColor,
+                        errorUrlColor = errorUrlColor,
+                    ) {
+                        if (!repairing) {
+                            repairing = true
+                            scope.launch {
+                                try {
+                                    repository.retryImage(missing).onSuccess { repairedUri = it }.onFailure { repairError = it.message }
+                                } finally {
+                                    repairing = false
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        source
+    } ?: return
+    val fullUrl = repairedUri ?: localUrl
+
     val diagnosticUrl = imageSourceForDiagnostics(fullUrl)
     DebugRecomposeProbe("ImageViewer", diagnosticUrl)
     var localRetryKey by remember(fullUrl) { mutableIntStateOf(0) }
+    fun retryFailedImage() {
+        if (missing == null && !original.startsWith("yamibo-image://")) {
+            if (onReload != null) onReload() else localRetryKey++
+            return
+        }
+        if (repairing) return
+        repairing = true
+        scope.launch {
+            try {
+                val result = if (missing != null) repository.retryImage(missing, fullUrl)
+                    else repository.retryArchivedImage(original, fullUrl)
+                result.onSuccess {
+                    repairError = null
+                    repairedUri = it
+                    localRetryKey++
+                    onReload?.invoke()
+                }.onFailure { repairError = it.message }
+            } finally { repairing = false }
+        }
+    }
     var showMenu by remember { mutableStateOf(false) }
     val retryKey = localRetryKey + externalRetryKey
     var hasReportedSuccess by remember(fullUrl, localRetryKey, externalRetryKey) { mutableStateOf(false) }
     var hasReportedError by remember(fullUrl, localRetryKey, externalRetryKey) { mutableStateOf(false) }
 
-    val colors = YamiboTheme.colors
     val isOverlayOpen = LocalReaderOverlayVisible.current
     val density = LocalDensity.current
 
@@ -149,12 +221,6 @@ fun ImageViewer(
     val onImageActionMessage = LocalImageActionMessageListener.current
 
     val hasGestures = enableContextMenu || onSingleTap != null || onDoubleTap != null
-
-    // Formatting styles
-    val errorBgColor = if (isDarkTheme) Color.White.copy(alpha = 0.08f) else Color(0xFFF3F3F3)
-    val errorTextColor = if (isDarkTheme) Color.White else colors.textDark
-    val errorSubTextColor = if (isDarkTheme) Color.White.copy(alpha = 0.5f) else colors.textDark.copy(alpha = 0.6f)
-    val errorUrlColor = if (isDarkTheme) Color.White.copy(alpha = 0.3f) else colors.brownDeep
 
     val imageRequest = rememberImageRequest(
         url = fullUrl,
@@ -193,7 +259,7 @@ fun ImageViewer(
                                 latestOnSingleTap?.invoke()
                             },
                             onDoubleTap = {
-                                latestOnDoubleTap?.invoke(fullUrl)
+                                latestOnDoubleTap?.invoke(original)
                             },
                             onLongPress = {
                                 if (latestEnableContextMenu && !latestOverlayOpen) {
@@ -224,21 +290,17 @@ fun ImageViewer(
                 .then(maxRenderedHeight?.let { Modifier.heightIn(max = it) } ?: Modifier),
             contentAlignment = Alignment.Center
         ) {
-            if (blockedErrorMessage != null) {
+            if (repairing) {
+                ImageLoadingContent(reservedHeight, onImageRetry = null)
+            } else if (blockedErrorMessage != null && repairedUri == null) {
                 ImageErrorContent(
                     fullUrl = diagnosticUrl,
-                    errorMessage = imageErrorForDiagnostics(blockedErrorMessage, fullUrl),
+                    errorMessage = repairError ?: imageErrorForDiagnostics(blockedErrorMessage, fullUrl),
                     errorBgColor = errorBgColor,
                     errorTextColor = errorTextColor,
                     errorSubTextColor = errorSubTextColor,
                     errorUrlColor = errorUrlColor,
-                    onReload = {
-                        if (onReload != null) {
-                            onReload()
-                        } else {
-                            localRetryKey++
-                        }
-                    }
+                    onReload = ::retryFailedImage,
                 )
             } else {
                 when (val state = painterState) {
@@ -277,18 +339,12 @@ fun ImageViewer(
 
                         ImageErrorContent(
                             fullUrl = diagnosticUrl,
-                            errorMessage = errorMsg,
+                            errorMessage = repairError ?: errorMsg,
                             errorBgColor = errorBgColor,
                             errorTextColor = errorTextColor,
                             errorSubTextColor = errorSubTextColor,
                             errorUrlColor = errorUrlColor,
-                            onReload = {
-                                if (onReload != null) {
-                                    onReload()
-                                } else {
-                                    localRetryKey++
-                                }
-                            }
+                            onReload = ::retryFailedImage,
                         )
                     }
 
@@ -393,55 +449,83 @@ private fun ImageErrorContent(
     errorTextColor: Color,
     errorSubTextColor: Color,
     errorUrlColor: Color,
+    compact: Boolean = false,
     onReload: () -> Unit,
 ) {
     val colors = YamiboTheme.colors
 
-    Row(
-        modifier = Modifier.fillMaxWidth()
-            .padding(horizontal = 12.dp)
-            .background(errorBgColor, RoundedCornerShape(12.dp))
-            .padding(horizontal = 12.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Column(Modifier.weight(1f)) {
+    val details: @Composable (Modifier) -> Unit = { modifier ->
+        Column(modifier) {
             Text(
                 text = i18n("圖片載入失敗"),
                 color = errorTextColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 fontSize = 14.sp,
+                lineHeight = 17.sp,
                 fontWeight = FontWeight.SemiBold
             )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = errorMessage,
-                color = errorSubTextColor,
-                fontSize = 11.sp,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(Modifier.height(4.dp))
+            if (errorMessage.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = errorMessage,
+                    color = errorSubTextColor,
+                    fontSize = 11.sp,
+                    lineHeight = 14.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Spacer(Modifier.height(2.dp))
             Text(
                 text = fullUrl,
                 color = errorUrlColor,
                 fontSize = 10.sp,
+                lineHeight = 12.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 style = TextStyle(textDecoration = TextDecoration.Underline)
             )
         }
+    }
+    val retryButton: @Composable () -> Unit = {
         OutlinedButton(
             onClick = onReload,
             colors = ButtonDefaults.outlinedButtonColors(
                 contentColor = colors.brownPrimary
             ),
-            contentPadding = PaddingValues(horizontal = 28.dp, vertical = 8.dp)
+            contentPadding = PaddingValues(horizontal = if (compact) 4.dp else 12.dp, vertical = 8.dp)
         ) {
             Text(
                 text = i18n("重新載入"),
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold
             )
+        }
+    }
+
+    if (compact) {
+        Column(
+            modifier = Modifier.fillMaxWidth()
+                .padding(2.dp)
+                .background(errorBgColor, RoundedCornerShape(12.dp))
+                .padding(4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            details(Modifier)
+            retryButton()
+        }
+    } else {
+        Row(
+            modifier = Modifier.fillMaxWidth()
+                .padding(horizontal = 12.dp)
+                .background(errorBgColor, RoundedCornerShape(12.dp))
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            details(Modifier.weight(1f))
+            retryButton()
         }
     }
 }

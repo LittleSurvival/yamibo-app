@@ -17,8 +17,7 @@ class AndroidAppSyncBackgroundScheduler(context: Context) : AppSyncBackgroundSch
 
     override fun setEnabled(enabled: Boolean, interval: FixedScheduleInterval) {
         if (!enabled) {
-            workManager.cancelUniqueWork(PERIODIC_WORK)
-            workManager.cancelUniqueWork(LIFECYCLE_WORK)
+            cancelScheduledWork()
             return
         }
         val request = PeriodicWorkRequestBuilder<AppSyncWorker>(
@@ -33,6 +32,11 @@ class AndroidAppSyncBackgroundScheduler(context: Context) : AppSyncBackgroundSch
             ExistingPeriodicWorkPolicy.UPDATE,
             request,
         )
+    }
+
+    fun cancelScheduledWork() {
+        workManager.cancelUniqueWork(PERIODIC_WORK)
+        workManager.cancelUniqueWork(LIFECYCLE_WORK)
     }
 
     override fun runNow() {

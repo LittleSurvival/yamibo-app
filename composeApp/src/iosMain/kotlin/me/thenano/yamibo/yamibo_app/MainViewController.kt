@@ -40,6 +40,13 @@ import me.thenano.yamibo.yamibo_app.profile.settings.sign.IOSSignReminderSchedul
 import me.thenano.yamibo.yamibo_app.repository.*
 import me.thenano.yamibo.yamibo_app.repository.backup.BackupRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncService
+import me.thenano.yamibo.yamibo_app.repository.appsync.bookMarkRepository
+import me.thenano.yamibo.yamibo_app.repository.appsync.detailNoteRepository
+import me.thenano.yamibo.yamibo_app.repository.appsync.favoriteStoreRepository
+import me.thenano.yamibo.yamibo_app.repository.appsync.favoriteUpdateRepository
+import me.thenano.yamibo.yamibo_app.repository.appsync.operationRecordingSettingsStore
+import me.thenano.yamibo.yamibo_app.repository.appsync.readHistoryRepository
+import me.thenano.yamibo.yamibo_app.repository.appsync.rssSearchSubscriptionRepository
 import me.thenano.yamibo.yamibo_app.repository.chineseconversion.createChineseConversionRepository
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadImageFetcher
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadRepositoryImpl
@@ -125,7 +132,7 @@ fun MainViewController() = ComposeUIViewController {
     val dbFactory = remember { DatabaseFactory() }
     val appDatabase = remember { Database(dbFactory.createDriver()) }
     val appSyncService = remember {
-        AppSyncService(
+        AppSyncService.createIfAvailable(
             db = appDatabase,
             settingsStore = rawSettingsStore,
             authRepository = authRepository,
@@ -139,7 +146,7 @@ fun MainViewController() = ComposeUIViewController {
     val mangaReaderSettingsRepository = remember { MangaReaderSettingsRepository(settingsStore) }
     val imageReaderModeOverrideRepository = remember { SettingsImageReaderModeOverrideRepository(settingsStore) }
     remember(appSyncService, appSettingsRepository, novelReaderSettingsRepository, mangaReaderSettingsRepository) {
-        appSyncService.registerSyncableSettings(
+        appSyncService?.registerSyncableSettings(
             listOf(appSettingsRepository, novelReaderSettingsRepository, mangaReaderSettingsRepository),
         )
     }
@@ -241,7 +248,7 @@ fun MainViewController() = ComposeUIViewController {
         )
     }
     remember(appSyncService, backupRepository) {
-        appSyncService.registerLocalSnapshotSource(backupRepository)
+        appSyncService?.registerLocalSnapshotSource(backupRepository)
     }
     val downloadRepository = remember {
         DownloadRepositoryImpl(
@@ -249,6 +256,8 @@ fun MainViewController() = ComposeUIViewController {
             tagRepository = tagRepository,
             rssRepository = rssSearchSubscriptionRepository,
             storageProvider = IOSDownloadStorageProvider(appSettingsRepository),
+            database = diskCacheFactory.database,
+            cacheDirectory = diskCacheFactory.rootCacheDir / "downloads",
             imageFetcher = DownloadImageFetcher { cookieStore.load().orEmpty() },
         )
     }

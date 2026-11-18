@@ -2,6 +2,15 @@ package me.thenano.yamibo.yamibo_app.util
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import coil3.ImageLoader
+import coil3.Uri
+import coil3.decode.DataSource
+import coil3.decode.ImageSource
+import coil3.fetch.Fetcher
+import coil3.fetch.SourceFetchResult
+import coil3.request.Options
+import me.thenano.yamibo.yamibo_app.repository.DownloadRepository
+import okio.buffer
 import coil3.PlatformContext
 import coil3.compose.LocalPlatformContext
 import coil3.network.NetworkHeaders
@@ -43,6 +52,7 @@ private fun repairMalformedImageUri(url: String): String {
     val repaired = when {
         url.startsWith("http://data:image/", ignoreCase = true) -> url.substring("http://".length)
         url.startsWith("https://data:image/", ignoreCase = true) -> url.substring("https://".length)
+        url.startsWith("$domain/yamibo-image://") -> url.removePrefix("$domain/")
         url.startsWith("$domain/content://") -> url.removePrefix("$domain/")
         url.startsWith("$domain/file://") -> url.removePrefix("$domain/")
         url.startsWith("$domain/data:", ignoreCase = true) -> url.substring(domain.length + 1)
@@ -134,5 +144,17 @@ fun rememberImageRequest(url: String, retryKey: Int = 0, enableCrossfade: Boolea
             retryKey = retryKey,
             enableCrossfade = enableCrossfade,
         )
+    }
+}
+
+internal object ArchivedImageFetcher : Fetcher.Factory<Uri> {
+    val downloads = kotlinx.coroutines.flow.MutableStateFlow<DownloadRepository?>(null)
+
+    override fun create(data: Uri, options: Options, imageLoader: ImageLoader): Fetcher? {
+        if (data.scheme != "yamibo-image") return null
+        return Fetcher {
+            val source = checkNotNull(downloads.value).openArchivedImage(data.toString())
+            SourceFetchResult(ImageSource(source.buffer(), options.fileSystem), null, DataSource.DISK)
+        }
     }
 }

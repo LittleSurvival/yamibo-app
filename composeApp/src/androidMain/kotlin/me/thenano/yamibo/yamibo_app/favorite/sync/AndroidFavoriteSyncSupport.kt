@@ -10,6 +10,7 @@ import me.thenano.yamibo.yamibo_app.repository.AndroidFavoriteRepository
 import me.thenano.yamibo.yamibo_app.repository.AndroidThreadRepository
 import me.thenano.yamibo.yamibo_app.repository.FavoriteSyncRepository
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncService
+import me.thenano.yamibo.yamibo_app.repository.appsync.favoriteStoreRepository
 import me.thenano.yamibo.yamibo_app.repository.favorite.FavoriteSyncRepositoryImpl
 import me.thenano.yamibo.yamibo_app.store.AndroidCookieStore
 import me.thenano.yamibo.yamibo_app.store.AndroidUserStore
@@ -28,7 +29,7 @@ internal object AndroidFavoriteSyncSupport {
             cacheDirPath = appContext.cacheDir.absolutePath,
         )
         val db = Database(dbFactory.createDriver())
-        val appSyncService = AppSyncService(
+        val appSyncService = AppSyncService.createIfAvailable(
             db = db,
             settingsStore = AndroidSettingsStore(appContext),
             authRepository = authRepository,

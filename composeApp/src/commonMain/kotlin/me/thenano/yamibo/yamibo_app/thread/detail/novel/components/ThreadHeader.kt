@@ -1,5 +1,8 @@
 ﻿package me.thenano.yamibo.yamibo_app.thread.detail.novel.components
 
+import me.thenano.yamibo.yamibo_app.repository.download.MissingThreadImage
+import me.thenano.yamibo.yamibo_app.thread.image.ImageViewer
+import me.thenano.yamibo.yamibo_app.util.normalizeImageUrl
 import YamiboIcons
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.combinedClickable
@@ -25,7 +28,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.SubcomposeAsyncImage
-import io.github.littlesurvival.YamiboRoute
 import io.github.littlesurvival.dto.page.ThreadPage
 import me.thenano.yamibo.yamibo_app.components.text.rememberConvertedText
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
@@ -61,7 +63,7 @@ internal fun ThreadHeader(
     val firstPost = threadPage.posts.firstOrNull { it.floor == 1 } ?: threadPage.posts.firstOrNull()
     val convertedThreadTitle = rememberConvertedText(thread.title)
 
-    val coverUrl = coverUrlOverride ?: remember(firstPost) {
+    val postCover = remember(firstPost) {
         val attachedImage = firstPost?.images?.firstOrNull()?.url ?: return@remember null
         if (
             attachedImage.contains("none.gif") ||
@@ -69,11 +71,12 @@ internal fun ThreadHeader(
             attachedImage.contains("face")
         ) {
             null
-        } else if (attachedImage.startsWith("http")) {
-            attachedImage
-        } else {
-            "${YamiboRoute.Domain.build()}$attachedImage"
-        }
+        } else normalizeImageUrl(attachedImage)
+    }
+
+    val coverUrl = remember(postCover, coverUrlOverride) {
+        val missing = postCover?.let(MissingThreadImage::fromReaderUri)
+        if (missing != null && missing.sourceUrl == coverUrlOverride) postCover else coverUrlOverride ?: postCover
     }
 
     Card(
@@ -99,7 +102,9 @@ internal fun ThreadHeader(
                             containerColor = colors.brownPrimary.copy(alpha = 0.1f)
                         )
                     ) {
-                        if (coverUrl != null) {
+                        if (coverUrl != null && MissingThreadImage.isReaderUri(coverUrl)) {
+                            ImageViewer(url = coverUrl, modifier = Modifier.fillMaxSize(), enableContextMenu = false)
+                        } else if (coverUrl != null) {
                             SubcomposeAsyncImage(
                                 model = rememberImageRequest(url = coverUrl),
                                 contentDescription = "cover",

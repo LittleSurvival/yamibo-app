@@ -912,6 +912,7 @@ Journal 清理程序等待下一次重新驗證：{},Journal cleanup is waiting 
 等待重試,Waiting to retry,等待重試,等待重试
 開啟 {},Enabled {},開啟 {},开启 {}
 雲端清除未完整確認：{}；下次會先安全載入再繼續,Cloud deletion was not fully confirmed: {}; the next run will safely load data before continuing,雲端清除未完整確認：{}；下次會先安全載入再繼續,云端清除未完整确认：{}；下次会先安全加载再继续
+暫不可用,Temporarily unavailable,暫不可用,暂不可用
 雲端暫時無法使用,Cloud is temporarily unavailable,雲端暫時無法使用,云端暂时无法使用
 同步核心目前無法使用,The sync core is currently unavailable,同步核心目前無法使用,同步核心目前无法使用
 新增 {},Added {},新增 {},新增 {}
@@ -966,6 +967,7 @@ RSS 目錄進度,RSS catalog progress,RSS 目錄進度,RSS 目录进度
 多選,Select,多選,多选
 取消選取,Cancel selection,取消選取,取消选择
 全不選,Deselect all,全不選,全不选
+取消全選,Deselect all,取消全選,取消全选
 反選,Invert selection,反選,反选
 已選取 {} 項,{} selected,已選取 {} 項,已选择 {} 项
 移除任務,Remove tasks,移除任務,移除任务
@@ -980,9 +982,16 @@ RSS 目錄進度,RSS catalog progress,RSS 目錄進度,RSS 目录进度
 查看結果,View results,查看結果,查看结果
 處理結果,Results,處理結果,处理结果
 成功,Succeeded,成功,成功
+失敗明細,Failure details,失敗明細,失败明细
 重試失敗項目,Retry failed items,重試失敗項目,重试失败项目
 下載任務正在處理，請稍後重試,The download is busy. Please try again later.,下載任務正在處理，請稍後重試,下载任务正在处理，请稍后重试
 任務已完成，請在下載內容管理中刪除,This task has completed. Delete it from downloaded content.,任務已完成，請在下載內容管理中刪除,任务已完成，请在下载内容管理中删除
 儲存資料夾已變更，請重新載入,The storage folder changed. Please reload.,儲存資料夾已變更，請重新載入,存储文件夹已变更，请重新加载
 下載內容未完全刪除，請重試,Some download files remain. Please retry.,下載內容未完全刪除，請重試,下载内容未完全删除，请重试
 下載任務正在移除，請稍後重試,The download is being removed. Please try again later.,下載任務正在移除，請稍後重試,下载任务正在移除，请稍后重试
+轉換舊版圖片,Convert legacy images,轉換舊版圖片,转换旧版图片
+按頁或章節將現有圖片轉為 CBZ。中斷後可以繼續。,Convert saved images to CBZ one page or chapter at a time. You can resume after an interruption.,按頁或章節將現有圖片轉為 CBZ。中斷後可以繼續。,按页或章节将现有图片转为 CBZ。中断后可以继续。
+轉換,Convert,轉換,转换
+圖片轉換完成,Image conversion complete,圖片轉換完成,图片转换完成
+轉換失敗,Conversion failed,轉換失敗,转换失败
+重新掃描下載資料夾,Rescan download folder,重新掃描下載資料夾,重新扫描下载文件夹
