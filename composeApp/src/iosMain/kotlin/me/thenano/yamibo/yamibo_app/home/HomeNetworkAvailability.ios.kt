@@ -14,7 +14,7 @@ import platform.Network.nw_path_monitor_start
 import platform.Network.nw_path_status_satisfied
 import platform.darwin.dispatch_get_main_queue
 
-internal actual fun homeNetworkAvailability(): Flow<Boolean> = callbackFlow {
+internal actual fun homeNetworkAvailability(): Flow<Boolean>? = callbackFlow {
     val monitor = nw_path_monitor_create()
     nw_path_monitor_set_update_handler(monitor) { path ->
         trySend(nw_path_get_status(path) == nw_path_status_satisfied)

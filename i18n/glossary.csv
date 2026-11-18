@@ -5,6 +5,7 @@ source,en,zh-tw,zh-cn
 搜尋目錄或輸入樓層#,Search catalog or floor#,搜尋目錄或輸入樓層#,搜索目录或输入楼层#
 清除搜尋,Clear search,清除搜尋,清除搜索
 跳至頁碼,Go to page,跳至頁碼,跳至页码
+等待網路連線，連線後會自動載入。,Waiting for a connection. The home page will load automatically.,等待網路連線，連線後會自動載入。,等待网络连接，连接后会自动载入。
 已載入的目錄中沒有符合項目,No matches in loaded catalog entries,已載入的目錄中沒有符合項目,已加载的目录中没有符合项目
 找不到此樓層,Floor not found,找不到此樓層,找不到此楼层
 此頁找不到此樓層,Floor not found on this page,此頁找不到此樓層,此页找不到此楼层

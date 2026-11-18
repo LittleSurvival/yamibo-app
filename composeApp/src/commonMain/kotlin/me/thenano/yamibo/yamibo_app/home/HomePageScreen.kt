@@ -66,6 +66,7 @@ import kotlin.time.Duration.Companion.milliseconds
 
 /** Sealed state for the home page */
 internal sealed interface HomeState {
+    data object WaitingForNetwork : HomeState
     data object Loading : HomeState
     data class Success(val page: HomePage) : HomeState
     data class Error(val message: String) : HomeState
@@ -93,14 +94,16 @@ fun HomePageScreen(
     var isFetching by remember { mutableStateOf(false) }
     val requestMutex = remember { Mutex() }
     val recovery = remember { HomeNetworkRecovery() }
-    var networkRevision by remember { mutableIntStateOf(0) }
+    val networkAvailability = remember { homeNetworkAvailability() }
     val lifecycleOwner = LocalLifecycleOwner.current
     var isForeground by remember(lifecycleOwner) {
         mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
     }
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, _ ->
-            isForeground = lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+            val resumed = lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+            if (resumed && !isForeground) recovery.returnedToForeground()
+            isForeground = resumed
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
@@ -109,26 +112,36 @@ fun HomePageScreen(
     suspend fun loadHomePage(
         initialLoad: Boolean = false,
         afterLogin: Boolean = false,
+        automaticRetry: Boolean = false,
     ) {
         if (afterLogin) requestMutex.lock() else if (!requestMutex.tryLock()) return
+        if (automaticRetry && (!recovery.retryReady || !isForeground)) {
+            requestMutex.unlock()
+            return
+        }
         isFetching = true
         val requestGeneration = recovery.requestStarted()
         try {
             if (initialLoad) forumRepository.getCachedHomePage()?.let { state = HomeState.Success(it) }
             val hadContent = state is HomeState.Success
-            isRefreshing = hadContent && !initialLoad
-            if (!hadContent) state = HomeState.Loading
+            isRefreshing = hadContent && !initialLoad && !automaticRetry
+            if (!hadContent && !automaticRetry) state = HomeState.Loading
             val result = forumRepository.fetchHomePage()
             if (result is YamiboResult.Success) {
                 state = HomeState.Success(result.value)
             } else {
-                recovery.requestFailed(
-                    requestGeneration,
-                    isNetworkFailure = result is YamiboResult.Failure && result.reason.startsWith("[Network]"),
-                )
+                val reason = (result as? YamiboResult.Failure)?.reason.orEmpty()
+                val networkFailure = reason.startsWith("[Network]")
+                recovery.requestFailed(requestGeneration, networkFailure)
                 val failureMessage = errorMessages.resolve(result)
-                state = state.afterRefresh(result, failureMessage)
-                if (!initialLoad && hadContent) {
+                state = if (!hadContent && networkFailure && networkAvailability != null &&
+                    (!recovery.available || recovery.retryReady || reason.contains("Code=-1009"))
+                ) {
+                    HomeState.WaitingForNetwork
+                } else {
+                    state.afterRefresh(result, failureMessage)
+                }
+                if (!initialLoad && !automaticRetry && hadContent) {
                     feedbackController.post(
                         message = i18n(failureMessage),
                         duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short,
@@ -143,18 +156,13 @@ fun HomePageScreen(
     }
 
     LaunchedEffect(Unit) {
-        homeNetworkAvailability().distinctUntilChanged().collect { available ->
-            recovery.availabilityChanged(available)
-            networkRevision++
-        }
+        networkAvailability?.distinctUntilChanged()?.collect(recovery::availabilityChanged)
     }
 
     /** A path can recover before the failed request finishes; retain that transition. */
-    LaunchedEffect(networkRevision, state, isForeground, isFetching) {
-        scope.launch {
-            if (isForeground && !isFetching && state is HomeState.Error && recovery.takeRetry()) {
-                loadHomePage()
-            }
+    LaunchedEffect(recovery.retryReady, isForeground, isFetching) {
+        if (recovery.retryReady && isForeground && !isFetching) {
+            scope.launch { loadHomePage(automaticRetry = true) }
         }
     }
 
@@ -175,6 +183,13 @@ fun HomePageScreen(
     Box(modifier = Modifier.fillMaxSize().background(colors.creamBackground)) {
         when (val currentState = state) {
             is HomeState.Loading -> LoadingSkeleton()
+            HomeState.WaitingForNetwork -> Column(
+                modifier = Modifier.align(Alignment.Center).padding(horizontal = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(i18n("等待網路連線，連線後會自動載入。"), color = colors.brownPrimary)
+                TextButton(onClick = { scope.launch { loadHomePage() } }) { Text(i18n("重試")) }
+            }
             is HomeState.Error ->
                 ErrorContent(
                     message = currentState.message,
