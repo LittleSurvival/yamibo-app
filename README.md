@@ -87,6 +87,8 @@ $OutputEncoding=[System.Text.Encoding]::UTF8
 
 iOS 需要 macOS + Xcode，從 `iosApp` 開啟。
 
+iOS 首頁等待聯網時沿用載入骨架，若已有快取則繼續顯示內容。連線恢復後會自動補抓；持續離線時可從錯誤卡手動重試。
+
 ## 常用命令
 
 ```powershell
