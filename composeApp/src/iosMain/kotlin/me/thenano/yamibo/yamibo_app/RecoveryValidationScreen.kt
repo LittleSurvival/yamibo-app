@@ -1,6 +1,7 @@
 package me.thenano.yamibo.yamibo_app
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -17,6 +18,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import me.thenano.yamibo.yamibo_app.components.feedback.YamiboErrorContent
+import me.thenano.yamibo.yamibo_app.favorite.updates.FavoriteUpdateStatusCard
 import me.thenano.yamibo.yamibo_app.history.ReadHistoryPage
 import me.thenano.yamibo.yamibo_app.home.HomePageScreen
 import me.thenano.yamibo.yamibo_app.home.nativeHomeNetworkAvailability
@@ -100,6 +102,18 @@ fun RecoveryValidationScreen() {
                         onRetry = { attempts++ })
                     "image" -> ImageViewer("https://example.invalid/fixture.png", fillContainer = true,
                         blockedErrorMessage = longMessage, onReload = { attempts++ })
+                    "favorite" -> LazyColumn {
+                        item {
+                            val snapshot = FavoriteUpdateRepository.RunSnapshot(
+                                runId = "qa", status = FavoriteUpdateRepository.RunStatus.FAILED,
+                                phase = FavoriteUpdateRepository.RunPhase.FAILED, startedAt = 0L, updatedAt = 0L,
+                                finishedAt = 0L, totalCount = 1, completedCount = 0, skippedCount = 0,
+                                failedCount = 1, detectedCount = 0, currentItem = "Fixture", logMessage = null,
+                                warningMessage = longMessage, errorMessage = longMessage,
+                            )
+                            FavoriteUpdateStatusCard(FavoriteUpdateRepository.RunState.Failed(snapshot), onHide = { attempts++ })
+                        }
+                    }
                     "history" -> ReadHistoryPage()
                     "link" -> IInAppLinkResolvingScreen("https://bbs.yamibo.com/forum-49-1.html").Content()
                     else -> HomePageScreen()

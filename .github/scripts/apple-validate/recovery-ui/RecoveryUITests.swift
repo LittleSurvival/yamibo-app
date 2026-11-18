@@ -71,6 +71,23 @@ final class RecoveryUITests: XCTestCase {
         see(["QA attempts=1"])
     }
 
+    func testLandscapeImageAction() {
+        launch("image")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertGreaterThan(app.frame.width, app.frame.height)
+        shot("landscape-inline-image")
+        tapVisible(reloadNames)
+        see(["QA attempts=1"])
+    }
+
+    func testFavoriteStatusAction() {
+        launch("favorite")
+        see(["QA attempts=0"])
+        shot("favorite-status-large-text")
+        tapVisible(["隱藏", "隐藏", "Hide"])
+        see(["QA attempts=1"])
+    }
+
     func testLinkAction() {
         launch("link")
         see(["QA attempts=1"])
