@@ -156,6 +156,7 @@ Gitee / Gitea mirror 的 ready manifest 必須指向各自 mirror release 的 AP
 
 - 優先沿用現有頁面模式：`Screen` + content/components + repository/cache。
 - UI 文字走 `i18n(...)`。
+- 頁面載入失敗時保留可見的重試操作；技術錯誤預設顯示簡短提示，診斷詳情可展開、捲動及複製，顯示與複製前遮蔽憑證、Cookie 和網址查詢參數。
 - API 相關改動先確認本地 `kotlin-libs/yamibo-api`。
 - 不提交 `build/` 內 generated source。
 - 不手動把 source manifest 改成 `isReady=true`。
