@@ -87,6 +87,8 @@ $OutputEncoding=[System.Text.Encoding]::UTF8
 
 iOS 需要 macOS + Xcode，從 `iosApp` 開啟。
 
+iOS 首頁在網路錯誤後監聽系統網路路徑；首次允許聯網或斷網後恢復時，於前景自動重試一次。拒絕聯網或持續離線時保留手動重試；已載入的首頁不因網路變化而重新整理。
+
 ## 常用命令
 
 ```powershell

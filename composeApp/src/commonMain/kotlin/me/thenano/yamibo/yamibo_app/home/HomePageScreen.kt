@@ -33,13 +33,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil3.compose.SubcomposeAsyncImage
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.model.ForumSummary
 import io.github.littlesurvival.dto.page.ForumCategory
 import io.github.littlesurvival.dto.page.HomePage
 import io.github.littlesurvival.dto.page.SwiperImages
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import me.thenano.yamibo.yamibo_app.LocalAppSettingsRepository
 import me.thenano.yamibo.yamibo_app.LocalForumRepository
 import me.thenano.yamibo.yamibo_app.components.feedback.YamiboDetailedErrorContent
@@ -85,48 +90,80 @@ fun HomePageScreen(
 
     var state by remember { mutableStateOf<HomeState>(HomeState.Loading) }
     var isRefreshing by remember { mutableStateOf(false) }
-
-    suspend fun mapFetchResultState() {
-        val result = forumRepository.fetchHomePage()
-        state =
-            when (result) {
-                is YamiboResult.Success -> HomeState.Success(result.value)
-                else -> HomeState.Error(i18n(errorMessages.resolve(result)))
-            }
+    var isFetching by remember { mutableStateOf(false) }
+    val requestMutex = remember { Mutex() }
+    val recovery = remember { HomeNetworkRecovery() }
+    var networkRevision by remember { mutableIntStateOf(0) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var isForeground by remember(lifecycleOwner) {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+    }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, _ ->
+            isForeground = lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    /** Initial load: show cache immediately, then refresh once so message badge is current. */
-    LaunchedEffect(Unit) {
-        val cached = forumRepository.getCachedHomePage()
-        if (cached != null) {
-            state = HomeState.Success(cached)
-            when (val result = forumRepository.fetchHomePage()) {
-                is YamiboResult.Success -> state = HomeState.Success(result.value)
-                else -> Unit
+    suspend fun loadHomePage(
+        initialLoad: Boolean = false,
+        afterLogin: Boolean = false,
+    ) {
+        if (afterLogin) requestMutex.lock() else if (!requestMutex.tryLock()) return
+        isFetching = true
+        val requestGeneration = recovery.requestStarted()
+        try {
+            if (initialLoad) forumRepository.getCachedHomePage()?.let { state = HomeState.Success(it) }
+            val hadContent = state is HomeState.Success
+            isRefreshing = hadContent && !initialLoad
+            if (!hadContent) state = HomeState.Loading
+            val result = forumRepository.fetchHomePage()
+            if (result is YamiboResult.Success) {
+                state = HomeState.Success(result.value)
+            } else {
+                recovery.requestFailed(
+                    requestGeneration,
+                    isNetworkFailure = result is YamiboResult.Failure && result.reason.startsWith("[Network]"),
+                )
+                val failureMessage = errorMessages.resolve(result)
+                state = state.afterRefresh(result, failureMessage)
+                if (!initialLoad && hadContent) {
+                    feedbackController.post(
+                        message = i18n(failureMessage),
+                        duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short,
+                    )
+                }
             }
-        } else {
-            mapFetchResultState()
+        } finally {
+            isFetching = false
+            isRefreshing = false
+            requestMutex.unlock()
         }
     }
 
-    /** Event listening */
+    LaunchedEffect(Unit) {
+        homeNetworkAvailability().distinctUntilChanged().collect { available ->
+            recovery.availabilityChanged(available)
+            networkRevision++
+        }
+    }
+
+    /** A path can recover before the failed request finishes; retain that transition. */
+    LaunchedEffect(networkRevision, state, isForeground, isFetching) {
+        scope.launch {
+            if (isForeground && !isFetching && state is HomeState.Error && recovery.takeRetry()) {
+                loadHomePage()
+            }
+        }
+    }
+
+    /** Initial load: show cache immediately, then refresh once so message badge is current. */
+    LaunchedEffect(Unit) { loadHomePage(initialLoad = true) }
+
     LaunchedEffect(Unit) {
         AppEventBus.events.collect { event ->
-            if (event == LoginSuccessEvent) {
-                isRefreshing = true
-                try {
-                    val result = forumRepository.fetchHomePage()
-                    state = state.afterRefresh(result, errorMessages.resolve(result))
-                    if (result !is YamiboResult.Success && state is HomeState.Success) {
-                        feedbackController.post(
-                            message = i18n(errorMessages.resolve(result)),
-                            duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short,
-                        )
-                    }
-                } finally {
-                    isRefreshing = false
-                }
-            }
+            if (event == LoginSuccessEvent) loadHomePage(afterLogin = true)
         }
     }
 
@@ -142,8 +179,7 @@ fun HomePageScreen(
                 ErrorContent(
                     message = currentState.message,
                     onRetry = {
-                        state = HomeState.Loading
-                        scope.launch { mapFetchResultState() }
+                        scope.launch { loadHomePage() }
                     }
                 )
 
@@ -151,21 +187,7 @@ fun HomePageScreen(
                 PullToRefreshBox(
                     isRefreshing = isRefreshing,
                     onRefresh = {
-                        isRefreshing = true
-                        scope.launch {
-                            when (val result = forumRepository.fetchHomePage()) {
-                                is YamiboResult.Success ->
-                                    state = HomeState.Success(result.value)
-
-                                else -> {
-                                    feedbackController.post(
-                                        message = i18n(errorMessages.resolve(result)),
-                                        duration = me.thenano.yamibo.yamibo_app.feedback.AppFeedbackDuration.Short
-                                    )
-                                }
-                            }
-                            isRefreshing = false
-                        }
+                        scope.launch { loadHomePage() }
                     },
                     modifier = Modifier.fillMaxSize()
                 ) {
