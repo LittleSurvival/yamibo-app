@@ -1,4 +1,11 @@
 source,en,zh-tw,zh-cn
+暫時無法連線，請檢查網路設定後重試。,Unable to connect. Check your network settings and retry.,暫時無法連線，請檢查網路設定後重試。,暂时无法连接，请检查网络设置后重试。
+伺服器暫時無法完成請求，請稍後重試。,The server could not complete the request. Please retry later.,伺服器暫時無法完成請求，請稍後重試。,服务器暂时无法完成请求，请稍后重试。
+載入失敗，請稍後重試；若持續發生，請回報診斷詳情。,Loading failed. Retry later; if it persists report the diagnostic details.,載入失敗，請稍後重試；若持續發生，請回報診斷詳情。,加载失败，请稍后重试；若持续发生，请反馈诊断详情。
+查看診斷詳情,Show diagnostic details,查看診斷詳情,查看诊断详情
+收起診斷詳情,Hide diagnostic details,收起診斷詳情,收起诊断详情
+複製診斷詳情,Copy diagnostic details,複製診斷詳情,复制诊断详情
+已複製診斷詳情,Diagnostic details copied,已複製診斷詳情,已复制诊断详情
 更新小說詳情中,Updating novel details,更新小說詳情中,更新小说详情中
 "收藏更新完成，部分項目失敗","Favorite update completed with failures","收藏更新完成，部分項目失敗","收藏更新完成，部分项目失败"
 無法取得搜尋校驗碼，請刷新個人資料後重試,Unable to get the search verification token. Refresh your profile and try again.,無法取得搜尋校驗碼，請刷新個人資料後重試,无法获取搜索校验码，请刷新个人资料后重试

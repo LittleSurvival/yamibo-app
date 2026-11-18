@@ -26,6 +26,7 @@ import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.favorite.*
 import me.thenano.yamibo.yamibo_app.forum.components.PageNavigation
 import me.thenano.yamibo.yamibo_app.history.components.*
+import me.thenano.yamibo.yamibo_app.components.feedback.YamiboErrorContent
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.performance.favoriteHistoryLoadPerf
@@ -567,7 +568,7 @@ fun ReadHistoryPage(reTapToken: Int = 0) {
             when (val current = state) {
                 is HistoryState.Loading -> LoadingContent()
                 is HistoryState.Empty -> EmptyContent(mode)
-                is HistoryState.Error -> ErrorContent(current.message) { scope.launch { loadPage(currentPage) } }
+                is HistoryState.Error -> YamiboErrorContent(current.message, onRetry = { scope.launch { loadPage(currentPage) } })
                 is HistoryState.Success -> {
                     val totalPages = ceil(current.totalCount.toDouble() / PAGE_SIZE).toInt()
                     key(current.currentPage) {
