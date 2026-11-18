@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -45,7 +44,7 @@ fun FavoriteUpdateStatusCard(
     val boundedProgress = progress.coerceIn(0f, 1f)
 
     Surface(
-        modifier = modifier.heightIn(max = 184.dp),
+        modifier = modifier,
         shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
         color = colors.creamSurface,
         border = BorderStroke(1.dp, colors.brownPrimary.copy(alpha = 0.18f)),
