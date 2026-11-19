@@ -9,7 +9,12 @@ interface DownloadStorageProvider {
         manifestBytes: ByteArray,
         threadPageBytes: ByteArray,
         images: List<PendingDownloadedImage>,
+        retainedFiles: List<String> = emptyList(),
     )
+    /** Append to the existing page in this specific storage folder, publishing its manifest last. */
+    suspend fun writeThreadImage(
+        storageKey: String, key: ThreadPageDownloadKey, image: PendingDownloadedImage, manifestBytes: ByteArray,
+    ): String
     suspend fun readThreadPage(key: ThreadPageDownloadKey): ByteArray?
     suspend fun updateThreadPage(key: ThreadPageDownloadKey, manifestBytes: ByteArray, threadPageBytes: ByteArray)
     suspend fun resolveImageUri(key: ThreadPageDownloadKey, fileName: String): String?

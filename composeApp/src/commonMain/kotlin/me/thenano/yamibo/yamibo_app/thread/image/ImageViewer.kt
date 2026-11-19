@@ -22,6 +22,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.catch
+import me.thenano.yamibo.yamibo_app.LocalDownloadRepository
+import me.thenano.yamibo.yamibo_app.repository.download.MissingThreadImage
 import coil3.compose.AsyncImagePainter
 import coil3.compose.rememberAsyncImagePainter
 import coil3.compose.rememberConstraintsSizeResolver
@@ -131,7 +135,55 @@ fun ImageViewer(
     onRenderedHeightChanged: ((Int) -> Unit)? = null,
     onRenderedAspectRatioChanged: ((Float) -> Unit)? = null,
 ) {
-    val fullUrl = normalizeImageUrl(url)
+    val missing = remember(url) { MissingThreadImage.fromReaderUri(url) }
+    val original = normalizeImageUrl(url)
+    val colors = YamiboTheme.colors
+    val errorBgColor = if (isDarkTheme) Color.White.copy(alpha = 0.08f) else Color(0xFFF3F3F3)
+    val errorTextColor = if (isDarkTheme) Color.White else colors.textDark
+    val errorSubTextColor = if (isDarkTheme) Color.White.copy(alpha = 0.5f) else colors.textDark.copy(alpha = 0.6f)
+    val errorUrlColor = if (isDarkTheme) Color.White.copy(alpha = 0.3f) else colors.brownDeep
+
+    val fullUrl = if (missing == null) original else key(missing) {
+        val repository = LocalDownloadRepository.current
+        val local by remember(repository, missing) {
+            repository.observeLocalImage(missing).catch { emit(null) }
+        }.collectAsState(initial = null)
+        var loading by remember { mutableStateOf(false) }
+        var failure by remember { mutableStateOf<String?>(null) }
+        val scope = rememberCoroutineScope()
+        val source = local
+        if (source == null) {
+            BoxWithConstraints(modifier = modifier, contentAlignment = Alignment.Center) {
+                if (loading) {
+                    ImageLoadingContent(160.dp, onImageRetry = null)
+                } else {
+                    ImageErrorContent(
+                        fullUrl = missing.sourceUrl,
+                        errorMessage = failure.orEmpty(),
+                        reservedHeight = 0.dp,
+                        compact = maxWidth <= 140.dp || maxHeight <= 140.dp,
+                        errorBgColor = errorBgColor,
+                        errorTextColor = errorTextColor,
+                        errorSubTextColor = errorSubTextColor,
+                        errorUrlColor = errorUrlColor,
+                    ) {
+                        if (!loading) {
+                            loading = true
+                            scope.launch {
+                                try {
+                                    repository.retryImage(missing).onFailure { failure = it.message }
+                                } finally {
+                                    loading = false
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        source
+    } ?: return
+
     val diagnosticUrl = imageSourceForDiagnostics(fullUrl)
     DebugRecomposeProbe("ImageViewer", diagnosticUrl)
     var localRetryKey by remember(fullUrl) { mutableIntStateOf(0) }
@@ -140,7 +192,6 @@ fun ImageViewer(
     var hasReportedSuccess by remember(fullUrl, localRetryKey, externalRetryKey) { mutableStateOf(false) }
     var hasReportedError by remember(fullUrl, localRetryKey, externalRetryKey) { mutableStateOf(false) }
 
-    val colors = YamiboTheme.colors
     val isOverlayOpen = LocalReaderOverlayVisible.current
     val density = LocalDensity.current
 
@@ -152,12 +203,6 @@ fun ImageViewer(
     val onImageActionMessage = LocalImageActionMessageListener.current
 
     val hasGestures = enableContextMenu || onSingleTap != null || onDoubleTap != null
-
-    // Formatting styles
-    val errorBgColor = if (isDarkTheme) Color.White.copy(alpha = 0.08f) else Color(0xFFF3F3F3)
-    val errorTextColor = if (isDarkTheme) Color.White else colors.textDark
-    val errorSubTextColor = if (isDarkTheme) Color.White.copy(alpha = 0.5f) else colors.textDark.copy(alpha = 0.6f)
-    val errorUrlColor = if (isDarkTheme) Color.White.copy(alpha = 0.3f) else colors.brownDeep
 
     val imageRequest = rememberImageRequest(
         url = fullUrl,
@@ -196,7 +241,7 @@ fun ImageViewer(
                                 latestOnSingleTap?.invoke()
                             },
                             onDoubleTap = {
-                                latestOnDoubleTap?.invoke(fullUrl)
+                                latestOnDoubleTap?.invoke(original)
                             },
                             onLongPress = {
                                 if (latestEnableContextMenu && !latestOverlayOpen) {
@@ -399,6 +444,7 @@ private fun ImageErrorContent(
     errorTextColor: Color,
     errorSubTextColor: Color,
     errorUrlColor: Color,
+    compact: Boolean = false,
     onReload: () -> Unit,
 ) {
     val colors = YamiboTheme.colors
@@ -408,18 +454,20 @@ private fun ImageErrorContent(
             .fillMaxWidth()
             // Error details and the retry button must not be squeezed into a loading placeholder.
             .heightIn(min = reservedHeight)
-            .padding(16.dp)
+            .padding(if (compact) 2.dp else 16.dp)
             .background(errorBgColor, RoundedCornerShape(12.dp))
-            .padding(24.dp),
+            .padding(if (compact) 4.dp else 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Image(
-            painter = painterResource(Res.drawable.image_icon),
-            contentDescription = "Image Load Failed",
-            modifier = Modifier.size(64.dp)
-        )
-        Spacer(Modifier.height(12.dp))
+        if (!compact) {
+            Image(
+                painter = painterResource(Res.drawable.image_icon),
+                contentDescription = "Image Load Failed",
+                modifier = Modifier.size(64.dp)
+            )
+            Spacer(Modifier.height(12.dp))
+        }
         Text(
             text = i18n("圖片載入失敗"),
             color = errorTextColor,
@@ -427,7 +475,7 @@ private fun ImageErrorContent(
             fontWeight = FontWeight.SemiBold
         )
         Spacer(Modifier.height(6.dp))
-        Text(
+        if (errorMessage.isNotBlank()) Text(
             text = errorMessage,
             color = errorSubTextColor,
             fontSize = 11.sp,
@@ -449,7 +497,7 @@ private fun ImageErrorContent(
             colors = ButtonDefaults.outlinedButtonColors(
                 contentColor = colors.brownPrimary
             ),
-            contentPadding = PaddingValues(horizontal = 28.dp, vertical = 8.dp)
+            contentPadding = PaddingValues(horizontal = if (compact) 4.dp else 28.dp, vertical = 8.dp)
         ) {
             Text(
                 text = i18n("重新載入"),

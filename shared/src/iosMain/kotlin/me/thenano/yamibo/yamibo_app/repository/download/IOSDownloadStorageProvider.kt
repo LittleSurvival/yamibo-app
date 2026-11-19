@@ -1,5 +1,15 @@
 package me.thenano.yamibo.yamibo_app.repository.download
 
+import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.addressOf
+import kotlinx.cinterop.reinterpret
+import kotlinx.cinterop.usePinned
+import platform.CoreFoundation.CFDataCreate
+import platform.CoreFoundation.CFRelease
+import platform.ImageIO.CGImageSourceCreateWithData
+import platform.ImageIO.CGImageSourceCreateImageAtIndex
+import platform.ImageIO.CGImageSourceGetStatusAtIndex
+import platform.ImageIO.kCGImageStatusComplete
 import kotlinx.serialization.json.Json
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
@@ -37,6 +47,7 @@ class IOSDownloadStorageProvider(
         manifestBytes: ByteArray,
         threadPageBytes: ByteArray,
         images: List<PendingDownloadedImage>,
+        retainedFiles: List<String>,
     ) {
         val root = rootDir()
         fileSystem.createDirectories(root)
@@ -47,8 +58,34 @@ class IOSDownloadStorageProvider(
         write(tmp / "manifest.json", manifestBytes)
         write(tmp / "thread_page.json", threadPageBytes)
         images.forEach { write(tmp / "images" / it.fileName, it.bytes) }
-        if (fileSystem.exists(final)) fileSystem.deleteRecursively(final)
-        fileSystem.atomicMove(tmp, final)
+        retainedFiles.forEach { name -> fileSystem.copy(final / "images" / name, tmp / "images" / name) }
+        val previous = root / "${key.stableId}.previous"
+        if (fileSystem.exists(previous)) fileSystem.deleteRecursively(previous)
+        if (fileSystem.exists(final)) fileSystem.atomicMove(final, previous)
+        try {
+            fileSystem.atomicMove(tmp, final)
+        } catch (error: Exception) {
+            if (fileSystem.exists(previous)) fileSystem.atomicMove(previous, final)
+            throw error
+        }
+        if (fileSystem.exists(previous)) fileSystem.deleteRecursively(previous)
+    }
+
+    override suspend fun writeThreadImage(
+        storageKey: String, key: ThreadPageDownloadKey, image: PendingDownloadedImage, manifestBytes: ByteArray,
+    ): String {
+        val folder = selectedFolder().also { check(it.toString() == storageKey) }
+        val page = folder / "YamiboDownloads" / key.stableId
+        check(fileSystem.exists(page / "manifest.json"))
+        val images = page / "images"
+        fileSystem.createDirectories(images)
+        val file = images / image.fileName
+        val pending = images / "${image.fileName}.tmp"
+        write(pending, image.bytes)
+        fileSystem.atomicMove(pending, file)
+        write(page / "manifest.json.tmp", manifestBytes)
+        fileSystem.atomicMove(page / "manifest.json.tmp", page / "manifest.json")
+        return "file://$file"
     }
 
     override suspend fun readThreadPage(key: ThreadPageDownloadKey): ByteArray? {
@@ -85,7 +122,7 @@ class IOSDownloadStorageProvider(
         val root = rootDir()
         if (!fileSystem.exists(root)) return emptyList()
         return fileSystem.list(root)
-            .filter { it.name.startsWith("thread_") }
+            .filter { it.name.startsWith("thread_") && !it.name.endsWith(".previous") && !it.name.endsWith(".tmp") }
             .mapNotNull(::readManifest)
     }
 
@@ -260,4 +297,21 @@ internal fun resolveIosStorageFolder(stored: String): Path {
     }
     require(folder.isAbsolute) { "Storage folder must be an absolute path" }
     return folder
+}
+
+@OptIn(ExperimentalForeignApi::class)
+internal actual fun isReadableDownloadedBitmap(bytes: ByteArray): Boolean = bytes.usePinned { pinned ->
+    val data = CFDataCreate(null, pinned.addressOf(0).reinterpret(), bytes.size.toLong()) ?: return@usePinned false
+    try {
+        val source = CGImageSourceCreateWithData(data, null) ?: return@usePinned false
+        try {
+            val image = CGImageSourceCreateImageAtIndex(source, 0uL, null) ?: return@usePinned false
+            CFRelease(image)
+            CGImageSourceGetStatusAtIndex(source, 0uL) == kCGImageStatusComplete
+        } finally {
+            CFRelease(source)
+        }
+    } finally {
+        CFRelease(data)
+    }
 }

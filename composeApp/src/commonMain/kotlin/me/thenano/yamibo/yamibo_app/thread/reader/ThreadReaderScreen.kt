@@ -35,6 +35,7 @@ import androidx.compose.ui.zIndex
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import me.thenano.yamibo.yamibo_app.repository.download.MissingThreadImage
 import coil3.SingletonImageLoader
 import coil3.compose.LocalPlatformContext
 import coil3.request.CachePolicy
@@ -1290,7 +1291,7 @@ internal fun ThreadReaderScreen(
         }.takeIf { it >= 0 } ?: readerEntries.indexOfFirst {
             it.post.pid.value.toLong() == priorityPostId
         }.coerceAtLeast(0)
-        val urls = nearbyReaderImages(scrollImagePositions, anchorEntry, anchorEntry)
+        val urls = nearbyReaderImages(scrollImagePositions, anchorEntry, anchorEntry).filterNot(MissingThreadImage::isReaderUri)
         if (urls.isEmpty()) {
             activeImageGeometrySnapshot = imageAspectRatioCache.toMap()
             imageGeometryPreflightReady = true
@@ -2982,9 +2983,6 @@ internal fun ThreadReaderScreen(
             }
         }
         val locatedPage = located?.let { it.pageNav?.currentPage ?: 1 }
-        if (located != null && locatedPage != null) {
-            threadRepository.setCachedThread(tid, authorId, locatedPage, located)
-        }
         loadPage(locatedPage ?: initialPage, initialSnapshot = located)
 
         /** Restore position from history if no explicit targetPid */
@@ -3345,7 +3343,7 @@ internal fun ThreadReaderScreen(
         }.distinctUntilChanged().collectLatest { urls ->
             debugPerfLog("image_prefetch_window|count=${urls.size}|ahead=3|behind=2")
             // A new window cancels outstanding work; completed images stay in Coil's bounded cache.
-            urls.filterNot { it in failedImageMessages }.chunked(2).forEach { batch ->
+            urls.filterNot { it in failedImageMessages || MissingThreadImage.isReaderUri(it) }.chunked(2).forEach { batch ->
                 coroutineScope {
                     batch.forEach { imageUrl ->
                         launch {

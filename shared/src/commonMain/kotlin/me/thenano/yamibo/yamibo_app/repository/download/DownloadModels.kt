@@ -1,6 +1,9 @@
 package me.thenano.yamibo.yamibo_app.repository.download
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import okio.ByteString.Companion.decodeBase64
+import okio.ByteString.Companion.encodeUtf8
 
 @Serializable
 sealed interface DownloadTaskKey {
@@ -18,6 +21,28 @@ data class ThreadPageDownloadKey(
 
     val threadPrefix: String
         get() = "thread_${tid}_"
+}
+
+/** Read-time image reference carried through the readers' URL-based navigation. */
+@Serializable
+data class MissingThreadImage(
+    val key: ThreadPageDownloadKey,
+    val storageId: String,
+    val sourceUrl: String,
+) {
+    internal fun readerUri(): String = PREFIX + Json.encodeToString(this).encodeUtf8().base64Url()
+
+    companion object {
+        private const val PREFIX = "yamibo-missing://"
+
+        fun isReaderUri(url: String): Boolean = url.startsWith(PREFIX)
+
+        fun fromReaderUri(url: String): MissingThreadImage? {
+            if (!isReaderUri(url)) return null
+            val payload = url.removePrefix(PREFIX).decodeBase64()?.utf8() ?: return null
+            return runCatching { Json.decodeFromString<MissingThreadImage>(payload) }.getOrNull()
+        }
+    }
 }
 
 @Serializable

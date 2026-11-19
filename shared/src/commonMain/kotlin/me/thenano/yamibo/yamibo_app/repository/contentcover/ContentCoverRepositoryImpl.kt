@@ -1,5 +1,6 @@
 package me.thenano.yamibo.yamibo_app.repository.contentcover
 
+import me.thenano.yamibo.yamibo_app.repository.download.MissingThreadImage
 import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToOneOrNull
 import kotlinx.coroutines.Dispatchers
@@ -93,7 +94,7 @@ class ContentCoverRepositoryImpl(
 
 internal fun normalizeCoverUrl(rawUrl: String): String? {
     val url = repairDomainPrefixedLocalCoverUri(rawUrl.trim())
-    if (url.isEmpty()) return null
+    if (url.isEmpty() || MissingThreadImage.isReaderUri(url)) return null
     val lower = url.lowercase()
     if (lower.startsWith("data:") || lower.startsWith("blob:")) return null
     if (lower.contains("none.gif") || lower.contains("static/image/") ||

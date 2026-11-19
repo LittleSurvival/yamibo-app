@@ -6,6 +6,7 @@ import io.github.littlesurvival.dto.page.ThreadPage
 import io.github.littlesurvival.dto.value.TagId
 import io.github.littlesurvival.dto.value.ThreadId
 import io.github.littlesurvival.dto.value.UserId
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadQueueEntry
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadQueueSummary
@@ -13,6 +14,7 @@ import me.thenano.yamibo.yamibo_app.repository.download.DownloadStatus
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadTaskKey
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadedContentGroup
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadedContentSummary
+import me.thenano.yamibo.yamibo_app.repository.download.MissingThreadImage
 import me.thenano.yamibo.yamibo_app.repository.download.RssMangaChapterDownloadKey
 import me.thenano.yamibo.yamibo_app.repository.download.RssMangaChapterManifest
 import me.thenano.yamibo.yamibo_app.repository.download.TagMangaChapterDownloadKey
@@ -31,6 +33,10 @@ interface DownloadRepository {
     suspend fun getStatus(key: TagMangaChapterDownloadKey): DownloadStatus
     suspend fun getStatus(key: RssMangaChapterDownloadKey): DownloadStatus
     suspend fun getDownloadedPage(key: ThreadPageDownloadKey): ThreadPage?
+    /** Observe only the durable local copy. Collecting never contacts the image host. */
+    fun observeLocalImage(image: MissingThreadImage): Flow<String?>
+    /** Fetch and persist one missing image after an explicit reader action. */
+    suspend fun retryImage(image: MissingThreadImage): Result<String>
     suspend fun updateDownloadedPage(key: ThreadPageDownloadKey, page: ThreadPage): Boolean
     suspend fun getManifest(key: ThreadPageDownloadKey): ThreadPageDownloadManifest?
     suspend fun getTagMangaChapterImages(key: TagMangaChapterDownloadKey): List<String>?

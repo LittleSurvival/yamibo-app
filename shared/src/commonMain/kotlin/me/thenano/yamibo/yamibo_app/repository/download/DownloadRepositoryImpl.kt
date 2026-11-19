@@ -1,5 +1,11 @@
 package me.thenano.yamibo.yamibo_app.repository.download
 
+import com.fleeksoft.ksoup.Ksoup
+import com.fleeksoft.ksoup.nodes.Element
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import okio.ByteString.Companion.encodeUtf8
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.model.ThreadSummary
 import io.github.littlesurvival.dto.page.PostImage
@@ -43,6 +49,8 @@ class DownloadRepositoryImpl(
     private val removalMutex = Mutex()
     private val queueWriteMutex = Mutex()
     private val activeTasks = mutableMapOf<DownloadTaskKey, Job>()
+    private val imageRepairs = mutableMapOf<MissingThreadImage, Deferred<Result<String>>>()
+    private val imageRevision = MutableStateFlow(0L)
     private val removing = mutableListOf<(DownloadTaskKey) -> Boolean>()
     private val queueWrites = Channel<Unit>(Channel.CONFLATED)
     private val contentMutex = Mutex()
@@ -304,31 +312,82 @@ class DownloadRepositoryImpl(
 
     override suspend fun getDownloadedPage(key: ThreadPageDownloadKey): ThreadPage? {
         return withContext(Dispatchers.IO) {
-            val bytes = storageProvider.readThreadPage(key) ?: return@withContext null
-            val page = runCatching { json.decodeFromString<ThreadPage>(bytes.decodeToString()) }
-                .onFailure { Logger.d(TAG, "Failed to decode downloaded thread page key=${key.stableId}", it) }
-                .getOrNull()
-                ?: return@withContext null
-            val manifest = storageProvider.readManifest(key) ?: return@withContext page
-            val imageUris = storageProvider.resolveImageUris(key, manifest.images.map { it.fileName })
-            val localUris = manifest.images.mapNotNull { image ->
-                imageUris[image.fileName]?.let { image.sourceUrl to it }
-            }.toMap()
-            if (localUris.isEmpty()) return@withContext page
-            page.copy(
-                posts = page.posts.map { post ->
-                    post.copy(
-                        contentHtml = localUris.entries.fold(post.contentHtml) { html, (source, local) ->
-                            html.replace(source, local)
-                                .replace(source.removePrefix("https://bbs.yamibo.com/"), local)
-                        },
-                        images = post.images.map { image ->
-                            val normalized = normalizeDownloadImageUrl(image.url)
-                            PostImage(localUris[normalized] ?: image.url, image.alt)
-                        },
-                    )
-                },
+            contentMutex.withLock {
+                val page = readOriginalPage(key) ?: return@withLock null
+                val storageKey = storageProvider.getStorageKey() ?: return@withLock page
+                val manifest = storageProvider.readManifest(key) ?: return@withLock page
+                val imageUris = storageProvider.resolveImageUris(key, manifest.images.map { it.fileName }.filter { it.isSafeImageFileName() })
+                val saved = manifest.images.associate { it.sourceUrl to imageUris[it.fileName] }
+                val storageId = storageKey.encodeUtf8().sha256().hex()
+                page.mapThreadImages { source ->
+                    saved[source] ?: MissingThreadImage(key, storageId, source).readerUri()
+                }
+            }
+        }
+    }
+
+    private suspend fun readOriginalPage(key: ThreadPageDownloadKey): ThreadPage? {
+        val bytes = storageProvider.readThreadPage(key) ?: return null
+        return runCatching { json.decodeFromString<ThreadPage>(bytes.decodeToString()) }
+            .onFailure { Logger.d(TAG, "Failed to decode downloaded page key=${key.stableId}", it) }
+            .getOrNull()
+    }
+
+    override fun observeLocalImage(image: MissingThreadImage) = imageRevision.map {
+        contentMutex.withLock {
+            if (storageFor(image) == null) return@withLock null
+            storageProvider.readManifest(image.key)?.images?.find { it.sourceUrl == image.sourceUrl && it.fileName.isSafeImageFileName() }
+                ?.let { storageProvider.resolveImageUri(image.key, it.fileName) }
+        }
+    }.distinctUntilChanged().flowOn(Dispatchers.IO)
+
+    private suspend fun storageFor(image: MissingThreadImage): String? =
+        storageProvider.getStorageKey()?.takeIf { it.encodeUtf8().sha256().hex() == image.storageId }
+
+    override suspend fun retryImage(image: MissingThreadImage): Result<String> {
+        initialized.await()
+        val job = taskMutex.withLock {
+            if (removing.any { it(image.key) }) return Result.failure(IllegalStateException("下載內容已移除"))
+            imageRepairs[image]?.takeUnless { it.isCompleted } ?: scope.async(start = CoroutineStart.LAZY) {
+                try {
+                    downloadResult("retryImage key=${image.key.stableId}") { repairImage(image) }
+                } finally {
+                    withContext(NonCancellable) { taskMutex.withLock { imageRepairs.remove(image) } }
+                }
+            }.also { repair ->
+                imageRepairs[image] = repair
+                repair.start()
+            }
+        }
+        return job.await()
+    }
+
+    private suspend fun repairImage(image: MissingThreadImage): String {
+        val key = image.key
+        suspend fun currentManifest(): ThreadPageDownloadManifest {
+            check(storageFor(image) != null) { "儲存資料夾已變更" }
+            val page = readOriginalPage(key)
+            check(page != null && image.sourceUrl in page.threadImageUrls()) { "圖片已從帖子移除" }
+            return checkNotNull(storageProvider.readManifest(key)) { "下載內容已移除" }
+        }
+        contentMutex.withLock {
+            val existing = currentManifest().images.find { it.sourceUrl == image.sourceUrl && it.fileName.isSafeImageFileName() }
+            existing?.let { storageProvider.resolveImageUri(key, it.fileName) }?.let { return it }
+        }
+        val bytes = imageFetcher.fetch(image.sourceUrl)
+        return contentMutex.withLock {
+            val manifest = currentManifest()
+            val storage = checkNotNull(storageFor(image))
+            val fileName = threadImageFileName(image.sourceUrl)
+            val saved = DownloadedImage(image.sourceUrl, fileName, bytes.size.toLong())
+            val updated = manifest.copy(images = manifest.images.filterNot { it.sourceUrl == image.sourceUrl } + saved)
+            val uri = storageProvider.writeThreadImage(
+                storage, key, PendingDownloadedImage(fileName, bytes), json.encodeToString(updated).encodeToByteArray(),
             )
+            contentCatalog = null
+            imageRevision.update { it + 1 }
+            queue.value.firstOrNull { it.key == key }?.let { upsert(it.copy(updatedAt = currentTimeMillis())) }
+            uri
         }
     }
 
@@ -682,6 +741,7 @@ class DownloadRepositoryImpl(
                             rss.any { storageProvider.resolveRssMangaImageUris(it.key, it.images.map { image -> image.fileName }).isNotEmpty() }
                         check(!remaining) { "下載內容未完全刪除，請重試" }
                         forgetTasks(matches)
+                        imageRevision.update { it + 1 }
                     }
                 }
             }
@@ -714,7 +774,8 @@ class DownloadRepositoryImpl(
         removalMutex.withLock {
             val tasks = taskMutex.withLock {
                 removing.add(matches)
-                activeTasks.filterKeys(matches).values.toList().also { jobs -> jobs.forEach { it.cancel() } }
+                (activeTasks.filterKeys(matches).values + imageRepairs.filterKeys { matches(it.key) }.values)
+                    .also { jobs -> jobs.forEach { it.cancel() } }
             }
             try {
                 // Never join while holding the catalog/task lock: a finishing writer may need it.
@@ -939,29 +1000,35 @@ class DownloadRepositoryImpl(
 
     private suspend fun persistPage(key: ThreadPageDownloadKey, title: String, page: ThreadPage) {
         updateStage(key, DownloadStage.DownloadingText)
-        val imageUrls = page.posts.flatMap { post -> post.images.map { normalizeDownloadImageUrl(it.url) } }.distinct()
-        val results = downloadImages(key, imageUrls, startIndex = 0)
-        val pendingImages = results.map { it.first }
-        val downloadedImages = results.map { it.second }
+        val imageUrls = page.threadImageUrls()
+        val storageKey = storageProvider.getStorageKey()
+        suspend fun retainedImages(): List<DownloadedImage> {
+            val old = storageProvider.readManifest(key)?.images.orEmpty().filter { it.sourceUrl in imageUrls && it.fileName.isSafeImageFileName() }
+            val files = storageProvider.resolveImageUris(key, old.map { it.fileName })
+            return old.filter { it.fileName in files }
+        }
+        val existing = contentMutex.withLock { retainedImages() }.mapTo(mutableSetOf()) { it.sourceUrl }
+        val results = downloadImages(key, imageUrls.filterNot { it in existing }, startIndex = 0)
         val totalPages = page.pageNav?.totalPages ?: 1
-        val manifest = ThreadPageDownloadManifest(
-            key = key,
-            title = title,
-            downloadedAt = currentTimeMillis(),
-            sourceTotalPages = totalPages,
-            pageKind = if (key.page >= totalPages) DownloadPageKind.LastAtDownloadTime else DownloadPageKind.Normal,
-            forumId = page.thread.forum.fid.value,
-            forumName = page.thread.forum.name,
-            images = downloadedImages,
-        )
-        updateStage(key, DownloadStage.Saving, downloadedImages.size, downloadedImages.size)
-        storageProvider.writeThreadPage(
-            key = key,
-            manifestBytes = json.encodeToString(manifest).encodeToByteArray(),
-            threadPageBytes = json.encodeToString(page).encodeToByteArray(),
-            images = pendingImages,
-        )
-        invalidateContentCatalog()
+        contentMutex.withLock {
+            check(storageProvider.getStorageKey() == storageKey) { "儲存資料夾已變更" }
+            val retained = retainedImages()
+            val retainedUrls = retained.mapTo(mutableSetOf()) { it.sourceUrl }
+            val newImages = results.filterNot { it.second.sourceUrl in retainedUrls }
+            val manifest = ThreadPageDownloadManifest(
+                key = key, title = title, downloadedAt = currentTimeMillis(), sourceTotalPages = totalPages,
+                pageKind = if (key.page >= totalPages) DownloadPageKind.LastAtDownloadTime else DownloadPageKind.Normal,
+                forumId = page.thread.forum.fid.value, forumName = page.thread.forum.name,
+                images = retained + newImages.map { it.second },
+            )
+            updateStage(key, DownloadStage.Saving, imageUrls.size, imageUrls.size)
+            storageProvider.writeThreadPage(
+                key, json.encodeToString(manifest).encodeToByteArray(), json.encodeToString(page).encodeToByteArray(),
+                newImages.map { it.first }, retained.map { it.fileName },
+            )
+            contentCatalog = null
+            imageRevision.update { it + 1 }
+        }
         threadRepository.setCachedThread(ThreadId(key.tid), key.authorId?.let(::UserId), key.page, page)
     }
 
@@ -1105,12 +1172,21 @@ class DownloadRepositoryImpl(
                 .forEach { chunk ->
                     val chunkResults = chunk.map { (index, url) ->
                         async {
-                            val bytes = imageFetcher.fetch(url)
-                            val fileName = imageFileName(index + startIndex, url)
+                            val bytes = try {
+                                imageFetcher.fetch(url)
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (error: Exception) {
+                                if (key !is ThreadPageDownloadKey) throw error
+                                Logger.d(TAG, "Leaving unavailable image in page ${key.stableId}", error)
+                                return@async null
+                            }
+                            val fileName = if (key is ThreadPageDownloadKey) threadImageFileName(url)
+                                else imageFileName(index + startIndex, url)
                             PendingDownloadedImage(fileName, bytes) to DownloadedImage(url, fileName, bytes.size.toLong())
                         }
                     }.awaitAll()
-                    results += chunkResults
+                    results += chunkResults.filterNotNull()
                     completed += chunkResults.size
                     updateStage(key, DownloadStage.DownloadingImages, completed, imageUrls.size)
                 }
@@ -1211,6 +1287,52 @@ class DownloadRepositoryImpl(
         val downloaded: List<DownloadedImage>,
     )
 }
+
+private fun String.isSafeImageFileName() =
+    isNotBlank() && this != "." && this != ".." && '/' !in this && '\\' !in this
+
+private fun threadImageFileName(source: String): String {
+    val extension = source.substringBefore('?').substringBefore('#').substringAfterLast('.', "")
+        .takeIf { it.length in 2..5 && it.all(Char::isLetterOrDigit) } ?: "img"
+    return "${source.encodeUtf8().sha256().hex()}.$extension"
+}
+
+private fun Element.threadImageAttribute(): String =
+    listOf("file", "zoomfile", "src").firstOrNull { attr(it).isNotBlank() } ?: "src"
+
+private fun threadImageSource(raw: String): String? {
+    if (raw.isBlank() || raw.contains("none.gif", ignoreCase = true) || raw.contains("/smiley/", ignoreCase = true)) return null
+    return normalizeDownloadImageUrl(raw).takeIf { it.startsWith("https://") || it.startsWith("http://") }
+}
+
+/** HTML readers prefer Discuz lazy-image attributes over the placeholder src. */
+private fun threadImageDocument(html: String) =
+    if (html.contains("<img", ignoreCase = true)) Ksoup.parseBodyFragment(html) else null
+
+private fun ThreadPage.threadImageUrls(): Set<String> = buildSet {
+    for (post in posts) {
+        post.images.mapNotNullTo(this) { threadImageSource(it.url) }
+        threadImageDocument(post.contentHtml)?.select("img")?.mapNotNullTo(this) { element ->
+            threadImageSource(element.attr(element.threadImageAttribute()))
+        }
+    }
+}
+
+/** Only the read-time copy contains local URIs and manual retry references. */
+private fun ThreadPage.mapThreadImages(transform: (String) -> String): ThreadPage = copy(posts = posts.map { post ->
+    val document = threadImageDocument(post.contentHtml)
+    val html = if (document != null) {
+        document.outputSettings().prettyPrint(false)
+        document.select("img").forEach { element ->
+            val attribute = element.threadImageAttribute()
+            threadImageSource(element.attr(attribute))?.let { element.attr(attribute, transform(it)) }
+        }
+        document.body().html()
+    } else post.contentHtml
+    post.copy(contentHtml = html, images = post.images.map { image ->
+        threadImageSource(image.url)?.let { PostImage(transform(it), image.alt) } ?: image
+    })
+})
 
 internal const val DOWNLOAD_QUEUE_TERMINAL_RETENTION_MS: Long = 24L * 60L * 60L * 1000L
 private const val TAG = "DownloadRepository"
