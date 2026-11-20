@@ -1,5 +1,10 @@
 # Repository Instructions
 
+## App UI theming
+
+- Use shared Yamibo controls and `YamiboTheme.colors` for user-facing UI. When using Material components directly, set the surface, matching content colors, and action colors for the states the component supports, including selected and disabled states.
+- When changing a flow, open its affected dialogs and feedback states, including failure details and retry when applicable. Check the rendered controls in the default theme and a contrasting built-in theme, and record which states and themes were verified.
+
 ## OpenSpec isolation
 
 - Keep `/openspec/` in the repository-local exclude file returned by `git rev-parse --git-path info/exclude`. Unlike `.gitignore`, this rule survives switching to older branches; ensure it is present before switching branches. Local exclude rules are not included in commits and must be set up per clone.

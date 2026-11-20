@@ -6,11 +6,13 @@ import YamiboIcons
 import androidx.compose.animation.*
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.selection.triStateToggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -120,8 +122,9 @@ fun DownloadQueueScreen(screenId: ScreenId) {
     val removalProgress by downloadRemovalProgress.collectAsState()
     val lastRemoval = removalProgress.request
     val outcomes = removalProgress.outcomes
+    val failures = remember(outcomes) { outcomes.filter { it.error != null } }
     val progress = outcomes.size
-    var showResults by remember { mutableStateOf(false) }
+    var showFailureDetails by remember { mutableStateOf(false) }
     val appTasks by appTaskManager.tasks.collectAsState()
     val busy = appTasks[downloadRemovalTaskKey]?.isActive == true
     val contentGroups = (contentState as? DownloadContentManagementState.Ready)?.groups.orEmpty()
@@ -218,8 +221,22 @@ fun DownloadQueueScreen(screenId: ScreenId) {
     Scaffold(
         topBar = {
             YamiboTopBar(
-                title = i18n("下載管理"),
+                title = if (selectionMode) i18n("已選取 {} 項", selectedKeys.size) else i18n("下載管理"),
                 onBack = { if (!leaveSelection()) navigator.pop() },
+                actions = {
+                    if (selectedTab == DownloadManagerTab.Queue) {
+                        TextButton(
+                            onClick = { if (!leaveSelection()) selectionMode = true },
+                            enabled = !busy && (selectionMode || selectableKeys.isNotEmpty()),
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = colors.textOnDeepHigh,
+                                disabledContentColor = colors.textOnDeepHigh.copy(alpha = 0.45f),
+                            ),
+                        ) {
+                            Text(if (selectionMode) i18n("取消選取") else i18n("多選"))
+                        }
+                    }
+                },
             )
         },
         containerColor = colors.creamBackground,
@@ -237,24 +254,9 @@ fun DownloadQueueScreen(screenId: ScreenId) {
                 }
             }
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                    itemVerticalAlignment = Alignment.CenterVertically,
-                ) {
-                    YamiboActionChip(
-                        text = if (selectionMode) i18n("取消選取") else i18n("多選"),
-                        onClick = { if (!leaveSelection()) selectionMode = true },
-                        selected = selectionMode,
-                        enabled = !busy && (selectionMode || selectableKeys.isNotEmpty()),
-                    )
-                    if (selectionMode) {
-                        Text(i18n("已選取 {} 項", selectedKeys.size), color = colors.textStrong, fontSize = 13.sp)
-                    }
-                }
                 if (selectionMode) {
                     FlowRow(
+                        modifier = Modifier.padding(top = 6.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                         itemVerticalAlignment = Alignment.CenterVertically,
@@ -271,13 +273,12 @@ fun DownloadQueueScreen(screenId: ScreenId) {
                     }
                 }
                 if (busy) {
-                    Text(i18n("處理中 {}/{}", progress, lastRemoval?.targets?.size ?: 0))
-                    LinearProgressIndicator(Modifier.fillMaxWidth())
-                } else if (outcomes.isNotEmpty()) {
-                    val failed = outcomes.count { it.error != null }
+                    Text(i18n("處理中 {}/{}", progress, lastRemoval?.targets?.size ?: 0), color = colors.textStrong)
+                    LinearProgressIndicator(Modifier.fillMaxWidth(), color = colors.brownPrimary, trackColor = colors.brownPrimary.copy(alpha = 0.12f))
+                } else if (failures.isNotEmpty() && lastRemoval?.tasksOnly == (selectedTab == DownloadManagerTab.Queue)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(i18n("成功 {} 項，失敗 {} 項", outcomes.size - failed, failed), modifier = Modifier.weight(1f))
-                        TextButton(onClick = { showResults = true }) { Text(i18n("查看結果")) }
+                        Text(i18n("成功 {} 項，失敗 {} 項", outcomes.size - failures.size, failures.size), modifier = Modifier.weight(1f), color = colors.textStrong)
+                        YamiboActionChip(i18n("失敗明細"), onClick = { showFailureDetails = true })
                     }
                 }
             }
@@ -314,6 +315,7 @@ fun DownloadQueueScreen(screenId: ScreenId) {
                 )
                 DownloadManagerTab.Content -> DownloadContentManagementTab(
                     state = contentState,
+                    onToggleSelectionMode = { if (!leaveSelection()) selectionMode = true },
                     selectionMode = selectionMode,
                     selectedKeys = selectedKeys,
                     busy = busy,
@@ -380,6 +382,9 @@ fun DownloadQueueScreen(screenId: ScreenId) {
     }
     pendingRemoval?.let { request ->
         AlertDialog(
+            containerColor = colors.creamSurface,
+            titleContentColor = colors.textOnSurface,
+            textContentColor = colors.textOnSurface,
             onDismissRequest = { pendingRemoval = null },
             title = { Text(if (request.tasksOnly) i18n("移除任務") else i18n("刪除下載內容")) },
             text = {
@@ -390,30 +395,33 @@ fun DownloadQueueScreen(screenId: ScreenId) {
                     if (!request.tasksOnly) Text(i18n("已知圖片大小：{}", formatDownloadedByteSize(request.targets.sumOf { it.imageBytes })))
                 }
             },
-            confirmButton = { TextButton(onClick = { executeRemoval(request) }, enabled = !busy) { Text(i18n("確定")) } },
-            dismissButton = { TextButton(onClick = { pendingRemoval = null }) { Text(i18n("取消")) } },
+            confirmButton = { YamiboActionChip(i18n("確定"), onClick = { executeRemoval(request) }, enabled = !busy, selected = true) },
+            dismissButton = { YamiboActionChip(i18n("取消"), onClick = { pendingRemoval = null }) },
         )
     }
-    if (showResults) {
+    if (showFailureDetails) {
         AlertDialog(
-            onDismissRequest = { showResults = false },
-            title = { Text(i18n("處理結果")) },
+            containerColor = colors.creamSurface,
+            titleContentColor = colors.textOnSurface,
+            textContentColor = colors.textOnSurface,
+            onDismissRequest = { showFailureDetails = false },
+            title = { Text(i18n("失敗明細")) },
             text = {
                 LazyColumn(Modifier.heightIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(outcomes, key = { it.target.key.stableId }) { outcome ->
+                    items(failures, key = { it.target.key.stableId }) { outcome ->
                         Column {
                             Text(outcome.target.title, fontWeight = FontWeight.Medium)
-                            Text(outcome.error?.let { i18n(forumErrorMessage(it)) } ?: i18n("成功"))
+                            outcome.error?.let { Text(i18n(forumErrorMessage(it))) }
                         }
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { showResults = false }) { Text(i18n("關閉")) } },
+            confirmButton = { YamiboActionChip(i18n("關閉"), onClick = { showFailureDetails = false }) },
             dismissButton = {
-                if (outcomes.any { it.error != null }) TextButton(onClick = {
-                    showResults = false
-                    lastRemoval?.let { requestRemoval(it.tasksOnly, outcomes.filter { result -> result.error != null }.map { result -> result.target }) }
-                }, enabled = !busy) { Text(i18n("重試失敗項目")) }
+                YamiboActionChip(i18n("重試失敗項目"), onClick = {
+                    showFailureDetails = false
+                    lastRemoval?.let { requestRemoval(it.tasksOnly, failures.map { result -> result.target }) }
+                }, enabled = !busy)
             },
         )
     }
@@ -617,6 +625,7 @@ private fun DownloadQueueEntryCard(
 @Composable
 private fun DownloadContentManagementTab(
     state: DownloadContentManagementState,
+    onToggleSelectionMode: () -> Unit,
     selectionMode: Boolean,
     selectedKeys: Set<DownloadTaskKey>,
     busy: Boolean,
@@ -654,7 +663,6 @@ private fun DownloadContentManagementTab(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         when (state) {
             DownloadContentManagementState.Loading -> {
@@ -677,19 +685,27 @@ private fun DownloadContentManagementTab(
                         sortMode = sortMode,
                         sortDescending = sortDescending,
                         filterActive = normalizedFilterKeys.isNotEmpty(),
+                        selectionMode = selectionMode,
+                        selectionEnabled = !busy && (selectionMode || displayedGroups.any { it.items.isNotEmpty() }),
+                        onToggleSelectionMode = onToggleSelectionMode,
                         onSortClick = { if (!busy) showSortDialog = true },
                         onFilterClick = { if (!busy) showFilterDialog = true },
                     )
                 }
-                item { DownloadContentSummaryCard(state.summary) }
+                item {
+                    Spacer(Modifier.height(12.dp))
+                    DownloadContentSummaryCard(state.summary)
+                }
                 if (groups.isEmpty()) {
                     item {
+                        Spacer(Modifier.height(12.dp))
                         YamiboDownloadCard {
                             Text(i18n("目前沒有已下載內容"), color = colors.textStrong, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 } else if (displayedGroups.isEmpty()) {
                     item {
+                        Spacer(Modifier.height(12.dp))
                         YamiboDownloadCard {
                             Text(i18n("沒有符合篩選的下載內容"), color = colors.textStrong, fontWeight = FontWeight.SemiBold)
                         }
@@ -698,7 +714,8 @@ private fun DownloadContentManagementTab(
                     displayedGroups.forEach { group ->
                         val expanded = group.id in expandedGroups
                         item(key = "group:${group.id}", contentType = "group") {
-                            DownloadContentGroupCard(
+                            Spacer(Modifier.height(12.dp))
+                            DownloadContentGroupHeader(
                                 group = group,
                                 selectionMode = selectionMode,
                                 selectedKeys = selectedKeys,
@@ -711,13 +728,13 @@ private fun DownloadContentManagementTab(
                             )
                         }
                         if (expanded) {
-                            items(group.items, key = { "item:${group.id}:${it.key.stableId}" }, contentType = { "content" }) { item ->
-                                YamiboDownloadCard {
+                            itemsIndexed(group.items, key = { _, item -> "item:${group.id}:${item.key.stableId}" }, contentType = { _, _ -> "content" }) { index, item ->
+                                DownloadPanelSection(last = selectionMode && index == group.items.lastIndex) {
                                     DownloadContentItemRow(item, selectionMode, item.key in selectedKeys, busy, { onToggle(setOf(item.key)) }, onClearItem, onRefreshItem)
                                 }
                             }
                             if (!selectionMode) item(key = "clear:${group.id}", contentType = "clear") {
-                                YamiboDownloadCard {
+                                DownloadPanelSection(last = true) {
                                     SmallQueueButton(
                                         text = i18n("刪除整組下載內容"),
                                         enabled = !busy,
@@ -788,13 +805,17 @@ private fun DownloadContentControlRow(
     sortMode: DownloadedContentSortMode,
     sortDescending: Boolean,
     filterActive: Boolean,
+    selectionMode: Boolean,
+    selectionEnabled: Boolean,
+    onToggleSelectionMode: () -> Unit,
     onSortClick: () -> Unit,
     onFilterClick: () -> Unit,
 ) {
-    Row(
+    FlowRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+        itemVerticalAlignment = Alignment.CenterVertically,
     ) {
         YamiboActionChip(
             text = i18n("排序: {} {}", sortMode.downloadedContentSortLabel(), if (sortDescending) "↓" else "↑"),
@@ -804,6 +825,12 @@ private fun DownloadContentControlRow(
             text = i18n("篩選"),
             onClick = onFilterClick,
             selected = filterActive,
+        )
+        YamiboActionChip(
+            text = if (selectionMode) i18n("取消選取") else i18n("多選"),
+            onClick = onToggleSelectionMode,
+            selected = selectionMode,
+            enabled = selectionEnabled,
         )
     }
 }
@@ -857,7 +884,7 @@ private fun DownloadContentSummaryCard(summary: DownloadedContentSummary) {
 }
 
 @Composable
-private fun DownloadContentGroupCard(
+private fun DownloadContentGroupHeader(
     group: DownloadedContentGroup,
     selectionMode: Boolean,
     selectedKeys: Set<DownloadTaskKey>,
@@ -876,7 +903,7 @@ private fun DownloadContentGroupCard(
         group.items.any { it.key in selectedKeys } -> ToggleableState.Indeterminate
         else -> ToggleableState.Off
     }
-    YamiboDownloadCard {
+    DownloadPanelSection(first = true, last = !expanded) {
         Row(
             modifier = Modifier.fillMaxWidth().then(
                 if (selectionMode) Modifier.triStateToggleable(selection, enabled = !busy, role = Role.Checkbox, onClick = onToggleSelection)
@@ -912,6 +939,22 @@ private fun DownloadContentGroupCard(
     }
 }
 
+// Adjacent lazy items share the panel background so even long chapter lists compose on demand.
+@Composable
+private fun DownloadPanelSection(first: Boolean = false, last: Boolean, content: @Composable () -> Unit) {
+    val colors = YamiboTheme.colors
+    val top = if (first) 18.dp else 0.dp
+    val bottom = if (last) 18.dp else 0.dp
+    Column(
+        modifier = Modifier.fillMaxWidth()
+            .background(colors.creamSurface, RoundedCornerShape(top, top, bottom, bottom))
+            .padding(horizontal = 16.dp),
+    ) {
+        if (!first) HorizontalDivider(color = colors.brownPrimary.copy(alpha = 0.15f))
+        Box(Modifier.padding(vertical = if (first) 12.dp else 4.dp)) { content() }
+    }
+}
+
 @Composable
 private fun DownloadContentItemRow(
     item: DownloadedContentItem,
@@ -942,9 +985,9 @@ private fun DownloadContentItemRow(
             )
         }
         if (!selectionMode) {
-        SmallQueueButton(i18n("重新載入"), { onRefreshItem(item) }, enabled = !busy)
-        Spacer(Modifier.size(6.dp))
-        SmallQueueButton(i18n("清除"), { onClearItem(item) }, destructive = true, enabled = !busy)
+            SmallQueueButton(i18n("重新載入"), { onRefreshItem(item) }, enabled = !busy)
+            Spacer(Modifier.size(6.dp))
+            SmallQueueButton(i18n("清除"), { onClearItem(item) }, destructive = true, enabled = !busy)
         }
     }
 }
@@ -989,7 +1032,9 @@ private fun SmallQueueButton(
     OutlinedButton(
         onClick = onClick,
         enabled = enabled,
+        border = BorderStroke(1.dp, colors.brownPrimary.copy(alpha = if (enabled) 0.45f else 0.18f)),
         colors = ButtonDefaults.outlinedButtonColors(
+            disabledContentColor = colors.textOnSurface.copy(alpha = 0.38f),
             contentColor = if (destructive) colors.redAccent else colors.brownPrimary,
             containerColor = Color.Transparent,
         ),
