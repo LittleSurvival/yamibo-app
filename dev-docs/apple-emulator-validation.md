@@ -4,8 +4,10 @@
 
 Use **Apple validation** (`.github/workflows/apple-validate.yml`) as the permanent
 manual entry point. Put each scenario in
-`.github/scripts/apple-validate/<full-branch-name>-<NN>.sh` on the branch that
-contains its validation code. Start numbering at `01`; use `02`, `03`, and so on
+`.github/scripts/apple-validate/<branch-basename>-<NN>.sh` on the branch that
+contains its validation code. For the basename, replace each `/` in the full
+branch name with `-`. Pass the original branch name or commit SHA as
+`validation_ref`. Start numbering at `01`; use `02`, `03`, and so on
 for additional validation variants on the same branch. Do not create a workflow for
 each feature. The downloaded-content experiment's old workflow remains on its
 validation branch and must not be merged.
@@ -55,7 +57,7 @@ gh workflow run apple-validate.yml --ref main \
 
 gh workflow run apple-validate.yml --ref main \
   -f validation_ref='<validation-commit-sha>' \
-  -f validation_script=custom -f custom_script='<full-branch-name>-02'
+  -f validation_script=custom -f custom_script='<branch-basename>-02'
 ```
 
 The workflow has read-only repository permissions, does not persist checkout
@@ -81,7 +83,7 @@ java -version
 export APPLE_VALIDATE_OUTPUT="$PWD/.tmp/qa/apple-validate/my-run"
 mkdir -p "$APPLE_VALIDATE_OUTPUT"
 set -o pipefail
-validation_script='<full-branch-name>-01'
+validation_script='<branch-basename>-01'
 bash ".github/scripts/apple-validate/$validation_script.sh" \
   2>&1 | tee "$APPLE_VALIDATE_OUTPUT/validation.log"
 ```
@@ -96,7 +98,8 @@ App, XCTest bundle, or a reader flow works.
 ## Script naming and contract
 
 There is one clearly named shell entry for each validation variant. Use the full
-branch name from the repository's [branch naming rules](branch-naming.md), then
+branch name from the repository's [branch naming rules](branch-naming.md), replace
+each `/` with `-` for the script basename, then append
 a hyphen and a zero-padded sequence number. There is no generic `run.sh` and no
 separate shell dispatcher. The shared Action selects the file directly.
 
@@ -104,7 +107,7 @@ Keep supporting files in a named sibling directory, referenced by the shell entr
 
 ```text
 .github/scripts/apple-validate/
-  <full-branch-name>-01.sh   # shell entry, invoked with bash
+  <branch-basename>-01.sh   # shell entry, invoked with bash
   downloaded-content/
     README.md              # prerequisites, fixtures, assertions, expected cases
     validate.py            # optional orchestration helper
