@@ -37,9 +37,6 @@ import me.thenano.yamibo.yamibo_app.util.imageErrorForDiagnostics
 import me.thenano.yamibo.yamibo_app.util.imageSourceForDiagnostics
 import me.thenano.yamibo.yamibo_app.util.normalizeImageUrl
 import me.thenano.yamibo.yamibo_app.util.rememberImageRequest
-import org.jetbrains.compose.resources.painterResource
-import yamibo_app.composeapp.generated.resources.Res
-import yamibo_app.composeapp.generated.resources.image_icon
 
 val LocalReaderOverlayVisible = compositionLocalOf { false }
 internal interface ReaderImagePainterCache {
@@ -160,7 +157,6 @@ fun ImageViewer(
                     ImageErrorContent(
                         fullUrl = missing.sourceUrl,
                         errorMessage = failure.orEmpty(),
-                        reservedHeight = 0.dp,
                         compact = maxWidth <= 140.dp || maxHeight <= 140.dp,
                         errorBgColor = errorBgColor,
                         errorTextColor = errorTextColor,
@@ -276,7 +272,6 @@ fun ImageViewer(
                 ImageErrorContent(
                     fullUrl = diagnosticUrl,
                     errorMessage = imageErrorForDiagnostics(blockedErrorMessage, fullUrl),
-                    reservedHeight = reservedHeight,
                     errorBgColor = errorBgColor,
                     errorTextColor = errorTextColor,
                     errorSubTextColor = errorSubTextColor,
@@ -327,7 +322,6 @@ fun ImageViewer(
                         ImageErrorContent(
                             fullUrl = diagnosticUrl,
                             errorMessage = errorMsg,
-                            reservedHeight = reservedHeight,
                             errorBgColor = errorBgColor,
                             errorTextColor = errorTextColor,
                             errorSubTextColor = errorSubTextColor,
@@ -439,7 +433,6 @@ private fun ImageLoadingContent(
 private fun ImageErrorContent(
     fullUrl: String,
     errorMessage: String,
-    reservedHeight: Dp,
     errorBgColor: Color,
     errorTextColor: Color,
     errorSubTextColor: Color,
@@ -449,61 +442,78 @@ private fun ImageErrorContent(
 ) {
     val colors = YamiboTheme.colors
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            // Error details and the retry button must not be squeezed into a loading placeholder.
-            .heightIn(min = reservedHeight)
-            .padding(if (compact) 2.dp else 16.dp)
-            .background(errorBgColor, RoundedCornerShape(12.dp))
-            .padding(if (compact) 4.dp else 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        if (!compact) {
-            Image(
-                painter = painterResource(Res.drawable.image_icon),
-                contentDescription = "Image Load Failed",
-                modifier = Modifier.size(64.dp)
+    val details: @Composable (Modifier) -> Unit = { modifier ->
+        Column(modifier) {
+            Text(
+                text = i18n("圖片載入失敗"),
+                color = errorTextColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                fontSize = 14.sp,
+                lineHeight = 17.sp,
+                fontWeight = FontWeight.SemiBold
             )
-            Spacer(Modifier.height(12.dp))
+            if (errorMessage.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = errorMessage,
+                    color = errorSubTextColor,
+                    fontSize = 11.sp,
+                    lineHeight = 14.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = fullUrl,
+                color = errorUrlColor,
+                fontSize = 10.sp,
+                lineHeight = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = TextStyle(textDecoration = TextDecoration.Underline)
+            )
         }
-        Text(
-            text = i18n("圖片載入失敗"),
-            color = errorTextColor,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold
-        )
-        Spacer(Modifier.height(6.dp))
-        if (errorMessage.isNotBlank()) Text(
-            text = errorMessage,
-            color = errorSubTextColor,
-            fontSize = 11.sp,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = fullUrl,
-            color = errorUrlColor,
-            fontSize = 10.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            style = TextStyle(textDecoration = TextDecoration.Underline)
-        )
-        Spacer(Modifier.height(16.dp))
+    }
+    val retryButton: @Composable () -> Unit = {
         OutlinedButton(
             onClick = onReload,
             colors = ButtonDefaults.outlinedButtonColors(
                 contentColor = colors.brownPrimary
             ),
-            contentPadding = PaddingValues(horizontal = if (compact) 4.dp else 28.dp, vertical = 8.dp)
+            contentPadding = PaddingValues(horizontal = if (compact) 4.dp else 12.dp, vertical = 8.dp)
         ) {
             Text(
                 text = i18n("重新載入"),
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold
             )
+        }
+    }
+
+    if (compact) {
+        Column(
+            modifier = Modifier.fillMaxWidth()
+                .padding(2.dp)
+                .background(errorBgColor, RoundedCornerShape(12.dp))
+                .padding(4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            details(Modifier)
+            retryButton()
+        }
+    } else {
+        Row(
+            modifier = Modifier.fillMaxWidth()
+                .padding(horizontal = 12.dp)
+                .background(errorBgColor, RoundedCornerShape(12.dp))
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            details(Modifier.weight(1f))
+            retryButton()
         }
     }
 }

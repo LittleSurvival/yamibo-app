@@ -1,6 +1,8 @@
 ﻿package me.thenano.yamibo.yamibo_app.navigation
 
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -92,10 +94,12 @@ private sealed interface InAppLinkResolvingState {
     ) : InAppLinkResolvingState
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun InAppLinkResolvingScreen(url: String, context: InAppLinkContext) {
     val errorMessages = me.thenano.yamibo.yamibo_app.LocalForumErrorMessageResolver.current
     val colors = YamiboTheme.colors
+    val cardColors = CardDefaults.elevatedCardColors(containerColor = colors.creamSurface)
     val navigator = LocalNavigator.current
     val repository = LocalInAppLinkNavigationRepository.current
     var state by remember(url, context) { mutableStateOf<InAppLinkResolvingState>(InAppLinkResolvingState.Loading) }
@@ -140,6 +144,7 @@ private fun InAppLinkResolvingScreen(url: String, context: InAppLinkContext) {
             when (val current = state) {
                 InAppLinkResolvingState.Loading -> {
                     ElevatedCard(
+                        colors = cardColors,
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(16.dp),
                     ) {
@@ -151,12 +156,12 @@ private fun InAppLinkResolvingScreen(url: String, context: InAppLinkContext) {
                             Text(progressText, color = colors.brownPrimary, fontSize = 14.sp)
                             LinearProgressIndicator(
                                 modifier = Modifier.fillMaxWidth(),
-                                color = colors.brownDeep,
+                                color = colors.brownPrimary,
                                 trackColor = colors.brownPrimary.copy(alpha = 0.18f),
                             )
                             Text(
                                 text = url,
-                                color = colors.textDark.copy(alpha = 0.55f),
+                                color = colors.textOnSurface.copy(alpha = 0.72f),
                                 fontSize = 12.sp,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
@@ -167,6 +172,7 @@ private fun InAppLinkResolvingScreen(url: String, context: InAppLinkContext) {
 
                 is InAppLinkResolvingState.Error -> {
                     ElevatedCard(
+                        colors = cardColors,
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(16.dp),
                     ) {
@@ -174,35 +180,39 @@ private fun InAppLinkResolvingScreen(url: String, context: InAppLinkContext) {
                             modifier = Modifier.padding(20.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            Text(i18n("定位失敗"), color = colors.textStrong, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                            Text(current.message, color = colors.brownPrimary, fontSize = 14.sp)
-                            Text(
-                                text = url,
-                                color = colors.textDark.copy(alpha = 0.55f),
-                                fontSize = 12.sp,
-                                maxLines = 3,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Spacer(Modifier.height(4.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End,
-                                verticalAlignment = Alignment.CenterVertically,
+                            Column(
+                                modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
-                                current.fallbackTarget?.takeIf { it.canOpenInApp() }?.let { target ->
-                                    TextButton(onClick = { navigator.navigateInAppLinkTarget(target, replaceCurrent = true) }) {
-                                        Text(i18n("開啟替代頁"), color = colors.brownPrimary)
+                                Text(i18n("定位失敗"), color = colors.textStrong, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                                Text(current.message, color = colors.brownPrimary, fontSize = 14.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    text = url,
+                                    color = colors.textOnSurface.copy(alpha = 0.72f),
+                                    fontSize = 12.sp,
+                                    maxLines = 3,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End,
+                                ) {
+                                    current.fallbackTarget?.takeIf { it.canOpenInApp() }?.let { target ->
+                                        TextButton(onClick = { navigator.navigateInAppLinkTarget(target, replaceCurrent = true) }) {
+                                            Text(i18n("開啟替代頁"), color = colors.brownPrimary)
+                                        }
+                                    }
+                                    TextButton(onClick = { navigator.navigate(IPlatformWebView(url)) }) {
+                                        Text("WebView", color = colors.brownPrimary)
                                     }
                                 }
-                                TextButton(onClick = { navigator.navigate(IPlatformWebView(url)) }) {
-                                    Text("WebView", color = colors.brownPrimary)
-                                }
-                                OutlinedButton(
-                                    onClick = { attempt++ },
-                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.textStrong),
-                                ) {
-                                    Text(i18n("重試"))
-                                }
+                            }
+                            OutlinedButton(
+                                onClick = { attempt++ },
+                                modifier = Modifier.align(Alignment.End),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.textStrong),
+                            ) {
+                                Text(i18n("重試"))
                             }
                         }
                     }

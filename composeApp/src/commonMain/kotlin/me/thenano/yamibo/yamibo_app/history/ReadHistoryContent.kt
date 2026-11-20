@@ -10,8 +10,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -21,7 +19,6 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import me.thenano.yamibo.yamibo_app.LocalFavoriteRepository
@@ -72,29 +69,6 @@ internal fun EmptyContent(mode: PageMode) {
             fontSize = 16.sp,
             color = colors.textDark.copy(alpha = 0.5f),
         )
-    }
-}
-
-@Composable
-internal fun ErrorContent(message: String, onRetry: () -> Unit) {
-    val colors = YamiboTheme.colors
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            text = i18n("載入錯誤：{}", message),
-            fontSize = 14.sp,
-            color = colors.textDark.copy(alpha = 0.7f),
-        )
-        Spacer(Modifier.height(12.dp))
-        Button(
-            onClick = onRetry,
-            colors = ButtonDefaults.buttonColors(containerColor = colors.brownPrimary),
-        ) {
-            Text(i18n("重新載入"), color = Color.White)
-        }
     }
 }
 
