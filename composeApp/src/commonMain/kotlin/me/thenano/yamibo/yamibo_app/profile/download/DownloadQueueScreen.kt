@@ -9,7 +9,10 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -23,10 +26,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
@@ -156,7 +161,9 @@ fun DownloadQueueScreen(screenId: ScreenId) {
         onDispose { navigator.backHandlers.remove(handler) }
     }
     fun toggleKeys(keys: Set<DownloadTaskKey>) {
-        if (!busy) selectedKeys = if (selectedKeys.containsAll(keys)) selectedKeys - keys else selectedKeys + keys
+        if (busy || keys.isEmpty()) return
+        selectionMode = true
+        selectedKeys = if (selectedKeys.containsAll(keys)) selectedKeys - keys else selectedKeys + keys
     }
     fun requestRemoval(tasksOnly: Boolean, targets: List<DownloadRemovalTarget>) {
         if (!busy && targets.isNotEmpty()) pendingRemoval = DownloadRemovalRequest(tasksOnly, targets.distinctBy { it.key })
@@ -223,20 +230,6 @@ fun DownloadQueueScreen(screenId: ScreenId) {
             YamiboTopBar(
                 title = if (selectionMode) i18n("已選取 {} 項", selectedKeys.size) else i18n("下載管理"),
                 onBack = { if (!leaveSelection()) navigator.pop() },
-                actions = {
-                    if (selectedTab == DownloadManagerTab.Queue) {
-                        TextButton(
-                            onClick = { if (!leaveSelection()) selectionMode = true },
-                            enabled = !busy && (selectionMode || selectableKeys.isNotEmpty()),
-                            colors = ButtonDefaults.textButtonColors(
-                                contentColor = colors.textOnDeepHigh,
-                                disabledContentColor = colors.textOnDeepHigh.copy(alpha = 0.45f),
-                            ),
-                        ) {
-                            Text(if (selectionMode) i18n("取消選取") else i18n("多選"))
-                        }
-                    }
-                },
             )
         },
         containerColor = colors.creamBackground,
@@ -261,9 +254,12 @@ fun DownloadQueueScreen(screenId: ScreenId) {
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                         itemVerticalAlignment = Alignment.CenterVertically,
                     ) {
-                        YamiboActionChip(i18n("全選"), { selectedKeys = selectableKeys }, enabled = !busy && selectedKeys != selectableKeys)
-                        YamiboActionChip(i18n("全不選"), { selectedKeys = emptySet() }, enabled = !busy && selectedKeys.isNotEmpty())
-                        YamiboActionChip(i18n("反選"), { selectedKeys = selectableKeys - selectedKeys }, enabled = !busy && selectableKeys.isNotEmpty())
+                        if (selectedTab == DownloadManagerTab.Queue) {
+                            YamiboActionChip(i18n("全選"), { selectedKeys = selectableKeys }, enabled = !busy && selectedKeys != selectableKeys)
+                            YamiboActionChip(i18n("取消"), { leaveSelection() }, enabled = !busy)
+                            YamiboActionChip(i18n("全不選"), { selectedKeys = emptySet() }, enabled = !busy && selectedKeys.isNotEmpty())
+                            YamiboActionChip(i18n("反選"), { selectedKeys = selectableKeys - selectedKeys }, enabled = !busy && selectableKeys.isNotEmpty())
+                        }
                         SmallQueueButton(
                             text = if (selectedTab == DownloadManagerTab.Queue) i18n("移除任務") else i18n("刪除下載內容"),
                             onClick = { requestRemoval(selectedTab == DownloadManagerTab.Queue, selectableTargets.filter { it.key in selectedKeys }) },
@@ -315,7 +311,15 @@ fun DownloadQueueScreen(screenId: ScreenId) {
                 )
                 DownloadManagerTab.Content -> DownloadContentManagementTab(
                     state = contentState,
-                    onToggleSelectionMode = { if (!leaveSelection()) selectionMode = true },
+                    selectionActions = {
+                        val allSelected = selectableKeys.isNotEmpty() && selectedKeys.containsAll(selectableKeys)
+                        YamiboActionChip(
+                            text = if (allSelected) i18n("取消全選") else i18n("全選"),
+                            onClick = { toggleKeys(selectableKeys) },
+                            enabled = !busy && selectableKeys.isNotEmpty(),
+                        )
+                        YamiboActionChip(i18n("取消"), { leaveSelection() }, enabled = !busy)
+                    },
                     selectionMode = selectionMode,
                     selectedKeys = selectedKeys,
                     busy = busy,
@@ -593,7 +597,8 @@ private fun DownloadQueueEntryCard(
         val selectable = selectionMode && entry.status.canRemoveTask()
         Row(
             modifier = Modifier.fillMaxWidth().then(
-                if (selectable) Modifier.toggleable(selected, enabled = !busy, role = Role.Checkbox, onValueChange = { onToggle() }) else Modifier
+                if (entry.status.canRemoveTask()) Modifier.downloadRowSelection(selectionMode, selected, !busy, onToggle)
+                else Modifier
             ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -625,7 +630,7 @@ private fun DownloadQueueEntryCard(
 @Composable
 private fun DownloadContentManagementTab(
     state: DownloadContentManagementState,
-    onToggleSelectionMode: () -> Unit,
+    selectionActions: @Composable () -> Unit,
     selectionMode: Boolean,
     selectedKeys: Set<DownloadTaskKey>,
     busy: Boolean,
@@ -680,14 +685,13 @@ private fun DownloadContentManagementTab(
                 }
             }
             is DownloadContentManagementState.Ready -> {
-                item {
+                stickyHeader(key = "content-controls") {
                     DownloadContentControlRow(
                         sortMode = sortMode,
                         sortDescending = sortDescending,
                         filterActive = normalizedFilterKeys.isNotEmpty(),
                         selectionMode = selectionMode,
-                        selectionEnabled = !busy && (selectionMode || displayedGroups.any { it.items.isNotEmpty() }),
-                        onToggleSelectionMode = onToggleSelectionMode,
+                        selectionActions = selectionActions,
                         onSortClick = { if (!busy) showSortDialog = true },
                         onFilterClick = { if (!busy) showFilterDialog = true },
                     )
@@ -714,8 +718,8 @@ private fun DownloadContentManagementTab(
                     displayedGroups.forEach { group ->
                         val expanded = group.id in expandedGroups
                         item(key = "group:${group.id}", contentType = "group") {
-                            Spacer(Modifier.height(12.dp))
                             DownloadContentGroupHeader(
+                                modifier = downloadPanelMotion().padding(top = 12.dp),
                                 group = group,
                                 selectionMode = selectionMode,
                                 selectedKeys = selectedKeys,
@@ -729,12 +733,12 @@ private fun DownloadContentManagementTab(
                         }
                         if (expanded) {
                             itemsIndexed(group.items, key = { _, item -> "item:${group.id}:${item.key.stableId}" }, contentType = { _, _ -> "content" }) { index, item ->
-                                DownloadPanelSection(last = selectionMode && index == group.items.lastIndex) {
+                                DownloadPanelSection(modifier = downloadPanelMotion(), last = selectionMode && index == group.items.lastIndex) {
                                     DownloadContentItemRow(item, selectionMode, item.key in selectedKeys, busy, { onToggle(setOf(item.key)) }, onClearItem, onRefreshItem)
                                 }
                             }
                             if (!selectionMode) item(key = "clear:${group.id}", contentType = "clear") {
-                                DownloadPanelSection(last = true) {
+                                DownloadPanelSection(modifier = downloadPanelMotion(), last = true) {
                                     SmallQueueButton(
                                         text = i18n("刪除整組下載內容"),
                                         enabled = !busy,
@@ -806,13 +810,12 @@ private fun DownloadContentControlRow(
     sortDescending: Boolean,
     filterActive: Boolean,
     selectionMode: Boolean,
-    selectionEnabled: Boolean,
-    onToggleSelectionMode: () -> Unit,
+    selectionActions: @Composable () -> Unit,
     onSortClick: () -> Unit,
     onFilterClick: () -> Unit,
 ) {
     FlowRow(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().background(YamiboTheme.colors.creamBackground),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
         itemVerticalAlignment = Alignment.CenterVertically,
@@ -826,12 +829,7 @@ private fun DownloadContentControlRow(
             onClick = onFilterClick,
             selected = filterActive,
         )
-        YamiboActionChip(
-            text = if (selectionMode) i18n("取消選取") else i18n("多選"),
-            onClick = onToggleSelectionMode,
-            selected = selectionMode,
-            enabled = selectionEnabled,
-        )
+        if (selectionMode) selectionActions()
     }
 }
 
@@ -892,6 +890,7 @@ private fun DownloadContentGroupHeader(
     onToggleSelection: () -> Unit,
     expanded: Boolean,
     onToggleExpanded: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val colors = YamiboTheme.colors
     val arrowRotation by animateFloatAsState(
@@ -903,11 +902,18 @@ private fun DownloadContentGroupHeader(
         group.items.any { it.key in selectedKeys } -> ToggleableState.Indeterminate
         else -> ToggleableState.Off
     }
-    DownloadPanelSection(first = true, last = !expanded) {
+    DownloadPanelSection(modifier = modifier, first = true, last = !expanded) {
         Row(
             modifier = Modifier.fillMaxWidth().then(
-                if (selectionMode) Modifier.triStateToggleable(selection, enabled = !busy, role = Role.Checkbox, onClick = onToggleSelection)
-                else Modifier.clickable(onClick = onToggleExpanded)
+                if (selectionMode) Modifier.triStateToggleable(
+                    state = selection, interactionSource = null, indication = null,
+                    enabled = !busy, role = Role.Checkbox, onClick = onToggleSelection,
+                ) else Modifier.combinedClickable(
+                    interactionSource = null, indication = null,
+                    onClick = onToggleExpanded,
+                    onLongClickLabel = i18n("多選"),
+                    onLongClick = if (busy) null else onToggleSelection,
+                )
             ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -929,7 +935,7 @@ private fun DownloadContentGroupHeader(
             val expandLabel = i18n("點擊展開 / 收起")
             Box(
                 modifier = if (selectionMode) Modifier.size(48.dp)
-                    .clickable(role = Role.Button, onClick = onToggleExpanded)
+                    .clickable(interactionSource = null, indication = null, role = Role.Button, onClick = onToggleExpanded)
                     .semantics { contentDescription = expandLabel } else Modifier,
                 contentAlignment = Alignment.Center,
             ) {
@@ -939,14 +945,25 @@ private fun DownloadContentGroupHeader(
     }
 }
 
+private fun LazyItemScope.downloadPanelMotion() = Modifier.animateItem(
+    fadeInSpec = tween(180),
+    placementSpec = tween(180),
+    fadeOutSpec = tween(120),
+)
+
 // Adjacent lazy items share the panel background so even long chapter lists compose on demand.
 @Composable
-private fun DownloadPanelSection(first: Boolean = false, last: Boolean, content: @Composable () -> Unit) {
+private fun DownloadPanelSection(
+    modifier: Modifier = Modifier,
+    first: Boolean = false,
+    last: Boolean,
+    content: @Composable () -> Unit,
+) {
     val colors = YamiboTheme.colors
     val top = if (first) 18.dp else 0.dp
     val bottom = if (last) 18.dp else 0.dp
     Column(
-        modifier = Modifier.fillMaxWidth()
+        modifier = modifier.fillMaxWidth()
             .background(colors.creamSurface, RoundedCornerShape(top, top, bottom, bottom))
             .padding(horizontal = 16.dp),
     ) {
@@ -967,9 +984,9 @@ private fun DownloadContentItemRow(
 ) {
     val colors = YamiboTheme.colors
     Row(
-        modifier = Modifier.fillMaxWidth().then(
-            if (selectionMode) Modifier.toggleable(selected, enabled = !busy, role = Role.Checkbox, onValueChange = { onToggle() }) else Modifier
-        ).padding(vertical = 6.dp),
+        modifier = Modifier.fillMaxWidth()
+            .downloadRowSelection(selectionMode, selected, !busy, onToggle)
+            .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (selectionMode) DownloadSelectionMark(if (selected) ToggleableState.On else ToggleableState.Off, !busy)
@@ -990,6 +1007,24 @@ private fun DownloadContentItemRow(
             SmallQueueButton(i18n("清除"), { onClearItem(item) }, destructive = true, enabled = !busy)
         }
     }
+}
+
+@Composable
+private fun Modifier.downloadRowSelection(
+    selectionMode: Boolean,
+    selected: Boolean,
+    enabled: Boolean,
+    onToggle: () -> Unit,
+): Modifier {
+    if (selectionMode) return toggleable(
+        value = selected, interactionSource = null, indication = null,
+        enabled = enabled, role = Role.Checkbox, onValueChange = { onToggle() },
+    )
+    if (!enabled) return this
+    val onLongPress by rememberUpdatedState(onToggle)
+    val label = i18n("多選")
+    return pointerInput(Unit) { detectTapGestures(onLongPress = { onLongPress() }) }
+        .semantics(mergeDescendants = true) { onLongClick(label) { onLongPress(); true } }
 }
 
 @Composable
