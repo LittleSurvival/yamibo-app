@@ -25,6 +25,8 @@ import me.thenano.yamibo.yamibo_app.repository.download.ThreadPageDownloadManife
 interface DownloadRepository {
     val queue: StateFlow<List<DownloadQueueEntry>>
 
+    suspend fun openArchivedImage(uri: String): okio.Source
+    suspend fun migrateImages(onProgress: (Int, Int) -> Unit): Map<DownloadTaskKey, Throwable>
     suspend fun isStorageReady(): Boolean
     suspend fun getSummary(): DownloadQueueSummary
     suspend fun getDownloadedContentSummary(): DownloadedContentSummary
@@ -56,6 +58,7 @@ interface DownloadRepository {
     suspend fun refreshTagMangaChapter(key: TagMangaChapterDownloadKey): YamiboResult<List<String>>
     suspend fun refreshRssMangaChapter(key: RssMangaChapterDownloadKey): YamiboResult<List<String>>
     suspend fun markThreadUpdateAvailable(tid: ThreadId, authorId: UserId? = null)
+    suspend fun removeItems(keys: Set<DownloadTaskKey>, tasksOnly: Boolean, onProgress: (Int) -> Unit = {}): Map<DownloadTaskKey, Throwable>
     suspend fun clearPage(key: ThreadPageDownloadKey): Result<Unit>
     suspend fun clearThread(key: ThreadPageDownloadKey): Result<Unit>
     suspend fun clearTagMangaChapter(key: TagMangaChapterDownloadKey): Result<Unit>

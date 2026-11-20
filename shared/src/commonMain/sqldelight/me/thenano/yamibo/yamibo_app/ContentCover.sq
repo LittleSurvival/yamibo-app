@@ -6,3 +6,37 @@ upsert:
 INSERT OR REPLACE INTO ContentCover(
     targetType, targetId, automaticCoverUrl, manualCoverUrl, dynamicEnabled, updatedAt
 ) VALUES (?, ?, ?, ?, ?, ?);
+
+localImageReferences:
+SELECT automaticCoverUrl AS url FROM ContentCover WHERE automaticCoverUrl LIKE 'file://%' OR automaticCoverUrl LIKE 'content://%' OR automaticCoverUrl LIKE 'https://bbs.yamibo.com/content://%' OR automaticCoverUrl LIKE 'https://bbs.yamibo.com/file://%'
+UNION
+SELECT manualCoverUrl AS url FROM ContentCover WHERE manualCoverUrl LIKE 'file://%' OR manualCoverUrl LIKE 'content://%' OR manualCoverUrl LIKE 'https://bbs.yamibo.com/content://%' OR manualCoverUrl LIKE 'https://bbs.yamibo.com/file://%'
+UNION
+SELECT threadCover AS url FROM ReadingHistory WHERE threadCover LIKE 'file://%' OR threadCover LIKE 'content://%' OR threadCover LIKE 'https://bbs.yamibo.com/content://%' OR threadCover LIKE 'https://bbs.yamibo.com/file://%'
+UNION
+SELECT coverUrl AS url FROM LocalFavoriteItem WHERE coverUrl LIKE 'file://%' OR coverUrl LIKE 'content://%' OR coverUrl LIKE 'https://bbs.yamibo.com/content://%' OR coverUrl LIKE 'https://bbs.yamibo.com/file://%'
+UNION
+SELECT coverUrl AS url FROM MangaTagReadingHistory WHERE coverUrl LIKE 'file://%' OR coverUrl LIKE 'content://%' OR coverUrl LIKE 'https://bbs.yamibo.com/content://%' OR coverUrl LIKE 'https://bbs.yamibo.com/file://%'
+UNION
+SELECT coverUrl AS url FROM RssSearchReadingHistory WHERE coverUrl LIKE 'file://%' OR coverUrl LIKE 'content://%' OR coverUrl LIKE 'https://bbs.yamibo.com/content://%' OR coverUrl LIKE 'https://bbs.yamibo.com/file://%'
+UNION
+SELECT coverUrl AS url FROM TagCatalogReadingHistory WHERE coverUrl LIKE 'file://%' OR coverUrl LIKE 'content://%' OR coverUrl LIKE 'https://bbs.yamibo.com/content://%' OR coverUrl LIKE 'https://bbs.yamibo.com/file://%'
+UNION
+SELECT coverUrl AS url FROM RssCatalogReadingHistory WHERE coverUrl LIKE 'file://%' OR coverUrl LIKE 'content://%' OR coverUrl LIKE 'https://bbs.yamibo.com/content://%' OR coverUrl LIKE 'https://bbs.yamibo.com/file://%'
+UNION
+SELECT coverUrl AS url FROM FavoriteUpdateTrackedTarget WHERE coverUrl LIKE 'file://%' OR coverUrl LIKE 'content://%' OR coverUrl LIKE 'https://bbs.yamibo.com/content://%' OR coverUrl LIKE 'https://bbs.yamibo.com/file://%'
+UNION
+SELECT coverUrl AS url FROM FavoriteUpdateEvent WHERE coverUrl LIKE 'file://%' OR coverUrl LIKE 'content://%' OR coverUrl LIKE 'https://bbs.yamibo.com/content://%' OR coverUrl LIKE 'https://bbs.yamibo.com/file://%';
+
+remapLocalImage {
+    UPDATE ContentCover SET automaticCoverUrl = :newUrl WHERE automaticCoverUrl = :oldUrl;
+    UPDATE ContentCover SET manualCoverUrl = :newUrl WHERE manualCoverUrl = :oldUrl;
+    UPDATE ReadingHistory SET threadCover = :newUrl WHERE threadCover = :oldUrl;
+    UPDATE LocalFavoriteItem SET coverUrl = :newUrl WHERE coverUrl = :oldUrl;
+    UPDATE MangaTagReadingHistory SET coverUrl = :newUrl WHERE coverUrl = :oldUrl;
+    UPDATE RssSearchReadingHistory SET coverUrl = :newUrl WHERE coverUrl = :oldUrl;
+    UPDATE TagCatalogReadingHistory SET coverUrl = :newUrl WHERE coverUrl = :oldUrl;
+    UPDATE RssCatalogReadingHistory SET coverUrl = :newUrl WHERE coverUrl = :oldUrl;
+    UPDATE FavoriteUpdateTrackedTarget SET coverUrl = :newUrl WHERE coverUrl = :oldUrl;
+    UPDATE FavoriteUpdateEvent SET coverUrl = :newUrl WHERE coverUrl = :oldUrl;
+}

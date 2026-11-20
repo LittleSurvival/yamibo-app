@@ -110,6 +110,7 @@ internal fun normalizeCoverUrl(rawUrl: String): String? {
 
 private fun repairDomainPrefixedLocalCoverUri(url: String): String =
     when {
+        url.startsWith("https://bbs.yamibo.com/yamibo-image://") -> url.removePrefix("https://bbs.yamibo.com/")
         url.startsWith("https://bbs.yamibo.com/content://") -> url.removePrefix("https://bbs.yamibo.com/")
         url.startsWith("https://bbs.yamibo.com/file://") -> url.removePrefix("https://bbs.yamibo.com/")
         else -> url

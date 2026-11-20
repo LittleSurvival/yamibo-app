@@ -842,7 +842,7 @@ internal fun ThreadReaderScreen(
         ) {
             return null
         }
-        return if (rawUrl.startsWith("http")) rawUrl else "${YamiboRoute.Domain.build()}$rawUrl"
+        return me.thenano.yamibo.yamibo_app.util.normalizeImageUrl(rawUrl)
     }
 
     LaunchedEffect(canonicalCover?.resolvedUrl) {
