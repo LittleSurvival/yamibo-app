@@ -111,12 +111,12 @@ class IOSDownloadStorageProvider(
         return if (fileSystem.exists(path)) fileSystem.openReadOnly(path).asSeekableSource() else null
     }
 
-    override suspend fun writeThreadImage(
-        storageKey: String, key: ThreadPageDownloadKey, image: PendingDownloadedImage, manifestBytes: ByteArray,
+    override suspend fun writeImage(
+        storageKey: String, key: DownloadTaskKey, image: PendingDownloadedImage, manifestBytes: ByteArray,
     ): String {
         check(getStorageKey() == storageKey)
         val page = readablePath(key)
-        check(fileSystem.exists(page / "manifest.json"))
+        check(fileSystem.exists(page / "manifest.json") || (key is ThreadPageDownloadKey && fileSystem.exists(page / "thread_page.json")))
         val images = page / "images"
         fileSystem.createDirectories(images)
         val file = images / image.fileName
@@ -156,7 +156,7 @@ class IOSDownloadStorageProvider(
         val root = rootDir()
         if (!fileSystem.exists(root)) return emptyList()
         return completedDirectories(root, "thread_")
-            .mapNotNull(::readManifest)
+            .mapNotNull { readManifest(it) ?: recoverListing(it.name, json) }
     }
 
     override suspend fun readTagMangaManifest(key: TagMangaChapterDownloadKey): TagMangaChapterManifest? =

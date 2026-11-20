@@ -3,6 +3,8 @@ package me.thenano.yamibo.yamibo_app.repository.download
 import no.synth.kmpzip.io.SeekableSource
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import io.github.littlesurvival.dto.page.ThreadPage
+import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
 import me.thenano.yamibo.yamibo_app.Logger
 import okio.ByteString.Companion.encodeUtf8
 import okio.FileSystem
@@ -20,9 +22,9 @@ interface DownloadStorageProvider {
     suspend fun openArchive(key: DownloadTaskKey, generation: String): SeekableSource?
     suspend fun looseImages(key: DownloadTaskKey, names: List<String>?): Map<String, String>
     fun openLoose(uri: String): okio.Source
-    /** Append to the existing page in this specific storage folder, publishing its manifest last. */
-    suspend fun writeThreadImage(
-        storageKey: String, key: ThreadPageDownloadKey, image: PendingDownloadedImage, manifestBytes: ByteArray,
+    /** Append to an existing download in this storage folder, publishing its manifest last. */
+    suspend fun writeImage(
+        storageKey: String, key: DownloadTaskKey, image: PendingDownloadedImage, manifestBytes: ByteArray,
     ): String
     suspend fun readThreadPage(key: ThreadPageDownloadKey): ByteArray?
     suspend fun readPageRecord(key: ThreadPageDownloadKey): Pair<ByteArray, ThreadPageDownloadManifest?>? =
@@ -68,6 +70,22 @@ data class PendingDownloadedImage(
 internal fun itemDirectoryNames(key: DownloadTaskKey) = listOf(key.itemDirectory, "${key.itemDirectory}.previous", "${key.itemDirectory}.tmp")
 
 private val threadDirectory = Regex("""thread_(-?[0-9]+)_page_([0-9]+)_author_(all|-?[0-9]+)""")
+internal fun ThreadPage.downloadManifest(key: ThreadPageDownloadKey): ThreadPageDownloadManifest {
+    val total = pageNav?.totalPages ?: 1
+    return ThreadPageDownloadManifest(key, thread.title, currentTimeMillis(), total,
+        if (key.page >= total) DownloadPageKind.LastAtDownloadTime else DownloadPageKind.Normal,
+        thread.forum.fid.value, thread.forum.name)
+}
+
+/** Keep a readable page discoverable by a rescan even when its manifest is lost. */
+internal suspend fun DownloadStorageProvider.recoverListing(directory: String, json: Json): ThreadPageDownloadManifest? {
+    val parts = threadDirectory.matchEntire(directory.removeSuffix(".previous"))?.groupValues ?: return null
+    val author = parts[3].takeUnless { it == "all" }?.let { it.toIntOrNull() ?: return null }
+    val key = ThreadPageDownloadKey(parts[1].toIntOrNull() ?: return null, parts[2].toIntOrNull() ?: return null, author)
+    val bytes = readThreadPage(key) ?: return null
+    val page = runCatching { json.decodeFromString<ThreadPage>(bytes.decodeToString()) }.getOrNull() ?: return null
+    return page.takeIf { it.thread.tid.value == key.tid }?.downloadManifest(key)
+}
 private val chapterDirectory = Regex("""chapter_(-?[0-9]+)_author_(all|-?[0-9]+)""")
 
 internal fun groupMember(group: DownloadTaskKey, raw: String): DownloadTaskKey? {

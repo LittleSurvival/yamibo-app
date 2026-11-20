@@ -135,41 +135,42 @@ fun ImageViewer(
     val missing = remember(url) { MissingThreadImage.fromReaderUri(url) }
     val original = normalizeImageUrl(url)
     val colors = YamiboTheme.colors
-    val errorBgColor = if (isDarkTheme) Color.White.copy(alpha = 0.08f) else Color(0xFFF3F3F3)
+    val errorBgColor = if (isDarkTheme) Color.White.copy(alpha = 0.08f) else colors.creamSurface
     val errorTextColor = if (isDarkTheme) Color.White else colors.textDark
     val errorSubTextColor = if (isDarkTheme) Color.White.copy(alpha = 0.5f) else colors.textDark.copy(alpha = 0.6f)
     val errorUrlColor = if (isDarkTheme) Color.White.copy(alpha = 0.3f) else colors.brownDeep
 
-    val fullUrl = if (missing == null) original else key(missing) {
-        val repository = LocalDownloadRepository.current
+    val repository = LocalDownloadRepository.current
+    val scope = rememberCoroutineScope()
+    var repairedUri by remember(url) { mutableStateOf<String?>(null) }
+    var repairing by remember(url) { mutableStateOf(false) }
+    var repairError by remember(url) { mutableStateOf<String?>(null) }
+    val localUrl = if (missing == null) original else key(missing) {
         val local by remember(repository, missing) {
             repository.observeLocalImage(missing).catch { emit(null) }
         }.collectAsState(initial = null)
-        var loading by remember { mutableStateOf(false) }
-        var failure by remember { mutableStateOf<String?>(null) }
-        val scope = rememberCoroutineScope()
-        val source = local
+        val source = repairedUri ?: local
         if (source == null) {
             BoxWithConstraints(modifier = modifier, contentAlignment = Alignment.Center) {
-                if (loading) {
+                if (repairing) {
                     ImageLoadingContent(160.dp, onImageRetry = null)
                 } else {
                     ImageErrorContent(
                         fullUrl = missing.sourceUrl,
-                        errorMessage = failure.orEmpty(),
+                        errorMessage = repairError.orEmpty(),
                         compact = maxWidth <= 140.dp || maxHeight <= 140.dp,
                         errorBgColor = errorBgColor,
                         errorTextColor = errorTextColor,
                         errorSubTextColor = errorSubTextColor,
                         errorUrlColor = errorUrlColor,
                     ) {
-                        if (!loading) {
-                            loading = true
+                        if (!repairing) {
+                            repairing = true
                             scope.launch {
                                 try {
-                                    repository.retryImage(missing).onFailure { failure = it.message }
+                                    repository.retryImage(missing).onSuccess { repairedUri = it }.onFailure { repairError = it.message }
                                 } finally {
-                                    loading = false
+                                    repairing = false
                                 }
                             }
                         }
@@ -179,10 +180,31 @@ fun ImageViewer(
         }
         source
     } ?: return
+    val fullUrl = repairedUri ?: localUrl
 
     val diagnosticUrl = imageSourceForDiagnostics(fullUrl)
     DebugRecomposeProbe("ImageViewer", diagnosticUrl)
     var localRetryKey by remember(fullUrl) { mutableIntStateOf(0) }
+    fun retryFailedImage() {
+        if (missing == null && !original.startsWith("yamibo-image://")) {
+            if (onReload != null) onReload() else localRetryKey++
+            return
+        }
+        if (repairing) return
+        repairing = true
+        scope.launch {
+            try {
+                val result = if (missing != null) repository.retryImage(missing, fullUrl)
+                    else repository.retryArchivedImage(original, fullUrl)
+                result.onSuccess {
+                    repairError = null
+                    repairedUri = it
+                    localRetryKey++
+                    onReload?.invoke()
+                }.onFailure { repairError = it.message }
+            } finally { repairing = false }
+        }
+    }
     var showMenu by remember { mutableStateOf(false) }
     val retryKey = localRetryKey + externalRetryKey
     var hasReportedSuccess by remember(fullUrl, localRetryKey, externalRetryKey) { mutableStateOf(false) }
@@ -268,21 +290,17 @@ fun ImageViewer(
                 .then(maxRenderedHeight?.let { Modifier.heightIn(max = it) } ?: Modifier),
             contentAlignment = Alignment.Center
         ) {
-            if (blockedErrorMessage != null) {
+            if (repairing) {
+                ImageLoadingContent(reservedHeight, onImageRetry = null)
+            } else if (blockedErrorMessage != null && repairedUri == null) {
                 ImageErrorContent(
                     fullUrl = diagnosticUrl,
-                    errorMessage = imageErrorForDiagnostics(blockedErrorMessage, fullUrl),
+                    errorMessage = repairError ?: imageErrorForDiagnostics(blockedErrorMessage, fullUrl),
                     errorBgColor = errorBgColor,
                     errorTextColor = errorTextColor,
                     errorSubTextColor = errorSubTextColor,
                     errorUrlColor = errorUrlColor,
-                    onReload = {
-                        if (onReload != null) {
-                            onReload()
-                        } else {
-                            localRetryKey++
-                        }
-                    }
+                    onReload = ::retryFailedImage,
                 )
             } else {
                 when (val state = painterState) {
@@ -321,18 +339,12 @@ fun ImageViewer(
 
                         ImageErrorContent(
                             fullUrl = diagnosticUrl,
-                            errorMessage = errorMsg,
+                            errorMessage = repairError ?: errorMsg,
                             errorBgColor = errorBgColor,
                             errorTextColor = errorTextColor,
                             errorSubTextColor = errorSubTextColor,
                             errorUrlColor = errorUrlColor,
-                            onReload = {
-                                if (onReload != null) {
-                                    onReload()
-                                } else {
-                                    localRetryKey++
-                                }
-                            }
+                            onReload = ::retryFailedImage,
                         )
                     }
 
