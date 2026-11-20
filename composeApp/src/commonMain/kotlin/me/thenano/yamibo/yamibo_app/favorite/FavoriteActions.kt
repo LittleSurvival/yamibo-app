@@ -459,18 +459,12 @@ fun FavoriteCollectionPickerDialog(
             border = BorderStroke(1.dp, colors.brownPrimary.copy(alpha = 0.15f)),
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = i18n("選擇類別"),
-                        modifier = Modifier.weight(1f),
-                        color = colors.brownDeep,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    TextButton(onClick = onDismiss) {
-                        Text(i18n("取消"), color = colors.brownDeep)
-                    }
-                }
+                Text(
+                    text = i18n("選擇類別"),
+                    color = colors.brownDeep,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                )
 
                 Spacer(Modifier.size(6.dp))
                 Text(
@@ -483,7 +477,6 @@ fun FavoriteCollectionPickerDialog(
                 Spacer(Modifier.size(16.dp))
 
                 Surface(
-                    modifier = Modifier.weight(1f, fill = false),
                     shape = RoundedCornerShape(20.dp),
                     color = colors.creamBackground,
                     border = BorderStroke(1.dp, colors.brownPrimary.copy(alpha = 0.16f)),
@@ -532,10 +525,10 @@ fun FavoriteCollectionPickerDialog(
 
                 Spacer(Modifier.size(18.dp))
 
-                FlowRow(
+                Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (currentCategory != null) {
                         FavoriteDialogButton(
@@ -561,16 +554,22 @@ fun FavoriteCollectionPickerDialog(
                             onClick = { onCreateCollection(currentCategory.categoryId) },
                         )
                     }
-                }
 
-                Spacer(Modifier.height(8.dp))
-                Button(
-                    onClick = { onConfirm(selectedCategories, selectedCollections) },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = colors.brownDeep, contentColor = Color.White),
-                ) {
-                    Text(i18n("確定"), fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.weight(1f))
+
+                    FavoriteDialogButton(
+                        text = i18n("取消"),
+                        background = colors.textDark.copy(alpha = 0.06f),
+                        contentColor = colors.textDark.copy(alpha = 0.8f),
+                        onClick = onDismiss,
+                    )
+
+                    FavoriteDialogButton(
+                        text = i18n("確定"),
+                        background = colors.brownDeep,
+                        contentColor = Color.White,
+                        onClick = { onConfirm(selectedCategories, selectedCollections) },
+                    )
                 }
             }
         }
