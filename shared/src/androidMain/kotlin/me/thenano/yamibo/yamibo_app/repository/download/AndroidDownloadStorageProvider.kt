@@ -34,6 +34,7 @@ class AndroidDownloadStorageProvider(
         manifestBytes: ByteArray,
         threadPageBytes: ByteArray,
         images: List<PendingDownloadedImage>,
+        retainedFiles: List<String>,
     ) {
         val treeUri = selectedTreeUri() ?: error("尚未選擇備份資料夾")
         val root = ensureDirectory(treeUri, rootDocumentUri(treeUri), ROOT_DIR)
@@ -44,6 +45,18 @@ class AndroidDownloadStorageProvider(
         writeFile(treeUri, tmp, "manifest.json", "application/json", manifestBytes)
         writeFile(treeUri, tmp, "thread_page.json", "application/json", threadPageBytes)
         images.forEach { writeFile(treeUri, imagesDir, it.fileName, "application/octet-stream", it.bytes) }
+        if (retainedFiles.isNotEmpty()) {
+            val oldPage = requireNotNull(findChild(treeUri, root, key.stableId))
+            val oldImages = requireNotNull(findChild(treeUri, oldPage, IMAGES_DIR))
+            val existing = listChildren(treeUri, oldImages).associateBy { it.name }
+            for (name in retainedFiles) {
+                val source = existing.getValue(name).uri
+                val target = requireNotNull(DocumentsContract.createDocument(resolver, imagesDir, "application/octet-stream", name))
+                requireNotNull(resolver.openInputStream(source)).use { input ->
+                    requireNotNull(resolver.openOutputStream(target)).use { output -> input.copyTo(output) }
+                }
+            }
+        }
         val previousName = "${key.stableId}.previous"
         deleteChildByName(treeUri, root, previousName)
         val current = findChild(treeUri, root, key.stableId)
@@ -61,6 +74,20 @@ class AndroidDownloadStorageProvider(
             previous?.let { renameDocumentSafely(it, key.stableId, "restore previous thread page key=${key.stableId}") }
             throw error
         }
+    }
+
+    override suspend fun writeThreadImage(
+        storageKey: String, key: ThreadPageDownloadKey, image: PendingDownloadedImage, manifestBytes: ByteArray,
+    ): String {
+        val tree = requireNotNull(selectedTreeUri()).also { check(it.toString() == storageKey) }
+        val root = requireNotNull(downloadsRoot(tree))
+        val page = requireNotNull(findChild(tree, root, key.stableId))
+        val images = ensureDirectory(tree, page, IMAGES_DIR)
+        val pending = writeFile(tree, images, "${image.fileName}.tmp", "application/octet-stream", image.bytes)
+        deleteChildByName(tree, images, image.fileName)
+        val file = checkNotNull(DocumentsContract.renameDocument(resolver, pending, image.fileName))
+        replaceFile(tree, page, "manifest.json", manifestBytes)
+        return file.toString()
     }
 
     override suspend fun readThreadPage(key: ThreadPageDownloadKey): ByteArray? {
@@ -443,4 +470,22 @@ internal fun Throwable.isMissingDocumentFailure(): Boolean {
         error = error.cause
     }
     return false
+}
+
+internal actual fun isReadableDownloadedBitmap(bytes: ByteArray): Boolean {
+    if (android.os.Build.VERSION.SDK_INT >= 28) {
+        return try {
+            val source = android.graphics.ImageDecoder.createSource(java.nio.ByteBuffer.wrap(bytes))
+            android.graphics.ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                decoder.setTargetSampleSize((maxOf(info.size.width, info.size.height) / 256).coerceAtLeast(1))
+            }.recycle()
+            true
+        } catch (_: java.io.IOException) {
+            false
+        }
+    }
+    val options = android.graphics.BitmapFactory.Options().apply { inSampleSize = 8 }
+    val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: return false
+    bitmap.recycle()
+    return true
 }
