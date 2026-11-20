@@ -346,7 +346,6 @@ fun DownloadQueueScreen(screenId: ScreenId) {
                         }
                     },
                     onSelectFilterKeys = { keys ->
-                        selectedKeys = emptySet()
                         selectedContentFilterKeys = keys.toList()
                     },
                     onRetryLoad = {
@@ -737,24 +736,23 @@ private fun DownloadContentManagementTab(
                         sortMode = sortMode,
                         sortDescending = sortDescending,
                         filterActive = normalizedFilterKeys.isNotEmpty(),
-                        selectionMode = selectionMode,
-                        selectionActions = selectionActions,
                         onSortClick = { if (!busy) showSortDialog = true },
                         onFilterClick = { if (!busy) showFilterDialog = true },
-                    )
+                    ) {
+                        if (selectionMode) {
+                            selectionActions()
+                        } else if (migrationProgress == null) {
+                            YamiboActionChip(i18n("重新掃描下載資料夾"), onRescan, enabled = !busy)
+                        }
+                    }
                 }
                 item {
                     Spacer(Modifier.height(12.dp))
                     DownloadContentSummaryCard(state.summary)
                     if (migrationProgress != null) {
                         Text(i18n("處理中 {}/{}", migrationProgress.first, migrationProgress.second), color = colors.textStrong)
-                    } else if (!selectionMode) {
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            YamiboActionChip(i18n("重新掃描下載資料夾"), onRescan, enabled = !busy)
-                            if (groups.any { group -> group.items.any { it.needsMigration } }) {
-                                YamiboActionChip(i18n("轉換舊版圖片"), onMigrate, enabled = !busy)
-                            }
-                        }
+                    } else if (!selectionMode && groups.any { group -> group.items.any { it.needsMigration } }) {
+                        YamiboActionChip(i18n("轉換舊版圖片"), onMigrate, enabled = !busy)
                     }
                 }
                 if (groups.isEmpty()) {
@@ -849,6 +847,7 @@ private fun DownloadContentManagementTab(
                 )
             },
             onCancel = { showFilterDialog = false },
+            onDismissRequest = { showFilterDialog = false },
             label = { option -> i18n("{} ({})", i18n(option.label), option.count) },
             toggleSelection = { option, current ->
                 when {
@@ -866,27 +865,34 @@ private fun DownloadContentControlRow(
     sortMode: DownloadedContentSortMode,
     sortDescending: Boolean,
     filterActive: Boolean,
-    selectionMode: Boolean,
-    selectionActions: @Composable () -> Unit,
     onSortClick: () -> Unit,
     onFilterClick: () -> Unit,
+    actions: @Composable () -> Unit,
 ) {
+    val horizontalSpacing = Arrangement.spacedBy(8.dp)
+    val verticalSpacing = Arrangement.spacedBy(4.dp)
     FlowRow(
         modifier = Modifier.fillMaxWidth().background(YamiboTheme.colors.creamBackground),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalArrangement = horizontalSpacing,
+        verticalArrangement = verticalSpacing,
         itemVerticalAlignment = Alignment.CenterVertically,
     ) {
         YamiboActionChip(
             text = i18n("排序: {} {}", sortMode.downloadedContentSortLabel(), if (sortDescending) "↓" else "↑"),
             onClick = onSortClick,
         )
-        YamiboActionChip(
-            text = i18n("篩選"),
-            onClick = onFilterClick,
-            selected = filterActive,
-        )
-        if (selectionMode) selectionActions()
+        FlowRow(
+            horizontalArrangement = horizontalSpacing,
+            verticalArrangement = verticalSpacing,
+            itemVerticalAlignment = Alignment.CenterVertically,
+        ) {
+            YamiboActionChip(
+                text = i18n("篩選"),
+                onClick = onFilterClick,
+                selected = filterActive,
+            )
+            actions()
+        }
     }
 }
 

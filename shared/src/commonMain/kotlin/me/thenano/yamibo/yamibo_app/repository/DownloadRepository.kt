@@ -38,7 +38,8 @@ interface DownloadRepository {
     /** Observe only the durable local copy. Collecting never contacts the image host. */
     fun observeLocalImage(image: MissingThreadImage): Flow<String?>
     /** Fetch and persist one missing image after an explicit reader action. */
-    suspend fun retryImage(image: MissingThreadImage): Result<String>
+    suspend fun retryImage(image: MissingThreadImage, failedLocalUri: String? = null): Result<String>
+    suspend fun retryArchivedImage(uri: String, failedLocalUri: String = uri): Result<String>
     suspend fun updateDownloadedPage(key: ThreadPageDownloadKey, page: ThreadPage): Boolean
     suspend fun getManifest(key: ThreadPageDownloadKey): ThreadPageDownloadManifest?
     suspend fun getTagMangaChapterImages(key: TagMangaChapterDownloadKey): List<String>?

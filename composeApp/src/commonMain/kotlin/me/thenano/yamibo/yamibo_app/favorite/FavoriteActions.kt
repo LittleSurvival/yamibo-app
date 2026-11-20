@@ -7,6 +7,7 @@ import me.thenano.yamibo.yamibo_app.components.navigation.NavigationBackSymbol
 import YamiboIcons
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -405,9 +407,9 @@ fun FavoriteCollectionPickerDialog(
 ) {
     val colors = YamiboTheme.colors
     val checkboxColors = CheckboxDefaults.colors(
-        checkedColor = colors.brownDeep,
+        checkedColor = colors.textOnSurface,
         uncheckedColor = colors.textDark.copy(alpha = 0.4f),
-        checkmarkColor = Color.White,
+        checkmarkColor = colors.creamSurface,
     )
     val groupedCategories = remember(categories, options) {
         val collectionsByCategory = options.groupBy { it.categoryId }
@@ -452,8 +454,9 @@ fun FavoriteCollectionPickerDialog(
     ) {
         Surface(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp),
+                .padding(horizontal = 20.dp)
+                .widthIn(max = 320.dp)
+                .fillMaxWidth(),
             shape = RoundedCornerShape(24.dp),
             color = colors.creamSurface,
             border = BorderStroke(1.dp, colors.brownPrimary.copy(alpha = 0.15f)),
@@ -461,14 +464,14 @@ fun FavoriteCollectionPickerDialog(
             Column(modifier = Modifier.padding(20.dp)) {
                 Text(
                     text = i18n("選擇類別"),
-                    color = colors.brownDeep,
+                    color = colors.textOnSurface,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
                 )
 
                 Spacer(Modifier.size(6.dp))
                 Text(
-                    text = currentCategory?.let { "${it.categoryName}/" } ?: i18n("勾選大類，或點進去選擇小集合"),
+                    text = currentCategory?.let { "${it.categoryName} /" } ?: i18n("勾選大類，或點進去選擇小集合"),
                     color = colors.textDark.copy(alpha = if (currentCategory == null) 0.58f else 0.82f),
                     fontSize = 12.sp,
                     fontWeight = if (currentCategory == null) FontWeight.Normal else FontWeight.Medium,
@@ -477,6 +480,7 @@ fun FavoriteCollectionPickerDialog(
                 Spacer(Modifier.size(16.dp))
 
                 Surface(
+                    modifier = Modifier.weight(1f, fill = false),
                     shape = RoundedCornerShape(20.dp),
                     color = colors.creamBackground,
                     border = BorderStroke(1.dp, colors.brownPrimary.copy(alpha = 0.16f)),
@@ -484,7 +488,7 @@ fun FavoriteCollectionPickerDialog(
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 360.dp)
+                            .heightIn(max = 228.dp)
                             .padding(vertical = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(2.dp),
                     ) {
@@ -523,15 +527,14 @@ fun FavoriteCollectionPickerDialog(
                     }
                 }
 
-                Spacer(Modifier.size(18.dp))
+                Spacer(Modifier.height(8.dp))
 
-                Row(
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (currentCategory != null) {
-                        FavoriteDialogButton(
+                        FavoritePickerButton(
                             text = i18n("返回"),
                             background = colors.brownPrimary.copy(alpha = 0.12f),
                             contentColor = colors.textStrong,
@@ -539,7 +542,7 @@ fun FavoriteCollectionPickerDialog(
                         )
                     }
 
-                    FavoriteDialogButton(
+                    FavoritePickerButton(
                         text = i18n("編輯"),
                         background = colors.brownPrimary.copy(alpha = 0.08f),
                         contentColor = colors.textStrong,
@@ -547,32 +550,57 @@ fun FavoriteCollectionPickerDialog(
                     )
 
                     if (currentCategory != null) {
-                        FavoriteDialogButton(
+                        FavoritePickerButton(
                             text = i18n("新增集合"),
                             background = colors.brownPrimary.copy(alpha = 0.08f),
                             contentColor = colors.textStrong,
                             onClick = { onCreateCollection(currentCategory.categoryId) },
                         )
                     }
+                }
 
-                    Spacer(modifier = Modifier.weight(1f))
-
-                    FavoriteDialogButton(
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FavoritePickerButton(
                         text = i18n("取消"),
-                        background = colors.textDark.copy(alpha = 0.06f),
-                        contentColor = colors.textDark.copy(alpha = 0.8f),
+                        modifier = Modifier.weight(1f),
+                        background = colors.brownPrimary.copy(alpha = 0.08f),
+                        contentColor = colors.textStrong,
                         onClick = onDismiss,
                     )
-
-                    FavoriteDialogButton(
+                    FavoritePickerButton(
                         text = i18n("確定"),
-                        background = colors.brownDeep,
-                        contentColor = Color.White,
+                        modifier = Modifier.weight(1f),
+                        background = colors.textOnSurface,
+                        contentColor = colors.creamSurface,
                         onClick = { onConfirm(selectedCategories, selectedCollections) },
                     )
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun FavoritePickerButton(
+    text: String,
+    background: Color,
+    contentColor: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = modifier
+            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(vertical = 7.dp)
+            .background(background, RoundedCornerShape(9.dp))
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, color = contentColor, fontSize = 13.sp, lineHeight = 17.sp, fontWeight = FontWeight.Medium)
     }
 }
 

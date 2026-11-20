@@ -151,8 +151,8 @@ class AndroidDownloadStorageProvider(
         return handle
     }
 
-    override suspend fun writeThreadImage(
-        storageKey: String, key: ThreadPageDownloadKey, image: PendingDownloadedImage, manifestBytes: ByteArray,
+    override suspend fun writeImage(
+        storageKey: String, key: DownloadTaskKey, image: PendingDownloadedImage, manifestBytes: ByteArray,
     ): String {
         val tree = requireNotNull(selectedTreeUri()).also { check(it.toString() == storageKey) }
         val page = requireNotNull(itemDir(tree, key))
@@ -203,7 +203,7 @@ class AndroidDownloadStorageProvider(
         val treeUri = selectedTreeUri() ?: return emptyList()
         val root = downloadsRoot(treeUri) ?: return emptyList()
         return completedDirectories(treeUri, root, "thread_")
-            .mapNotNull { readManifestFromDir(treeUri, it.uri) }
+            .mapNotNull { readManifestFromDir(treeUri, it.uri) ?: recoverListing(it.name, json) }
     }
 
     override suspend fun readTagMangaManifest(key: TagMangaChapterDownloadKey): TagMangaChapterManifest? = withContext(Dispatchers.IO) {

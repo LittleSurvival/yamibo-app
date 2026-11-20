@@ -38,7 +38,7 @@ internal val DownloadTaskKey.itemDirectory: String get() = when (this) {
 /** Read-time image reference carried through the readers' URL-based navigation. */
 @Serializable
 data class MissingThreadImage(
-    val key: ThreadPageDownloadKey,
+    val key: DownloadTaskKey,
     val storageId: String,
     val sourceUrl: String,
 ) {
@@ -52,10 +52,17 @@ data class MissingThreadImage(
         fun fromReaderUri(url: String): MissingThreadImage? {
             if (!isReaderUri(url)) return null
             val payload = url.removePrefix(PREFIX).decodeBase64()?.utf8() ?: return null
-            return runCatching { Json.decodeFromString<MissingThreadImage>(payload) }.getOrNull()
+            return runCatching { Json.decodeFromString<MissingThreadImage>(payload) }.getOrElse {
+                // Older saved reader URLs encode a concrete thread key without a type discriminator.
+                runCatching { Json.decodeFromString<LegacyThreadImage>(payload) }
+                    .getOrNull()?.let { MissingThreadImage(it.key, it.storageId, it.sourceUrl) }
+            }
         }
     }
 }
+
+@Serializable
+private data class LegacyThreadImage(val key: ThreadPageDownloadKey, val storageId: String, val sourceUrl: String)
 
 @Serializable
 data class TagMangaChapterDownloadKey(
@@ -127,6 +134,15 @@ sealed interface DownloadManifest {
     val archiveId: String?
 }
 
+internal fun DownloadManifest.orderedSources(): List<String> {
+    val order = when (this) {
+        is TagMangaChapterManifest -> sourceOrder
+        is RssMangaChapterManifest -> sourceOrder
+        is ThreadPageDownloadManifest -> emptyList()
+    }
+    return order.ifEmpty { images.map { it.sourceUrl } }
+}
+
 @Serializable
 internal data class ArchivedImage(val storageId: String, val key: DownloadTaskKey, val fileName: String, val generation: String, val sourceId: String) {
     fun uri() = PREFIX + Json.encodeToString(this).encodeUtf8().base64Url()
@@ -167,6 +183,7 @@ data class TagMangaChapterManifest(
     val sourceUpdatedAt: Long? = null,
     override val images: List<DownloadedImage> = emptyList(),
     override val archiveId: String? = null,
+    val sourceOrder: List<String> = emptyList(),
 ) : DownloadManifest
 
 @Serializable
@@ -183,6 +200,7 @@ data class RssMangaChapterManifest(
     val sourceUpdatedAt: Long? = null,
     override val images: List<DownloadedImage> = emptyList(),
     override val archiveId: String? = null,
+    val sourceOrder: List<String> = emptyList(),
 ) : DownloadManifest
 
 @Serializable

@@ -119,6 +119,83 @@ class DownloadArchiveTest {
         assertTrue(repo.getDownloadedPage(key) != null)
     }
 
+    @Test fun damagedPackedMemberCanBeReplacedWithoutRewritingTheArchive() = runBlocking {
+        val repo = repository()
+        assertTrue(repo.refreshPage(ThreadId(key.tid), "QA", null, 1) is YamiboResult.Success)
+        val archive = dir / "images.cbz"
+        val damaged = fs.read(archive) { readByteArray() }
+        val start = (0..damaged.size-png.size).first { index -> png.indices.all { damaged[index + it] == png[it] } }
+        damaged[start] = 0
+        fs.write(archive) { write(damaged) }
+        val next = repository()
+        val local = next.getDownloadedPage(key)!!.posts.first().images.first().url
+        val n = fetchCount
+        next.retryArchivedImage(local).getOrThrow()
+        assertEquals(n+1, fetchCount)
+        assertContentEquals(damaged, fs.read(archive) { readByteArray() })
+        val reopened = repository()
+        reopened.getDownloadedPage(key) // Warm the archive cache using the remaining packed image.
+        assertContentEquals(png, reopened.openArchivedImage(local).buffer().use { it.readByteArray() })
+    }
+
+    @Test fun missingAndBrokenManifestsKeepTextAndManualLinks() = runBlocking {
+        val repo = repository()
+        assertTrue(repo.refreshPage(ThreadId(key.tid), "QA", null, 1) is YamiboResult.Success)
+        val manifest = dir / "manifest.json"
+        for (broken in listOf(false, true)) {
+            if (broken) fs.write(manifest) { writeUtf8("{") } else fs.delete(manifest)
+            val next = repository()
+            val n = fetchCount
+            assertEquals(key, next.getDownloadedContentGroups(true).single().items.single().key)
+            val post = next.getDownloadedPage(key)!!.posts.first()
+            assertTrue(post.images.all { MissingThreadImage.isReaderUri(it.url) })
+            assertFalse(post.contentHtml.contains("https://"))
+            assertEquals(n, fetchCount)
+            next.retryImage(MissingThreadImage.fromReaderUri(post.images.first().url)!!).getOrThrow()
+            assertEquals(n+1, fetchCount)
+            assertTrue(repository().getDownloadedPage(key)!!.posts.first().images.none { MissingThreadImage.isReaderUri(it.url) })
+        }
+    }
+
+    @Test fun partialTagAndRssChaptersKeepOrderAcrossRepairAndRefresh() = runBlocking {
+        val repo = repository()
+        val tag = TagMangaChapterDownloadKey(4, key.tid, 7)
+        val rss = RssMangaChapterDownloadKey(4, key.tid, 7)
+        for (item in listOf(tag, rss)) {
+            suspend fun read(r: DownloadRepositoryImpl) = when (item) {
+                is TagMangaChapterDownloadKey -> r.getTagMangaChapterImages(item)!!
+                is RssMangaChapterDownloadKey -> r.getRssMangaChapterImages(item)!!
+                else -> error("not a chapter")
+            }
+            suspend fun refresh() = when (item) {
+                is TagMangaChapterDownloadKey -> repo.refreshTagMangaChapter(item)
+                is RssMangaChapterDownloadKey -> repo.refreshRssMangaChapter(item)
+                else -> error("not a chapter")
+            }
+            allowSecond = false
+            assertTrue(refresh() is YamiboResult.Success)
+            val n = fetchCount
+            val ordered = read(repository())
+            assertEquals(2, ordered.size)
+            assertTrue(ordered.first().startsWith("yamibo-image://"))
+            val missing = assertNotNull(MissingThreadImage.fromReaderUri(ordered.last()))
+            assertEquals(item, missing.key)
+            assertEquals(urls.last(), missing.sourceUrl)
+            assertEquals(n, fetchCount)
+            assertTrue(repo.retryImage(missing).isFailure)
+            assertEquals(ordered, read(repo))
+            allowSecond = true
+            repo.retryImage(missing).getOrThrow()
+            assertEquals(n+2, fetchCount)
+            val repaired = read(repository())
+            assertEquals(ordered.first(), repaired.first())
+            assertTrue(repaired.last().startsWith("file://"))
+            allowSecond = false
+            assertTrue(refresh() is YamiboResult.Success)
+            assertTrue(read(repository()).none(MissingThreadImage::isReaderUri))
+        }
+    }
+
     @Test fun manualRepairAddsOnlyTheRequestedImage() = runBlocking {
         allowSecond=false
         val repo=repository()
