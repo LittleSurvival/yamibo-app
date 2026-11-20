@@ -15,6 +15,12 @@ import io.github.littlesurvival.dto.value.UserId
 import kotlin.test.*
 import kotlin.uuid.Uuid
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.db.DatabaseFactory
@@ -42,6 +48,7 @@ class DownloadArchiveTest {
     private val urls = samplePage.posts.first().images.map { it.url }
     private var allowSecond = true
     private var fetchCount = 0
+    private val fetchLock = Mutex()
     private val threads = object : ThreadRepository {
         override suspend fun fetchThread(
         tid: ThreadId,
@@ -66,10 +73,10 @@ class DownloadArchiveTest {
         override fun clearCachedThread(tid: ThreadId) = Unit
     }
 
-    private fun repository() = DownloadRepositoryImpl(threadRepository = threads, storageProvider = store,
+    private fun repository(storage: DownloadStorageProvider = store) = DownloadRepositoryImpl(threadRepository = threads, storageProvider = storage,
         database = db, cacheDirectory = folder / "cache", imageFetcher = object : DownloadImageFetcher({ "" }) {
             override suspend fun fetch(url: String): ByteArray {
-                fetchCount++
+                fetchLock.withLock { fetchCount++ }
                 check(allowSecond || url != urls.last())
                 return png
             }
@@ -117,6 +124,33 @@ class DownloadArchiveTest {
         assertTrue(repo.clearThread(other).isSuccess)
         assertNull(repo.getDownloadedPage(other))
         assertTrue(repo.getDownloadedPage(key) != null)
+    }
+
+    @Test fun completedDownloadIsDurableBeforeAnImmediateRestart() = runBlocking {
+        val saving = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val slowQueue = object : DownloadStorageProvider by store {
+            override suspend fun writeQueue(entries: List<DownloadQueueEntry>) {
+                if (entries.any { it.key == key && it.status == DownloadStatus.Downloaded }) {
+                    saving.complete(Unit)
+                    release.await()
+                }
+                store.writeQueue(entries)
+            }
+        }
+        val repo = repository(slowQueue)
+        val refresh = async { repo.refreshPage(ThreadId(key.tid), "QA", null, 1) }
+        try {
+            withTimeout(10_000) { saving.await() }
+            assertNull(withTimeoutOrNull(300) { refresh.await() })
+        } finally { release.complete(Unit) }
+        assertTrue(refresh.await() is YamiboResult.Success)
+        assertEquals(DownloadStatus.Downloaded, store.readQueue().single { it.key == key }.status)
+        val count = fetchCount
+        val next = repository()
+        next.getSummary()
+        assertEquals(DownloadStatus.Downloaded, next.queue.value.single { it.key == key }.status)
+        assertEquals(count, fetchCount)
     }
 
     @Test fun damagedPackedMemberCanBeReplacedWithoutRewritingTheArchive() = runBlocking {
