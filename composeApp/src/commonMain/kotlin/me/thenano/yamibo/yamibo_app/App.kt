@@ -17,6 +17,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.input.pointer.pointerInput
@@ -281,6 +283,7 @@ fun App() {
                 stack.forEachIndexed { index, navigatable ->
                     val isPopping = index == poppingIdx
                     val isTop = index == stack.lastIndex
+                    val active = index == if (poppingIdx >= 0) poppingIdx - 1 else topIndex
                     val isNewPush =
                         navigator.lastAction == NavAction.Push &&
                             isTop &&
@@ -319,11 +322,12 @@ fun App() {
                                 ) + fadeOut(animationSpec = tween(duration)),
                                 modifier = Modifier
                                     .fillMaxSize()
+                                    .then(if (active) Modifier else Modifier.clearAndSetSemantics { hideFromAccessibility() })
                                     .drawOnlyWhen(shouldDraw)
                                     .blockPointerPassthrough(isTop || isPopping)
                                     .zIndex(index.toFloat())
                             ) {
-                                SystemBarsScope(active = index == if (poppingIdx >= 0) poppingIdx - 1 else topIndex) {
+                                SystemBarsScope(active = active) {
                                     navigatable.Content()
                                 }
                             }
