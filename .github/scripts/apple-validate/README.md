@@ -3,7 +3,8 @@
 Use the single **Apple validation** workflow, or run a selected script on macOS.
 See the [validation guide](../../../dev-docs/apple-emulator-validation.md).
 
-Name each script `<full-branch-name>-<NN>.sh`, starting at `01`. Keep supporting
+For the basename, replace each `/` in the full branch name with `-`.
+Name each script `<branch-basename>-<NN>.sh`, starting at `01`. Keep supporting
 files in a named sibling directory referenced by that entry. Scripts and their XCTest
 sources, fixtures, QA adapters and dependencies stay on the validation branch.
 This production directory contains the convention only; it has no generic
