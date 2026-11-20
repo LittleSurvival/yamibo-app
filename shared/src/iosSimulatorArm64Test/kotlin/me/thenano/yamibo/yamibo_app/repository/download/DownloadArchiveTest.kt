@@ -36,7 +36,7 @@ class DownloadArchiveTest {
     private val db = Database(DatabaseFactory().createDriver())
     private val key = ThreadPageDownloadKey(970001, 1)
     private val dir = folder / "YamiboDownloads" / key.stableId
-    private val png = checkNotNull("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7ZkAAAAASUVORK5CYII=".decodeBase64()).toByteArray()
+    private val png = checkNotNull("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGMQCYgCAAE6AL8OBzgfAAAAAElFTkSuQmCC".decodeBase64()).toByteArray()
     private val text = """{"thread":{"tid":970001,"title":"CBZ benchmark","forum":{"fid":1,"name":"QA Forum","url":"forum.php?fid=1","description":null,"todayCount":null,"themeCount":null,"rank":null,"iconUrl":null},"categoryTag":null,"totalReplies":null,"totalViews":null,"replyUrl":null},"posts":[{"pid":43,"floor":1,"isPinned":false,"manageButtons":[],"title":"QA MANGA","author":{"uid":7,"name":"QA Author","avatarUrl":null},"timeCreate":{"text":"2026-10-24","specialText":null,"epoch":0},"lastEditedTime":null,"contentHtml":"<img src=\"https://bbs.yamibo.com/qa-pack/0.png\"><img src=\"https://bbs.yamibo.com/qa-pack/1.png\">","images":[{"url":"https://bbs.yamibo.com/qa-pack/0.png","alt":null},{"url":"https://bbs.yamibo.com/qa-pack/1.png","alt":null}],"tags":{"value":[]},"poll":null,"attachments":[],"comments":[],"rateBlock":{"rateParticipatePeople":0,"rateTotalScore":0,"rates":[]}}],"pageNav":{"nextUrl":null,"nextPageIndex":null,"prevUrl":null,"prevPageIndex":null,"currentPage":1,"totalPages":20}}"""
     private val samplePage = Json { ignoreUnknownKeys = true }.decodeFromString<ThreadPage>(text)
     private val urls = samplePage.posts.first().images.map { it.url }
