@@ -148,12 +148,13 @@ class DownloadArchiveTest {
             val n = fetchCount
             assertEquals(key, next.getDownloadedContentGroups(true).single().items.single().key)
             val post = next.getDownloadedPage(key)!!.posts.first()
-            assertTrue(post.images.all { MissingThreadImage.isReaderUri(it.url) })
-            assertFalse(post.contentHtml.contains("https://"))
+            assertTrue(post.images.all { MissingThreadImage.isReaderUri(it.url) }, "raw post URLs after manifest damage: ${post.images}")
+            assertFalse(post.contentHtml.contains("https://"), "raw HTML: ${post.contentHtml}")
             assertEquals(n, fetchCount)
             next.retryImage(MissingThreadImage.fromReaderUri(post.images.first().url)!!).getOrThrow()
             assertEquals(n+1, fetchCount)
-            assertTrue(repository().getDownloadedPage(key)!!.posts.first().images.none { MissingThreadImage.isReaderUri(it.url) })
+            val reopened = repository().getDownloadedPage(key)!!.posts.first().images
+            assertTrue(reopened.none { MissingThreadImage.isReaderUri(it.url) }, "unresolved after manual recovery broken=$broken: $reopened")
         }
     }
 
@@ -173,7 +174,8 @@ class DownloadArchiveTest {
                 else -> error("not a chapter")
             }
             allowSecond = false
-            assertTrue(refresh() is YamiboResult.Success)
+            val first = refresh()
+            assertTrue(first is YamiboResult.Success, "initial partial chapter $item: $first")
             val n = fetchCount
             val ordered = read(repository())
             assertEquals(2, ordered.size)
@@ -182,7 +184,7 @@ class DownloadArchiveTest {
             assertEquals(item, missing.key)
             assertEquals(urls.last(), missing.sourceUrl)
             assertEquals(n, fetchCount)
-            assertTrue(repo.retryImage(missing).isFailure)
+            assertTrue(repo.retryImage(missing).isFailure, "failed source unexpectedly loaded for $item")
             assertEquals(ordered, read(repo))
             allowSecond = true
             repo.retryImage(missing).getOrThrow()
@@ -191,8 +193,10 @@ class DownloadArchiveTest {
             assertEquals(ordered.first(), repaired.first())
             assertTrue(repaired.last().startsWith("file://"))
             allowSecond = false
-            assertTrue(refresh() is YamiboResult.Success)
-            assertTrue(read(repository()).none(MissingThreadImage::isReaderUri))
+            val updated = refresh()
+            assertTrue(updated is YamiboResult.Success, "refresh after repair $item: $updated")
+            val restored = read(repository())
+            assertTrue(restored.none(MissingThreadImage::isReaderUri), "previously saved image lost for $item: $restored")
         }
     }
 
