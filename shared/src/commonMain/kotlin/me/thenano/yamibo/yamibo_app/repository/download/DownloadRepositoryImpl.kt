@@ -1583,7 +1583,12 @@ class DownloadRepositoryImpl(
             }
         }
         backgroundController.onQueueChanged(queue.value)
-        persistQueue()
+        if (entry.status == DownloadStatus.Downloaded) {
+            // A reopen immediately after success must not replay a stale Downloading entry.
+            writeQueueSnapshot()
+        } else {
+            persistQueue()
+        }
     }
 
     private suspend fun upsertAll(newEntries: List<DownloadQueueEntry>) {
