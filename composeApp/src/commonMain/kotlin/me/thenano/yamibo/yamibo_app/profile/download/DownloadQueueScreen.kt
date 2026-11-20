@@ -11,6 +11,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.selection.triStateToggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -21,6 +23,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -232,22 +237,38 @@ fun DownloadQueueScreen(screenId: ScreenId) {
                 }
             }
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = { if (!leaveSelection()) selectionMode = true }, enabled = !busy) {
-                        Text(if (selectionMode) i18n("取消選取") else i18n("多選"))
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    itemVerticalAlignment = Alignment.CenterVertically,
+                ) {
+                    YamiboActionChip(
+                        text = if (selectionMode) i18n("取消選取") else i18n("多選"),
+                        onClick = { if (!leaveSelection()) selectionMode = true },
+                        selected = selectionMode,
+                        enabled = !busy && (selectionMode || selectableKeys.isNotEmpty()),
+                    )
+                    if (selectionMode) {
+                        Text(i18n("已選取 {} 項", selectedKeys.size), color = colors.textStrong, fontSize = 13.sp)
                     }
-                    if (selectionMode) Text(i18n("已選取 {} 項", selectedKeys.size), color = colors.textStrong)
                 }
                 if (selectionMode) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        TextButton(onClick = { selectedKeys = selectableKeys }, enabled = !busy) { Text(i18n("全選")) }
-                        TextButton(onClick = { selectedKeys = emptySet() }, enabled = !busy) { Text(i18n("全不選")) }
-                        TextButton(onClick = { selectedKeys = selectableKeys - selectedKeys }, enabled = !busy) { Text(i18n("反選")) }
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        itemVerticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        YamiboActionChip(i18n("全選"), { selectedKeys = selectableKeys }, enabled = !busy && selectedKeys != selectableKeys)
+                        YamiboActionChip(i18n("全不選"), { selectedKeys = emptySet() }, enabled = !busy && selectedKeys.isNotEmpty())
+                        YamiboActionChip(i18n("反選"), { selectedKeys = selectableKeys - selectedKeys }, enabled = !busy && selectableKeys.isNotEmpty())
+                        SmallQueueButton(
+                            text = if (selectedTab == DownloadManagerTab.Queue) i18n("移除任務") else i18n("刪除下載內容"),
+                            onClick = { requestRemoval(selectedTab == DownloadManagerTab.Queue, selectableTargets.filter { it.key in selectedKeys }) },
+                            destructive = true,
+                            enabled = !busy && selectedKeys.isNotEmpty(),
+                        )
                     }
-                    TextButton(
-                        enabled = !busy && selectedKeys.isNotEmpty(),
-                        onClick = { requestRemoval(selectedTab == DownloadManagerTab.Queue, selectableTargets.filter { it.key in selectedKeys }) },
-                    ) { Text(if (selectedTab == DownloadManagerTab.Queue) i18n("移除任務") else i18n("刪除下載內容")) }
                 }
                 if (busy) {
                     Text(i18n("處理中 {}/{}", progress, lastRemoval?.targets?.size ?: 0))
@@ -561,8 +582,14 @@ private fun DownloadQueueEntryCard(
         else -> colors.brownPrimary
     }
     YamiboDownloadCard {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (selectionMode && entry.status.canRemoveTask()) Checkbox(selected, { onToggle() }, enabled = !busy)
+        val selectable = selectionMode && entry.status.canRemoveTask()
+        Row(
+            modifier = Modifier.fillMaxWidth().then(
+                if (selectable) Modifier.toggleable(selected, enabled = !busy, role = Role.Checkbox, onValueChange = { onToggle() }) else Modifier
+            ),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (selectable) DownloadSelectionMark(if (selected) ToggleableState.On else ToggleableState.Off, !busy)
             Icon(
                 imageVector = if (entry.status == DownloadStatus.Downloaded) YamiboIcons.Downloaded else YamiboIcons.Download,
                 contentDescription = null,
@@ -844,20 +871,20 @@ private fun DownloadContentGroupCard(
         targetValue = if (expanded) 180f else 0f,
         animationSpec = tween(180),
     )
+    val selection = when {
+        group.items.all { it.key in selectedKeys } -> ToggleableState.On
+        group.items.any { it.key in selectedKeys } -> ToggleableState.Indeterminate
+        else -> ToggleableState.Off
+    }
     YamiboDownloadCard {
         Row(
-            modifier = Modifier.fillMaxWidth().clickable(onClick = onToggleExpanded),
+            modifier = Modifier.fillMaxWidth().then(
+                if (selectionMode) Modifier.triStateToggleable(selection, enabled = !busy, role = Role.Checkbox, onClick = onToggleSelection)
+                else Modifier.clickable(onClick = onToggleExpanded)
+            ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (selectionMode) TriStateCheckbox(
-                state = when {
-                    group.items.all { it.key in selectedKeys } -> ToggleableState.On
-                    group.items.any { it.key in selectedKeys } -> ToggleableState.Indeterminate
-                    else -> ToggleableState.Off
-                },
-                onClick = onToggleSelection,
-                enabled = !busy,
-            )
+            if (selectionMode) DownloadSelectionMark(selection, !busy)
             Icon(
                 imageVector = YamiboIcons.Book,
                 contentDescription = null,
@@ -872,12 +899,15 @@ private fun DownloadContentGroupCard(
                     fontSize = 12.sp,
                 )
             }
-            Text(
-                "▼",
-                color = colors.brownPrimary,
-                fontSize = 12.sp,
-                modifier = Modifier.graphicsLayer { rotationZ = arrowRotation },
-            )
+            val expandLabel = i18n("點擊展開 / 收起")
+            Box(
+                modifier = if (selectionMode) Modifier.size(48.dp)
+                    .clickable(role = Role.Button, onClick = onToggleExpanded)
+                    .semantics { contentDescription = expandLabel } else Modifier,
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("▼", color = colors.brownPrimary, fontSize = 12.sp, modifier = Modifier.graphicsLayer { rotationZ = arrowRotation })
+            }
         }
     }
 }
@@ -894,10 +924,12 @@ private fun DownloadContentItemRow(
 ) {
     val colors = YamiboTheme.colors
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        modifier = Modifier.fillMaxWidth().then(
+            if (selectionMode) Modifier.toggleable(selected, enabled = !busy, role = Role.Checkbox, onValueChange = { onToggle() }) else Modifier
+        ).padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (selectionMode) Checkbox(selected, { onToggle() }, enabled = !busy)
+        if (selectionMode) DownloadSelectionMark(if (selected) ToggleableState.On else ToggleableState.Off, !busy)
         Column(Modifier.weight(1f)) {
             Text(when (val key = item.key) {
                 is ThreadPageDownloadKey -> i18n("第 {} 頁", key.page)
@@ -915,6 +947,22 @@ private fun DownloadContentItemRow(
         SmallQueueButton(i18n("清除"), { onClearItem(item) }, destructive = true, enabled = !busy)
         }
     }
+}
+
+@Composable
+private fun DownloadSelectionMark(state: ToggleableState, enabled: Boolean) {
+    val colors = YamiboTheme.colors
+    TriStateCheckbox(
+        state = state,
+        onClick = null,
+        modifier = Modifier.padding(end = 10.dp),
+        enabled = enabled,
+        colors = CheckboxDefaults.colors(
+            checkedColor = colors.brownDeep,
+            uncheckedColor = colors.textDark.copy(alpha = 0.65f),
+            checkmarkColor = colors.textOnDeepHigh,
+        ),
+    )
 }
 
 @Composable
