@@ -5579,6 +5579,7 @@ private fun ThreadReaderProgressOverlay(
 
     ReaderPageProgressSlideBar(
         progress = progress,
+        readerScrollState = listState,
         modifier = slideBarModifier,
         onSeek = onSeek,
     )
