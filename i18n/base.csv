@@ -988,3 +988,9 @@ RSS 目錄進度,RSS catalog progress,RSS 目錄進度,RSS 目录进度
 儲存資料夾已變更，請重新載入,The storage folder changed. Please reload.,儲存資料夾已變更，請重新載入,存储文件夹已变更，请重新加载
 下載內容未完全刪除，請重試,Some download files remain. Please retry.,下載內容未完全刪除，請重試,下载内容未完全删除，请重试
 下載任務正在移除，請稍後重試,The download is being removed. Please try again later.,下載任務正在移除，請稍後重試,下载任务正在移除，请稍后重试
+轉換舊版圖片,Convert legacy images,轉換舊版圖片,转换旧版图片
+按頁或章節將現有圖片轉為 CBZ。中斷後可以繼續。,Convert saved images to CBZ one page or chapter at a time. You can resume after an interruption.,按頁或章節將現有圖片轉為 CBZ。中斷後可以繼續。,按页或章节将现有图片转为 CBZ。中断后可以继续。
+轉換,Convert,轉換,转换
+圖片轉換完成,Image conversion complete,圖片轉換完成,图片转换完成
+轉換失敗,Conversion failed,轉換失敗,转换失败
+重新掃描下載資料夾,Rescan download folder,重新掃描下載資料夾,重新扫描下载文件夹

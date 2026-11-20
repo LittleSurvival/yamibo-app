@@ -28,6 +28,7 @@ kotlin {
             implementation(libs.yamibo.api)
             implementation(libs.sqldelight.coroutines)
             implementation(libs.okio)
+            api(libs.kmp.zip.okio)
         }
         androidMain.dependencies {
             implementation(libs.androidx.security.crypto)

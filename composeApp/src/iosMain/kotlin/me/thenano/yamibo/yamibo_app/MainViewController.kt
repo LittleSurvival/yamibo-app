@@ -249,6 +249,8 @@ fun MainViewController() = ComposeUIViewController {
             tagRepository = tagRepository,
             rssRepository = rssSearchSubscriptionRepository,
             storageProvider = IOSDownloadStorageProvider(appSettingsRepository),
+            database = diskCacheFactory.database,
+            cacheDirectory = diskCacheFactory.rootCacheDir / "downloads",
             imageFetcher = DownloadImageFetcher { cookieStore.load().orEmpty() },
         )
     }

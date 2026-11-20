@@ -49,6 +49,7 @@ fun <T> YamiboMultiSelectDialog(
     selected: Set<T>,
     onConfirm: (Set<T>) -> Unit,
     onCancel: (() -> Unit)? = null,
+    onDismissRequest: (() -> Unit)? = null,
     label: @Composable (T) -> String,
     modifier: Modifier = Modifier,
     selectedText: String = i18n("已選擇"),
@@ -62,7 +63,7 @@ fun <T> YamiboMultiSelectDialog(
     fun enabledSelection(values: Set<T>): Set<T> = values.filterTo(mutableSetOf(), optionEnabled)
     var draftSelection by remember(options, selected) { mutableStateOf(enabledSelection(selected)) }
     AlertDialog(
-        onDismissRequest = { onConfirm(enabledSelection(draftSelection)) },
+        onDismissRequest = onDismissRequest ?: { onConfirm(enabledSelection(draftSelection)) },
         title = {
             Text(title, color = colors.textStrong, fontWeight = FontWeight.Bold)
         },

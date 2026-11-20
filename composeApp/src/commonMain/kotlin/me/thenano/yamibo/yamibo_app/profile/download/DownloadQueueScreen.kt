@@ -88,6 +88,7 @@ private data class DownloadRemovalRequest(val tasksOnly: Boolean, val targets: L
 private data class DownloadRemovalOutcome(val target: DownloadRemovalTarget, val error: String? = null)
 private data class DownloadRemovalProgress(
     val request: DownloadRemovalRequest? = null,
+    val processed: Int = 0,
     val outcomes: List<DownloadRemovalOutcome> = emptyList(),
 )
 // Retain the current batch result when navigating away or changing app language.
@@ -115,6 +116,7 @@ fun DownloadQueueScreen(screenId: ScreenId) {
     var selectedTab by remember { mutableStateOf(DownloadManagerTab.Queue) }
     var contentState by remember { mutableStateOf<DownloadContentManagementState>(DownloadContentManagementState.Loading) }
     var contentReloadToken by remember { mutableStateOf(0) }
+    var catalogUpdateToken by remember { mutableStateOf(0) }
     var lastContentReloadToken by remember { mutableStateOf(0) }
     var contentSortMode by rememberSaveable { mutableStateOf(DownloadedContentSortMode.DownloadedAt) }
     var contentSortDescending by rememberSaveable { mutableStateOf(true) }
@@ -123,15 +125,18 @@ fun DownloadQueueScreen(screenId: ScreenId) {
     val contentRevision = remember(entries) { downloadedContentRevision(entries) }
     var selectionMode by remember { mutableStateOf(false) }
     var selectedKeys by remember { mutableStateOf(emptySet<DownloadTaskKey>()) }
+    var confirmMigration by remember { mutableStateOf(false) }
+    var migrationProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    var migrationError by remember { mutableStateOf<String?>(null) }
     var pendingRemoval by remember { mutableStateOf<DownloadRemovalRequest?>(null) }
     val removalProgress by downloadRemovalProgress.collectAsState()
     val lastRemoval = removalProgress.request
     val outcomes = removalProgress.outcomes
     val failures = remember(outcomes) { outcomes.filter { it.error != null } }
-    val progress = outcomes.size
+    val progress = removalProgress.processed
     var showFailureDetails by remember { mutableStateOf(false) }
     val appTasks by appTaskManager.tasks.collectAsState()
-    val busy = appTasks[downloadRemovalTaskKey]?.isActive == true
+    val busy = appTasks[downloadRemovalTaskKey]?.isActive == true || migrationProgress != null
     val contentGroups = (contentState as? DownloadContentManagementState.Ready)?.groups.orEmpty()
     val filterOptions = remember(contentGroups) { buildDownloadedContentFilterOptions(contentGroups) }
     val normalizedFilterKeys = selectedContentFilterKeys.filterTo(mutableSetOf()) { key ->
@@ -174,17 +179,19 @@ fun DownloadQueueScreen(screenId: ScreenId) {
         downloadRemovalProgress.value = DownloadRemovalProgress(request)
         appTaskManager.launch(downloadRemovalTaskKey) {
             try {
-                request.targets.forEach { target ->
-                    val result = if (request.tasksOnly) repository.removeTask(target.key) else clearItem(target.key, repository)
-                    val outcome = DownloadRemovalOutcome(target, result.exceptionOrNull()?.let { it.message ?: "清除失敗" })
-                    downloadRemovalProgress.update { it.copy(outcomes = it.outcomes + outcome) }
-                    if (result.isSuccess) selectedKeys = selectedKeys - target.key
+                val keys = request.targets.mapTo(mutableSetOf()) { it.key }
+                val errors = repository.removeItems(keys, request.tasksOnly) { done ->
+                    downloadRemovalProgress.update { it.copy(processed = done) }
                 }
+                downloadRemovalProgress.update { state ->
+                    state.copy(processed = keys.size, outcomes = request.targets.map { target -> DownloadRemovalOutcome(target, errors[target.key]?.let { it.message ?: "清除失敗" }) })
+                }
+                selectedKeys -= keys - errors.keys
                 val results = downloadRemovalProgress.value.outcomes
                 val failed = results.count { it.error != null }
                 feedbackController.post(i18n("成功 {} 項，失敗 {} 項", results.size - failed, failed))
             } finally {
-                contentReloadToken++
+                if (!request.tasksOnly) catalogUpdateToken++
             }
         }
     }
@@ -217,7 +224,7 @@ fun DownloadQueueScreen(screenId: ScreenId) {
         }
     }
 
-    LaunchedEffect(selectedTab, contentRevision, contentReloadToken, storageFolderUri) {
+    LaunchedEffect(selectedTab, contentRevision, contentReloadToken, catalogUpdateToken, storageFolderUri) {
         if (selectedTab == DownloadManagerTab.Content) {
             val forceRefresh = lastContentReloadToken != contentReloadToken
             reloadContentManagement(forceRefresh)
@@ -268,7 +275,7 @@ fun DownloadQueueScreen(screenId: ScreenId) {
                         )
                     }
                 }
-                if (busy) {
+                if (appTasks[downloadRemovalTaskKey]?.isActive == true) {
                     Text(i18n("處理中 {}/{}", progress, lastRemoval?.targets?.size ?: 0), color = colors.textStrong)
                     LinearProgressIndicator(Modifier.fillMaxWidth(), color = colors.brownPrimary, trackColor = colors.brownPrimary.copy(alpha = 0.12f))
                 } else if (failures.isNotEmpty() && lastRemoval?.tasksOnly == (selectedTab == DownloadManagerTab.Queue)) {
@@ -311,6 +318,9 @@ fun DownloadQueueScreen(screenId: ScreenId) {
                 )
                 DownloadManagerTab.Content -> DownloadContentManagementTab(
                     state = contentState,
+                    onMigrate = { confirmMigration = true },
+                    onRescan = { contentReloadToken++ },
+                    migrationProgress = migrationProgress,
                     selectionActions = {
                         val allSelected = selectableKeys.isNotEmpty() && selectedKeys.containsAll(selectableKeys)
                         YamiboActionChip(
@@ -336,7 +346,6 @@ fun DownloadQueueScreen(screenId: ScreenId) {
                         }
                     },
                     onSelectFilterKeys = { keys ->
-                        selectedKeys = emptySet()
                         selectedContentFilterKeys = keys.toList()
                     },
                     onRetryLoad = {
@@ -377,12 +386,46 @@ fun DownloadQueueScreen(screenId: ScreenId) {
                         }
                         scope.launch {
                             handle.state.first { !it.isActive }
-                            contentReloadToken++
+                            catalogUpdateToken++
                         }
                     },
                 )
             }
         }
+    }
+    if (confirmMigration || migrationError != null) {
+        val failure = migrationError
+        AlertDialog(
+            containerColor = colors.creamSurface, titleContentColor = colors.textOnSurface, textContentColor = colors.textOnSurface,
+            onDismissRequest = { confirmMigration = false; migrationError = null },
+            title = { Text(i18n("轉換舊版圖片")) },
+            text = {
+                if (failure == null) Text(i18n("按頁或章節將現有圖片轉為 CBZ。中斷後可以繼續。"))
+                else LazyColumn(Modifier.heightIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(failure.lines()) { Text(it) }
+                }
+            },
+            confirmButton = { YamiboActionChip(if (failure == null) i18n("轉換") else i18n("重試"), onClick = {
+                confirmMigration = false
+                migrationError = null
+                scope.launch {
+                    migrationProgress = 0 to 0
+                    try {
+                        val errors = repository.migrateImages { done, total -> migrationProgress = done to total }
+                        if (errors.isEmpty()) feedbackController.post(i18n("圖片轉換完成"))
+                        else migrationError = errors.entries.joinToString("\n") { (key, error) -> "${key.stableId} · ${error.message.orEmpty()}" }
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        migrationError = error.message ?: i18n("轉換失敗")
+                    } finally {
+                        migrationProgress = null
+                        catalogUpdateToken++
+                    }
+                }
+            }, selected = true) },
+            dismissButton = { YamiboActionChip(i18n("取消"), { confirmMigration = false; migrationError = null }) },
+        )
     }
     pendingRemoval?.let { request ->
         AlertDialog(
@@ -629,6 +672,9 @@ private fun DownloadQueueEntryCard(
 
 @Composable
 private fun DownloadContentManagementTab(
+    onMigrate: () -> Unit,
+    onRescan: () -> Unit,
+    migrationProgress: Pair<Int, Int>?,
     state: DownloadContentManagementState,
     selectionActions: @Composable () -> Unit,
     selectionMode: Boolean,
@@ -690,15 +736,24 @@ private fun DownloadContentManagementTab(
                         sortMode = sortMode,
                         sortDescending = sortDescending,
                         filterActive = normalizedFilterKeys.isNotEmpty(),
-                        selectionMode = selectionMode,
-                        selectionActions = selectionActions,
                         onSortClick = { if (!busy) showSortDialog = true },
                         onFilterClick = { if (!busy) showFilterDialog = true },
-                    )
+                    ) {
+                        if (selectionMode) {
+                            selectionActions()
+                        } else if (migrationProgress == null) {
+                            YamiboActionChip(i18n("重新掃描下載資料夾"), onRescan, enabled = !busy)
+                        }
+                    }
                 }
                 item {
                     Spacer(Modifier.height(12.dp))
                     DownloadContentSummaryCard(state.summary)
+                    if (migrationProgress != null) {
+                        Text(i18n("處理中 {}/{}", migrationProgress.first, migrationProgress.second), color = colors.textStrong)
+                    } else if (!selectionMode && groups.any { group -> group.items.any { it.needsMigration } }) {
+                        YamiboActionChip(i18n("轉換舊版圖片"), onMigrate, enabled = !busy)
+                    }
                 }
                 if (groups.isEmpty()) {
                     item {
@@ -792,6 +847,7 @@ private fun DownloadContentManagementTab(
                 )
             },
             onCancel = { showFilterDialog = false },
+            onDismissRequest = { showFilterDialog = false },
             label = { option -> i18n("{} ({})", i18n(option.label), option.count) },
             toggleSelection = { option, current ->
                 when {
@@ -809,27 +865,34 @@ private fun DownloadContentControlRow(
     sortMode: DownloadedContentSortMode,
     sortDescending: Boolean,
     filterActive: Boolean,
-    selectionMode: Boolean,
-    selectionActions: @Composable () -> Unit,
     onSortClick: () -> Unit,
     onFilterClick: () -> Unit,
+    actions: @Composable () -> Unit,
 ) {
+    val horizontalSpacing = Arrangement.spacedBy(8.dp)
+    val verticalSpacing = Arrangement.spacedBy(4.dp)
     FlowRow(
         modifier = Modifier.fillMaxWidth().background(YamiboTheme.colors.creamBackground),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalArrangement = horizontalSpacing,
+        verticalArrangement = verticalSpacing,
         itemVerticalAlignment = Alignment.CenterVertically,
     ) {
         YamiboActionChip(
             text = i18n("排序: {} {}", sortMode.downloadedContentSortLabel(), if (sortDescending) "↓" else "↑"),
             onClick = onSortClick,
         )
-        YamiboActionChip(
-            text = i18n("篩選"),
-            onClick = onFilterClick,
-            selected = filterActive,
-        )
-        if (selectionMode) selectionActions()
+        FlowRow(
+            horizontalArrangement = horizontalSpacing,
+            verticalArrangement = verticalSpacing,
+            itemVerticalAlignment = Alignment.CenterVertically,
+        ) {
+            YamiboActionChip(
+                text = i18n("篩選"),
+                onClick = onFilterClick,
+                selected = filterActive,
+            )
+            actions()
+        }
     }
 }
 
@@ -1129,15 +1192,6 @@ private fun entryDetailLabel(entry: DownloadQueueEntry): String = when (val key 
     is ThreadPageDownloadKey -> i18n("第 {} 頁", key.page)
     is TagMangaChapterDownloadKey -> i18n("標籤漫畫章節")
     is RssMangaChapterDownloadKey -> i18n("RSS 漫畫章節")
-}
-
-private suspend fun clearItem(
-    key: DownloadTaskKey,
-    repository: DownloadRepository,
-): Result<Unit> = when (key) {
-    is ThreadPageDownloadKey -> repository.clearPage(key)
-    is TagMangaChapterDownloadKey -> repository.clearTagMangaChapter(key)
-    is RssMangaChapterDownloadKey -> repository.clearRssMangaChapter(key)
 }
 
 private suspend fun refreshUpdateAvailableDownloads(
