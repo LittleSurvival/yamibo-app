@@ -40,6 +40,8 @@ class AndroidDownloadStorageProvider(
         } == true
 
     private val archiveCache = File(context.cacheDir, "download-archive-cache")
+    private data class PageArchiveLocation(val tree: Uri, val key: ThreadPageDownloadKey, val generation: String, val file: Uri)
+    private val lastPageArchive = java.util.concurrent.atomic.AtomicReference<PageArchiveLocation?>()
 
     private fun itemDir(tree: Uri, key: DownloadTaskKey): Uri? {
         val root = downloadsRoot(tree) ?: return null
@@ -99,6 +101,14 @@ class AndroidDownloadStorageProvider(
 
     override suspend fun openArchive(key: DownloadTaskKey, generation: String): SeekableSource? {
         val tree = selectedTreeUri() ?: return null
+        val recent = lastPageArchive.getAndSet(null)
+        if (recent != null && recent.tree == tree && recent.key == key && recent.generation == generation) {
+            try {
+                return seekable(recent.file, generation)
+            } catch (_: FileNotFoundException) {
+                // A document provider may have replaced the file since the page listing.
+            }
+        }
         val dir = itemDir(tree, key) ?: return null
         val file = findChild(tree, dir, "images.cbz") ?: return null
         return seekable(file, generation)
@@ -169,6 +179,9 @@ class AndroidDownloadStorageProvider(
         val manifest = (files["manifest.json"] ?: files["manifest.json.previous"])?.let { file ->
             resolver.openInputStream(file.uri)?.bufferedReader()?.use { input -> runCatching { json.decodeFromString<ThreadPageDownloadManifest>(input.readText()) }.getOrNull() }
         }
+        val generation = manifest?.archiveId
+        val file = files["images.cbz"]
+        lastPageArchive.set(if (generation != null && file != null) PageArchiveLocation(tree, key, generation, file.uri) else null)
         return page to manifest
     }
 

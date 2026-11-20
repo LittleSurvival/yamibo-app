@@ -1159,7 +1159,10 @@ class DownloadRepositoryImpl(
         private var finished = false
 
         fun add(image: DownloadedImage, bytes: ByteArray): DownloadedImage {
-            require(image.fileName.isSafeImageFileName() && image.bytes == bytes.size.toLong())
+            require(image.fileName.isSafeImageFileName()) { "下載圖片檔名無效" }
+            require(image.bytes == bytes.size.toLong()) {
+                "${image.fileName} 大小與下載清單不符（預期 ${image.bytes} B，實際 ${bytes.size} B）"
+            }
             val checksum = Crypto.crc32(bytes)
             check(checksums.put(image.fileName, checksum) == null) { "下載圖片檔名重複" }
             val output = writer.value

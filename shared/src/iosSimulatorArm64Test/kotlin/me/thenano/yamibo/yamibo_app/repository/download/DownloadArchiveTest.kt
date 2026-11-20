@@ -111,6 +111,7 @@ class DownloadArchiveTest {
         val repo = repository()
         val errors = repo.migrateImages { _,_ -> }
         assertEquals(setOf(key), errors.keys)
+        assertContains(errors.getValue(key).message.orEmpty(), "0.png 大小與下載清單不符")
         assertTrue(repo.getDownloadedPage(key) != null)
         assertTrue(fs.exists(dir.parent!! / "${dir.name}.previous" / "images" / "0.png"))
         assertTrue(repo.clearThread(other).isSuccess)
