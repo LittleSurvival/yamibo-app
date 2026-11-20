@@ -19,6 +19,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.*
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.ScrollableState
+import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.drag
@@ -46,6 +49,7 @@ data class ReaderPageProgress(
 @Composable
 fun ReaderPageProgressSlideBar(
     progress: ReaderPageProgress?,
+    readerScrollState: ScrollableState,
     modifier: Modifier = Modifier,
     onSeek: suspend (Float) -> Unit,
     thumbColor: androidx.compose.ui.graphics.Color? = null,
@@ -78,10 +82,11 @@ fun ReaderPageProgressSlideBar(
             .windowInsetsPadding(trackInsets)
             .width(32.dp)
             .fillMaxHeight()
+            // The track overlays the list, so ordinary swipes scroll the same reader state.
+            .scrollable(readerScrollState, Orientation.Vertical, reverseDirection = true)
             .pointerInput(thumbHeightPx) {
                 awaitEachGesture {
                     val down = awaitFirstDown()
-                    down.consume()
                     // Moving before the timeout cancels arming, even during a slow edge swipe.
                     val cancelled = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
                         do {
