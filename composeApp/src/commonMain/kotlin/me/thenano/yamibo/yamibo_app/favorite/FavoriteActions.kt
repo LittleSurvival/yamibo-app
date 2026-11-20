@@ -7,6 +7,7 @@ import me.thenano.yamibo.yamibo_app.components.navigation.NavigationBackSymbol
 import YamiboIcons
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -525,12 +527,11 @@ fun FavoriteCollectionPickerDialog(
                     }
                 }
 
-                Spacer(Modifier.size(18.dp))
+                Spacer(Modifier.height(8.dp))
 
                 FlowRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     if (currentCategory != null) {
                         FavoritePickerButton(
@@ -558,7 +559,6 @@ fun FavoriteCollectionPickerDialog(
                     }
                 }
 
-                Spacer(Modifier.height(14.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -591,14 +591,16 @@ private fun FavoritePickerButton(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    Button(
-        onClick = onClick,
-        modifier = modifier.heightIn(min = 48.dp),
-        shape = RoundedCornerShape(12.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = background, contentColor = contentColor),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+    Box(
+        modifier = modifier
+            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(vertical = 7.dp)
+            .background(background, RoundedCornerShape(9.dp))
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Text(text, fontWeight = FontWeight.SemiBold)
+        Text(text, color = contentColor, fontSize = 13.sp, lineHeight = 17.sp, fontWeight = FontWeight.Medium)
     }
 }
 
