@@ -36,7 +36,20 @@ class IOSDownloadStorageProvider(
     override suspend fun getSelectedFolderLabel(): String? =
         runCatching { selectedFolder().name }.getOrNull()
 
-    override suspend fun getStorageKey(): String = selectedFolder().toString()
+    private val documentsDir by lazy { resolveIosStorageFolder("").parent!! }
+
+    private fun storageKeyFor(folder: Path): String {
+        // The sandbox container UUID can change on an app update. Covers retain this key across launches.
+        val path = folder.toString()
+        val documents = documentsDir.toString()
+        return when {
+            path == documents -> "ios:Documents"
+            path.startsWith("$documents/") -> "ios:Documents/" + path.removePrefix("$documents/")
+            else -> path
+        }
+    }
+
+    override suspend fun getStorageKey(): String = storageKeyFor(selectedFolder())
 
     override suspend fun isReady(): Boolean = withContext(Dispatchers.IO) {
         runCatching { fileSystem.createDirectories(rootDir()) }
@@ -56,7 +69,7 @@ class IOSDownloadStorageProvider(
 
     override suspend fun publishItem(storageKey: String, key: DownloadTaskKey, manifest: ByteArray, page: ByteArray?,
                                      archive: Path?, verifyArchive: ((SeekableSource) -> Unit)?) {
-        val folder = selectedFolder().also { check(it.toString() == storageKey) }
+        val folder = selectedFolder().also { check(storageKeyFor(it) == storageKey) }
         val final = itemPath(key, folder / "YamiboDownloads")
         val parent = final.parent!!
         val tmp = parent / "${final.name}.tmp"
@@ -101,7 +114,7 @@ class IOSDownloadStorageProvider(
     override suspend fun writeThreadImage(
         storageKey: String, key: ThreadPageDownloadKey, image: PendingDownloadedImage, manifestBytes: ByteArray,
     ): String {
-        check(selectedFolder().toString() == storageKey)
+        check(getStorageKey() == storageKey)
         val page = readablePath(key)
         check(fileSystem.exists(page / "manifest.json"))
         val images = page / "images"
@@ -187,13 +200,13 @@ class IOSDownloadStorageProvider(
     }
 
     override suspend fun groupKeys(storageKey: String, group: DownloadTaskKey): Set<DownloadTaskKey> {
-        val root = selectedFolder().also { check(it.toString() == storageKey) } / "YamiboDownloads"
+        val root = selectedFolder().also { check(storageKeyFor(it) == storageKey) } / "YamiboDownloads"
         val parent = group.parentDirectory?.let { root / it } ?: root
         return fileSystem.listOrNull(parent).orEmpty().mapNotNullTo(mutableSetOf()) { groupMember(group, it.name) }
     }
 
     override suspend fun deleteItems(storageKey: String, keys: Set<DownloadTaskKey>, onProgress: (Int) -> Unit): Map<DownloadTaskKey, Throwable> {
-        val folder = selectedFolder().also { check(it.toString() == storageKey) }
+        val folder = selectedFolder().also { check(storageKeyFor(it) == storageKey) }
         val root = folder / "YamiboDownloads"
         val errors = mutableMapOf<DownloadTaskKey, Throwable>()
         for ((index, key) in keys.withIndex()) {

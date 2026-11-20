@@ -107,17 +107,20 @@ class DownloadRepositoryImpl(
                 val storageKey = storageProvider.getStorageKey()
                 val persisted = storageProvider.readQueue()
                 savedQueue = storageKey to persisted
+                val groups = contentMutex.withLock { catalogLocked(storageKey).groups }
+                val contentKeys = groups.flatMap { group -> group.items.map { it.key } }.toHashSet()
                 val restoredQueue = pruneExpiredQueueEntries(
                     entries = persisted,
                     now = currentTimeMillis(),
-                ).map { entry ->
+                ).filter { entry ->
+                    entry.status != DownloadStatus.Downloaded && entry.status != DownloadStatus.UpdateAvailable || entry.key in contentKeys
+                }.map { entry ->
                     when (entry.status) {
                         DownloadStatus.Downloading -> entry.copy(status = DownloadStatus.Queued)
                         else -> entry
                     }
                 }
                 val queueKeys = restoredQueue.mapTo(hashSetOf()) { it.key }
-                val groups = contentMutex.withLock { catalogLocked(storageKey).groups }
                 val completed = groups.flatMap { group ->
                     group.items.filterNot { it.key in queueKeys }.map { item ->
                         val title = when (group.type) {
@@ -179,62 +182,58 @@ class DownloadRepositoryImpl(
 
     private data class DownloadedContentCatalog(val storageKey: String?, val groups: List<DownloadedContentGroup>)
 
-    private fun indexPath(storageKey: String): Path =
-        cacheDirectory / "catalog-v1-${storageKey.encodeUtf8().sha256().hex()}.json"
-
     private suspend fun catalogLocked(storageKey: String?, refresh: Boolean = false): DownloadedContentCatalog {
         if (!refresh) {
             contentCatalog?.takeIf { it.storageKey == storageKey }?.let { return it }
-            val path = storageKey?.let(::indexPath)
-            if (path != null && FileSystem.SYSTEM.exists(path)) {
-                val cached = runCatching {
-                    FileSystem.SYSTEM.read(path) { Json.decodeFromString<List<DownloadedContentGroup>>(readUtf8()) }
-                }.onFailure { Logger.w(TAG, "Rebuilding unreadable download index", it) }.getOrNull()
-                if (cached != null) return DownloadedContentCatalog(storageKey, cached).also { contentCatalog = it }
-            }
+            val cached = storageKey?.let { DownloadCatalogIndex(cacheDirectory, it).read(::applyCatalogEdits) }
+            if (cached != null) return DownloadedContentCatalog(storageKey, cached).also { contentCatalog = it }
         }
         val groups = buildContentGroups(storageProvider.listManifests(), storageProvider.listTagMangaManifests(), storageProvider.listRssMangaManifests())
         check(storageProvider.getStorageKey() == storageKey) { "儲存資料夾已變更" }
-        return publishCatalog(storageKey, groups)
-    }
-
-    private fun publishCatalog(storageKey: String?, groups: List<DownloadedContentGroup>): DownloadedContentCatalog {
-        val catalog = DownloadedContentCatalog(storageKey, groups)
-        contentCatalog = catalog
-        if (storageKey != null) {
-            val fs = FileSystem.SYSTEM
-            val path = indexPath(storageKey)
-            runCatching {
-                fs.createDirectories(cacheDirectory)
-                val pending = cacheDirectory / "${path.name}.tmp"
-                fs.write(pending) { writeUtf8(Json.encodeToString(groups)) }
-                fs.atomicMove(pending, path)
-            }.onFailure { Logger.w(TAG, "Could not cache download index", it) }
-        }
-        return catalog
+        if (storageKey != null) DownloadCatalogIndex(cacheDirectory, storageKey).commit(groups)
+        return DownloadedContentCatalog(storageKey, groups).also { contentCatalog = it }
     }
 
     /** Invalidate the persistent snapshot before mutating user storage. A crash rebuilds it. */
     private suspend fun beginCatalogChange(): DownloadedContentCatalog {
         val storage = checkNotNull(storageProvider.getStorageKey())
         val catalog = catalogLocked(storage)
-        FileSystem.SYSTEM.delete(indexPath(storage))
+        DownloadCatalogIndex(cacheDirectory, storage).begin()
         contentCatalog = null
         return catalog
     }
 
     private fun finishCatalogChange(catalog: DownloadedContentCatalog, removed: Set<DownloadTaskKey>, replacement: DownloadedContentGroup? = null) {
-        val groups = catalog.groups.mapNotNull { group ->
-            if (group.id != replacement?.id && group.items.none { it.key in removed }) return@mapNotNull group
-            val kept = group.items.filterNot { it.key in removed } + replacement?.takeIf { it.id == group.id }?.items.orEmpty()
-            if (kept.isEmpty()) return@mapNotNull null
-            val first = replacement?.takeIf { it.id == group.id } ?: group
-            val sorted = kept.sortedWith(compareBy<DownloadedContentItem> { it.sortPage }.thenBy { it.title })
-            downloadedContentGroup(first.id, if (first.type == DownloadedContentGroupType.Thread) sorted.first().title else first.title,
-                first.type, sorted, first.filterKey, first.filterLabel)
-        }.toMutableList()
-        if (replacement != null && groups.none { it.id == replacement.id }) groups += replacement
-        publishCatalog(catalog.storageKey, groups.sortedWith(compareBy<DownloadedContentGroup> { it.type.name }.thenBy { it.title }))
+        val edit = CatalogEdit(removed, replacement)
+        val groups = applyCatalogEdits(catalog.groups, listOf(edit))
+        val storage = checkNotNull(catalog.storageKey)
+        DownloadCatalogIndex(cacheDirectory, storage).commit(groups, edit)
+        contentCatalog = DownloadedContentCatalog(storage, groups)
+    }
+
+    private fun applyCatalogEdits(previous: List<DownloadedContentGroup>, edits: List<CatalogEdit>): List<DownloadedContentGroup> {
+        val groups = previous.associateByTo(linkedMapOf()) { it.id }
+        for ((removed, replacement) in edits) {
+            val byGroup = removed.groupBy { key -> when (key) {
+                is ThreadPageDownloadKey -> "thread_${key.tid}_author_${key.authorId ?: "all"}"
+                is TagMangaChapterDownloadKey -> key.tagStableId
+                is RssMangaChapterDownloadKey -> key.rssStableId
+            } }
+            for (id in byGroup.keys + listOfNotNull(replacement?.id)) {
+                val addition = replacement?.takeIf { it.id == id }
+                val old = groups[id]
+                val header = addition ?: old ?: continue
+                val items = old?.items.orEmpty().filterNot { it.key in removed } + addition?.items.orEmpty()
+                if (items.isEmpty()) {
+                    groups.remove(id)
+                    continue
+                }
+                val sorted = items.sortedWith(compareBy<DownloadedContentItem> { it.sortPage }.thenBy { it.title })
+                val title = if (header.type == DownloadedContentGroupType.Thread) sorted.first().title else header.title
+                groups[id] = downloadedContentGroup(id, title, header.type, sorted, header.filterKey, header.filterLabel)
+            }
+        }
+        return groups.values.sortedWith(compareBy<DownloadedContentGroup> { it.type.name }.thenBy { it.title })
     }
 
     private fun group(manifest: ThreadPageDownloadManifest) = buildContentGroups(listOf(manifest), emptyList(), emptyList()).single()
@@ -483,18 +482,20 @@ class DownloadRepositoryImpl(
         withContext(Dispatchers.IO) { storageProvider.readManifest(key) }
 
     override suspend fun getTagMangaChapterImages(key: TagMangaChapterDownloadKey): List<String>? = withContext(Dispatchers.IO) {
-        val manifest = storageProvider.readTagMangaManifest(key) ?: return@withContext null
-        contentMutex.withLock { orderedUris(manifest) }
-            .takeIf { it.isNotEmpty() }
+        contentMutex.withLock {
+            val manifest = storageProvider.readTagMangaManifest(key) ?: return@withLock null
+            orderedUris(manifest).takeIf { it.isNotEmpty() }
+        }
     }
 
     override suspend fun getTagMangaManifest(key: TagMangaChapterDownloadKey): TagMangaChapterManifest? =
         withContext(Dispatchers.IO) { storageProvider.readTagMangaManifest(key) }
 
     override suspend fun getRssMangaChapterImages(key: RssMangaChapterDownloadKey): List<String>? = withContext(Dispatchers.IO) {
-        val manifest = storageProvider.readRssMangaManifest(key) ?: return@withContext null
-        contentMutex.withLock { orderedUris(manifest) }
-            .takeIf { it.isNotEmpty() }
+        contentMutex.withLock {
+            val manifest = storageProvider.readRssMangaManifest(key) ?: return@withLock null
+            orderedUris(manifest).takeIf { it.isNotEmpty() }
+        }
     }
 
     override suspend fun getRssMangaManifest(key: RssMangaChapterDownloadKey): RssMangaChapterManifest? =

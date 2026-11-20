@@ -1,6 +1,14 @@
 package me.thenano.yamibo.yamibo_app.repository.download
 
 import no.synth.kmpzip.io.SeekableSource
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import me.thenano.yamibo.yamibo_app.Logger
+import okio.ByteString.Companion.encodeUtf8
+import okio.FileSystem
+import okio.SYSTEM
+import okio.buffer
+import okio.use
 import okio.Path
 
 interface DownloadStorageProvider {
@@ -76,5 +84,59 @@ internal fun groupMember(group: DownloadTaskKey, raw: String): DownloadTaskKey? 
         is TagMangaChapterDownloadKey -> group.copy(tid = tid, authorId = author)
         is RssMangaChapterDownloadKey -> group.copy(tid = tid, authorId = author)
         is ThreadPageDownloadKey -> null
+    }
+}
+
+@Serializable
+internal data class CatalogEdit(val removed: Set<DownloadTaskKey>, val replacement: DownloadedContentGroup?)
+
+/** App-private, rebuildable index. Interrupted storage operations leave the dirty marker in place. */
+internal class DownloadCatalogIndex(root: Path, storage: String) {
+    private val fs = FileSystem.SYSTEM
+    private val dir = root / storage.encodeUtf8().sha256().hex()
+    private val snapshot = dir / "catalog-v1.json"
+    private val journal = dir / "updates.jsonl"
+    private val dirty = dir / "pending"
+
+    fun read(apply: (List<DownloadedContentGroup>, List<CatalogEdit>) -> List<DownloadedContentGroup>): List<DownloadedContentGroup>? {
+        if (fs.exists(dirty) || !fs.exists(snapshot)) return null
+        return runCatching {
+            val groups = fs.read(snapshot) { Json.decodeFromString<List<DownloadedContentGroup>>(readUtf8()) }
+            if (!fs.exists(journal)) return@runCatching groups
+            val edits = fs.read(journal) {
+                buildList<CatalogEdit> { while (!exhausted()) add(Json.decodeFromString(readUtf8LineStrict())) }
+            }
+            apply(groups, edits)
+        }.onFailure { Logger.w("DownloadCatalog", "Rebuilding unreadable index", it) }.getOrNull()
+    }
+
+    fun begin() {
+        try {
+            fs.createDirectories(dir)
+            fs.write(dirty) { writeByte(1) }
+        } catch (error: okio.IOException) {
+            // Freeing downloads must still work on a full disk. Removing the old snapshot also forces recovery.
+            fs.delete(snapshot)
+            Logger.w("DownloadCatalog", "Invalidated snapshot without a journal marker", error)
+        }
+    }
+
+    fun commit(groups: List<DownloadedContentGroup>, edit: CatalogEdit? = null) {
+        runCatching {
+            if (edit == null || !fs.exists(snapshot) || (fs.metadataOrNull(journal)?.size ?: 0L) >= 256 * 1024) {
+                begin()
+                val pending = dir / "snapshot.tmp"
+                fs.write(pending) { writeUtf8(Json.encodeToString(groups)) }
+                fs.atomicMove(pending, snapshot)
+                fs.delete(journal)
+            } else {
+                fs.appendingSink(journal).buffer().use { it.writeUtf8(Json.encodeToString(edit)).writeByte(10) }
+            }
+            fs.delete(dirty)
+        }.onFailure {
+            // A later mutation must checkpoint the complete in-memory catalog before trusting this journal again.
+            fs.delete(snapshot)
+            Logger.w("DownloadCatalog", "Could not persist download index", it)
+        }
     }
 }
