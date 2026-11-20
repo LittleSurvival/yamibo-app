@@ -64,7 +64,12 @@ class AndroidDownloadStorageProvider(
         var previous: Uri? = null
         try {
             if (archive != null) {
-                val packed = checkNotNull(DocumentsContract.createDocument(resolver, tmp, "application/zip", "images.cbz"))
+                val created = checkNotNull(DocumentsContract.createDocument(resolver, tmp, "application/vnd.comicbook+zip", "images.cbz"))
+                val packed = findChild(tree, tmp, "images.cbz") ?: run {
+                    // Some document providers append an extension based on the MIME type.
+                    checkNotNull(DocumentsContract.renameDocument(resolver, created, "images.cbz"))
+                    checkNotNull(findChild(tree, tmp, "images.cbz")) { "儲存提供者無法建立 images.cbz" }
+                }
                 checkNotNull(resolver.openOutputStream(packed, "wt")).use { output -> archive.toFile().inputStream().use { it.copyTo(output) } }
                 verifyArchive?.invoke(seekable(packed, archive.name))
             }
