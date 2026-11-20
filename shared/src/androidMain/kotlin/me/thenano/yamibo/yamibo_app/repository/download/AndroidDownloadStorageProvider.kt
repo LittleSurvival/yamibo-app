@@ -2,6 +2,16 @@ package me.thenano.yamibo.yamibo_app.repository.download
 
 import android.content.Context
 import android.net.Uri
+import android.os.ParcelFileDescriptor
+import no.synth.kmpzip.io.SeekableSource
+import no.synth.kmpzip.okio.asSeekableSource
+import okio.source
+import okio.FileSystem
+import okio.Path
+import okio.Path.Companion.toPath
+import okio.ByteString.Companion.encodeUtf8
+import java.io.File
+import java.nio.ByteBuffer
 import android.provider.DocumentsContract
 import java.io.FileNotFoundException
 import kotlinx.coroutines.Dispatchers
@@ -29,140 +39,158 @@ class AndroidDownloadStorageProvider(
             }
         } == true
 
-    override suspend fun writeThreadPage(
-        key: ThreadPageDownloadKey,
-        manifestBytes: ByteArray,
-        threadPageBytes: ByteArray,
-        images: List<PendingDownloadedImage>,
-    ) {
-        val treeUri = selectedTreeUri() ?: error("尚未選擇備份資料夾")
-        val root = ensureDirectory(treeUri, rootDocumentUri(treeUri), ROOT_DIR)
-        val tmpName = "${key.stableId}.tmp"
-        deleteChildByName(treeUri, root, tmpName)
-        val tmp = ensureDirectory(treeUri, root, tmpName)
-        val imagesDir = ensureDirectory(treeUri, tmp, IMAGES_DIR)
-        writeFile(treeUri, tmp, "manifest.json", "application/json", manifestBytes)
-        writeFile(treeUri, tmp, "thread_page.json", "application/json", threadPageBytes)
-        images.forEach { writeFile(treeUri, imagesDir, it.fileName, "application/octet-stream", it.bytes) }
-        val previousName = "${key.stableId}.previous"
-        deleteChildByName(treeUri, root, previousName)
-        val current = findChild(treeUri, root, key.stableId)
-        val previous = current?.let { DocumentsContract.renameDocument(resolver, it, previousName) }
+    private val archiveCache = File(context.cacheDir, "download-archive-cache")
+
+    private fun itemDir(tree: Uri, key: DownloadTaskKey): Uri? {
+        val root = downloadsRoot(tree) ?: return null
+        val parent = key.parentDirectory?.let { findChild(tree, root, it) ?: return null } ?: root
+        return findChild(tree, parent, key.itemDirectory) ?: findChild(tree, parent, "${key.itemDirectory}.previous")
+    }
+
+    override suspend fun publishItem(storageKey: String, key: DownloadTaskKey, manifest: ByteArray, page: ByteArray?,
+                                     archive: Path?, verifyArchive: ((SeekableSource) -> Unit)?) {
+        val tree = checkNotNull(selectedTreeUri()).also { check(it.toString() == storageKey) }
+        val root = ensureDirectory(tree, rootDocumentUri(tree), ROOT_DIR)
+        val parent = key.parentDirectory?.let { ensureDirectory(tree, root, it) } ?: root
+        val name = key.itemDirectory
+        val children = listChildren(tree, parent).associateBy { it.name }
+        var current = children[name]?.uri
+        children["$name.previous"]?.uri?.let { previous ->
+            if (current == null) current = checkNotNull(DocumentsContract.renameDocument(resolver, previous, name))
+            else check(DocumentsContract.deleteDocument(resolver, previous))
+        }
+        children["$name.tmp"]?.let { check(DocumentsContract.deleteDocument(resolver, it.uri)) }
+        val tmp = checkNotNull(DocumentsContract.createDocument(resolver, parent, DocumentsContract.Document.MIME_TYPE_DIR, "$name.tmp"))
+        var previous: Uri? = null
         try {
-            val renamed = DocumentsContract.renameDocument(resolver, tmp, key.stableId)
-                ?: error("儲存提供者不支援完成下載檔案")
-            if (renamed == tmp) {
-                findChild(treeUri, root, key.stableId) ?: error("下載資料夾重新命名失敗")
+            if (archive != null) {
+                val packed = checkNotNull(DocumentsContract.createDocument(resolver, tmp, "application/zip", "images.cbz"))
+                checkNotNull(resolver.openOutputStream(packed, "wt")).use { output -> archive.toFile().inputStream().use { it.copyTo(output) } }
+                verifyArchive?.invoke(seekable(packed, archive.name))
             }
-            previous?.let { deleteDocumentSafely(it, "delete previous thread page key=${key.stableId}") }
+            if (page != null) writeFile(tree, tmp, "thread_page.json", "application/json", page)
+            writeFile(tree, tmp, "manifest.json", "application/json", manifest)
+            check(getStorageKey() == storageKey)
+            previous = current?.let { checkNotNull(DocumentsContract.renameDocument(resolver, it, "$name.previous")) }
+            checkNotNull(DocumentsContract.renameDocument(resolver, tmp, name))
         } catch (error: Throwable) {
-            Logger.e(TAG, "writeThreadPage failed key=${key.stableId}", error)
-            deleteDocumentSafely(tmp, "cleanup tmp thread page key=${key.stableId}")
-            previous?.let { renameDocumentSafely(it, key.stableId, "restore previous thread page key=${key.stableId}") }
+            previous?.let { renameDocumentSafely(it, name, "restore $name") }
+            deleteDocumentSafely(tmp, "discard incomplete $name")
             throw error
         }
+        previous?.let { deleteDocumentSafely(it, "clean previous $name") }
+    }
+
+    override suspend fun looseImages(key: DownloadTaskKey, names: List<String>?): Map<String, String> {
+        if (names != null && names.isEmpty()) return emptyMap()
+        val tree = selectedTreeUri() ?: return emptyMap()
+        val dir = itemDir(tree, key) ?: return emptyMap()
+        val images = findChild(tree, dir, IMAGES_DIR) ?: return emptyMap()
+        val wanted = names?.toHashSet()
+        return listChildren(tree, images).filter { wanted == null || it.name in wanted }.associate { it.name to it.uri.toString() }
+    }
+
+    override fun openLoose(uri: String) = checkNotNull(resolver.openInputStream(Uri.parse(uri))).source()
+
+    override suspend fun openArchive(key: DownloadTaskKey, generation: String): SeekableSource? {
+        val tree = selectedTreeUri() ?: return null
+        val dir = itemDir(tree, key) ?: return null
+        val file = findChild(tree, dir, "images.cbz") ?: return null
+        return seekable(file, generation)
+    }
+
+    private fun seekable(file: Uri, generation: String): SeekableSource {
+        val fd = checkNotNull(resolver.openFileDescriptor(file, "r"))
+        val input = ParcelFileDescriptor.AutoCloseInputStream(fd)
+        val channel = input.channel
+        try {
+            val length = channel.size()
+            if (length > 0 && channel.read(ByteBuffer.allocate(1), 0) == 1) return object : SeekableSource {
+                override val size = length
+                override fun read(position: Long, into: ByteArray, offset: Int, length: Int) =
+                    channel.read(ByteBuffer.wrap(into, offset, length), position)
+                override fun close() = input.close()
+            }
+        } catch (_: java.io.IOException) {
+            // A documents provider may return a pipe instead of a seekable descriptor.
+        }
+        input.close()
+        archiveCache.mkdirs()
+        val cache = File(archiveCache, (file.toString() + generation).encodeUtf8().sha256().hex())
+        if (!cache.exists()) {
+            val partial = File.createTempFile("reading-", ".tmp", archiveCache)
+            try {
+                checkNotNull(resolver.openInputStream(file)).use { source -> partial.outputStream().use { source.copyTo(it) } }
+                check(partial.renameTo(cache))
+            } finally {
+                partial.delete()
+            }
+        }
+        cache.setLastModified(System.currentTimeMillis())
+        val handle = FileSystem.SYSTEM.openReadOnly(cache.path.toPath()).asSeekableSource()
+        var used = 0L
+        archiveCache.listFiles()?.sortedByDescending { it.lastModified() }?.forEach {
+            used += it.length()
+            if (used > 256L * 1024 * 1024) it.delete()
+        }
+        return handle
+    }
+
+    override suspend fun writeThreadImage(
+        storageKey: String, key: ThreadPageDownloadKey, image: PendingDownloadedImage, manifestBytes: ByteArray,
+    ): String {
+        val tree = requireNotNull(selectedTreeUri()).also { check(it.toString() == storageKey) }
+        val page = requireNotNull(itemDir(tree, key))
+        val images = ensureDirectory(tree, page, IMAGES_DIR)
+        val pending = writeFile(tree, images, "${image.fileName}.tmp", "application/octet-stream", image.bytes)
+        deleteChildByName(tree, images, image.fileName)
+        val file = checkNotNull(DocumentsContract.renameDocument(resolver, pending, image.fileName))
+        replaceFile(tree, page, "manifest.json", manifestBytes)
+        return file.toString()
     }
 
     override suspend fun readThreadPage(key: ThreadPageDownloadKey): ByteArray? {
         val treeUri = selectedTreeUri() ?: return null
-        val pageDir = findChild(treeUri, downloadsRoot(treeUri) ?: return null, key.stableId) ?: return null
-        val file = findChild(treeUri, pageDir, "thread_page.json") ?: return null
+        val pageDir = itemDir(treeUri, key) ?: return null
+        val file = findChild(treeUri, pageDir, "thread_page.json") ?: findChild(treeUri, pageDir, "thread_page.json.previous") ?: return null
         return resolver.openInputStream(file)?.use { it.readBytes() }
+    }
+
+    override suspend fun readPageRecord(key: ThreadPageDownloadKey): Pair<ByteArray, ThreadPageDownloadManifest?>? {
+        val tree = selectedTreeUri() ?: return null
+        val dir = itemDir(tree, key) ?: return null
+        val files = listChildren(tree, dir).associateBy { it.name }
+        val page = (files["thread_page.json"] ?: files["thread_page.json.previous"])?.let { resolver.openInputStream(it.uri)?.use { stream -> stream.readBytes() } } ?: return null
+        val manifest = (files["manifest.json"] ?: files["manifest.json.previous"])?.let { file ->
+            resolver.openInputStream(file.uri)?.bufferedReader()?.use { input -> runCatching { json.decodeFromString<ThreadPageDownloadManifest>(input.readText()) }.getOrNull() }
+        }
+        return page to manifest
     }
 
     override suspend fun updateThreadPage(key: ThreadPageDownloadKey, manifestBytes: ByteArray, threadPageBytes: ByteArray) {
         val treeUri = selectedTreeUri() ?: error("尚未選擇備份資料夾")
-        val pageDir = findChild(treeUri, downloadsRoot(treeUri) ?: error("下載內容不存在"), key.stableId)
+        val pageDir = itemDir(treeUri, key)
             ?: error("下載內容不存在")
         replaceFile(treeUri, pageDir, "thread_page.json", threadPageBytes)
         replaceFile(treeUri, pageDir, "manifest.json", manifestBytes)
     }
 
-    override suspend fun resolveImageUri(key: ThreadPageDownloadKey, fileName: String): String? {
-        val treeUri = selectedTreeUri() ?: return null
-        val pageDir = findChild(treeUri, downloadsRoot(treeUri) ?: return null, key.stableId) ?: return null
-        val imagesDir = findChild(treeUri, pageDir, IMAGES_DIR) ?: return null
-        return findChild(treeUri, imagesDir, fileName)?.toString()
-    }
-
-    override suspend fun resolveImageUris(
-        key: ThreadPageDownloadKey,
-        fileNames: List<String>,
-    ): Map<String, String> = withContext(Dispatchers.IO) {
-        if (fileNames.isEmpty()) return@withContext emptyMap()
-        val treeUri = selectedTreeUri() ?: return@withContext emptyMap()
-        val pageDir = findChild(treeUri, downloadsRoot(treeUri) ?: return@withContext emptyMap(), key.stableId)
-            ?: return@withContext emptyMap()
-        val imagesDir = findChild(treeUri, pageDir, IMAGES_DIR) ?: return@withContext emptyMap()
-        val childrenByName = listChildren(treeUri, imagesDir).associateBy { it.name }
-        fileNames.mapNotNull { name -> childrenByName[name]?.let { name to it.uri.toString() } }.toMap()
-    }
-
     override suspend fun readManifest(key: ThreadPageDownloadKey): ThreadPageDownloadManifest? {
         val treeUri = selectedTreeUri() ?: return null
-        val pageDir = findChild(treeUri, downloadsRoot(treeUri) ?: return null, key.stableId) ?: return null
+        val pageDir = itemDir(treeUri, key) ?: return null
         return readManifestFromDir(treeUri, pageDir)
     }
 
     override suspend fun listManifests(): List<ThreadPageDownloadManifest> {
         val treeUri = selectedTreeUri() ?: return emptyList()
         val root = downloadsRoot(treeUri) ?: return emptyList()
-        return listChildren(treeUri, root)
-            .filter { isCompletedThreadDownloadDirectory(it.name) }
+        return completedDirectories(treeUri, root, "thread_")
             .mapNotNull { readManifestFromDir(treeUri, it.uri) }
-    }
-
-    override suspend fun writeTagMangaChapter(
-        key: TagMangaChapterDownloadKey,
-        manifestBytes: ByteArray,
-        images: List<PendingDownloadedImage>,
-    ) {
-        val treeUri = selectedTreeUri() ?: error("尚未選擇備份資料夾")
-        val root = ensureDirectory(treeUri, rootDocumentUri(treeUri), ROOT_DIR)
-        val tagDir = ensureDirectory(treeUri, root, key.tagStableId)
-        val tmpName = "${key.chapterStableId}.tmp"
-        deleteChildByName(treeUri, tagDir, tmpName)
-        val tmp = ensureDirectory(treeUri, tagDir, tmpName)
-        val imagesDir = ensureDirectory(treeUri, tmp, IMAGES_DIR)
-        writeFile(treeUri, tmp, "manifest.json", "application/json", manifestBytes)
-        images.forEach { writeFile(treeUri, imagesDir, it.fileName, "application/octet-stream", it.bytes) }
-        val previousName = "${key.chapterStableId}.previous"
-        deleteChildByName(treeUri, tagDir, previousName)
-        val current = findChild(treeUri, tagDir, key.chapterStableId)
-        val previous = current?.let { DocumentsContract.renameDocument(resolver, it, previousName) }
-        try {
-            DocumentsContract.renameDocument(resolver, tmp, key.chapterStableId)
-                ?: error("儲存提供者不支援完成下載檔案")
-            previous?.let { deleteDocumentSafely(it, "delete previous tag manga chapter key=${key.stableId}") }
-        } catch (error: Throwable) {
-            Logger.e(TAG, "writeTagMangaChapter failed key=${key.stableId}", error)
-            deleteDocumentSafely(tmp, "cleanup tmp tag manga chapter key=${key.stableId}")
-            previous?.let { renameDocumentSafely(it, key.chapterStableId, "restore previous tag manga chapter key=${key.stableId}") }
-            throw error
-        }
-    }
-
-    override suspend fun resolveTagMangaImageUri(key: TagMangaChapterDownloadKey, fileName: String): String? = withContext(Dispatchers.IO) {
-        val treeUri = selectedTreeUri() ?: return@withContext null
-        val chapterDir = findTagMangaChapterDir(treeUri, key) ?: return@withContext null
-        val imagesDir = findChild(treeUri, chapterDir, IMAGES_DIR) ?: return@withContext null
-        return@withContext findChild(treeUri, imagesDir, fileName)?.toString()
-    }
-
-    override suspend fun resolveTagMangaImageUris(
-        key: TagMangaChapterDownloadKey,
-        fileNames: List<String>,
-    ): List<String> = withContext(Dispatchers.IO) {
-        val treeUri = selectedTreeUri() ?: return@withContext emptyList()
-        val chapterDir = findTagMangaChapterDir(treeUri, key) ?: return@withContext emptyList()
-        val imagesDir = findChild(treeUri, chapterDir, IMAGES_DIR) ?: return@withContext emptyList()
-        val childrenByName = listChildren(treeUri, imagesDir).associateBy { it.name }
-        fileNames.mapNotNull { childrenByName[it]?.uri?.toString() }
     }
 
     override suspend fun readTagMangaManifest(key: TagMangaChapterDownloadKey): TagMangaChapterManifest? = withContext(Dispatchers.IO) {
         val treeUri = selectedTreeUri() ?: return@withContext null
-        val chapterDir = findTagMangaChapterDir(treeUri, key) ?: return@withContext null
+        val chapterDir = itemDir(treeUri, key) ?: return@withContext null
         return@withContext readTagMangaManifestFromDir(treeUri, chapterDir)
     }
 
@@ -172,61 +200,13 @@ class AndroidDownloadStorageProvider(
         return listChildren(treeUri, root)
             .filter { it.name.startsWith("tag_manga_") }
             .flatMap { tagDir ->
-                listChildren(treeUri, tagDir.uri).mapNotNull { readTagMangaManifestFromDir(treeUri, it.uri) }
+                completedDirectories(treeUri, tagDir.uri, "chapter_").mapNotNull { readTagMangaManifestFromDir(treeUri, it.uri) }
             }
-    }
-
-    override suspend fun writeRssMangaChapter(
-        key: RssMangaChapterDownloadKey,
-        manifestBytes: ByteArray,
-        images: List<PendingDownloadedImage>,
-    ) {
-        val treeUri = selectedTreeUri() ?: error("尚未選擇備份資料夾")
-        val root = ensureDirectory(treeUri, rootDocumentUri(treeUri), ROOT_DIR)
-        val rssDir = ensureDirectory(treeUri, root, key.rssStableId)
-        val tmpName = "${key.chapterStableId}.tmp"
-        deleteChildByName(treeUri, rssDir, tmpName)
-        val tmp = ensureDirectory(treeUri, rssDir, tmpName)
-        val imagesDir = ensureDirectory(treeUri, tmp, IMAGES_DIR)
-        writeFile(treeUri, tmp, "manifest.json", "application/json", manifestBytes)
-        images.forEach { writeFile(treeUri, imagesDir, it.fileName, "application/octet-stream", it.bytes) }
-        val previousName = "${key.chapterStableId}.previous"
-        deleteChildByName(treeUri, rssDir, previousName)
-        val current = findChild(treeUri, rssDir, key.chapterStableId)
-        val previous = current?.let { DocumentsContract.renameDocument(resolver, it, previousName) }
-        try {
-            DocumentsContract.renameDocument(resolver, tmp, key.chapterStableId)
-                ?: error("儲存提供者不支援完成下載檔案")
-            previous?.let { deleteDocumentSafely(it, "delete previous RSS manga chapter key=${key.stableId}") }
-        } catch (error: Throwable) {
-            Logger.e(TAG, "writeRssMangaChapter failed key=${key.stableId}", error)
-            deleteDocumentSafely(tmp, "cleanup tmp RSS manga chapter key=${key.stableId}")
-            previous?.let { renameDocumentSafely(it, key.chapterStableId, "restore previous RSS manga chapter key=${key.stableId}") }
-            throw error
-        }
-    }
-
-    override suspend fun resolveRssMangaImageUri(key: RssMangaChapterDownloadKey, fileName: String): String? = withContext(Dispatchers.IO) {
-        val treeUri = selectedTreeUri() ?: return@withContext null
-        val chapterDir = findRssMangaChapterDir(treeUri, key) ?: return@withContext null
-        val imagesDir = findChild(treeUri, chapterDir, IMAGES_DIR) ?: return@withContext null
-        return@withContext findChild(treeUri, imagesDir, fileName)?.toString()
-    }
-
-    override suspend fun resolveRssMangaImageUris(
-        key: RssMangaChapterDownloadKey,
-        fileNames: List<String>,
-    ): List<String> = withContext(Dispatchers.IO) {
-        val treeUri = selectedTreeUri() ?: return@withContext emptyList()
-        val chapterDir = findRssMangaChapterDir(treeUri, key) ?: return@withContext emptyList()
-        val imagesDir = findChild(treeUri, chapterDir, IMAGES_DIR) ?: return@withContext emptyList()
-        val childrenByName = listChildren(treeUri, imagesDir).associateBy { it.name }
-        fileNames.mapNotNull { childrenByName[it]?.uri?.toString() }
     }
 
     override suspend fun readRssMangaManifest(key: RssMangaChapterDownloadKey): RssMangaChapterManifest? = withContext(Dispatchers.IO) {
         val treeUri = selectedTreeUri() ?: return@withContext null
-        val chapterDir = findRssMangaChapterDir(treeUri, key) ?: return@withContext null
+        val chapterDir = itemDir(treeUri, key) ?: return@withContext null
         return@withContext readRssMangaManifestFromDir(treeUri, chapterDir)
     }
 
@@ -236,14 +216,14 @@ class AndroidDownloadStorageProvider(
         return listChildren(treeUri, root)
             .filter { it.name.startsWith("rss_") }
             .flatMap { rssDir ->
-                listChildren(treeUri, rssDir.uri).mapNotNull { readRssMangaManifestFromDir(treeUri, it.uri) }
+                completedDirectories(treeUri, rssDir.uri, "chapter_").mapNotNull { readRssMangaManifestFromDir(treeUri, it.uri) }
             }
     }
 
     override suspend fun readQueue(): List<DownloadQueueEntry> {
         val treeUri = selectedTreeUri() ?: return emptyList()
         val root = downloadsRoot(treeUri) ?: return emptyList()
-        val file = findChild(treeUri, root, QUEUE_FILE) ?: return emptyList()
+        val file = findChild(treeUri, root, QUEUE_FILE) ?: findChild(treeUri, root, "$QUEUE_FILE.previous") ?: return emptyList()
         val bytes = resolver.openInputStream(file)?.use { it.readBytes() } ?: return emptyList()
         return runCatching { json.decodeFromString<List<DownloadQueueEntry>>(bytes.decodeToString()) }
             .onFailure { Logger.w(TAG, "Failed to decode download queue", it) }
@@ -253,51 +233,46 @@ class AndroidDownloadStorageProvider(
     override suspend fun writeQueue(entries: List<DownloadQueueEntry>) {
         val treeUri = selectedTreeUri() ?: return
         val root = ensureDirectory(treeUri, rootDocumentUri(treeUri), ROOT_DIR)
-        writeFile(
-            treeUri,
-            root,
-            QUEUE_FILE,
-            "application/json",
-            json.encodeToString(entries).encodeToByteArray(),
-        )
+        replaceFile(treeUri, root, QUEUE_FILE, json.encodeToString(entries).encodeToByteArray())
     }
 
-    override suspend fun deleteThreadPage(key: ThreadPageDownloadKey) {
-        val treeUri = selectedTreeUri() ?: return
-        val root = downloadsRoot(treeUri) ?: return
-        deleteChildByName(treeUri, root, key.stableId)
+    override suspend fun groupKeys(storageKey: String, group: DownloadTaskKey): Set<DownloadTaskKey> {
+        val tree = checkNotNull(selectedTreeUri()).also { check(it.toString() == storageKey) }
+        val root = downloadsRoot(tree) ?: return emptySet()
+        val parent = group.parentDirectory?.let { findChild(tree, root, it) ?: return emptySet() } ?: root
+        return listChildren(tree, parent).mapNotNullTo(mutableSetOf()) { groupMember(group, it.name) }
     }
 
-    override suspend fun deleteThread(key: ThreadPageDownloadKey) {
-        val treeUri = selectedTreeUri() ?: return
-        val root = downloadsRoot(treeUri) ?: return
-        listChildren(treeUri, root)
-            .filter { it.name.startsWith(key.threadPrefix) }
-            .forEach { deleteDocumentSafely(it.uri, "delete thread download item prefix=${key.threadPrefix}") }
-    }
-
-    override suspend fun deleteTagMangaChapter(key: TagMangaChapterDownloadKey) {
-        val treeUri = selectedTreeUri() ?: return
-        val tagDir = findTagMangaDir(treeUri, key.tagId) ?: return
-        deleteChildByName(treeUri, tagDir, key.chapterStableId)
-    }
-
-    override suspend fun deleteTagManga(tagId: Int) {
-        val treeUri = selectedTreeUri() ?: return
-        val root = downloadsRoot(treeUri) ?: return
-        deleteChildByName(treeUri, root, "tag_manga_$tagId")
-    }
-
-    override suspend fun deleteRssMangaChapter(key: RssMangaChapterDownloadKey) {
-        val treeUri = selectedTreeUri() ?: return
-        val rssDir = findRssMangaDir(treeUri, key.subscriptionId) ?: return
-        deleteChildByName(treeUri, rssDir, key.chapterStableId)
-    }
-
-    override suspend fun deleteRssManga(subscriptionId: Long) {
-        val treeUri = selectedTreeUri() ?: return
-        val root = downloadsRoot(treeUri) ?: return
-        deleteChildByName(treeUri, root, "rss_$subscriptionId")
+    override suspend fun deleteItems(storageKey: String, keys: Set<DownloadTaskKey>, onProgress: (Int) -> Unit): Map<DownloadTaskKey, Throwable> {
+        val tree = checkNotNull(selectedTreeUri()).also { check(it.toString() == storageKey) }
+        val root = downloadsRoot(tree) ?: return emptyMap()
+        val roots = listChildren(tree, root).associateBy { it.name }
+        var completed = 0
+        val errors = mutableMapOf<DownloadTaskKey, Throwable>()
+        for ((parentName, group) in keys.groupBy { it.parentDirectory }) {
+            val parent = if (parentName == null) root else roots[parentName]?.uri ?: continue
+            try {
+                val before = if (parentName == null) roots else listChildren(tree, parent).associateBy { it.name }
+                for (key in group) {
+                    try {
+                        for (name in itemDirectoryNames(key)) {
+                            before[name]?.let { DocumentsContract.deleteDocument(resolver, it.uri) }
+                        }
+                    } catch (error: Exception) {
+                        errors[key] = error
+                    }
+                    onProgress(++completed)
+                }
+                val remaining = listChildren(tree, parent).mapTo(hashSetOf()) { it.name }
+                for (key in group) {
+                    if (itemDirectoryNames(key).none { it in remaining }) errors.remove(key)
+                    else errors.getOrPut(key) { IllegalStateException("下載內容未完全刪除，請重試") }
+                }
+            } catch (error: Exception) {
+                group.forEach { errors[it] = error }
+            }
+        }
+        return errors
     }
 
     private fun selectedTreeUri(): Uri? =
@@ -309,17 +284,15 @@ class AndroidDownloadStorageProvider(
     private fun downloadsRoot(treeUri: Uri): Uri? =
         findChild(treeUri, rootDocumentUri(treeUri), ROOT_DIR)
 
-    private fun findTagMangaDir(treeUri: Uri, tagId: Int): Uri? =
-        findChild(treeUri, downloadsRoot(treeUri) ?: return null, "tag_manga_$tagId")
-
-    private fun findTagMangaChapterDir(treeUri: Uri, key: TagMangaChapterDownloadKey): Uri? =
-        findChild(treeUri, findTagMangaDir(treeUri, key.tagId) ?: return null, key.chapterStableId)
-
-    private fun findRssMangaDir(treeUri: Uri, subscriptionId: Long): Uri? =
-        findChild(treeUri, downloadsRoot(treeUri) ?: return null, "rss_$subscriptionId")
-
-    private fun findRssMangaChapterDir(treeUri: Uri, key: RssMangaChapterDownloadKey): Uri? =
-        findChild(treeUri, findRssMangaDir(treeUri, key.subscriptionId) ?: return null, key.chapterStableId)
+    private fun completedDirectories(tree: Uri, parent: Uri, prefix: String): List<DocumentChild> {
+        val children = listChildren(tree, parent).filter { it.name.startsWith(prefix) && !it.name.endsWith(".tmp") }
+        val current = children.filterNot { it.name.endsWith(".previous") }.associateByTo(linkedMapOf()) { it.name }
+        for (child in children.filter { it.name.endsWith(".previous") }) {
+            val name = child.name.removeSuffix(".previous")
+            if (name !in current) current[name] = child
+        }
+        return current.values.toList()
+    }
 
     private fun ensureDirectory(treeUri: Uri, parent: Uri, name: String): Uri =
         findChild(treeUri, parent, name)
@@ -327,17 +300,22 @@ class AndroidDownloadStorageProvider(
             ?: error("無法建立資料夾：$name")
 
     private fun replaceFile(treeUri: Uri, parent: Uri, name: String, bytes: ByteArray) {
-        val pending = writeFile(treeUri, parent, "$name.tmp", "application/json", bytes)
-        val previous = findChild(treeUri, parent, name)?.let {
-            DocumentsContract.renameDocument(resolver, it, "$name.previous") ?: error("無法更新下載檔案：$name")
+        val children = listChildren(treeUri, parent).associateBy { it.name }
+        val backup = children["$name.previous"]?.uri
+        var current = children[name]?.uri
+        if (backup != null) {
+            if (current == null) current = checkNotNull(DocumentsContract.renameDocument(resolver, backup, name))
+            else check(DocumentsContract.deleteDocument(resolver, backup))
         }
+        val pending = writeFile(treeUri, parent, "$name.tmp", "application/json", bytes)
+        val previous = current?.let { checkNotNull(DocumentsContract.renameDocument(resolver, it, "$name.previous")) }
         try {
-            DocumentsContract.renameDocument(resolver, pending, name) ?: error("無法更新下載檔案：$name")
-            previous?.let { deleteDocumentSafely(it, "delete previous downloaded file name=$name") }
+            checkNotNull(DocumentsContract.renameDocument(resolver, pending, name))
         } catch (error: Exception) {
-            previous?.let { renameDocumentSafely(it, name, "restore previous downloaded file name=$name") }
+            previous?.let { renameDocumentSafely(it, name, "restore $name") }
             throw error
         }
+        previous?.let { deleteDocumentSafely(it, "clean previous $name") }
     }
 
     private fun writeFile(treeUri: Uri, parent: Uri, name: String, mimeType: String, bytes: ByteArray): Uri {
@@ -350,7 +328,7 @@ class AndroidDownloadStorageProvider(
     }
 
     private fun readManifestFromDir(treeUri: Uri, dir: Uri): ThreadPageDownloadManifest? {
-        val file = findChild(treeUri, dir, "manifest.json") ?: return null
+        val file = findChild(treeUri, dir, "manifest.json") ?: findChild(treeUri, dir, "manifest.json.previous") ?: return null
         val bytes = resolver.openInputStream(file)?.use { it.readBytes() } ?: return null
         return runCatching { json.decodeFromString<ThreadPageDownloadManifest>(bytes.decodeToString()) }
             .onFailure { Logger.d(TAG, "Failed to decode thread page manifest", it) }
@@ -358,7 +336,7 @@ class AndroidDownloadStorageProvider(
     }
 
     private fun readTagMangaManifestFromDir(treeUri: Uri, dir: Uri): TagMangaChapterManifest? {
-        val file = findChild(treeUri, dir, "manifest.json") ?: return null
+        val file = findChild(treeUri, dir, "manifest.json") ?: findChild(treeUri, dir, "manifest.json.previous") ?: return null
         val bytes = resolver.openInputStream(file)?.use { it.readBytes() } ?: return null
         return runCatching { json.decodeFromString<TagMangaChapterManifest>(bytes.decodeToString()) }
             .onFailure { Logger.d(TAG, "Failed to decode tag manga manifest", it) }
@@ -366,7 +344,7 @@ class AndroidDownloadStorageProvider(
     }
 
     private fun readRssMangaManifestFromDir(treeUri: Uri, dir: Uri): RssMangaChapterManifest? {
-        val file = findChild(treeUri, dir, "manifest.json") ?: return null
+        val file = findChild(treeUri, dir, "manifest.json") ?: findChild(treeUri, dir, "manifest.json.previous") ?: return null
         val bytes = resolver.openInputStream(file)?.use { it.readBytes() } ?: return null
         return runCatching { json.decodeFromString<RssMangaChapterManifest>(bytes.decodeToString()) }
             .onFailure { Logger.d(TAG, "Failed to decode RSS manga manifest", it) }
@@ -399,7 +377,7 @@ class AndroidDownloadStorageProvider(
         )
         val items = mutableListOf<DocumentChild>()
         try {
-            resolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+            checkNotNull(resolver.query(childrenUri, projection, null, null, null)) { "無法讀取下載資料夾" }.use { cursor ->
                 val idIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
                 val nameIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
                 while (cursor.moveToNext()) {
@@ -443,4 +421,22 @@ internal fun Throwable.isMissingDocumentFailure(): Boolean {
         error = error.cause
     }
     return false
+}
+
+internal actual fun isReadableDownloadedBitmap(bytes: ByteArray): Boolean {
+    if (android.os.Build.VERSION.SDK_INT >= 28) {
+        return try {
+            val source = android.graphics.ImageDecoder.createSource(java.nio.ByteBuffer.wrap(bytes))
+            android.graphics.ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                decoder.setTargetSampleSize((maxOf(info.size.width, info.size.height) / 256).coerceAtLeast(1))
+            }.recycle()
+            true
+        } catch (_: java.io.IOException) {
+            false
+        }
+    }
+    val options = android.graphics.BitmapFactory.Options().apply { inSampleSize = 8 }
+    val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: return false
+    bitmap.recycle()
+    return true
 }

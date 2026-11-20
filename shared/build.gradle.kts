@@ -18,6 +18,7 @@ kotlin {
     iosSimulatorArm64()
 
     sourceSets {
+        commonTest.dependencies { implementation(kotlin("test")) }
         commonMain.dependencies {
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.content.negotiation)
@@ -28,6 +29,7 @@ kotlin {
             implementation(libs.yamibo.api)
             implementation(libs.sqldelight.coroutines)
             implementation(libs.okio)
+            api(libs.kmp.zip.okio)
         }
         androidMain.dependencies {
             implementation(libs.androidx.security.crypto)

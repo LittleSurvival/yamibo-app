@@ -57,7 +57,7 @@ suspend fun ThreadRepository.fetchReaderStartPage(
     val downloaded = downloadRepository?.getDownloadedPage(ThreadPageDownloadKey(tid.value, initialPage, authorId?.value))
         ?.takeIf { it.isValidThreadPage(tid, target = target, page = initialPage, authorId = authorId) }
     if (downloaded != null) return YamiboResult.Success(downloaded)
-    return if (authorId != null) {
+    val fetched = if (authorId != null) {
         // Catalog/history page numbers belong to the author-only view. Reusing a
         // full-thread redirect here poisons that cache and can request a nonexistent page.
         fetchThread(tid, authorId, initialPage)
@@ -65,4 +65,9 @@ suspend fun ThreadRepository.fetchReaderStartPage(
     } else {
         fetchFindPost(tid, target).validatedThreadPage(tid, target)
     }
+    if (fetched is YamiboResult.Success) {
+        val page = fetched.value
+        setCachedThread(tid, authorId, page.pageNav?.currentPage ?: 1, page)
+    }
+    return fetched
 }

@@ -28,6 +28,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import me.thenano.yamibo.yamibo_app.util.ArchivedImageFetcher
 import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
@@ -134,6 +135,11 @@ fun HomeScreenContent(
 @Composable
 fun App() {
     val errorMessages = LocalForumErrorMessageResolver.current
+    val downloads = LocalDownloadRepository.current
+    DisposableEffect(downloads) {
+        ArchivedImageFetcher.downloads.value = downloads
+        onDispose { ArchivedImageFetcher.downloads.compareAndSet(downloads, null) }
+    }
     val imageLoaderFactory = remember {
         { context: PlatformContext ->
             ImageLoader.Builder(context)
@@ -146,6 +152,7 @@ fun App() {
                     // Coil lazily retains this client for the singleton ImageLoader, allowing the
                     // in-memory WAF cookie to be reused without another app-level singleton.
                     add(KtorNetworkFetcherFactory(httpClient = { HttpClientFactory.create() }))
+                    add(ArchivedImageFetcher)
                     add(SvgDecoder.Factory())
                 }
                 .build()

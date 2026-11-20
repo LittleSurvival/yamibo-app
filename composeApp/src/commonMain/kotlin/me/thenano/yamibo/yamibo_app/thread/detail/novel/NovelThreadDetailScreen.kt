@@ -321,14 +321,15 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
             }
             when (val result = threadRepository.fetchThread(tid, authorId, page).validatedThreadPage(tid, page = page, authorId = authorId)) {
                 is YamiboResult.Success -> {
-                    showPage(result.value)
                     try {
-                        if (downloadRepository.updateDownloadedPage(key, result.value) && notifyUpdate) {
-                            feedbackController.post(i18n("更新小說詳情中"))
-                        }
+                        val saved = downloadRepository.updateDownloadedPage(key, result.value)
+                        val display = if (saved) downloadRepository.getDownloadedPage(key) else null
+                        showPage(display ?: result.value)
+                        if (saved && notifyUpdate) feedbackController.post(i18n("更新小說詳情中"))
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (error: Exception) {
+                        if (pagePostsCache[page] == null) showPage(result.value)
                         Logger.w("NovelThreadDetailScreen", "Failed to update downloaded detail key=${key.stableId}", error)
                     }
                 }

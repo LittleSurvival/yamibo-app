@@ -38,6 +38,7 @@ import androidx.compose.ui.zIndex
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import me.thenano.yamibo.yamibo_app.repository.download.MissingThreadImage
 import coil3.SingletonImageLoader
 import coil3.compose.LocalPlatformContext
 import io.github.littlesurvival.YamiboForum
@@ -570,7 +571,8 @@ fun ImagesReaderScreen(
             val activeTidSnap = activeTid
             val postIdSnap = actualPostId
             val tagPageSnap = currentTagPage
-            val currentCoverSnap = actualImageList.getOrNull(1) ?: actualImageList.getOrNull(0)
+            val currentCoverSnap = (actualImageList.getOrNull(1) ?: actualImageList.getOrNull(0))
+                ?.takeUnless(MissingThreadImage::isReaderUri)
             
             appTaskManager.launch(
                 key = AppTaskKey("reader-history:${activeTidSnap.value}"),
@@ -720,7 +722,7 @@ fun ImagesReaderScreen(
         val imageLoader = SingletonImageLoader.get(platformContext)
         val cookie = authRepository.cookieStore.load().orEmpty()
         listOf(currentPage - 1, currentPage, currentPage + 1)
-            .filter { it in actualImageList.indices }
+            .filter { it in actualImageList.indices && !MissingThreadImage.isReaderUri(actualImageList[it]) }
             .distinct()
             .forEach { index ->
                 imageLoader.enqueue(

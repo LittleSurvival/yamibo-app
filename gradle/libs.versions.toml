@@ -21,6 +21,7 @@ okio = "3.18.1"
 opencc4j = "1.14.0"
 
 [libraries]
+kmp-zip-okio = { module = "no.synth:kmp-zip-okio", version = "2.1.0" }
 androidx-security-crypto = { module = "androidx.security:security-crypto", version.ref = "securityCrypto" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity" }
 androidx-lifecycle-viewmodelCompose = { module = "org.jetbrains.androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "androidx-lifecycle" }

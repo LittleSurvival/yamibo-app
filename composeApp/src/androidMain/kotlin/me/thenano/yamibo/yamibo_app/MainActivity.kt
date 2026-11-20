@@ -329,6 +329,8 @@ class MainActivity : ComponentActivity() {
                     tagRepository = tagRepository,
                     rssRepository = rssSearchSubscriptionRepository,
                     storageProvider = AndroidDownloadStorageProvider(context, appSettingsRepository),
+                    database = diskCacheFactory.database,
+                    cacheDirectory = diskCacheFactory.rootCacheDir / "downloads",
                     imageFetcher = DownloadImageFetcher { cookieStore.load().orEmpty() },
                     backgroundController = AndroidDownloadBackgroundController(context),
                 ).also { AndroidDownloadRuntime.repository = it }
