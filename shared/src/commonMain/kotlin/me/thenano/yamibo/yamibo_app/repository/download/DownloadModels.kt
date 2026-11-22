@@ -130,6 +130,7 @@ data class DownloadedImage(
 /** The archive generation changes only when the physical image pack is replaced. */
 sealed interface DownloadManifest {
     val owner: Int?
+    val missingImageCount: Int
     val key: DownloadTaskKey
     val images: List<DownloadedImage>
     val archiveId: String?
@@ -170,6 +171,7 @@ data class ThreadPageDownloadManifest(
     override val images: List<DownloadedImage> = emptyList(),
     override val archiveId: String? = null,
     override val owner: Int? = null,
+    override val missingImageCount: Int = 0,
 ) : DownloadManifest
 
 @Serializable
@@ -187,6 +189,7 @@ data class TagMangaChapterManifest(
     override val archiveId: String? = null,
     val sourceOrder: List<String> = emptyList(),
     override val owner: Int? = null,
+    override val missingImageCount: Int = 0,
 ) : DownloadManifest
 
 @Serializable
@@ -205,6 +208,7 @@ data class RssMangaChapterManifest(
     override val archiveId: String? = null,
     val sourceOrder: List<String> = emptyList(),
     override val owner: Int? = null,
+    override val missingImageCount: Int = 0,
 ) : DownloadManifest
 
 @Serializable
@@ -220,6 +224,7 @@ data class DownloadQueueEntry(
     // Legacy queues have only updatedAt; use it once when decoding older entries.
     val queuedAt: Long = updatedAt,
     val owner: Int? = null,
+    val refreshSource: Boolean = false,
 )
 
 data class DownloadQueueSummary(
@@ -274,4 +279,6 @@ data class DownloadedContentItem(
     val downloadedAt: Long,
     val imageCount: Int,
     val imageBytes: Long,
+    val missingImageCount: Int = 0,
+    val owner: Int? = null,
 )

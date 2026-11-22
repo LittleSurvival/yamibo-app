@@ -46,6 +46,8 @@ kotlin {
 }
 
 android {
+    // Repository fault-injection tests log expected transport failures through android.util.Log.
+    testOptions.unitTests.isReturnDefaultValues = true
     namespace = "me.thenano.yamibo.yamibo_app.shared"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
     compileOptions {
