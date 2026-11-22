@@ -307,6 +307,7 @@ fun ImagesReaderScreen(
             return@LaunchedEffect
         }
         smartLoading = true
+        catalogVerified = false
         smartError = null
         fun display(chapters: List<ThreadSummary>) {
             val displayed = currentThreads.firstOrNull { it.tid == activeTid }

@@ -111,7 +111,7 @@ internal data class CatalogEdit(val removed: Set<DownloadTaskKey>, val replaceme
 /** App-private, rebuildable index. Interrupted storage operations leave the dirty marker in place. */
 internal class DownloadCatalogIndex(root: Path, storage: String) {
     private val fs = FileSystem.SYSTEM
-    private val dir = root / storage.encodeUtf8().sha256().hex()
+    private val dir = root / storage.encodeUtf8().sha256().hex() / "owner-catalog-v2"
     private val snapshot = dir / "catalog-v1.json"
     private val journal = dir / "updates.jsonl"
     private val dirty = dir / "pending"

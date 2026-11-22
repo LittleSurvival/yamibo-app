@@ -27,6 +27,9 @@ class ReaderDownloadLifecycleTest {
     private val second = "https://reader.invalid/second.jpg"
     private val requests = mutableListOf<String>()
     private var unavailable: String? = second
+    private var librarySize = 0
+    private var scans = 0
+    private var pageOpens = 0
     private var owner = 7
     private var body = page("old", first, second)
     private var storedBytes: ByteArray? = null
@@ -47,10 +50,19 @@ class ReaderDownloadLifecycleTest {
         val storage = mock<DownloadStorageProvider> { name, args -> when (name) {
             "getStorageKey", "getSelectedFolderLabel" -> "fixture"
             "isReady" -> true
-            "listManifests" -> listOfNotNull(storedManifest)
+            "listManifests" -> {
+                scans++
+                List(librarySize) { index -> ThreadPageDownloadManifest(
+                    key = ThreadPageDownloadKey(5000 + index, 1), title = "other", downloadedAt = 1,
+                    sourceTotalPages = 1, pageKind = DownloadPageKind.LastAtDownloadTime) } + listOfNotNull(storedManifest)
+            }
             "listTagMangaManifests", "listRssMangaManifests", "readQueue" -> emptyList<Any>()
             "readThreadPage" -> storedBytes
-            "readPageRecord" -> storedBytes?.let { it to storedManifest }
+            "readPageRecord" -> {
+                pageOpens++
+                assertEquals(key, args[0])
+                storedBytes?.let { it to storedManifest }
+            }
             "readManifest" -> storedManifest
             "looseImages" -> emptyMap<String, String>()
             "writeQueue" -> Unit
@@ -128,6 +140,20 @@ class ReaderDownloadLifecycleTest {
         owner = 8
         assertNull(repo.getDownloadedPage(key))
         assertEquals(DownloadStatus.NotDownloaded, repo.getStatus(key))
+    }
+
+    @Test fun openingTargetReaderAvoidsTenThousandUnrelatedDownloads() = runBlocking {
+        librarySize = 10_000
+        storedBytes = Json.encodeToString(page("target")).encodeToByteArray()
+        storedManifest = ThreadPageDownloadManifest(key = key, title = "target", downloadedAt = 1,
+            sourceTotalPages = 1, pageKind = DownloadPageKind.LastAtDownloadTime, owner = owner)
+        val repo = repository()
+        assertEquals(DownloadStatus.Downloaded, repo.getStatus(key))
+        assertEquals("target", repo.getDownloadedPage(key)?.thread?.title)
+        assertEquals(1, pageOpens)
+        assertEquals(0, scans)
+        assertEquals(10_001, repo.getDownloadedContentGroups().sumOf { it.itemCount })
+        assertEquals(1, scans)
     }
 
     @AfterTest fun cleanUp() {

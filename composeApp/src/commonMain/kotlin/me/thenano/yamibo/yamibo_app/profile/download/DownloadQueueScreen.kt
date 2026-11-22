@@ -48,6 +48,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.thenano.yamibo.yamibo_app.LocalAppSettingsRepository
 import me.thenano.yamibo.yamibo_app.LocalAppTaskManager
+import me.thenano.yamibo.yamibo_app.LocalAuthRepository
 import me.thenano.yamibo.yamibo_app.LocalDownloadRepository
 import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.components.controls.YamiboActionChip
@@ -107,7 +108,9 @@ fun DownloadQueueScreen(screenId: ScreenId) {
     val appSettingsRepository = LocalAppSettingsRepository.current
     val downloadedContentRefreshAutoUpdate = appSettingsRepository.downloadedContentRefreshAutoUpdate.state()
     val storageFolderUri = appSettingsRepository.backupFolderUri.state()
-    val entries by repository.queue.collectAsState()
+    val queue by repository.queue.collectAsState()
+    val owner = LocalAuthRepository.current.currentUser()?.uid?.value ?: 0
+    val entries = remember(queue, owner) { queue.filter { it.owner == null || it.owner == owner } }
     val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
     val appTaskManager = LocalAppTaskManager.current
     val scope = rememberCoroutineScope()

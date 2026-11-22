@@ -23,7 +23,7 @@ import kotlin.time.Duration.Companion.hours
 
 class SmartComicCatalog(factory: DiskCacheFactory) {
     @Serializable
-    private data class Snapshot(val checkedAt: Long, val threads: List<ThreadSummary>)
+    private data class Snapshot(val checkedAt: Long, val threads: List<ThreadSummary>, val verified: Boolean = false)
     private val cache = factory.create<Snapshot>("smart_comic", maxSize = 80)
 
     private val searches = InFlightReads<String, YamiboResult<List<ThreadSummary>>>()
@@ -62,6 +62,11 @@ class SmartComicCatalog(factory: DiskCacheFactory) {
             val conflict = known.any { it != id }
             val verified = complete && !conflict
             val accepted = if (conflict) listOf(seed) else ordered
+            val previous = works.workById(id, account).executeAsOne()
+            // Keep the last verified membership intact when an incomplete search discovers new candidates.
+            // Their downloads remain addressable by thread and can join the saved work after verification.
+            if (previous.completeAt != null && !verified) return@transactionWithResult id
+            if (verified) works.retireMembers(id)
             works.updateTitle(name, currentTimeMillis().takeIf { verified }, id, account)
             val tail = (works.lastOrdinal(id).executeAsOneOrNull() ?: -1L) + 1
             accepted.forEachIndexed { index, chapter ->
@@ -101,6 +106,13 @@ class SmartComicCatalog(factory: DiskCacheFactory) {
         }
     }
 
+    private suspend fun compatibleMembership(owner: UserId, fid: ForumId, chapters: List<ThreadSummary>) = withContext(Dispatchers.IO) {
+        val memberships = chapters.chunked(400).flatMap { batch ->
+            works.memberOwners(owner.value.toLong(), fid.value.toLong(), batch.map { it.tid.value.toLong() }).executeAsList()
+        }
+        memberships.map { it.workId }.distinct().size <= 1
+    }
+
     fun chapters(seed: ThreadSummary, candidates: List<ThreadSummary>): List<ThreadSummary> {
         val work = smartComicTitle(seed.title)
         return (listOf(seed) + candidates).distinctBy { it.tid }
@@ -130,23 +142,30 @@ class SmartComicCatalog(factory: DiskCacheFactory) {
         val snapshot = account?.let { withContext(Dispatchers.IO) { cache.get(key) } }
         val initial = ordered(local + snapshot?.threads.orEmpty())
         if (auth.currentUser()?.uid != account) return YamiboResult.NotLoggedIn
-        if (!refresh && snapshot != null && currentTimeMillis() - snapshot.checkedAt in 0L until 2.hours.inWholeMilliseconds) {
-            onVerified()
-            return YamiboResult.Success(initial)
+        if (!refresh && snapshot?.verified == true && currentTimeMillis() - snapshot.checkedAt in 0L until 2.hours.inWholeMilliseconds &&
+            snapshot.threads.mapTo(hashSetOf()) { it.tid }.containsAll(initial.map { it.tid })) {
+            if (account != null && compatibleMembership(account, fid, initial)) onVerified()
+            return if (auth.currentUser()?.uid == account) YamiboResult.Success(initial) else YamiboResult.NotLoggedIn
         }
         onCached(initial)
         return searches.read(key) { search(forum, auth, fid, work.query) }.flatMapSuccess { candidates ->
             val sorted = ordered(local + candidates)
+            val returned = candidates.mapTo(hashSetOf()) { it.tid }
             if (auth.currentUser()?.uid != account) return@flatMapSuccess YamiboResult.NotLoggedIn
-            if (account != null) withContext(Dispatchers.IO) { cache.set(key, Snapshot(currentTimeMillis(), sorted)) }
-            if (account != null) {
+            // chapters() always inserts the seed. Only the actual search response can confirm coverage.
+            val covered = sorted.all { it.tid in returned }
+            if (covered && account != null && compatibleMembership(account, fid, sorted)) {
+                withContext(Dispatchers.IO) { cache.set(key, Snapshot(currentTimeMillis(), sorted, verified = true)) }
                 onVerified()
                 val saved = withContext(Dispatchers.IO) {
                     works.memberWork(account.value.toLong(), fid.value.toLong(), seed.tid.value.toLong()).executeAsOneOrNull()
                 }
                 if (saved != null) saveWork(account, fid, seed, sorted, complete = true)
             }
-            YamiboResult.Success(sorted)
+            if (auth.currentUser()?.uid != account) return@flatMapSuccess YamiboResult.NotLoggedIn
+            if (!covered && snapshot != null) {
+                YamiboResult.Success(ordered(snapshot.threads + sorted))
+            } else YamiboResult.Success(sorted)
         }
     }
 
