@@ -1,7 +1,9 @@
 package me.thenano.yamibo.yamibo_app.repository.download
 
+import me.thenano.yamibo.yamibo_app.repository.thread.readerImageUrls
+import me.thenano.yamibo.yamibo_app.repository.thread.readerImageAttribute
+import me.thenano.yamibo.yamibo_app.repository.thread.readerImages
 import com.fleeksoft.ksoup.Ksoup
-import com.fleeksoft.ksoup.nodes.Element
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -1169,7 +1171,10 @@ class DownloadRepositoryImpl(
         val uris = imageUris(storage, manifest)
         val bySource = manifest.images.associate { it.sourceUrl to uris[it.fileName] }
         val storageId = storage.encodeUtf8().sha256().hex()
-        return manifest.orderedSources().map { bySource[it] ?: MissingThreadImage(manifest.key, storageId, it).readerUri() }
+        return manifest.orderedSources().map { source ->
+            if (source.startsWith("data:image/", ignoreCase = true)) source
+            else bySource[source] ?: MissingThreadImage(manifest.key, storageId, source).readerUri()
+        }
     }
 
     override suspend fun openArchivedImage(uri: String): okio.Source = withContext(Dispatchers.IO) {
@@ -1365,10 +1370,9 @@ class DownloadRepositoryImpl(
     private suspend fun persistChapter(key: DownloadTaskKey, authorId: Int?, page: ThreadPage,
                                       manifest: (List<DownloadedImage>, List<String>, String) -> DownloadManifest): List<String> {
         val storage = checkNotNull(storageProvider.getStorageKey())
-        val author = authorId ?: page.posts.firstOrNull()?.author?.uid?.value
-        val urls = page.posts.filter { author == null || it.author.uid.value == author }.take(2)
-            .flatMap { post -> post.images.map { normalizeDownloadImageUrl(it.url) } }.distinct()
-        check(urls.isNotEmpty()) { "此章節沒有可下載圖片" }
+        val order = page.readerImages(authorId?.let(::UserId)).map { it.url }
+        val urls = order.distinct().filter { it.startsWith("https://") || it.startsWith("http://") }
+        check(order.isNotEmpty()) { "此章節沒有可下載圖片" }
         return withPack { pack ->
             val images = downloadImages(key, urls, 1, pack)
             updateStage(key, DownloadStage.Saving, urls.size, urls.size)
@@ -1396,7 +1400,7 @@ class DownloadRepositoryImpl(
                         }
                     }
                 }
-                val saved = manifest(urls.mapNotNull(bySource::get), urls, pack.generation)
+                val saved = manifest(urls.mapNotNull(bySource::get), order, pack.generation)
                 if (old != null && old.images.any { !it.packed }) {
                     val oldUris = storageProvider.looseImages(key, old.images.filterNot { it.packed }.map { it.fileName })
                     val storageId = storage.encodeUtf8().sha256().hex()
@@ -1637,9 +1641,6 @@ private fun threadImageFileName(source: String): String {
     return "${source.encodeUtf8().sha256().hex()}.$extension"
 }
 
-private fun Element.threadImageAttribute(): String =
-    listOf("file", "zoomfile", "src").firstOrNull { attr(it).isNotBlank() } ?: "src"
-
 private fun threadImageSource(raw: String): String? {
     if (raw.isBlank() || raw.contains("none.gif", ignoreCase = true) || raw.contains("/smiley/", ignoreCase = true)) return null
     return normalizeDownloadImageUrl(raw).takeIf { it.startsWith("https://") || it.startsWith("http://") }
@@ -1651,10 +1652,7 @@ private fun threadImageDocument(html: String) =
 
 private fun ThreadPage.threadImageUrls(): Set<String> = buildSet {
     for (post in posts) {
-        post.images.mapNotNullTo(this) { threadImageSource(it.url) }
-        threadImageDocument(post.contentHtml)?.select("img")?.mapNotNullTo(this) { element ->
-            threadImageSource(element.attr(element.threadImageAttribute()))
-        }
+        post.readerImageUrls().filterTo(this) { it.startsWith("https://") || it.startsWith("http://") }
     }
 }
 
@@ -1664,7 +1662,7 @@ private fun ThreadPage.mapThreadImages(transform: (String) -> String): ThreadPag
     val html = if (document != null) {
         document.outputSettings().prettyPrint(false)
         document.select("img").forEach { element ->
-            val attribute = element.threadImageAttribute()
+            val attribute = element.readerImageAttribute()
             threadImageSource(element.attr(attribute))?.let { element.attr(attribute, transform(it)) }
         }
         document.body().html()

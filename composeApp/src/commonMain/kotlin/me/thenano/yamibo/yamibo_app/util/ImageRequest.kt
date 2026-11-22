@@ -2,6 +2,7 @@ package me.thenano.yamibo.yamibo_app.util
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import me.thenano.yamibo.yamibo_app.repository.download.normalizeDownloadImageUrl
 import coil3.ImageLoader
 import coil3.Uri
 import coil3.decode.DataSource
@@ -30,40 +31,7 @@ import me.thenano.yamibo.yamibo_app.factory.IMAGE_ACCEPT
  * Absolute network URLs and local `data:`, `content://`, or `file://` URIs are preserved. Relative
  * forum attachment paths are resolved against [YamiboRoute.Domain].
  */
-fun normalizeImageUrl(url: String): String {
-    val cleaned = repairMalformedImageUri(url)
-    return if (cleaned.contains("://") || cleaned.startsWith("data:", ignoreCase = true)) {
-        cleaned
-    } else {
-        "${YamiboRoute.Domain.build().trimEnd('/')}/${cleaned.removePrefix("/")}"
-    }
-}
-
-/**
- * Restores an inline or local URI that was accidentally prefixed with an HTTP origin.
- *
- * For example, `http://data:image/...` must become `data:image/...`, and
- * `https://bbs.yamibo.com/content://...` must become `content://...`, before the source is passed
- * to Coil. Without this repair, Coil treats the value as an HTTP URL instead of inline or local
- * data.
- */
-private fun repairMalformedImageUri(url: String): String {
-    val domain = YamiboRoute.Domain.build().trimEnd('/')
-    val repaired = when {
-        url.startsWith("http://data:image/", ignoreCase = true) -> url.substring("http://".length)
-        url.startsWith("https://data:image/", ignoreCase = true) -> url.substring("https://".length)
-        url.startsWith("$domain/yamibo-image://") -> url.removePrefix("$domain/")
-        url.startsWith("$domain/content://") -> url.removePrefix("$domain/")
-        url.startsWith("$domain/file://") -> url.removePrefix("$domain/")
-        url.startsWith("$domain/data:", ignoreCase = true) -> url.substring(domain.length + 1)
-        else -> url
-    }
-    return if (repaired.startsWith("data:", ignoreCase = true)) {
-        "data:${repaired.substring("data:".length)}"
-    } else {
-        repaired
-    }
-}
+fun normalizeImageUrl(url: String): String = normalizeDownloadImageUrl(url)
 
 internal fun buildImageNetworkHeaders(
     normalizedUrl: String,

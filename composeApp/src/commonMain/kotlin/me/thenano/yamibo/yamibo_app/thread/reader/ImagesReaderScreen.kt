@@ -1,5 +1,6 @@
 package me.thenano.yamibo.yamibo_app.thread.reader
 
+import me.thenano.yamibo.yamibo_app.repository.thread.readerImages
 import YamiboIcons
 import androidx.compose.animation.*
 import androidx.compose.animation.core.Animatable
@@ -48,6 +49,8 @@ import io.github.littlesurvival.dto.model.ThreadSummary
 import io.github.littlesurvival.dto.page.TagPage
 import io.github.littlesurvival.dto.page.ThreadPage
 import io.github.littlesurvival.dto.value.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
@@ -494,9 +497,9 @@ fun ImagesReaderScreen(
                     val p = threadPage.posts.firstOrNull()
                     if (p != null) {
                         actualPostId = p.pid
-                        val targetAuthorId = activeAuthorId ?: p.author.uid
-                        val authorPosts = threadPage.posts.filter { it.author.uid == targetAuthorId }.take(2)
-                        actualImageList = authorPosts.flatMap { it.readerImageUrls() }
+                        actualImageList = withContext(Dispatchers.Default) {
+                            threadPage.readerImages(activeAuthorId).map { it.url }
+                        }
                         isDownloadedTagChapter = false
                         
                         // Coerce the initial page against the actual loaded bounds now

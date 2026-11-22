@@ -54,10 +54,28 @@ open class DownloadImageFetcher(
 internal expect fun isReadableDownloadedBitmap(bytes: ByteArray): Boolean
 
 fun normalizeDownloadImageUrl(url: String): String {
-    val source = url.trim()
+    val source = repairMalformedImageUri(url.trim())
     return when {
         source.startsWith("//") -> "https:$source"
         source.contains("://") || source.startsWith("data:", ignoreCase = true) -> source
         else -> "${YamiboRoute.Domain.build().trimEnd('/')}/${source.removePrefix("/")}"
+    }
+}
+
+private fun repairMalformedImageUri(url: String): String {
+    val domain = YamiboRoute.Domain.build().trimEnd('/')
+    val repaired = when {
+        url.startsWith("http://data:image/", ignoreCase = true) -> url.substring("http://".length)
+        url.startsWith("https://data:image/", ignoreCase = true) -> url.substring("https://".length)
+        url.startsWith("$domain/yamibo-image://") -> url.removePrefix("$domain/")
+        url.startsWith("$domain/content://") -> url.removePrefix("$domain/")
+        url.startsWith("$domain/file://") -> url.removePrefix("$domain/")
+        url.startsWith("$domain/data:", ignoreCase = true) -> url.substring(domain.length + 1)
+        else -> url
+    }
+    return if (repaired.startsWith("data:", ignoreCase = true)) {
+        "data:${repaired.substring("data:".length)}"
+    } else {
+        repaired
     }
 }

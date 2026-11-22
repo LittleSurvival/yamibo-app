@@ -1,29 +1,75 @@
-# Forum reading defaults and Smart Comic
+# 三種閱讀模式的下載與進度互通計畫
 
-## Agreed direction
+基線為 `9b0e8d3`。該版已支援逐板選擇智能漫畫、小說閱讀和論壇模式。智能漫畫點哪一帖就開哪一話，以同板搜尋補齊目錄，升降冪只改顯示順序。編號話依話數與分段排序，合刊依起始話數排序，無編號附錄置後。登入帳號的目錄快取有效兩小時，可手動更新或重試。以下為下一版的設計與驗收條件。
 
-Readers choose one of three opening modes for each forum, in Settings or the forum menu. Forum mode opens the existing discussion reader. Novel mode opens the existing novel detail page and its reader. Smart Comic opens the tapped chapter directly in the image reader with a directory of related threads, as if entering through an RSS or tag manga catalog. It uses the forum search without creating a subscription. Boards without a preference keep their existing opening behavior.
+## 讀者應看到的行為
 
-The first version seeds the directory from the selected board page and follows the forum search through its result pages. It compares work names and printed creator credits. Where a credit is missing it also checks the uploader. Each thread keeps its own ID. Numbered chapters sort by chapter and part, bundled chapters by their starting number, and unnumbered extras follow in thread-ID order. The directory can reverse its display order locally while the reader retains its current chapter and chronological next/previous behavior.
+假設第 14 話有兩個樓層貼圖，讀者在智能漫畫看到第二個樓層的第 3 張圖。切到論壇或小說時，如果該模式能顯示這個樓層，就定位到該樓層的同一張圖。再回漫畫仍能接著讀。如果讀者後來在論壇停在另一人的留言，論壇保留留言位置，漫畫則回到上次可顯示的漫畫位置。
 
-The directory cache is scoped to the signed-in account, board and work. A successful result is fresh for two hours. Older results remain readable during a refresh or after a network error. The directory provides manual refresh and retry. A successful empty search still preserves the selected thread.
+| 操作 | 預期結果 |
+| --- | --- |
+| 從板塊、搜尋或目錄點第 14 話 | 開第 14 話並恢復該話進度。只有作品或歷史的「繼續閱讀」可以帶到另一話。明確指定某一樓的連結仍優先開該樓。 |
+| 更改板塊預設，或在閱讀中切模式 | 沿用同一帖與可對應的位置。閱讀中切換只作用於本次開啟；板塊選單才會寫入預設。 |
+| 在漫畫選「下載本話／所選章節／整部作品」 | 「本話」是當前帖子。「整部」採用最近一次成功取得的完整目錄快照，列出章數與已可離線的章數；只有當頁候選或搜尋失敗時，可下載已知章節並明示範圍。新話出現後，可補下載新增章節。 |
+| 在論壇或小說下載 | 沿用本頁、整帖等既有選項，標示「全部樓層」或「只看某作者」。從下載管理開啟時沿用保存範圍，可切到能呈現這份內容的模式。 |
+| 飛航模式開啟作品 | 從下載管理進作品，能看到已保存的目錄及各話狀態。上次讀的章節缺檔時保留其位置，標示缺少的內容，另提供可讀章節供選擇。 |
 
-## How this relates to downloads
+## 現有實作的接點
 
-A saved thread page already has a thread ID, page number and optional author ID. An absent author ID means all authors. A specific author ID identifies a filtered copy. The download manager can therefore contain two copies of the same thread, even though it offers no direct choice between them when starting a download there.
+| 既有能力 | 需要銜接的地方 |
+| --- | --- |
+| 小說、論壇共用文字閱讀器。文字歷史含 TID、作者範圍、PID、段落與段內位置；儲存時還區分 Normal／Novel 及來源。 | 同一樓在兩種分頁中的頁碼可能不同。保留各自精確位置，增加兩者共用的樓層定位。 [歷史資料模型](../../shared/src/commonMain/kotlin/me/thenano/yamibo/yamibo_app/repository/ReadHistoryRepository.kt) |
+| 智能漫畫目前以帖內第一個 PID 儲存整串圖片的索引；它會取目標作者在所載帖頁中的前兩個樓層。 | 第二個樓層的圖片需要自己的 PID。切話前要儲存離開位置，從目錄進入也要讀回目標話的紀錄。 [圖片閱讀器](../../composeApp/src/commonMain/kotlin/me/thenano/yamibo/yamibo_app/thread/reader/ImagesReaderScreen.kt) |
+| 帖頁下載以 TID、作者範圍、論壇頁碼區別。RSS／標籤漫畫另有章節 manifest、圖片順序與圖片封包。閱讀器會解析 HTML 中的圖片，漫畫下載器目前取 `post.images` 並去重。 | 要讓線上第 8 張與離線第 8 張對應，雙方須使用同一套取圖規則，並分開處理圖片顯示次數與檔案份數。 [下載實作](../../shared/src/commonMain/kotlin/me/thenano/yamibo/yamibo_app/repository/download/DownloadRepositoryImpl.kt) · [閱讀器取圖](../../shared/src/commonMain/kotlin/me/thenano/yamibo/yamibo_app/repository/thread/ReaderImages.kt) |
+| AppSync 已有文字、圖片、標籤和 RSS 歷史。下載封包、快取、章節已讀狀態目前由各裝置保存。 | 第一階段沿用既有同步格式；本機共用進度與跨裝置可還原的精度分別驗收。 [同步資料模型](../app-sync-cloud-data-model.md) |
 
-Opening an existing download should respect the author scope stored with it. Changing a forum preference affects future board opens and preserves both existing copies. Work-level offline downloads are a separate follow-up.
+## 一份下載，按需要提供內容
 
-## Decisions still open
+沿用 `DownloadRepository` 的佇列、儲存位置、manifest、封包與缺圖重試。讓下載入口與三個閱讀器呼叫同一套查詢，回答「這個範圍已經能離線讀到哪裡」。查詢須確認 manifest、帖頁與檔案確實可讀。一般快取仍可加速開啟；只有持久下載能計入離線狀態。
 
-- Should a one-thread override persist? When a download starts, does it inherit the current view or offer an explicit choice?
-- What evidence is sufficient to group chapter threads as one work? How should the directory order specials, handle similar titles by different authors, and let readers correct a mistaken match?
-- When opening Smart Comic offline, which saved chapter should resume and how should unavailable chapters appear?
+**新下載的漫畫要能反向開帖。** 下載本話時，一併保存這次已取得的來源帖頁、作者範圍、樓層及原圖對照。如此從新漫畫下載切到論壇／小說，飛航模式也看得到已存的正文與對應樓層；選擇下載整帖或其他人的留言，才擴大範圍。原有只有圖片的下載按下表處理。
 
-## Examples to verify before rollout
+| 裝置上已有 | 可直接使用 | 尚需取得 |
+| --- | --- | --- |
+| 全部樓層的帖頁與圖片 | 論壇可讀已存頁；小說可讀其中已知的作者樓層；漫畫可讀已收齊的本話圖片 | 缺少的作者樓層、頁或圖。要標示整帖或整個作者範圍已下載，必須能證明涵蓋全部目標內容。 |
+| 只看作者的帖頁與圖片 | 小說、漫畫及論壇的只看該作者檢視，可按相同 PID 取用 | 論壇全部樓層還需要其他人的回覆與原分頁資料。作者檢視的第 2 頁不可冒充全部樓層的第 2 頁。 |
+| 智能、RSS 或標籤漫畫的章節圖片包 | 同一 TID、作者範圍及可核對的圖序可共用已存圖片。舊包缺少樓層資料時仍可用原入口看圖。 | 論壇／小說需要帖文、樓層及分頁；線上只補缺項，離線時可開已下載的漫畫圖。 |
 
-1. Assign different defaults to two forums, reopen the app and open a thread from each.
-2. In 中文百合漫画区, open a middle installment of `DOUBLE HELIX BLOSSOM`. Compare the directory with multiple pages of results. Toggle the sort order and verify the highlighted thread and image stay the same.
-3. Compare the bundled chapters and extras of `青梅竹马BIG LOVE` with its thread titles. For `少女所不期望的英雄史诗` check decimal chapter numbers, and for `JK⇔杀手` check the numbered parts within each chapter.
-4. Reopen a cached directory offline, refresh it, reconnect and retry. The selected chapter should stay readable throughout whenever its images are available locally.
-5. Check unrelated works with similar titles. Alternate translations with different work names and ambiguous titles still need a way to review or correct matches.
+- 圖片清單逐項保存所屬 PID、可靠的附件識別或正規化來源、同圖在樓內的出現次序。保留現有閱讀器對懶載入與表情圖的處理。相同圖片在正文出現兩次就顯示兩次，實體檔可共用一份；受權限保護的來源只在相同存取範圍內重用。
+- 第 1 階段用作者跨三樓貼圖、跨頁續貼的真帖核對章節邊界。若驗得現行「前兩樓」會漏圖，閱讀與下載須一起調整。完整狀態必須對照已核實的樓層與圖序；僅取得部分時顯示已存範圍，保留補下載入口。
+- 作品保存獨立於兩小時搜尋快取的章節清單。為已保存作品分配持久識別，記錄板塊、帳號範圍、成員 TID 和最近閱讀的 TID。標題或作者署名修正、升降冪、補進較早話數，都不會重建既有下載。新搜尋結果透過已確認成員銜接；同名或歸屬衝突時先保留舊歸屬與可讀副本。
+- 作品、帖子、標籤與 RSS 可以各自保留一筆下載關聯。實作時須先解決既有封包 URI 含任務及封包版本的問題。以有效關聯保留被引用的實體封包；刷新先寫好並驗證新版，再原子切換引用。取消任務保留已完成內容，刪除最後一個引用才回收檔案。重複排隊、失敗重試或兩個入口同時下載都應合併相同需求。
+
+## 三種閱讀器共用的定位規則
+
+1. **保存當前內容。** 在現有歷史 repository 內記錄最近一次實際閱讀的 TID、PID、作者範圍與觀測順序。文字保留段落識別與段內比例；圖片保留所屬樓層、圖片識別、同圖出現次序及頁內位置。模式內可另存精確捲動位置。作品只持有最近閱讀的 TID，單話進度以內容識別保存。目錄排序、搜尋刷新及載入畫面都不產生閱讀紀錄。
+2. **恢復可見的位置。** 明確指定的章節或樓層優先。一般續讀時先找最近一次能對應的閱讀動作，避免舊的模式內進度蓋過剛讀的位置。在目標範圍驗證 PID，有同圖或同段就精確恢復。只能對上樓層時，文字閱讀器開到該樓，漫畫開到該樓第一張可讀圖。若該樓不在目標範圍或沒有可顯示的內容，回到該模式在該帖最後有效的位置，首次開啟才回到開頭。回退定位本身不覆寫另一模式的精確紀錄。分頁不同則用 PID 解析目標頁，離線優先查已保存的 PID 索引。
+3. **處理切章與競態。** 經過目錄、上下話、切模式、返回或進背景時，先擷取離開章節的不可變位置，再交給同一儲存流程。保留閱讀中的延遲寫入以降低 IO，用事件順序防止舊寫入晚到覆蓋新位置。目錄點話可續讀；翻越章末進下話從首張、從章首往回翻則接前話末張。明確的「繼續閱讀」使用保存的位置。
+4. **區分讀完與上次停留。** 回看第 3 張可以移動續讀位置，已讀標記則保留到讀者手動改為未讀。讀完一樓、一話或整帖各依其涵蓋範圍計算。漫畫讀完不會把論壇尚未看的留言標為已讀；目錄對同一話呈現一致的進度。刪下載保留進度，清閱讀紀錄保留離線內容。
+
+## 進入 reader 時的工作順序
+
+1. 點帖後先讀目標 TID、作者範圍及已知 PID 的進度與內容索引，只打開該頁或首張圖需要的封包。已有可用正文就呈現，已知樓層在後頁就直接開目標頁。全庫盤點、舊包遷移、目錄解析排序與跨頁搜尋移出首屏依賴；耗 CPU 的工作離開主執行緒。
+2. 分開「開啟閱讀」與「檢查更新」。從下載管理或切模式開已存內容，直接使用本機副本。一般線上小說詳情若需要重驗，顯示本機內容後再更新；同一次從詳情進 reader 共用該結果或同一個在途工作。智能漫畫目錄過期可先顯示舊目錄，搜尋需要的登入驗證跟著該次搜尋走，首圖不用等它完成。
+3. 對相同帳號／授權範圍、TID、作者範圍與頁的讀取合併請求；圖片顯示與預載按原始資源共用下載。首張可見圖優先於相鄰圖和背景目錄。離開舊話時取消已無消費者的預載，保留其他畫面仍在用的工作。先擷取進度再非同步落盤，既要防止舊寫入覆蓋，也要避免把磁碟寫入延遲加到下一話首屏。
+
+## 實作順序與交付條件
+
+| 階段 | 實作範圍 | 進入下一階段的條件 |
+| --- | --- | --- |
+| 1. 核對圖序與舊資料 | 在共用層整理圖序與 PID 對照；以兩個樓層貼圖、重複圖、懶載入、附件與缺圖的帖子，比較線上閱讀、帖頁包、RSS／標籤包。 | 同一內容在線上與新下載有相同的順序和樓層。舊包無法證明對應的位置會退回原有讀法。 |
+| 2. 共用下載與離線入口 | 擴充既有下載 repository 的內容查詢、引用生命週期及批次排隊。串接板塊、閱讀器、收藏下載與下載管理，為智能漫畫加入本話、選話和整部入口。 | 先在一個模式下載，另外兩個能讀取相符內容；切換完整覆蓋的內容時，抓取正文與圖片的網路請求皆為零。有缺項時只補缺項。 |
+| 3. 共用續讀與作品目錄 | 串接文字／圖片歷史、章節狀態、歷史列表與作品的「繼續閱讀」。升級時按需從舊紀錄建立對照，保留舊格式、原始時間、作者範圍與來源。 | 三種模式間六個有向切換都通過；快速切章後重開能回最後位置。舊紀錄缺少圖片身分時，沿用原模式位置，等實際開讀再補足。 |
+| 4. 驗證升級、AppSync 與平台 | 從舊版實際資料升級 Android／iOS；測離線、同步、刪除及還原。先以既有 `reading.thread`、`reading.image` 和既有 RSS／標籤歷史重建能辨識的位置。本機下載可用性依各裝置檔案判斷。 | 新舊客戶端可交換現有紀錄，清除後舊資料不會復活。新裝置若缺進階圖片錨點，精度要記錄在驗收結果。若要跨裝置傳作品識別或新增欄位，先驗證舊版 registry、journal、checkpoint 與刪除相容性，再啟用新格式。 |
+
+升級採加欄位或旁表與可重跑的索引重建。第一次讀取舊 manifest 或歷史時能解多少就補多少；舊圖片索引無法確認所屬 PID 時，不憑數字猜測。遷移中斷可從已提交項目繼續。回退時原有 reader 和下載鍵仍可使用，已保存的封包可由原入口開啟。
+
+## 驗收案例
+
+實作前先建立基線並驗證量測工具。逐案的資料、步驟、請求預算、首屏與卡頓門檻，以及交付時必須保留的證據，見[三種閱讀模式測試與效能驗收計畫](forum-reading-modes-validation.md)。以下為功能範圍摘要。
+
+- **六個方向。** 智能漫畫 ↔ 小說、智能漫畫 ↔ 論壇、小說 ↔ 論壇各做雙向測試。每一方向都做「從來源模式下載，目標模式飛航冷啟」及「在來源停到指定樓／圖，目標續讀，再切回」。記錄預期與實際的 TID、PID、圖或段落，以及網路請求數。另測目標模式無法呈現的留言與純文字帖。
+- **下載完整性。** 用全部樓層與只看作者分頁不同的長帖，分別測本頁、整帖、本話和整部。加入部分圖片遺失、重複加入、兩個來源共用後刪除其中之一、刷新中斷、取消後重試、跨帳號開啟；核對可讀內容、缺項、實體檔數與移除後結果。
+- **進度完整性。** 在第二個作者樓層的第 3 張圖停下；在兩秒內連續切話、返回、背景後重啟；切換連續捲動與單頁。驗證讀完再回看、手動未讀、改作品名、倒序、同名作品、原樓層被刪與目錄刷新後仍指向正確內容。清歷史後同步兩台裝置，確認已刪位置不再出現。
+- **真實論壇與原有入口。** 在中文百合漫畫區以《DOUBLE HELIX BLOSSOM》測跨搜尋分頁及新增章節，以《青梅竹马BIG LOVE》測合刊和附錄，以《少女所不期望的英雄史诗》及《JK⇔杀手》回歸小數話數、分段排序。保留 RSS／標籤、收藏、歷史、下載管理與指定樓層連結的原入口。切換兩個板塊的預設後重啟，確認各自生效。
+- **平台交付。** Android 模擬器與 iOS 模擬器分別記錄版本、實際覆蓋與失敗案例。預設及深色主題都檢查下載選擇、部分可讀、缺檔、失敗詳情與重試。驗證腳本和測試資料按專案規則留在驗證分支，產物留在版本控制之外。

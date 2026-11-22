@@ -1,5 +1,7 @@
 package me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl
 
+import me.thenano.yamibo.yamibo_app.repository.thread.visibleReaderHtml
+import me.thenano.yamibo.yamibo_app.repository.thread.readerImageAttribute
 import me.thenano.yamibo.yamibo_app.Logger
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 
@@ -13,8 +15,6 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.em
-import com.fleeksoft.ksoup.Ksoup
-import com.fleeksoft.ksoup.nodes.Document
 import com.fleeksoft.ksoup.nodes.Element
 import com.fleeksoft.ksoup.nodes.Node
 import com.fleeksoft.ksoup.nodes.TextNode
@@ -43,19 +43,8 @@ object HtmlParser {
     /** Parses raw HTML string into a list of HtmlBlock for Compose to render */
     fun parseHtml(html: String): List<HtmlBlock> {
         // Keep HTML entities intact so Ksoup decodes spaces such as &nbsp; with their real width.
-        val cleanHtml = html.replace("\r", "")
-        val document: Document = Ksoup.parseBodyFragment(cleanHtml)
-        
-        // Filter out Discuz jammer (interference) elements to avoid garbage text in reader
-        document.select("font.jammer").forEach { it.remove() }
-        document.select(".jammer").forEach { it.remove() }
-        document.select("[style]").forEach { element ->
-            val style = element.attr("style").lowercase().replace(" ", "")
-            if (style.contains("display:none")) {
-                element.remove()
-            }
-        }
-        
+        val document = visibleReaderHtml(html)
+
         val blocks = mutableListOf<HtmlBlock>()
         val globalBuilder = AnnotatedString.Builder()
         var lastCommitIndex = 0
@@ -155,9 +144,7 @@ object HtmlParser {
                         }
                         "img" -> {
                             commitText()
-                            val srcRaw = node.attr("file").takeIf { it.isNotBlank() }
-                                ?: node.attr("zoomfile").takeIf { it.isNotBlank() }
-                                ?: node.attr("src")
+                            val srcRaw = node.attr(node.readerImageAttribute())
                             val src = if (srcRaw.contains("none.gif")) "" else srcRaw
                             val alt = node.attr("alt").takeIf { it.isNotBlank() }
                             if (src.isNotBlank()) {
