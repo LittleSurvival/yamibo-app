@@ -14,7 +14,7 @@ import io.github.littlesurvival.dto.value.PostId
 import io.github.littlesurvival.dto.value.ThreadId
 import io.github.littlesurvival.dto.value.UserId
 import me.thenano.yamibo.yamibo_app.store.auth.CookieStore
-import kotlin.time.Duration.Companion.hours
+import me.thenano.yamibo.yamibo_app.repository.thread.ThreadPageReads
 
 import me.thenano.yamibo.yamibo_app.core.cache.DiskCacheFactory
 
@@ -24,24 +24,13 @@ class AndroidThreadRepository(
     diskCacheFactory: DiskCacheFactory
 ) : ThreadRepository {
 
-    private val threadCache = diskCacheFactory.create<ThreadPage>("thread_page", maxSize = 50, expiration = 24.hours)
+    private val pages = ThreadPageReads(diskCacheFactory, cookieStore)
 
     override suspend fun fetchThread(
-        tid: ThreadId,
-        authorId: UserId?,
-        page: Int,
-        reverse: Boolean,
-    ): YamiboResult<ThreadPage> {
-        yamiboClient.setCookie(cookieStore.load() ?: "")
-        val result = yamiboClient.fetchThreadById(tid, authorId, reverse, page)
-
-        if (result is YamiboResult.Success) {
-            if (!reverse) {
-                val key = ThreadRepository.ThreadCacheKey(tid.value, page, authorId?.value).toCacheKey()
-                threadCache.set(key, result.value)
-            }
-        }
-        return result
+        tid: ThreadId, authorId: UserId?, page: Int, reverse: Boolean,
+    ): YamiboResult<ThreadPage> = pages.fetch(tid, authorId, page, reverse) { session ->
+        yamiboClient.setCookie(session)
+        yamiboClient.fetchThreadById(tid, authorId, reverse, page)
     }
 
     override suspend fun fetchFindPost(
@@ -88,17 +77,12 @@ class AndroidThreadRepository(
         return yamiboClient.fetchCommentPost(tId, pId, message, formHash)
     }
 
-    override fun getCachedThread(tid: ThreadId, authorId: UserId?, page: Int): ThreadPage? {
-        val key = ThreadRepository.ThreadCacheKey(tid.value, page, authorId?.value).toCacheKey()
-        return threadCache.get(key)
-    }
+    override fun knownPageForPost(tid: ThreadId, author: UserId?, pid: PostId): Int? = pages.pageOf(tid, author, pid)
 
-    override fun setCachedThread(tid: ThreadId, authorId: UserId?, page: Int, threadPage: ThreadPage) {
-        val key = ThreadRepository.ThreadCacheKey(tid.value, page, authorId?.value).toCacheKey()
-        threadCache.set(key, threadPage)
-    }
+    override fun getCachedThread(tid: ThreadId, authorId: UserId?, page: Int) = pages.get(tid, authorId, page)
 
-    override fun clearCachedThread(tid: ThreadId) {
-        threadCache.removeByPrefix(ThreadRepository.ThreadCacheKey.keyPrefix(tid.value))
-    }
+    override fun setCachedThread(tid: ThreadId, authorId: UserId?, page: Int, threadPage: ThreadPage) =
+        pages.set(tid, authorId, page, threadPage)
+
+    override fun clearCachedThread(tid: ThreadId) = pages.clear(tid)
 }

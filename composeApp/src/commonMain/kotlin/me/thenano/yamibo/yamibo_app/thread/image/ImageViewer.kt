@@ -235,13 +235,14 @@ fun ImageViewer(
     }
     // Coil's default model equality ignores cache policies, so changing the request alone
     // does not restart a failed load. Each retry owns a fresh painter and request job.
-    val painter = key(fullUrl, localRetryKey, externalRetryKey) {
+    val painterKey = imageRequest.memoryCacheKey ?: fullUrl
+    val painter = key(painterKey, localRetryKey, externalRetryKey) {
         rememberAsyncImagePainter(model = sizedImageRequest)
     }
     val painterState by key(painter) { painter.state.collectAsState() }
     val sharedPainterCache = LocalReaderImagePainterCache.current
-    var lastSuccessfulPainter by remember(fullUrl) {
-        mutableStateOf(sharedPainterCache?.get(fullUrl) ?: ReaderImagePainterMemoryCache[fullUrl])
+    var lastSuccessfulPainter by remember(painterKey) {
+        mutableStateOf(sharedPainterCache?.get(painterKey) ?: ReaderImagePainterMemoryCache[painterKey])
     }
     val latestOverlayOpen by rememberUpdatedState(isOverlayOpen)
     val latestOnSingleTap by rememberUpdatedState(onSingleTap)
@@ -351,8 +352,8 @@ fun ImageViewer(
                     is AsyncImagePainter.State.Success -> {
                         SideEffect {
                             lastSuccessfulPainter = state.painter
-                            sharedPainterCache?.put(fullUrl, state.painter)
-                            ReaderImagePainterMemoryCache.put(fullUrl, state.painter)
+                            sharedPainterCache?.put(painterKey, state.painter)
+                            ReaderImagePainterMemoryCache.put(painterKey, state.painter)
                         }
                         LaunchedEffect(fullUrl, localRetryKey, externalRetryKey, onSuccess) {
                             if (!hasReportedSuccess) {

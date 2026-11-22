@@ -33,31 +33,41 @@ class AndroidReadHistoryRepository(
     }
 
     override fun savePositionSynchronously(history: ReadHistoryRepository.ThreadReadingHistory) {
-        queries.upsert(
-            threadId = history.threadId.value.toLong(),
-            threadType = history.threadType.name,
-            threadName = history.threadName,
-            threadCover = history.threadCover,
-            forumName = history.forumName,
-            forumId = history.forumId?.value?.toLong(),
-            authorId = history.authorId?.value?.toLong() ?: 0L,
-            page = history.page.toLong(),
-            postId = history.postId.value.toLong(),
-            postTitle = history.postTitle,
-            anchorPostId = history.anchorPostId,
-            anchorPostRatio = history.anchorPostRatio?.toDouble(),
-            anchorBlockId = history.anchorBlockId,
-            anchorBlockType = history.anchorBlockType,
-            anchorBlockRatio = history.anchorBlockRatio?.toDouble(),
-            globalScrollY = history.globalScrollY?.toLong(),
-            viewportHeight = history.viewportHeight?.toLong(),
-            firstVisibleItemIndex = history.firstVisibleItemIndex?.toLong(),
-            firstVisibleItemOffset = history.firstVisibleItemOffset?.toLong(),
-            historyOrigin = history.historyOrigin.name,
-            lastVisitTime = history.lastVisitTime,
-            lastUpdatedTime = history.lastUpdatedTime
-        )
-        queries.trimToLatest(MAX_HISTORY_ITEMS)
+        db.transaction {
+            val previous = queries.timeOfOrigin(history.threadId.value.toLong(), history.threadType.name,
+                history.authorId?.value?.toLong() ?: 0L, history.historyOrigin.name).executeAsOneOrNull()
+            if (previous != null && previous > history.lastVisitTime) return@transaction
+            queries.upsert(
+                threadId = history.threadId.value.toLong(),
+                threadType = history.threadType.name,
+                threadName = history.threadName,
+                threadCover = history.threadCover,
+                forumName = history.forumName,
+                forumId = history.forumId?.value?.toLong(),
+                authorId = history.authorId?.value?.toLong() ?: 0L,
+                page = history.page.toLong(),
+                postId = history.postId.value.toLong(),
+                postTitle = history.postTitle,
+                anchorPostId = history.anchorPostId,
+                anchorPostRatio = history.anchorPostRatio?.toDouble(),
+                anchorBlockId = history.anchorBlockId,
+                anchorBlockType = history.anchorBlockType,
+                anchorBlockRatio = history.anchorBlockRatio?.toDouble(),
+                globalScrollY = history.globalScrollY?.toLong(),
+                viewportHeight = history.viewportHeight?.toLong(),
+                firstVisibleItemIndex = history.firstVisibleItemIndex?.toLong(),
+                firstVisibleItemOffset = history.firstVisibleItemOffset?.toLong(),
+                historyOrigin = history.historyOrigin.name,
+                lastVisitTime = history.lastVisitTime,
+                lastUpdatedTime = history.lastUpdatedTime
+            )
+            history.floorAuthor?.let { author ->
+                queries.saveTextAnchor(history.threadId.value.toLong(), history.threadType.name,
+                    history.authorId?.value?.toLong() ?: 0L, history.historyOrigin.name, history.lastVisitTime,
+                    author.value.toLong(), history.imageSource, history.imageOccurrence?.toLong())
+            }
+            queries.trimToLatest(MAX_HISTORY_ITEMS)
+        }
     }
 
     override suspend fun getLastVisitTimes(
@@ -130,7 +140,18 @@ class AndroidReadHistoryRepository(
             threadId = tid.value.toLong(),
             threadType = threadType.name,
             authorId = authorId?.value?.toLong() ?: 0L
-        ).executeAsOneOrNull()?.toHistory()
+        ).executeAsOneOrNull()?.toAnchoredHistory()
+    }
+
+    override suspend fun getLatestTextPosition(tid: ThreadId) =
+        queries.latestDirectInThread(tid.value.toLong()).executeAsOneOrNull()?.toAnchoredHistory()
+
+    private fun ReadingHistory.toAnchoredHistory(): ReadHistoryRepository.ThreadReadingHistory {
+        val basic = toHistory()
+        val anchor = queries.getTextAnchor(threadId, threadType, authorId, historyOrigin, lastVisitTime)
+            .executeAsOneOrNull() ?: return basic
+        return basic.copy(floorAuthor = UserId(anchor.floorAuthor.toInt()), imageSource = anchor.imageSource,
+            imageOccurrence = anchor.occurrence?.toInt())
     }
 
     override suspend fun getHistoryPage(
@@ -237,30 +258,44 @@ class AndroidReadHistoryRepository(
     }
 
     override fun saveImagePositionSynchronously(history: ReadHistoryRepository.ImageReadingHistory) {
-        imageQueries.upsert(
-            postId = history.postId.value.toLong(),
-            threadId = history.threadId.value.toLong(),
-            pageIndex = history.pageIndex.toLong(),
-            totalPages = history.totalPages.toLong(),
-            firstVisibleItemIndex = history.firstVisibleItemIndex?.toLong(),
-            firstVisibleItemOffset = history.firstVisibleItemOffset?.toLong(),
-            lastVisitTime = history.lastVisitTime
-        )
-        imageQueries.trimToLatest(MAX_HISTORY_ITEMS)
+        db.transaction {
+            val observed = imageQueries.getByPostId(history.postId.value.toLong()).executeAsOneOrNull()?.lastVisitTime
+            if (observed != null && observed > history.lastVisitTime) return@transaction
+            imageQueries.upsert(
+                postId = history.postId.value.toLong(),
+                threadId = history.threadId.value.toLong(),
+                pageIndex = history.pageIndex.toLong(),
+                totalPages = history.totalPages.toLong(),
+                firstVisibleItemIndex = history.firstVisibleItemIndex?.toLong(),
+                firstVisibleItemOffset = history.firstVisibleItemOffset?.toLong(),
+                lastVisitTime = history.lastVisitTime
+            )
+            history.anchor?.let { anchor ->
+                imageQueries.saveAnchor(history.postId.value.toLong(), history.lastVisitTime, anchor.floorPid.value.toLong(),
+                    anchor.sourceId, anchor.occurrence.toLong(), anchor.forumPage.toLong(), anchor.scopeAuthor?.value?.toLong())
+            }
+            imageQueries.trimToLatest(MAX_HISTORY_ITEMS)
+        }
     }
 
     override suspend fun getImagePosition(postId: PostId): ReadHistoryRepository.ImageReadingHistory? {
-        return imageQueries.getByPostId(postId.value.toLong()).executeAsOneOrNull()?.let {
-            ReadHistoryRepository.ImageReadingHistory(
-                postId = PostId(it.postId.toInt()),
-                threadId = ThreadId(it.threadId.toInt()),
-                pageIndex = it.pageIndex.toInt(),
-                totalPages = it.totalPages.toInt(),
-                firstVisibleItemIndex = it.firstVisibleItemIndex?.toInt(),
-                firstVisibleItemOffset = it.firstVisibleItemOffset?.toInt(),
-                lastVisitTime = it.lastVisitTime
-            )
-        }
+        return imageQueries.getByPostId(postId.value.toLong()).executeAsOneOrNull()?.toReaderPosition()
+    }
+
+    override suspend fun getLatestImagePosition(tid: ThreadId) =
+        imageQueries.latestInThread(tid.value.toLong()).executeAsOneOrNull()?.toReaderPosition()
+
+    private fun me.thenano.yamibo.yamibo_app.ImageReadingHistory.toReaderPosition(): ReadHistoryRepository.ImageReadingHistory {
+        val anchor = imageQueries.getAnchor(postId, lastVisitTime).executeAsOneOrNull()
+        return ReadHistoryRepository.ImageReadingHistory(
+            postId = PostId(postId.toInt()), threadId = ThreadId(threadId.toInt()),
+            pageIndex = pageIndex.toInt(), totalPages = totalPages.toInt(),
+            firstVisibleItemIndex = firstVisibleItemIndex?.toInt(), firstVisibleItemOffset = firstVisibleItemOffset?.toInt(),
+            lastVisitTime = lastVisitTime, anchor = anchor?.let {
+                ReadHistoryRepository.ImageAnchor(PostId(it.floorPid.toInt()), it.sourceId, it.occurrence.toInt(),
+                    it.page.toInt(), it.authorId?.let { uid -> UserId(uid.toInt()) })
+            },
+        )
     }
 
     private val mangaTagQueries = db.mangaTagReadingHistoryQueries

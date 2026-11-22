@@ -3,6 +3,8 @@ package me.thenano.yamibo.yamibo_app.repository.appsync
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
 import me.thenano.yamibo.yamibo_app.repository.SynchronousReaderPersistence
@@ -24,16 +26,15 @@ internal class OperationRecordingReadHistoryRepository(
 
     override suspend fun savePosition(history: ReadHistoryRepository.ThreadReadingHistory) =
         withContext(storageDispatcher) {
-        val existing = delegate.getPosition(history.threadId, history.threadType, history.authorId)
-        recordSynchronous(
-            "reading.thread",
-            threadEntityId(history),
-            if (existing == null) SyncOperationKind.Put else SyncOperationKind.Patch,
-            history.fields(),
-        ) {
-            delegate.synchronousReaderPersistence().savePositionSynchronously(history)
+            historyWriteMutex.withLock {
+                val existing = delegate.getPosition(history.threadId, history.threadType, history.authorId)
+                if (existing?.historyOrigin == history.historyOrigin && existing.lastVisitTime > history.lastVisitTime) return@withLock
+                recordSynchronous("reading.thread", threadEntityId(history),
+                    if (existing == null) SyncOperationKind.Put else SyncOperationKind.Patch, history.fields()) {
+                    delegate.synchronousReaderPersistence().savePositionSynchronously(history)
+                }
+            }
         }
-    }
 
     override suspend fun deleteHistory(
         tid: io.github.littlesurvival.dto.value.ThreadId,
@@ -64,18 +65,23 @@ internal class OperationRecordingReadHistoryRepository(
         }
     }
 
+    private val historyWriteMutex = Mutex()
+
     override suspend fun saveImagePosition(history: ReadHistoryRepository.ImageReadingHistory) =
         withContext(storageDispatcher) {
-        val existing = delegate.getImagePosition(history.postId)
-        record(
-            "reading.image",
-            history.postId.value.toString(),
-            if (existing == null) SyncOperationKind.Put else SyncOperationKind.Patch,
-            history.fields(),
-        ) {
-            delegate.synchronousReaderPersistence().saveImagePositionSynchronously(history)
+            historyWriteMutex.withLock {
+                val existing = delegate.getImagePosition(history.postId)
+                if (existing != null && existing.lastVisitTime > history.lastVisitTime) return@withLock
+                record(
+                    "reading.image",
+                    history.postId.value.toString(),
+                    if (existing == null) SyncOperationKind.Put else SyncOperationKind.Patch,
+                    history.fields(),
+                ) {
+                    delegate.synchronousReaderPersistence().saveImagePositionSynchronously(history)
+                }
+            }
         }
-    }
 
     override suspend fun saveTagMangaReaderModeHistory(
         history: ReadHistoryRepository.TagMangaReadingHistory,

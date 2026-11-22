@@ -45,6 +45,8 @@ interface ThreadRepository {
     suspend fun ratePost(tId: ThreadId, pId: PostId, score: Int, reason: String, formHash: FormHash, noticeAuthor: Boolean = false): YamiboResult<String>
     suspend fun commentPost(tId: ThreadId, pId: PostId, message: String, formHash: FormHash): YamiboResult<String>
 
+    fun knownPageForPost(tid: ThreadId, author: UserId?, pid: PostId): Int? = null
+
     fun getCachedThread(tid: ThreadId, authorId: UserId? = null, page: Int = 1): ThreadPage?
     fun setCachedThread(tid: ThreadId, authorId: UserId? = null, page: Int, threadPage: ThreadPage)
     fun clearCachedThread(tid: ThreadId)

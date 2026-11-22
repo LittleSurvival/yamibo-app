@@ -1,5 +1,7 @@
 package me.thenano.yamibo.yamibo_app.thread.reader
 
+import me.thenano.yamibo.yamibo_app.repository.thread.textReaderStart
+import me.thenano.yamibo.yamibo_app.repository.thread.readerImageSourceId
 import me.thenano.yamibo.yamibo_app.repository.thread.readerImageUrls
 import me.thenano.yamibo.yamibo_app.repository.thread.fetchReaderStartPage
 import me.thenano.yamibo.yamibo_app.repository.thread.isValidThreadPage
@@ -133,6 +135,8 @@ private data class ReaderBodySegment(
     val blocks: List<HtmlBlock>,
     val anchorBlockId: String?,
     val anchorBlockType: String?,
+    val imageSource: String? = null,
+    val imageOccurrence: Int? = null,
 )
 
 private data class ReaderListEntry(
@@ -144,6 +148,8 @@ private data class ReaderListEntry(
     val bodyBlocks: List<HtmlBlock> = emptyList(),
     val anchorBlockId: String? = null,
     val anchorBlockType: String? = null,
+    val imageSource: String? = null,
+    val imageOccurrence: Int? = null,
     val footerRenderOptions: PostFooterRenderOptions = PostFooterRenderOptions(),
 ) {
     val isScrollAnchor: Boolean
@@ -538,7 +544,7 @@ internal fun splitLongReaderBlock(block: HtmlBlock): List<HtmlBlock> = when (blo
 }
 
 private fun buildReaderBodySegments(post: Post, contentHtml: String): List<ReaderBodySegment>? {
-    val shouldSegmentImages = post.images.size >= 6
+    val shouldSegmentImages = post.images.isNotEmpty() || contentHtml.contains("<img", ignoreCase = true)
     val shouldSegmentLongText = contentHtml.length >= LONG_READER_HTML_THRESHOLD
     if (!shouldSegmentImages && !shouldSegmentLongText) return null
 
@@ -565,13 +571,19 @@ private fun buildReaderBodySegments(post: Post, contentHtml: String): List<Reade
         if (shouldSegmentLongText) splitLongReaderBlock(block) else listOf(block)
     }
 
+    val occurrences = mutableMapOf<String, Int>()
     segmentableBlocks.forEach { block ->
-        if (block is HtmlBlock.Image && shouldSegmentImages) {
+        if (block is HtmlBlock.Image && !block.isEmoticon && shouldSegmentImages) {
+            val source = readerImageSourceId(block.url)
+            val occurrence = occurrences[source] ?: 0
+            occurrences[source] = occurrence + 1
             flushCurrentBlocks()
             segments += ReaderBodySegment(
                 blocks = listOf(block),
                 anchorBlockId = block.anchorId.takeIf { it.isNotBlank() },
                 anchorBlockType = "Image",
+                imageSource = source,
+                imageOccurrence = occurrence,
             )
         } else {
             val blockTextLength = block.readerTextLength()
@@ -588,7 +600,7 @@ private fun buildReaderBodySegments(post: Post, contentHtml: String): List<Reade
     val imageSegmentCount = segments.count { it.anchorBlockType == "Image" }
     return when {
         shouldSegmentLongText && segments.size > 1 -> segments
-        shouldSegmentImages && imageSegmentCount >= 6 && segments.size > 2 -> segments
+        imageSegmentCount > 0 -> segments
         else -> null
     }
 }
@@ -759,6 +771,7 @@ internal fun ThreadReaderScreen(
         mutableStateOf(targetPid?.value?.toLong())
     }
     var isRestoringSavedPosition by remember { mutableStateOf(false) }
+    var preserveRestoredProgress by remember(tid, authorId, threadType) { mutableStateOf(false) }
     var canPersistReadingState by remember(tid, targetPid) { mutableStateOf(false) }
     var hasPresentedInitialSinglePage by remember(tid, targetPid) { mutableStateOf(false) }
     var pendingTargetPid by remember(tid, targetPid) { mutableStateOf(targetPid?.value?.toLong()) }
@@ -1137,10 +1150,13 @@ internal fun ThreadReaderScreen(
     val isNovelForum = forumId?.let { YamiboForum.isNovelForum(it) } == true
     val showRegularFirstPostTagBanner = isMangaForum || (!isNovelForum && !isNovelThread)
     val showNovelFirstPostTagBanner = isNovelThread && isNovelForum
-    val segmentedBodyByPostId = remember(posts, convertedContentVersion) {
-        posts.associate { post ->
-            val pid = post.pid.value.toLong()
-            pid to buildReaderBodySegments(post, convertedContentByPid[pid] ?: post.contentHtml)
+    val segmentedBodyByPostId by produceState(emptyMap<Long, List<ReaderBodySegment>?>(), posts, convertedContentVersion) {
+        val content = convertedContentByPid.toMap()
+        value = withContext(Dispatchers.Default) {
+            posts.associate { post ->
+                val pid = post.pid.value.toLong()
+                pid to buildReaderBodySegments(post, content[pid] ?: post.contentHtml)
+            }
         }
     }
     val readerEntries = remember(
@@ -1155,6 +1171,7 @@ internal fun ThreadReaderScreen(
             posts.forEachIndexed { index, post ->
                 val postId = post.pid.value.toLong()
                 val postPage = pageByPid[postId] ?: 1
+                if (!segmentedBodyByPostId.containsKey(postId)) return@forEachIndexed
                 val segmentedBody = segmentedBodyByPostId[postId]
 
                 if (segmentedBody.isNullOrEmpty()) {
@@ -1188,6 +1205,8 @@ internal fun ThreadReaderScreen(
                                 bodyBlocks = segment.blocks,
                                 anchorBlockId = segment.anchorBlockId,
                                 anchorBlockType = segment.anchorBlockType,
+                                imageSource = segment.imageSource,
+                                imageOccurrence = segment.imageOccurrence,
                             )
                         )
                     }
@@ -1895,18 +1914,6 @@ internal fun ThreadReaderScreen(
             }
         }
     }
-    val entryIndexByAnchorBlockId = remember(readerEntries) {
-        buildMap {
-            readerEntries.forEachIndexed { index, entry ->
-                entry.anchorBlockId?.let { anchorBlockId ->
-                    if (!containsKey(anchorBlockId)) {
-                        put(anchorBlockId, index)
-                    }
-                }
-            }
-        }
-    }
-
     fun nearestSinglePageModelIndex(entryIndex: Int): Int {
         if (singlePageEntries.isEmpty()) return 0
         return singlePageEntries
@@ -1923,6 +1930,7 @@ internal fun ThreadReaderScreen(
     }
 
     fun moveSinglePage(delta: Int): Boolean {
+        preserveRestoredProgress = false
         if (singlePageEntries.isEmpty()) return false
         val currentPosition = singlePageModelIndex.coerceIn(0, singlePageEntries.lastIndex)
         val targetPosition = (currentPosition + delta).coerceIn(0, singlePageEntries.lastIndex)
@@ -2108,6 +2116,9 @@ internal fun ThreadReaderScreen(
                 authorId = authorId,
                 page = postPage,
                 postId = centerPost.pid,
+                floorAuthor = centerPost.author.uid,
+                imageSource = centerReaderEntry.imageSource,
+                imageOccurrence = centerReaderEntry.imageOccurrence,
                 postTitle = centerPost.title,
                 anchorPostId = centerPost.pid.value.toLong(),
                 anchorPostRatio = postRatio,
@@ -2175,6 +2186,9 @@ internal fun ThreadReaderScreen(
             authorId = authorId,
             page = postPage,
             postId = centerPost.pid,
+            floorAuthor = centerPost.author.uid,
+            imageSource = centerReaderEntry.imageSource,
+            imageOccurrence = centerReaderEntry.imageOccurrence,
             postTitle = centerPost.title,
             anchorPostId = centerPost.pid.value.toLong(),
             anchorPostRatio = if (centerReaderEntry.kind == ReaderEntryKind.WholePost) entryRatio else null,
@@ -2228,8 +2242,7 @@ internal fun ThreadReaderScreen(
     }
 
     fun canWriteReadingState(): Boolean {
-        return canPersistReadingState ||
-            (state == ReaderState.Success && readerEntries.isNotEmpty() && !isRestoringSavedPosition)
+        return canPersistReadingState && !preserveRestoredProgress && !isRestoringSavedPosition
     }
 
     fun progressUpdateForVisiblePost(
@@ -2530,6 +2543,7 @@ internal fun ThreadReaderScreen(
     }
 
     suspend fun scrollToChapterTarget(index: Int, pid: Long) {
+        preserveRestoredProgress = false
         val progressPercent = progressCoordinator.chapterStates.value[pid]
             ?.progressPercent
             ?.takeIf { it in 1..99 }
@@ -2633,7 +2647,7 @@ internal fun ThreadReaderScreen(
         coverUrl = resolvedCoverUrl
         scope.launch {
             contentCoverRepository.setManualCover(coverKey, resolvedCoverUrl)
-            if (canPersistReadingState) {
+            if (canWriteReadingState()) {
                 buildHistory()?.copy(threadCover = resolvedCoverUrl)?.let { history ->
                     try {
                         readHistoryRepo.savePosition(history)
@@ -2703,8 +2717,8 @@ internal fun ThreadReaderScreen(
             return true
         }
 
-        fun loadFromCache(): Boolean {
-            val cached = threadRepository.getCachedThread(tid, authorId, page)
+        suspend fun loadFromCache(): Boolean {
+            val cached = withContext(Dispatchers.Default) { threadRepository.getCachedThread(tid, authorId, page) }
                 ?.takeIf { it.isValidThreadPage(tid, page = page, authorId = authorId) }
             if (cached != null) {
                 loadedPostsByPage[page] = cached.posts
@@ -2766,7 +2780,7 @@ internal fun ThreadReaderScreen(
                         if (autoTriggered && page != initialPage && page != 1) {
                             failedAutoLoadPages[page] = i18n(errorMessages.resolve(result))
                         }
-                        if (page == initialPage || page == 1) state = ReaderState.Error(i18n(errorMessages.resolve(result)))
+                        if (posts.isEmpty() || page == initialPage || page == 1) state = ReaderState.Error(i18n(errorMessages.resolve(result)))
                         else feedbackController.post(i18n("載入失敗: {}", i18n(errorMessages.resolve(result))))
                     }
                 }
@@ -2838,6 +2852,17 @@ internal fun ThreadReaderScreen(
     }
 
     suspend fun restoreSavedPosition(savedPosition: ThreadReadingHistory) {
+        if (savedPosition.imageSource != null) {
+            val index = readerEntries.indexOfFirst { entry ->
+                entry.post.pid == savedPosition.postId && entry.imageSource == savedPosition.imageSource &&
+                    entry.imageOccurrence == savedPosition.imageOccurrence
+            }
+            if (index >= 0) {
+                if (isSinglePageMode) setSinglePageEntryIndex(index)
+                listState.scrollToItem(if (isSinglePageMode) 0 else index)
+                return
+            }
+        }
         if (isSinglePageMode) {
             val restoredPageIndex = resolvePageIndexForPersistedAnchor(
                 pages = singlePageEntries.map { it.page },
@@ -2869,7 +2894,7 @@ internal fun ThreadReaderScreen(
         }
 
         if (!savedPosition.anchorBlockId.isNullOrEmpty()) {
-            val blockIndex = entryIndexByAnchorBlockId[savedPosition.anchorBlockId]
+            val blockIndex = readerEntries.indexOfFirst { it.post.pid == savedPosition.postId && it.anchorBlockId == savedPosition.anchorBlockId }.takeIf { it >= 0 }
             if (blockIndex != null) {
                 if (isSinglePageMode) {
                     setSinglePageEntryIndex(blockIndex)
@@ -2953,6 +2978,7 @@ internal fun ThreadReaderScreen(
     val latestSeekEntries by rememberUpdatedState(readerEntries)
     val latestSeekPages by rememberUpdatedState(pageByPid)
     suspend fun seekReader(fraction: Float) {
+        preserveRestoredProgress = false
         val position = fraction.coerceIn(0f, 1f) * totalPages.coerceAtLeast(1)
         val page = (position.toInt() + 1).coerceIn(1, totalPages.coerceAtLeast(1))
         if (!loadPage(page)) return
@@ -2972,80 +2998,54 @@ internal fun ThreadReaderScreen(
 
     // Initial load + position restore
     LaunchedEffect(tid, initialPage, targetPid) {
-        val located = targetPid?.let { pid ->
-            try {
-                val result = threadRepository.fetchReaderStartPage(tid, pid, authorId, initialPage, downloadRepository)
-                (result as? YamiboResult.Success)?.value
-            } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                Logger.w("ThreadReaderScreen", "Could not locate target post", error)
-                null
-            }
-        }
-        val locatedPage = located?.let { it.pageNav?.currentPage ?: 1 }
-        loadPage(locatedPage ?: initialPage, initialSnapshot = located)
-
-        /** Restore position from history if no explicit targetPid */
-        if (!hasRestoredPosition && targetPid != null && threadHistoryOrigin != ReadHistoryRepository.ThreadHistoryOrigin.Direct) {
-            try {
-                val catalogPosition = when (threadHistoryOrigin) {
+        try {
+            val direct = if (targetPid == null) withContext(Dispatchers.Default) {
+                readHistoryRepo.textReaderStart(tid, threadType, authorId, threadRepository, downloadRepository)
+            } else null
+            preserveRestoredProgress = direct?.preserveUntilMoved == true
+            val catalogPosition = if (targetPid == null) null else withContext(Dispatchers.Default) {
+                when (threadHistoryOrigin) {
                     ReadHistoryRepository.ThreadHistoryOrigin.TagCatalog -> catalogTagId
                         ?.let { readHistoryRepo.getTagCatalogThreadHistoryPosition(it) }
-                        ?.takeIf { it.threadId == tid }
-                        ?.toThreadReadingHistory()
-
+                        ?.takeIf { it.threadId == tid && it.postId == targetPid }?.toThreadReadingHistory()
                     ReadHistoryRepository.ThreadHistoryOrigin.RssCatalog -> catalogRssSubscriptionId
                         ?.let { readHistoryRepo.getRssCatalogThreadHistoryPosition(it) }
-                        ?.takeIf { it.threadId == tid }
-                        ?.toThreadReadingHistory()
-
+                        ?.takeIf { it.threadId == tid && it.postId == targetPid }?.toThreadReadingHistory()
                     ReadHistoryRepository.ThreadHistoryOrigin.Direct -> null
                 }
-                if (catalogPosition != null) {
-                    catalogPosition.threadCover?.let { savedCover ->
-                        coverUrl = savedCover
-                        contentCoverRepository.setAutomaticCover(coverKey, savedCover)
-                        catalogCoverKey?.let { contentCoverRepository.setAutomaticCover(it, savedCover) }
-                    }
-                    if (catalogPosition.page != initialPage) {
-                        loadPage(catalogPosition.page)
-                    }
-                    pendingSavedPosition = catalogPosition
-                    imageGeometryPriorityPostId = catalogPosition.anchorPostId
-                    pendingTargetPid = null
-                }
-            } catch (error: Exception) {
-                Logger.w("ThreadReaderScreen", "Failed to restore catalog reading position tid=${tid.value}", error)
-                // Fall through to targetPid restore.
             }
-        }
-
-        if (!hasRestoredPosition && targetPid == null) {
-            try {
-                val savedPosition = readHistoryRepo.getPosition(tid, threadType, authorId)
-                if (savedPosition != null) {
-                    savedPosition.threadCover?.let { savedCover ->
-                        coverUrl = savedCover
-                        contentCoverRepository.setAutomaticCover(coverKey, savedCover)
-                        catalogCoverKey?.let { contentCoverRepository.setAutomaticCover(it, savedCover) }
-                    }
-                    // Ensure the saved page is loaded
-                    if (savedPosition.page != initialPage) {
-                        loadPage(savedPosition.page)
-                    }
-                    pendingSavedPosition = savedPosition
-                    imageGeometryPriorityPostId = savedPosition.anchorPostId
-                } else {
-                    hasRestoredPosition = true
-                    canPersistReadingState = true
+            val saved = catalogPosition ?: direct?.history
+            val snapshot = direct?.snapshot ?: targetPid?.let { pid ->
+                withContext(Dispatchers.Default) {
+                    val result = threadRepository.fetchReaderStartPage(tid, pid, authorId, saved?.page ?: initialPage, downloadRepository)
+                    (result as? YamiboResult.Success)?.value
                 }
-                hasResolvedInitialHistoryLookup = true
-            } catch (error: Exception) {
-                Logger.w("ThreadReaderScreen", "Failed to restore reading position tid=${tid.value}", error)
+            }
+            val page = snapshot?.let { it.pageNav?.currentPage ?: 1 } ?: saved?.page ?: initialPage
+            if (saved != null) {
+                pendingTargetPid = null
+                pendingSavedPosition = saved
+                imageGeometryPriorityPostId = saved.anchorPostId
+                saved.threadCover?.let { cover ->
+                    coverUrl = cover
+                    contentCoverRepository.setAutomaticCover(coverKey, cover)
+                    catalogCoverKey?.let { contentCoverRepository.setAutomaticCover(it, cover) }
+                }
+            }
+            hasResolvedInitialHistoryLookup = true
+            val loaded = loadPage(page, initialSnapshot = snapshot)
+            if (saved == null && targetPid == null && loaded) {
                 hasRestoredPosition = true
                 canPersistReadingState = true
-                hasResolvedInitialHistoryLookup = true
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Logger.w("ThreadReaderScreen", "Failed to resolve reader start", error)
+            hasResolvedInitialHistoryLookup = true
+            if (loadPage(initialPage) && targetPid == null) {
+                hasRestoredPosition = true
+                canPersistReadingState = true
             }
         }
     }
@@ -3646,6 +3646,7 @@ internal fun ThreadReaderScreen(
                                         (trackedChange.position - down.position).getDistance() > viewConfiguration.touchSlop
                                     ) {
                                         exceededTouchSlop = true
+                                        preserveRestoredProgress = false
                                     }
                                     pointerEvent = awaitPointerEvent(PointerEventPass.Initial)
                                 }
@@ -3655,6 +3656,7 @@ internal fun ThreadReaderScreen(
                                     (finalChange.position - down.position).getDistance() > viewConfiguration.touchSlop
                                 ) {
                                     exceededTouchSlop = true
+                                        preserveRestoredProgress = false
                                 }
                                 readerScrollSession.scheduleIdle(scope) {
                                     if (!exceededTouchSlop) {

@@ -11,6 +11,10 @@ import me.thenano.yamibo.yamibo_app.repository.AuthRepository
 import me.thenano.yamibo.yamibo_app.repository.ForumRepository
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import okio.ByteString.Companion.encodeUtf8
+import kotlinx.coroutines.IO
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import me.thenano.yamibo.yamibo_app.repository.thread.InFlightReads
 import kotlinx.serialization.Serializable
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
 import kotlin.time.Duration.Companion.hours
@@ -19,6 +23,8 @@ class SmartComicCatalog(factory: DiskCacheFactory) {
     @Serializable
     private data class Snapshot(val checkedAt: Long, val threads: List<ThreadSummary>)
     private val cache = factory.create<Snapshot>("smart_comic", maxSize = 80)
+
+    private val searches = InFlightReads<String, YamiboResult<List<ThreadSummary>>>()
 
     fun chapters(seed: ThreadSummary, candidates: List<ThreadSummary>): List<ThreadSummary> {
         val work = smartComicTitle(seed.title)
@@ -40,19 +46,30 @@ class SmartComicCatalog(factory: DiskCacheFactory) {
         auth: AuthRepository, refresh: Boolean, onCached: (List<ThreadSummary>) -> Unit,
     ): YamiboResult<List<ThreadSummary>> {
         val work = smartComicTitle(seed.title)
-        if (work.nameKey.length < 2) return YamiboResult.Success(chapters(seed, local))
+        suspend fun ordered(threads: List<ThreadSummary>) = withContext(Dispatchers.Default) { chapters(seed, threads) }
+        if (work.nameKey.length < 2) return YamiboResult.Success(ordered(local))
         val account = auth.currentUser()?.uid
         val key = listOf(account?.value, fid.value, work.nameKey, work.credit ?: seed.author?.uid?.value)
             .joinToString("|").encodeUtf8().sha256().hex()
-        account?.let { cache.get(key) }?.let { snapshot ->
-            val sorted = chapters(seed, local + snapshot.threads)
-            if (!refresh && currentTimeMillis() - snapshot.checkedAt in 0L until 2.hours.inWholeMilliseconds) {
-                return YamiboResult.Success(sorted)
-            }
-            onCached(sorted)
+        val snapshot = account?.let { withContext(Dispatchers.IO) { cache.get(key) } }
+        val initial = ordered(local + snapshot?.threads.orEmpty())
+        if (auth.currentUser()?.uid != account) return YamiboResult.NotLoggedIn
+        if (!refresh && snapshot != null && currentTimeMillis() - snapshot.checkedAt in 0L until 2.hours.inWholeMilliseconds) {
+            return YamiboResult.Success(initial)
         }
+        onCached(initial)
+        return searches.read(key) { search(forum, auth, fid, work.query) }.flatMapSuccess { candidates ->
+            val sorted = ordered(local + candidates)
+            if (auth.currentUser()?.uid != account) return@flatMapSuccess YamiboResult.NotLoggedIn
+            if (account != null) withContext(Dispatchers.IO) { cache.set(key, Snapshot(currentTimeMillis(), sorted)) }
+            YamiboResult.Success(sorted)
+        }
+    }
+
+    private suspend fun search(forum: ForumRepository, auth: AuthRepository, fid: ForumId, name: String):
+        YamiboResult<List<ThreadSummary>> {
         // Discuz limits search text. Match the full title locally, including for truncated queries.
-        val query = work.query.take(32).trimEnd()
+        val query = name.take(32).trimEnd()
         val first = auth.refreshFormHash().flatMapSuccess { forum.fetchSearch(query, fid, it) }
         return first.flatMapSuccess { firstPage ->
             val candidates = mutableListOf<ThreadSummary>()
@@ -75,9 +92,7 @@ class SmartComicCatalog(factory: DiskCacheFactory) {
                     else -> return@flatMapSuccess YamiboResult.Failure(result.message())
                 }
             }
-            val sorted = chapters(seed, local + candidates)
-            if (account != null && auth.currentUser()?.uid == account) cache.set(key, Snapshot(currentTimeMillis(), sorted))
-            YamiboResult.Success(sorted)
+            YamiboResult.Success(candidates)
         }
     }
 }

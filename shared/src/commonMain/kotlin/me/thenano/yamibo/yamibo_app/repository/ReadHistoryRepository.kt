@@ -94,7 +94,12 @@ interface ReadHistoryRepository {
         val historyOrigin: ThreadHistoryOrigin = ThreadHistoryOrigin.Direct,
 
         override val lastVisitTime: Long,
+        val floorAuthor: UserId? = null,
+        val imageSource: String? = null,
+        val imageOccurrence: Int? = null,
     ) : AnyReadingHistory
+
+    suspend fun getLatestTextPosition(tid: ThreadId): ThreadReadingHistory?
 
     /** Save or update a reading position */
     suspend fun savePosition(history: ThreadReadingHistory)
@@ -236,8 +241,19 @@ interface ReadHistoryRepository {
         val totalPages: Int,
         val firstVisibleItemIndex: Int? = null,
         val firstVisibleItemOffset: Int? = null,
-        override val lastVisitTime: Long
+        override val lastVisitTime: Long,
+        val anchor: ImageAnchor? = null,
     ) : AnyReadingHistory
+
+    data class ImageAnchor(
+        val floorPid: PostId,
+        val sourceId: String,
+        val occurrence: Int,
+        val forumPage: Int,
+        val scopeAuthor: UserId?,
+    )
+
+    suspend fun getLatestImagePosition(tid: ThreadId): ImageReadingHistory?
 
     /** Save or update a position for an image reading session */
     suspend fun saveImagePosition(history: ImageReadingHistory)

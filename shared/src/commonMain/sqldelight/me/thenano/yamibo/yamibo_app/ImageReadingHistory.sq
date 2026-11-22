@@ -29,3 +29,13 @@ WHERE postId IN (
     ORDER BY lastVisitTime DESC
     LIMIT -1 OFFSET ?
 );
+
+latestInThread:
+SELECT * FROM ImageReadingHistory WHERE threadId = :threadId ORDER BY lastVisitTime DESC, postId LIMIT 1;
+
+getAnchor:
+SELECT * FROM ReaderImageAnchor WHERE historyPostId = :postId AND observedAt = :observedAt;
+
+saveAnchor:
+INSERT OR REPLACE INTO ReaderImageAnchor(historyPostId, observedAt, floorPid, sourceId, occurrence, page, authorId)
+VALUES (?, ?, ?, ?, ?, ?, ?);

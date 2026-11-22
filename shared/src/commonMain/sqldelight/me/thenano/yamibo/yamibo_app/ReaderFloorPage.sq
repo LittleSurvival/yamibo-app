@@ -1,0 +1,11 @@
+getPage:
+SELECT page FROM ReaderFloorPage WHERE accessScope = ? AND threadId = ? AND authorScope = ? AND pid = ?;
+
+clearPage:
+DELETE FROM ReaderFloorPage WHERE accessScope = ? AND threadId = ? AND authorScope = ? AND page = ?;
+
+rememberFloor:
+INSERT OR REPLACE INTO ReaderFloorPage(accessScope, threadId, authorScope, pid, page) VALUES (?, ?, ?, ?, ?);
+
+clearThread:
+DELETE FROM ReaderFloorPage WHERE threadId = ?;

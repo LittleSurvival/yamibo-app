@@ -317,7 +317,10 @@ internal fun NovelThreadDetailScreen(tid: ThreadId, title: String, authorId: Use
                     ?.takeIf { it.isValidThreadPage(tid, page = page, authorId = authorId) }
                 val local = downloaded ?: threadRepository.getCachedThread(tid, authorId, page)
                     ?.takeIf { it.isValidThreadPage(tid, page = page, authorId = authorId) }
-                local?.let(::showPage)
+                if (local != null) {
+                    showPage(local)
+                    return
+                }
             }
             when (val result = threadRepository.fetchThread(tid, authorId, page).validatedThreadPage(tid, page = page, authorId = authorId)) {
                 is YamiboResult.Success -> {

@@ -1,0 +1,44 @@
+CREATE TABLE ReaderImageAnchor (
+    historyPostId INTEGER PRIMARY KEY NOT NULL,
+    observedAt INTEGER NOT NULL,
+    floorPid INTEGER NOT NULL,
+    sourceId TEXT NOT NULL,
+    occurrence INTEGER NOT NULL,
+    page INTEGER NOT NULL,
+    authorId INTEGER
+);
+
+CREATE INDEX imageHistoryThreadTime ON ImageReadingHistory(threadId, lastVisitTime DESC);
+CREATE TRIGGER deleteReaderImageAnchor AFTER DELETE ON ImageReadingHistory
+BEGIN
+    DELETE FROM ReaderImageAnchor WHERE historyPostId = old.postId;
+END;
+
+CREATE TABLE ReaderTextAnchor (
+    threadId INTEGER NOT NULL,
+    threadType TEXT NOT NULL,
+    authorId INTEGER NOT NULL,
+    origin TEXT NOT NULL,
+    observedAt INTEGER NOT NULL,
+    floorAuthor INTEGER NOT NULL,
+    imageSource TEXT,
+    occurrence INTEGER,
+    PRIMARY KEY(threadId, threadType, authorId, origin)
+);
+CREATE TRIGGER deleteReaderTextAnchor AFTER DELETE ON ReadingHistory
+BEGIN
+    DELETE FROM ReaderTextAnchor WHERE threadId = old.threadId AND threadType = old.threadType
+        AND authorId = old.authorId AND origin = old.historyOrigin;
+END;
+
+CREATE TABLE ReaderFloorPage (
+    accessScope TEXT NOT NULL,
+    threadId INTEGER NOT NULL,
+    authorScope INTEGER NOT NULL,
+    pid INTEGER NOT NULL,
+    page INTEGER NOT NULL,
+    PRIMARY KEY (accessScope, threadId, authorScope, pid)
+);
+CREATE INDEX floorByPage ON ReaderFloorPage(accessScope, threadId, authorScope, page);
+
+CREATE INDEX textHistoryThreadTime ON ReadingHistory(threadId, historyOrigin, lastVisitTime DESC);

@@ -130,3 +130,17 @@ FROM (
        OR subscriptionQuery LIKE '%' || :query || '%'
        OR threadTitle LIKE '%' || :query || '%'
 );
+
+latestDirectInThread:
+SELECT * FROM ReadingHistory WHERE threadId = :tid AND historyOrigin = 'Direct'
+ORDER BY lastVisitTime DESC LIMIT 1;
+
+getTextAnchor:
+SELECT * FROM ReaderTextAnchor WHERE threadId = ? AND threadType = ? AND authorId = ? AND origin = ? AND observedAt = ?;
+
+saveTextAnchor:
+INSERT OR REPLACE INTO ReaderTextAnchor(threadId, threadType, authorId, origin, observedAt, floorAuthor, imageSource, occurrence)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+timeOfOrigin:
+SELECT lastVisitTime FROM ReadingHistory WHERE threadId = ? AND threadType = ? AND authorId = ? AND historyOrigin = ?;

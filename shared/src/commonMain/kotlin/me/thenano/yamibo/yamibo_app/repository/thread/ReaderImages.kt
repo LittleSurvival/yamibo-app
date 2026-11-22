@@ -7,10 +7,28 @@ import io.github.littlesurvival.dto.page.Post
 import io.github.littlesurvival.dto.page.ThreadPage
 import io.github.littlesurvival.dto.value.PostId
 import io.github.littlesurvival.dto.value.UserId
+import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository.ImageAnchor
+import me.thenano.yamibo.yamibo_app.repository.download.ArchivedImage
+import me.thenano.yamibo.yamibo_app.repository.download.MissingThreadImage
 import me.thenano.yamibo.yamibo_app.repository.download.normalizeDownloadImageUrl
+import okio.ByteString.Companion.encodeUtf8
 
 /** A displayed occurrence. A repeated URL may belong to another floor or occur twice on one floor. */
-data class ReaderImage(val postId: PostId, val url: String, val occurrence: Int)
+data class ReaderImage(val postId: PostId, val url: String, val occurrence: Int) {
+    val sourceId = readerImageSourceId(url)
+}
+
+fun readerImageSourceId(url: String): String {
+    ArchivedImage.parse(url)?.let { return it.sourceId }
+    val source = MissingThreadImage.fromReaderUri(url)?.sourceUrl ?: normalizeDownloadImageUrl(url)
+    return source.encodeUtf8().sha256().hex()
+}
+
+/** A changed image list falls back to its floor before using the legacy numeric position. */
+fun List<ReaderImage>.positionOf(anchor: ImageAnchor): Int? {
+    val exact = indexOfFirst { it.postId == anchor.floorPid && it.sourceId == anchor.sourceId && it.occurrence == anchor.occurrence }
+    return if (exact >= 0) exact else indexOfFirst { it.postId == anchor.floorPid }.takeIf { it >= 0 }
+}
 
 fun ThreadPage.readerImages(authorId: UserId?): List<ReaderImage> {
     val author = authorId ?: posts.firstOrNull()?.author?.uid ?: return emptyList()

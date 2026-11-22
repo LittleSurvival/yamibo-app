@@ -135,6 +135,7 @@ fun HomeScreenContent(
 }
 
 @Composable
+@OptIn(coil3.annotation.ExperimentalCoilApi::class)
 fun App() {
     val errorMessages = LocalForumErrorMessageResolver.current
     val downloads = LocalDownloadRepository.current
@@ -153,7 +154,10 @@ fun App() {
                 .components {
                     // Coil lazily retains this client for the singleton ImageLoader, allowing the
                     // in-memory WAF cookie to be reused without another app-level singleton.
-                    add(KtorNetworkFetcherFactory(httpClient = { HttpClientFactory.create() }))
+                    add(KtorNetworkFetcherFactory(
+                        httpClient = { HttpClientFactory.create() },
+                        concurrentRequestStrategy = { coil3.network.DeDupeConcurrentRequestStrategy() },
+                    ))
                     add(ArchivedImageFetcher)
                     add(SvgDecoder.Factory())
                 }

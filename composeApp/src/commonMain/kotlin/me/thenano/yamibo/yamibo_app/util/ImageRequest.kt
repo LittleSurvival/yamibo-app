@@ -3,6 +3,7 @@ package me.thenano.yamibo.yamibo_app.util
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import me.thenano.yamibo.yamibo_app.repository.download.normalizeDownloadImageUrl
+import me.thenano.yamibo.yamibo_app.repository.thread.readerAccessScope
 import coil3.ImageLoader
 import coil3.Uri
 import coil3.decode.DataSource
@@ -81,10 +82,13 @@ fun buildImageRequest(
     enableCrossfade: Boolean = true,
 ): ImageRequest {
     val fullUrl = normalizeImageUrl(url)
+    val cacheKey = if (fullUrl.startsWith("https://") || fullUrl.startsWith("http://")) {
+        readerAccessScope(cookie) + "|" + fullUrl
+    } else fullUrl
     return ImageRequest.Builder(context)
         .data(fullUrl)
-        .memoryCacheKey(fullUrl)
-        .diskCacheKey(fullUrl)
+        .memoryCacheKey(cacheKey)
+        .diskCacheKey(cacheKey)
         .precision(Precision.INEXACT)
         .httpHeaders(buildImageNetworkHeaders(fullUrl, cookie, referer))
         .crossfade(enableCrossfade)
