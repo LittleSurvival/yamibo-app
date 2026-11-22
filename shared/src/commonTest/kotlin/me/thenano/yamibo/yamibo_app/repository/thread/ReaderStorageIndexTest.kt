@@ -27,8 +27,11 @@ class ReaderStorageIndexTest {
 
     @Test fun deletingReadingHistoryClearsTheWorkResumeButRetainsMembershipAndDownload() {
         val works = db.smartComicWorkQueries
-        works.createWork(7,30,"series")
-        val id = works.newId().executeAsOne()
+        val id = works.transactionWithResult {
+            works.createWork(7,30,"series")
+            works.newId().executeAsOne()
+        }
+        assertTrue(id > 0, "insert must return the created work on its writer connection")
         works.saveMember(7,30,140,id,"summary",0)
         works.visit(140,9000,id,7)
         works.saveProgress(7,30,140,1,5,6,1,9000)

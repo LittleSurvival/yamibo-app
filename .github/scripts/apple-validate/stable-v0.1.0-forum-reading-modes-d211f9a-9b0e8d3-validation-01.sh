@@ -3,6 +3,7 @@ set -euo pipefail
 mkdir -p "$APPLE_VALIDATE_OUTPUT"
 xcodebuild -version > "$APPLE_VALIDATE_OUTPUT/xcode.txt"
 xcrun simctl list devices available > "$APPLE_VALIDATE_OUTPUT/simulators.txt"
+trap 'for report in shared/build/test-results/iosSimulatorArm64Test/TEST-*.xml; do [[ ! -f "$report" ]] || cp "$report" "$APPLE_VALIDATE_OUTPUT/"; done' EXIT
 bash gradlew :shared:iosSimulatorArm64Test :composeApp:compileKotlinIosSimulatorArm64 --console=plain 2>&1 | tee "$APPLE_VALIDATE_OUTPUT/native-build.log"
 python3 - "$APPLE_VALIDATE_OUTPUT" <<'PY'
 import pathlib, shutil, sys, xml.etree.ElementTree as ET
