@@ -1,5 +1,12 @@
 package me.thenano.yamibo.yamibo_app.profile.settings
 
+import io.github.littlesurvival.YamiboForum
+import io.github.littlesurvival.dto.value.ForumId
+import me.thenano.yamibo.yamibo_app.forum.ForumReadingDialog
+import me.thenano.yamibo.yamibo_app.forum.label
+import me.thenano.yamibo.yamibo_app.profile.settings.components.SettingsItem
+import YamiboIcons
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -46,6 +53,7 @@ internal fun SettingsCategoryScreen(category: String) {
     val navigator = LocalNavigator.current
 
     val title = when (category) {
+        "forum_reading" -> i18n("板塊閱讀模式")
         "appearance" -> i18n("外觀")
         "language" -> i18n("語言")
         "novel_reader" -> i18n("小說閱讀器")
@@ -76,6 +84,15 @@ internal fun SettingsCategoryScreen(category: String) {
                 .padding(20.dp),
         ) {
             when (category) {
+                "forum_reading" -> {
+                    val settings = LocalAppSettingsRepository.current
+                    var editing by remember { mutableStateOf<ForumId?>(null) }
+                    YamiboForum.entries.forEach { forum ->
+                        SettingsItem(YamiboIcons.Book, forum.forumName,
+                            settings.forumReadingMode(forum.forumId).state().label(), { editing = forum.forumId })
+                    }
+                    editing?.let { ForumReadingDialog(it) { editing = null } }
+                }
                 "appearance" -> AppearanceContent(feedbackController)
                 "language" -> LanguageContent()
                 "novel_reader" -> NovelReaderContent()

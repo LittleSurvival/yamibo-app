@@ -77,6 +77,14 @@ internal fun SettingsScreen() {
             SettingsDivider()
 
             SettingsItem(
+                icon = YamiboIcons.Book,
+                title = i18n("板塊閱讀模式"),
+                subtitle = i18n("設定各板塊的帖子開啟方式"),
+                onClick = { navigator.navigate(ISettingsCategoryScreen("forum_reading")) },
+            )
+            SettingsDivider()
+
+            SettingsItem(
                 icon = YamiboIcons.Explore,
                 title = i18n("收藏管理"),
                 subtitle = i18n("管理類別、整理排序與收藏互動設定"),

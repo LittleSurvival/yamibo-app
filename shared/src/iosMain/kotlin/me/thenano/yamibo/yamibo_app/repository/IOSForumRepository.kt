@@ -1,5 +1,7 @@
 package me.thenano.yamibo.yamibo_app.repository
 
+import me.thenano.yamibo.yamibo_app.repository.forum.SmartComicCatalog
+
 import me.thenano.yamibo.yamibo_app.util.auth.setNativeCookies
 
 import io.github.littlesurvival.YamiboClient
@@ -31,6 +33,7 @@ class IOSForumRepository(
     private val forumFavoriteStore: ForumFavoriteStore,
 ) : ForumRepository {
 
+    override val smartComics = SmartComicCatalog(diskCacheFactory)
     private val homeCache = diskCacheFactory.create<HomePage>("home_page", maxSize = 1, expiration = 12.hours)
     private val homeLoader = HomePageLoader(homeCache)
     private val forumCache = diskCacheFactory.create<ForumPage>("forum_page", maxSize = 60, expiration = 2.hours)

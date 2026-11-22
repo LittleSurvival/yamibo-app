@@ -1,5 +1,7 @@
 ﻿package me.thenano.yamibo.yamibo_app.thread.reader.components.manga
 
+import me.thenano.yamibo.yamibo_app.components.controls.YamiboActionChip
+
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 
 import androidx.compose.animation.*
@@ -8,6 +10,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -136,6 +140,11 @@ internal fun TagCatalogPanel(
     currentTagPage: Int,
     currentThreadId: ThreadId?,
     chapterStates: Map<Long, ChapterStateRepository.Entry> = emptyMap(),
+    smartDescending: Boolean? = null,
+    onReverse: () -> Unit = {},
+    onRefresh: () -> Unit = {},
+    loading: Boolean = false,
+    error: String? = null,
     onPageOrThreadClick: (Int, ThreadSummary?) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -180,6 +189,29 @@ internal fun TagCatalogPanel(
 
             HorizontalDivider(color = colors.brownPrimary.copy(alpha = 0.15f))
 
+            if (smartDescending != null) {
+                Row(modifier = Modifier.padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    YamiboActionChip(if (smartDescending) i18n("降冪") else i18n("升冪"), onReverse)
+                    YamiboActionChip(if (loading) i18n("載入中") else if (error != null) i18n("重試") else i18n("重新整理"),
+                        onRefresh, enabled = !loading)
+                }
+                if (error != null) Text(error, color = colors.textDark, modifier = Modifier.padding(12.dp))
+                val chapters = loadedThreadsByPage[1].orEmpty()
+                val ordered = if (smartDescending) chapters.asReversed() else chapters
+                val listState = rememberLazyListState()
+                LaunchedEffect(smartDescending, chapters, currentThreadId) {
+                    val active = ordered.indexOfFirst { it.tid == currentThreadId }
+                    if (active >= 0) listState.scrollToItem(active)
+                }
+                LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+                    items(ordered, key = { it.tid.value }) { thread ->
+                        CatalogChapterRow(thread, thread.tid == currentThreadId, null) {
+                            onPageOrThreadClick(1, thread)
+                        }
+                    }
+                }
+                return@Column
+            }
             // Thread list
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 items(totalPages) { index ->
@@ -245,50 +277,8 @@ internal fun TagCatalogPanel(
                                 val pageThreads = loadedThreadsByPage[page] ?: emptyList()
                                 Column(modifier = Modifier.fillMaxWidth().background(colors.creamSurface)) {
                                     pageThreads.forEachIndexed { threadIndex, thread ->
-                                        val isCurrentThread = thread.tid == currentThreadId
-                                        val chapterState = chapterStates[thread.tid.value.toLong()]
-                                        val isRead = chapterState?.read == true
-                                        val progressText = chapterState?.chapterPageProgressLabel()
-                                        Surface(
-                                            color = if (isCurrentThread) colors.brownLight.copy(alpha = 0.15f) else colors.creamSurface,
-                                            onClick = { onPageOrThreadClick(page, thread) },
-                                            modifier = Modifier.fillMaxWidth().alpha(if (isRead) 0.6f else 1f)
-                                        ) {
-                                            Row(
-                                                modifier = Modifier
-                                                    .let {
-                                                        if (isCurrentThread) {
-                                                            it.drawBehind {
-                                                                drawRect(
-                                                                    color = colors.brownPrimary,
-                                                                    size = size.copy(width = 4.dp.toPx())
-                                                                )
-                                                            }
-                                                        } else it
-                                                    }
-                                                    .padding(
-                                                        horizontal = 24.dp,
-                                                        vertical = if (isCurrentThread) 14.dp else 12.dp
-                                                    ),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    text = thread.title,
-                                                    color = if (isCurrentThread) colors.brownDeep else colors.textDark,
-                                                    fontSize = 14.sp,
-                                                    fontWeight = if (isCurrentThread) FontWeight.Bold else FontWeight.Normal,
-                                                    modifier = Modifier.weight(1f)
-                                                )
-                                                if (!isRead && progressText != null) {
-                                                    Spacer(Modifier.width(8.dp))
-                                                    Text(
-                                                        text = progressText,
-                                                        color = colors.orangeAccent,
-                                                        fontSize = 11.sp,
-                                                        fontWeight = FontWeight.Medium,
-                                                    )
-                                                }
-                                            }
+                                        CatalogChapterRow(thread, thread.tid == currentThreadId, chapterStates[thread.tid.value.toLong()]) {
+                                            onPageOrThreadClick(page, thread)
                                         }
                                         if (threadIndex < pageThreads.lastIndex) {
                                             HorizontalDivider(
@@ -304,6 +294,59 @@ internal fun TagCatalogPanel(
                         HorizontalDivider(color = colors.brownPrimary.copy(alpha = 0.15f))
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CatalogChapterRow(
+    thread: ThreadSummary,
+    isCurrentThread: Boolean,
+    chapterState: ChapterStateRepository.Entry?,
+    onClick: () -> Unit,
+) {
+    val colors = YamiboTheme.colors
+    val isRead = chapterState?.read == true
+    val progressText = chapterState?.chapterPageProgressLabel()
+    Surface(
+        color = if (isCurrentThread) colors.brownLight.copy(alpha = 0.15f) else colors.creamSurface,
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().alpha(if (isRead) 0.6f else 1f)
+    ) {
+        Row(
+            modifier = Modifier
+                .let {
+                    if (isCurrentThread) {
+                        it.drawBehind {
+                            drawRect(
+                                color = colors.brownPrimary,
+                                size = size.copy(width = 4.dp.toPx())
+                            )
+                        }
+                    } else it
+                }
+                .padding(
+                    horizontal = 24.dp,
+                    vertical = if (isCurrentThread) 14.dp else 12.dp
+                ),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = thread.title,
+                color = if (isCurrentThread) colors.textStrong else colors.textDark,
+                fontSize = 14.sp,
+                fontWeight = if (isCurrentThread) FontWeight.Bold else FontWeight.Normal,
+                modifier = Modifier.weight(1f)
+            )
+            if (!isRead && progressText != null) {
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = progressText,
+                    color = colors.orangeAccent,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                )
             }
         }
     }

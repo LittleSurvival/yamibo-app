@@ -1,5 +1,7 @@
 package me.thenano.yamibo.yamibo_app.forum
 
+import me.thenano.yamibo.yamibo_app.LocalAppSettingsRepository
+
 import me.thenano.yamibo.yamibo_app.LocalForumErrorMessageResolver
 import YamiboIcons
 import androidx.compose.animation.core.*
@@ -19,7 +21,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
-import io.github.littlesurvival.YamiboForum
 import io.github.littlesurvival.YamiboRoute
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.model.ThreadSummary
@@ -45,7 +46,6 @@ import me.thenano.yamibo.yamibo_app.forum.search.ISearchScreen
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.navigation.ScreenId
-import me.thenano.yamibo.yamibo_app.thread.detail.novel.INovelThreadDetailScreen
 import me.thenano.yamibo.yamibo_app.thread.reader.IThreadReaderScreen
 import me.thenano.yamibo.yamibo_app.userspace.IUserSpaceScreen
 import me.thenano.yamibo.yamibo_app.webview.action.IActionWebView
@@ -83,6 +83,8 @@ fun ForumPageScreen(fid: ForumId, name: String, screenId: ScreenId) {
     var isRefreshing by remember { mutableStateOf(false) }
     var selectedOrderType by remember { mutableStateOf<OrderType?>(null) }
     var selectedFilterType by remember { mutableStateOf<FilterType?>(null) }
+    val readingMode = LocalAppSettingsRepository.current.forumReadingMode(fid)
+    var chooseMode by remember { mutableStateOf(false) }
     var showOrderDialog by remember { mutableStateOf(false) }
     var showFilterDialog by remember { mutableStateOf(false) }
     var loadGeneration by remember { mutableIntStateOf(0) }
@@ -168,6 +170,7 @@ fun ForumPageScreen(fid: ForumId, name: String, screenId: ScreenId) {
                 }
             ForumTopBar(
                 title = forumName,
+                onReadingMode = { chooseMode = true },
                 onBack = { if (!restorePreviousPage()) navigator.pop() },
                 onSearch = { navigator.navigate(ISearchScreen(fid)) },
                 onPostThread = {
@@ -308,22 +311,7 @@ fun ForumPageScreen(fid: ForumId, name: String, screenId: ScreenId) {
                                 }
                             },
                             onThreadClick = { thread ->
-                                if (YamiboForum.isNovelForum(fid)) {
-                                    navigator.navigate(
-                                        INovelThreadDetailScreen(
-                                            thread.tid,
-                                            thread.title,
-                                            thread.author?.uid
-                                        )
-                                    )
-                                } else {
-                                    navigator.navigate(
-                                        IThreadReaderScreen(
-                                            tid = thread.tid,
-                                            title = thread.title
-                                        )
-                                    )
-                                }
+                                navigator.navigate(forumThreadDestination(readingMode.getValue(), fid, thread, current.page.threads))
                             },
                             onAuthorClick = { user ->
                                 navigator.navigate(IUserSpaceScreen(user.uid, user.name))
@@ -355,6 +343,7 @@ fun ForumPageScreen(fid: ForumId, name: String, screenId: ScreenId) {
     }
 
     val currentForumPage = (state as? ForumState.Success)?.page
+    if (chooseMode) ForumReadingDialog(fid) { chooseMode = false }
     if (showOrderDialog && currentForumPage != null) {
         ForumOrderDialog(
             options = currentForumPage.orderType.orEmpty(),
@@ -385,6 +374,7 @@ private fun ForumTopBar(
     isFavorite: Boolean,
     onBack: () -> Unit,
     onSearch: () -> Unit,
+    onReadingMode: () -> Unit,
     onPostThread: () -> Unit,
     onStarClick: () -> Unit,
     onHomeClick: () -> Unit,
@@ -413,6 +403,10 @@ private fun ForumTopBar(
                     onDismissRequest = { showMenu = false },
                     modifier = Modifier.background(colors.creamSurface)
                 ) {
+                    DropdownMenuItem(
+                        text = { Text(i18n("板塊閱讀模式"), color = colors.textStrong) },
+                        onClick = { showMenu = false; onReadingMode() },
+                    )
                     DropdownMenuItem(
                         text = { Text(i18n("發表帖子"), color = colors.textStrong) },
                         leadingIcon = {

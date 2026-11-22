@@ -28,6 +28,7 @@ private data class ImageReaderRestorePayload(
     val authorId: Int? = null,
     val tagPage: Int? = null,
     val tagTotalPages: Int? = null,
+    val smartSeed: ThreadSummary? = null,
     val rssSubscriptionId: Long? = null,
     val rssTitle: String? = null,
     val rssQuery: String? = null,
@@ -52,6 +53,9 @@ class IImageReaderScreen(
     val tagPage: Int? = null,
     val tagTotalPages: Int? = null,
 
+    val smartSeed: ThreadSummary? = null,
+    private val smartNeighbors: List<ThreadSummary> = emptyList(),
+
     // RSS Search Catalog Mode Fields:
     val rssSubscriptionId: Long? = null,
     val rssTitle: String? = null,
@@ -60,7 +64,8 @@ class IImageReaderScreen(
     val rssPage: Int? = null,
     val rssTotalPages: Int? = null,
 ) : RestorableNavigatable {
-    override val id = buildId(tid.value, postId?.value, tagId?.value, rssSubscriptionId)
+    override val id = if (smartSeed != null) buildId("smart", fid?.value, tid.value)
+        else buildId(tid.value, postId?.value, tagId?.value, rssSubscriptionId)
     override val restoreDecoder = Decoder
 
     override fun toRestoreSnapshot(): RestorableScreenSnapshot = restoreSnapshot(
@@ -77,6 +82,7 @@ class IImageReaderScreen(
             authorId = authorId?.value,
             tagPage = tagPage,
             tagTotalPages = tagTotalPages,
+            smartSeed = smartSeed,
             rssSubscriptionId = rssSubscriptionId,
             rssTitle = rssTitle,
             rssQuery = rssQuery,
@@ -92,6 +98,7 @@ class IImageReaderScreen(
             postId = postId,
             fid = fid,
             threadTitle = threadTitle,
+            smartNeighbors = smartNeighbors,
             imageList = imageList,
             initialPage = initialPage,
             loadHistory = loadHistory,
@@ -101,6 +108,7 @@ class IImageReaderScreen(
             tagThreads = tagThreads,
             tagPage = tagPage,
             tagTotalPages = tagTotalPages,
+            smartSeed = smartSeed,
             rssSubscriptionId = rssSubscriptionId,
             rssTitle = rssTitle,
             rssQuery = rssQuery,
@@ -127,6 +135,7 @@ class IImageReaderScreen(
                 tagThreads = null,
                 tagPage = data.tagPage,
                 tagTotalPages = data.tagTotalPages,
+                smartSeed = data.smartSeed,
                 rssSubscriptionId = data.rssSubscriptionId,
                 rssTitle = data.rssTitle,
                 rssQuery = data.rssQuery,

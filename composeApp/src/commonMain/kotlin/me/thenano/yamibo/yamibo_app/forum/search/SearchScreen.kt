@@ -47,7 +47,7 @@ import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.navigation.IInAppLinkResolvingScreen
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.navigation.ScreenId
-import me.thenano.yamibo.yamibo_app.thread.detail.novel.INovelThreadDetailScreen
+import me.thenano.yamibo.yamibo_app.forum.forumThreadDestination
 import me.thenano.yamibo.yamibo_app.thread.detail.rss.IRssSearchSubscriptionDetailScreen
 import me.thenano.yamibo.yamibo_app.thread.reader.IThreadReaderScreen
 import me.thenano.yamibo.yamibo_app.userspace.IUserSpaceScreen
@@ -111,13 +111,15 @@ fun SearchScreen(fid: ForumId?, screenId: ScreenId) {
     val favoriteAddDownloadPromptEnabled = appSettingsRepository.favoriteAddDownloadPromptEnabled.state()
 
     fun navigateThread(thread: ThreadSummary) {
-        val isNovelThread = fid?.let { YamiboForum.isNovelForum(it) }
-            ?: YamiboForum.isNovelForum(thread.tag ?: "")
-        if (isNovelThread) {
-            navigator.navigate(INovelThreadDetailScreen(thread.tid, thread.title, thread.author?.uid))
-        } else {
+        val board = thread.fid ?: thread.tag?.let(YamiboForum::toForumId) ?: fid
+        if (board == null) {
             navigator.navigate(IThreadReaderScreen(tid = thread.tid, title = thread.title))
+            return
         }
+        val neighbors = (state as? SearchState.Success)?.page?.threads.orEmpty().filter {
+            (it.fid ?: it.tag?.let(YamiboForum::toForumId) ?: fid) == board
+        }
+        navigator.navigate(forumThreadDestination(appSettingsRepository.forumReadingMode(board).getValue(), board, thread, neighbors))
     }
 
     fun restorePreviousSearchPage(): Boolean {

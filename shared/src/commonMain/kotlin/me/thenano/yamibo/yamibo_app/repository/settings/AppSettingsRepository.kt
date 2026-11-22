@@ -1,5 +1,9 @@
 package me.thenano.yamibo.yamibo_app.repository.settings
 
+import io.github.littlesurvival.YamiboForum
+import io.github.littlesurvival.dto.value.ForumId
+import me.thenano.yamibo.yamibo_app.repository.settings.core.EnumSetting
+
 import me.thenano.yamibo.yamibo_app.repository.scheme.YamiboColorScheme
 import me.thenano.yamibo.yamibo_app.repository.settings.core.SettingsRegistry
 import me.thenano.yamibo.yamibo_app.store.settings.SettingsStore
@@ -162,7 +166,17 @@ enum class AppLanguage(val label: String, val languageTag: String) {
     ENGLISH("English", "en"),
 }
 
+enum class ForumReadingMode { SmartComic, Novel, Forum }
+
 class AppSettingsRepository(store: SettingsStore) : SettingsRegistry(store, prefix = "appsettings") {
+    private val forumModes = mutableMapOf<ForumId, EnumSetting<ForumReadingMode>>()
+
+    fun forumReadingMode(fid: ForumId): EnumSetting<ForumReadingMode> = forumModes.getOrPut(fid) {
+        val default = if (YamiboForum.isNovelForum(fid)) ForumReadingMode.Novel else ForumReadingMode.Forum
+        EnumSetting("Forum reading mode", "", default, "appsettings.forumReadingMode.${fid.value}", store,
+            ForumReadingMode.entries.toTypedArray())
+    }
+
 
     /** 顏色主題 */
     val themeMode by enumSetting(

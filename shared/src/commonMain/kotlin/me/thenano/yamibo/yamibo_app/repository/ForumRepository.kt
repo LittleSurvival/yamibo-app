@@ -1,5 +1,7 @@
 package me.thenano.yamibo.yamibo_app.repository
 
+import me.thenano.yamibo.yamibo_app.repository.forum.SmartComicCatalog
+
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.page.FilterType
 import io.github.littlesurvival.dto.page.AddFavoriteResult
@@ -14,6 +16,7 @@ import io.github.littlesurvival.dto.value.SearchId
 import kotlinx.coroutines.flow.StateFlow
 
 interface ForumRepository {
+    val smartComics: SmartComicCatalog
     val favoriteForums: StateFlow<Map<ForumId, FavoriteId?>>
 
     data class ForumCacheKey(

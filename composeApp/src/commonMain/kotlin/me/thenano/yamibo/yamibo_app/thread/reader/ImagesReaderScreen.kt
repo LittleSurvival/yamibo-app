@@ -101,6 +101,8 @@ fun ImagesReaderScreen(
     initialPage: Int = 1,
     loadHistory: Boolean = false,
 
+    smartSeed: ThreadSummary? = null,
+    smartNeighbors: List<ThreadSummary> = emptyList(),
     // Tag Manga Mode Fields:
     tagId: TagId? = null,
     tagName: String? = null,
@@ -137,11 +139,16 @@ fun ImagesReaderScreen(
     val authRepository = LocalAuthRepository.current
     ReadingTimeTracker()
 
-    val isCatalogMode = tagId != null || rssSubscriptionId != null
-    val catalogTitle = tagName ?: rssTitle
+    val forumRepo = LocalForumRepository.current
+    val smartCatalog = forumRepo.smartComics
+    val smartMode = smartSeed != null && fid != null
+    val isCatalogMode = tagId != null || rssSubscriptionId != null || smartMode
+    val catalogTitle = tagName ?: rssTitle ?: remember(smartSeed) { smartSeed?.let(smartCatalog::workName) }
     val initialCatalogPage = tagPage ?: rssPage ?: 1
     val initialCatalogTotalPages = tagTotalPages ?: rssTotalPages
-    val initialCatalogThreads = tagThreads ?: rssThreads ?: emptyList()
+    val initialCatalogThreads = tagThreads ?: rssThreads ?: remember(smartSeed, smartNeighbors) {
+        smartSeed?.let { smartCatalog.chapters(it, smartNeighbors) }.orEmpty()
+    }
 
     // Catalog specific state (Tag Manga / RSS Search)
     var currentTagPage by remember { mutableStateOf(initialCatalogPage) }
@@ -155,7 +162,7 @@ fun ImagesReaderScreen(
     val currentThreadIndex: () -> Int = { currentThreads.indexOfFirst { it.tid == activeTid } }
     val activeThread = if (currentThreadIndex() in currentThreads.indices) currentThreads[currentThreadIndex()] else null
     val activeTitle = activeThread?.title ?: threadTitle
-    val activeAuthorId = activeThread?.author?.uid ?: authorId
+    val activeAuthorId = activeThread?.author?.uid ?: authorId?.takeIf { !smartMode || activeTid == tid }
     val activeFid = activeThread?.fid ?: fid
 
     val isMangaForum = remember(activeFid, isCatalogMode) { isCatalogMode || (activeFid?.let { YamiboForum.isMangaForum(it) } == true) }
@@ -271,6 +278,35 @@ fun ImagesReaderScreen(
     val tagRepository = LocalTagRepository.current
     val rssRepository = LocalRssSearchSubscriptionRepository.current
     val loadedThreadsByPage = remember { mutableStateMapOf<Int, List<ThreadSummary>>() }
+
+    var smartRevision by remember { mutableIntStateOf(0) }
+    var smartDescending by remember { mutableStateOf(false) }
+    var smartLoading by remember { mutableStateOf(false) }
+    var smartError by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(smartSeed, fid, smartRevision) {
+        if (smartSeed == null || fid == null) return@LaunchedEffect
+        smartLoading = true
+        smartError = null
+        fun display(chapters: List<ThreadSummary>) {
+            val displayed = currentThreads.firstOrNull { it.tid == activeTid }
+            currentThreads = if (displayed == null || chapters.any { it.tid == activeTid }) chapters
+                else smartCatalog.chapters(smartSeed, chapters + displayed)
+        }
+        try {
+            val result = smartCatalog.load(fid, smartSeed, smartNeighbors, forumRepo, authRepository,
+                refresh = smartRevision > 0, onCached = ::display)
+            when (result) {
+                is YamiboResult.Success -> display(result.value)
+                else -> smartError = errorMessages.resolve(result)
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            smartError = error.message ?: i18n("無法載入閱讀目錄")
+        } finally {
+            smartLoading = false
+        }
+    }
 
     suspend fun loadCatalogPage(page: Int, preferCache: Boolean = false): TagPage? {
         return when {
@@ -1681,6 +1717,11 @@ fun ImagesReaderScreen(
             ) {
                 TagCatalogPanel(
                     totalPages = currentTagTotalPages ?: 1,
+                    smartDescending = smartDescending.takeIf { smartMode },
+                    onReverse = { smartDescending = !smartDescending },
+                    onRefresh = { smartRevision++ },
+                    loading = smartLoading,
+                    error = smartError,
                     loadedThreadsByPage = loadedThreadsByPage,
                     currentTagPage = currentTagPage,
                     currentThreadId = activeTid,
@@ -1786,7 +1827,7 @@ fun ImagesReaderScreen(
         ImageContextMenu(
             visible = showContextMenu,
             imageUrl = contextMenuImageUrl,
-            onSetAsCover = if (isCatalogMode) {
+            onSetAsCover = if (tagId != null || rssSubscriptionId != null) {
                 { imageUrl ->
                     scope.launch {
                         val coverKey = when {
