@@ -18,6 +18,7 @@ kotlin {
     iosSimulatorArm64()
 
     sourceSets {
+        commonTest.dependencies { implementation(kotlin("test")) }
         commonMain.dependencies {
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.content.negotiation)
