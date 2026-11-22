@@ -1,5 +1,6 @@
 package me.thenano.yamibo.yamibo_app.thread.reader
 
+import me.thenano.yamibo.yamibo_app.repository.download.ThreadPageDownloadKey
 import me.thenano.yamibo.yamibo_app.repository.thread.readerImages
 import YamiboIcons
 import androidx.compose.animation.*
@@ -68,6 +69,8 @@ import me.thenano.yamibo.yamibo_app.repository.download.DownloadTaskKey
 import me.thenano.yamibo.yamibo_app.repository.download.RssMangaChapterDownloadKey
 import me.thenano.yamibo.yamibo_app.repository.download.TagMangaChapterDownloadKey
 import me.thenano.yamibo.yamibo_app.repository.thread.getDownloadedReaderPage
+import me.thenano.yamibo.yamibo_app.forum.ReaderModeDialog
+import me.thenano.yamibo.yamibo_app.repository.settings.ForumReadingMode
 import me.thenano.yamibo.yamibo_app.repository.thread.ReaderImage
 import me.thenano.yamibo.yamibo_app.repository.thread.positionOf
 import me.thenano.yamibo.yamibo_app.repository.settings.EffectiveReadingModeSource
@@ -121,6 +124,8 @@ fun ImagesReaderScreen(
     rssPage: Int? = null,
     rssTotalPages: Int? = null,
     rssThreads: List<ThreadSummary>? = null,
+    offlineOnly: Boolean = false,
+    offlinePage: ThreadPageDownloadKey? = null,
 ) {
     val errorMessages = LocalForumErrorMessageResolver.current
     SystemBarsEffect(
@@ -260,9 +265,9 @@ fun ImagesReaderScreen(
     var isLoadingImages by remember { mutableStateOf(actualImageList.isEmpty()) }
     var actualPostId by remember(activeTid) { mutableStateOf(if (activeTid == tid) postId else null) }
     var imageFloors by remember(activeTid) { mutableStateOf(emptyList<ReaderImage>()) }
-    var sourcePage by remember(activeTid) { mutableIntStateOf(1) }
+    var sourcePage by remember(activeTid) { mutableIntStateOf(offlinePage?.takeIf { it.tid == activeTid.value }?.page ?: 1) }
     var sourcePageCount by remember(activeTid) { mutableIntStateOf(1) }
-    var sourceAuthor by remember(activeTid) { mutableStateOf(activeAuthorId.takeIf { smartMode }) }
+    var sourceAuthor by remember(activeTid) { mutableStateOf(if (offlinePage?.tid == activeTid.value) offlinePage.authorId?.let(::UserId) else activeAuthorId.takeIf { smartMode }) }
     var skipTextAnchor by remember(activeTid) { mutableStateOf(false) }
     var passiveImageIndex by remember(activeTid) { mutableStateOf<Int?>(null) }
     var startFromLastPage by remember { mutableStateOf(false) }
@@ -285,12 +290,22 @@ fun ImagesReaderScreen(
     val rssRepository = LocalRssSearchSubscriptionRepository.current
     val loadedThreadsByPage = remember { mutableStateMapOf<Int, List<ThreadSummary>>() }
 
+    var showReadingMode by remember { mutableStateOf(false) }
+    var downloadSelection by remember { mutableStateOf(false) }
+    var catalogVerified by remember(smartSeed) { mutableStateOf(false) }
+    var comicProgressRevision by remember { mutableIntStateOf(0) }
     var smartRevision by remember { mutableIntStateOf(0) }
     var smartDescending by remember { mutableStateOf(false) }
     var smartLoading by remember { mutableStateOf(false) }
     var smartError by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(smartSeed, fid, smartRevision) {
         if (smartSeed == null || fid == null) return@LaunchedEffect
+        if (offlineOnly) {
+            val saved = authRepository.currentUser()?.uid?.let { smartCatalog.savedWork(it, fid, smartSeed.tid) }
+            currentThreads = saved?.members.orEmpty().ifEmpty { listOf(smartSeed) }
+            catalogVerified = saved?.completeAt != null
+            return@LaunchedEffect
+        }
         smartLoading = true
         smartError = null
         fun display(chapters: List<ThreadSummary>) {
@@ -300,7 +315,7 @@ fun ImagesReaderScreen(
         }
         try {
             val result = smartCatalog.load(fid, smartSeed, smartNeighbors, forumRepo, authRepository,
-                refresh = smartRevision > 0, onCached = ::display)
+                refresh = smartRevision > 0, onCached = ::display, onVerified = { catalogVerified = true })
             when (result) {
                 is YamiboResult.Success -> display(result.value)
                 else -> smartError = errorMessages.resolve(result)
@@ -311,6 +326,13 @@ fun ImagesReaderScreen(
             smartError = error.message ?: i18n("無法載入閱讀目錄")
         } finally {
             smartLoading = false
+        }
+    }
+
+    val comicProgress by produceState(emptyMap<Long, SmartComicProgress>(), showCatalog, currentThreads, comicProgressRevision) {
+        if (showCatalog && smartMode && fid != null) {
+            val owner = authRepository.currentUser()?.uid
+            value = owner?.let { smartCatalog.progress(it, fid, currentThreads.map { chapter -> chapter.tid }) }.orEmpty()
         }
     }
 
@@ -349,7 +371,7 @@ fun ImagesReaderScreen(
     }
 
     LaunchedEffect(tagId, rssSubscriptionId, currentTagPage) {
-        if (isCatalogMode && currentThreads.isEmpty()) {
+        if (!offlineOnly && isCatalogMode && currentThreads.isEmpty()) {
             val result = loadCatalogPage(currentTagPage, preferCache = true)
             if (result != null) {
                 currentThreads = result.threadSummaries
@@ -500,7 +522,7 @@ fun ImagesReaderScreen(
                 !skipTextAnchor && activeAuthorId != null && (it.floorAuthor ?: it.authorId) == activeAuthorId
             }
             val anchor = savedImage?.anchor?.takeIf { it.scopeAuthor == null || it.scopeAuthor == activeAuthorId }
-            if (textAnchor != null || anchor != null) {
+            if ((textAnchor != null || anchor != null) && !(offlineOnly && offlinePage?.tid == activeTid.value)) {
                 sourceAuthor = if (textAnchor != null) textAnchor.authorId else anchor?.scopeAuthor
                 val targetPage = textAnchor?.page ?: checkNotNull(anchor).forumPage
                 if (sourcePage != targetPage) {
@@ -616,7 +638,7 @@ fun ImagesReaderScreen(
                             }
                         }
                     }
-                    passiveImageIndex = if (newerText != null) currentPage else null
+                    passiveImageIndex = if (newerText != null || savedImage?.anchor != null) currentPage else null
                     startFromLastPage = false
                     restoreHistoryForActiveThread = false
                     isLoadingImages = false
@@ -630,16 +652,18 @@ fun ImagesReaderScreen(
                     allowFullView = textAnchor == null && anchor == null && sourcePage == 1)
             } else null
             if (local != null) sourceAuthor = local.author
-            val cachedPage = local?.page ?: if (forceNetworkLoadTrigger == 0) {
+            val cachedPage = local?.page ?: if (!offlineOnly && forceNetworkLoadTrigger == 0) {
                 withContext(Dispatchers.Default) { threadRepository.getCachedThread(activeTid, sourceAuthor, sourcePage) }
             } else null
             if (cachedPage != null) processThreadResult(cached = cachedPage)
+            else if (offlineOnly) isLoadingImages = false
             else processThreadResult(result = threadRepository.fetchThread(activeTid, sourceAuthor, sourcePage))
             forceNetworkLoadTrigger = 0
         }
     }
 
     var lastCapturedAt by remember { mutableLongStateOf(0L) }
+    var lastSmartSnapshot by remember(activeTid) { mutableStateOf<ReadHistoryRepository.ImageReadingHistory?>(null) }
     val currentHistorySaver by rememberUpdatedState {
         if ((isMangaForum || isCatalogMode) && actualImageList.isNotEmpty() && !restoreHistoryForActiveThread && passiveImageIndex != currentPage) {
             val isScroll = readingMode == ReadingMode.SCROLL_CONTINUOUS || readingMode == ReadingMode.SCROLL_GAP
@@ -657,11 +681,22 @@ fun ImagesReaderScreen(
             val imageAnchor = imageFloors.getOrNull(snapshotPage.coerceIn(0, total.coerceAtLeast(1) - 1))?.let {
                 ReadHistoryRepository.ImageAnchor(it.postId, it.sourceId, it.occurrence, sourcePage, sourceAuthor)
             }
+            val smartSnapshot = if (smartMode && postIdSnap != null && imageAnchor != null) {
+                ReadHistoryRepository.ImageReadingHistory(postIdSnap, activeTidSnap, snapshotPage.coerceIn(0, total - 1),
+                    total, finalIdx, finalOffset, observedAt, imageAnchor)
+            } else null
+            val unchanged = smartSnapshot != null && lastSmartSnapshot?.let {
+                it.copy(lastVisitTime = observedAt) == smartSnapshot
+            } == true
+            if (smartSnapshot != null && !unchanged) lastSmartSnapshot = smartSnapshot
+            val capturedSourcePage = sourcePage
+            val capturedSourcePages = sourcePageCount
+            val capturedOwner = authRepository.currentUser()?.uid
             val tagPageSnap = currentTagPage
             val currentCoverSnap = (actualImageList.getOrNull(1) ?: actualImageList.getOrNull(0))
                 ?.takeUnless(MissingThreadImage::isReaderUri)
             
-            appTaskManager.launch(
+            if (!unchanged) appTaskManager.launch(
                 key = AppTaskKey("reader-history:${activeTidSnap.value}"),
                 duplicatePolicy = AppTaskDuplicatePolicy.AllowParallel,
                 instanceId = "${tagPageSnap}:${snapshotPage}:${currentTimeMillis()}",
@@ -725,7 +760,7 @@ fun ImagesReaderScreen(
                     syncTagMangaProgress(activeTidSnap, titleSnap, snapshotPage.coerceIn(0, (total - 1).coerceAtLeast(0)), total.coerceAtLeast(1))
                 } else if (isMangaForum && postIdSnap != null && total > 0) {
                     historyRepo.saveImagePosition(
-                        ReadHistoryRepository.ImageReadingHistory(
+                        smartSnapshot ?: ReadHistoryRepository.ImageReadingHistory(
                             postId = postIdSnap,
                             threadId = activeTidSnap,
                             pageIndex = snapshotPage.coerceIn(0, total - 1),
@@ -736,6 +771,11 @@ fun ImagesReaderScreen(
                             anchor = imageAnchor,
                         )
                     )
+                    if (smartMode && fid != null && capturedOwner != null && authRepository.currentUser()?.uid == capturedOwner) {
+                        smartCatalog.recordVisit(capturedOwner, fid, activeTidSnap, observedAt, capturedSourcePage, capturedSourcePages,
+                            snapshotPage.coerceIn(0, total - 1), total)
+                        comicProgressRevision++
+                    }
                 }
             }
         }
@@ -1421,7 +1461,7 @@ fun ImagesReaderScreen(
                                             modifier = Modifier.size(48.dp)
                                         )
                                         Spacer(Modifier.height(16.dp))
-                                        Text(text = i18n("沒有找到圖片"), color = Color.White.copy(alpha = 0.5f), fontSize = 14.sp)
+                                        Text(text = if (offlineOnly) i18n("此話尚無可離線閱讀的圖片") else i18n("沒有找到圖片"), color = Color.White.copy(alpha = 0.5f), fontSize = 14.sp)
                                         Spacer(Modifier.height(16.dp))
                                         OutlinedButton(
                                             onClick = { retryTrigger++ },
@@ -1517,7 +1557,7 @@ fun ImagesReaderScreen(
                                                     modifier = Modifier.size(48.dp)
                                                 )
                                                 Spacer(Modifier.height(16.dp))
-                                                Text(text = i18n("沒有找到圖片"), color = Color.White.copy(alpha = 0.5f), fontSize = 14.sp)
+                                                Text(text = if (offlineOnly) i18n("此話尚無可離線閱讀的圖片") else i18n("沒有找到圖片"), color = Color.White.copy(alpha = 0.5f), fontSize = 14.sp)
                                                 Spacer(Modifier.height(16.dp))
                                                 OutlinedButton(
                                                     onClick = { retryTrigger++ },
@@ -1688,10 +1728,11 @@ fun ImagesReaderScreen(
                 }
                 resetZoom()
             },
+            onDownload = if (smartMode && !offlineOnly) { { downloadSelection = true } } else null,
             onSettings = { showSettings = true },
             onDismiss = { showOverlay = false },
             onCatalog = if (isCatalogMode) { { showCatalog = true; showOverlay = false } } else null,
-            onNavigateToThread = if (isCatalogMode) { {
+            onNavigateToThread = if (smartMode) { { showReadingMode = true } } else if (isCatalogMode) { {
                 if (activeFid != null && YamiboForum.isNovelForum(activeFid)) {
                     navigator.navigate(INovelThreadDetailScreen(activeTid, activeTitle, activeAuthorId))
                 } else {
@@ -1712,6 +1753,38 @@ fun ImagesReaderScreen(
             },
             onRefresh = if (isCatalogMode && isDownloadedTagChapter) { { showDownloadedRefreshConfirm = true } } else null,
         )
+
+        if (showReadingMode) {
+            ReaderModeDialog(i18n("閱讀模式"), ForumReadingMode.SmartComic, { showReadingMode = false }) { mode ->
+                showReadingMode = false
+                if (mode != ForumReadingMode.SmartComic) {
+                    currentHistorySaver()
+                    val novel = mode == ForumReadingMode.Novel
+                    navigator.navigate(IThreadReaderScreen(activeTid, activeTitle,
+                        threadType = if (novel) ReadHistoryRepository.ThreadEntryType.Novel else ReadHistoryRepository.ThreadEntryType.Normal,
+                        authorId = if (novel) activeAuthorId else offlinePage?.authorId?.let(::UserId),
+                        offlineOnly = offlineOnly, offlinePage = offlinePage, initialPage = offlinePage?.page ?: 1,
+                        openingImage = lastSmartSnapshot))
+                    showOverlay = false
+                }
+            }
+        }
+
+        if (downloadSelection && smartSeed != null && fid != null) {
+            SmartComicDownloadDialog(
+                chapters = currentThreads, current = activeTid, complete = catalogVerified,
+                onDismiss = { downloadSelection = false },
+                onDownload = { selection ->
+                    val owner = authRepository.currentUser()?.uid ?: error(i18n("請先登入"))
+                    smartCatalog.saveWork(owner, fid, smartSeed, currentThreads, catalogVerified)
+                    selection.forEach { chapter ->
+                        check(authRepository.currentUser()?.uid == owner) { i18n("登入帳號已變更") }
+                        downloadRepository.enqueueThread(chapter.tid, chapter.title, chapter.author?.uid).getOrThrow()
+                    }
+                    feedbackController.post(i18n("已加入下載佇列"))
+                }
+            )
+        }
 
         if (showDownloadedRefreshConfirm) {
             AlertDialog(
@@ -1782,6 +1855,14 @@ fun ImagesReaderScreen(
                     currentTagPage = currentTagPage,
                     currentThreadId = activeTid,
                     chapterStates = tagThreadChapterStates,
+                    smartProgress = comicProgress,
+                    onMarkUnread = { thread ->
+                        val owner = authRepository.currentUser()?.uid
+                        if (owner != null && fid != null) scope.launch {
+                            smartCatalog.markUnread(owner, fid, thread.tid)
+                            comicProgressRevision++
+                        }
+                    },
                     onPageOrThreadClick = { page, targetThread ->
                         if (targetThread == null) {
                             if (!loadedThreadsByPage.containsKey(page)) {

@@ -128,7 +128,7 @@ class IOSDownloadStorageProvider(
         return "file://$file"
     }
 
-    override suspend fun readThreadPage(key: ThreadPageDownloadKey): ByteArray? {
+    override suspend fun readThreadPage(key: DownloadTaskKey): ByteArray? {
         val path = readablePath(key) / "thread_page.json"
         if (!fileSystem.exists(path)) return null
         return fileSystem.source(path).buffer().use { it.readByteArray() }

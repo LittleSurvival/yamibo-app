@@ -1,0 +1,46 @@
+CREATE TABLE ReaderDownloadPage (
+    storage TEXT NOT NULL,
+    item TEXT NOT NULL,
+    owner INTEGER NOT NULL,
+    tid INTEGER NOT NULL,
+    author INTEGER NOT NULL,
+    page INTEGER NOT NULL,
+    taskKey TEXT NOT NULL,
+    generation TEXT NOT NULL,
+    PRIMARY KEY (storage, item)
+);
+CREATE INDEX readerDownloadLookup ON ReaderDownloadPage(storage, owner, tid, author, page);
+CREATE TABLE ReaderDownloadFloor (
+    storage TEXT NOT NULL, item TEXT NOT NULL, pid INTEGER NOT NULL,
+    PRIMARY KEY(storage, item, pid)
+);
+CREATE INDEX readerDownloadPid ON ReaderDownloadFloor(storage, pid, item);
+
+CREATE TABLE SmartComicWork (
+    id INTEGER PRIMARY KEY NOT NULL,
+    owner INTEGER NOT NULL,
+    fid INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    completeAt INTEGER,
+    lastTid INTEGER,
+    lastReadAt INTEGER
+);
+CREATE TABLE SmartComicMember (
+    owner INTEGER NOT NULL, fid INTEGER NOT NULL, tid INTEGER NOT NULL, workId INTEGER NOT NULL,
+    summary TEXT NOT NULL, ordinal INTEGER NOT NULL,
+    PRIMARY KEY (owner, fid, tid)
+);
+CREATE INDEX comicMembersByWork ON SmartComicMember(workId, ordinal);
+
+CREATE TABLE ReaderDownloadImage (
+    storage TEXT NOT NULL,
+    owner INTEGER NOT NULL,
+    sourceId TEXT NOT NULL,
+    item TEXT NOT NULL,
+    taskKey TEXT NOT NULL,
+    generation TEXT NOT NULL,
+    fileName TEXT NOT NULL,
+    bytes INTEGER NOT NULL,
+    PRIMARY KEY(storage, owner, sourceId, item)
+);
+CREATE INDEX downloadImagesByItem ON ReaderDownloadImage(storage,item);

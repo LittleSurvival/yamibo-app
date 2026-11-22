@@ -1,0 +1,13 @@
+CREATE TABLE SmartComicProgress (
+    owner INTEGER NOT NULL, fid INTEGER NOT NULL, tid INTEGER NOT NULL,
+    page INTEGER NOT NULL, imageIndex INTEGER NOT NULL, imageCount INTEGER NOT NULL,
+    finished INTEGER NOT NULL, observedAt INTEGER NOT NULL,
+    PRIMARY KEY(owner, fid, tid)
+);
+
+CREATE TRIGGER forgetSmartComicVisit AFTER DELETE ON ImageReadingHistory
+WHEN NOT EXISTS (SELECT 1 FROM ImageReadingHistory WHERE threadId = old.threadId)
+BEGIN
+    DELETE FROM SmartComicProgress WHERE tid = old.threadId;
+    UPDATE SmartComicWork SET lastTid = NULL, lastReadAt = NULL WHERE lastTid = old.threadId;
+END;

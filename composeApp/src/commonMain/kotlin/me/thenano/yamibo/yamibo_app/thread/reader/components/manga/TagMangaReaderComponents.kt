@@ -140,6 +140,8 @@ internal fun TagCatalogPanel(
     currentTagPage: Int,
     currentThreadId: ThreadId?,
     chapterStates: Map<Long, ChapterStateRepository.Entry> = emptyMap(),
+    smartProgress: Map<Long, me.thenano.yamibo.yamibo_app.SmartComicProgress> = emptyMap(),
+    onMarkUnread: (ThreadSummary) -> Unit = {},
     smartDescending: Boolean? = null,
     onReverse: () -> Unit = {},
     onRefresh: () -> Unit = {},
@@ -205,7 +207,8 @@ internal fun TagCatalogPanel(
                 }
                 LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                     items(ordered, key = { it.tid.value }) { thread ->
-                        CatalogChapterRow(thread, thread.tid == currentThreadId, null) {
+                        CatalogChapterRow(thread, thread.tid == currentThreadId, null, smartProgress[thread.tid.value.toLong()],
+                            onMarkUnread = { onMarkUnread(thread) }) {
                             onPageOrThreadClick(1, thread)
                         }
                     }
@@ -304,11 +307,13 @@ private fun CatalogChapterRow(
     thread: ThreadSummary,
     isCurrentThread: Boolean,
     chapterState: ChapterStateRepository.Entry?,
+    comic: me.thenano.yamibo.yamibo_app.SmartComicProgress? = null,
+    onMarkUnread: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     val colors = YamiboTheme.colors
-    val isRead = chapterState?.read == true
-    val progressText = chapterState?.chapterPageProgressLabel()
+    val isRead = comic?.finished == 1L || chapterState?.read == true
+    val progressText = comic?.let { "${it.imageIndex + 1}/${it.imageCount}" } ?: chapterState?.chapterPageProgressLabel()
     Surface(
         color = if (isCurrentThread) colors.brownLight.copy(alpha = 0.15f) else colors.creamSurface,
         onClick = onClick,
@@ -339,6 +344,11 @@ private fun CatalogChapterRow(
                 fontWeight = if (isCurrentThread) FontWeight.Bold else FontWeight.Normal,
                 modifier = Modifier.weight(1f)
             )
+            if (isRead && onMarkUnread != null) {
+                TextButton(onClick = onMarkUnread, colors = ButtonDefaults.textButtonColors(contentColor = colors.brownPrimary)) {
+                    Text(i18n("標為未讀"))
+                }
+            }
             if (!isRead && progressText != null) {
                 Spacer(Modifier.width(8.dp))
                 Text(

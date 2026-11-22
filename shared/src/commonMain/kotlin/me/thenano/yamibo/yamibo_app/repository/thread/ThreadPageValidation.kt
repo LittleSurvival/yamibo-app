@@ -57,7 +57,7 @@ suspend fun ThreadRepository.fetchReaderStartPage(
     initialPage: Int,
     downloadRepository: DownloadRepository? = null,
 ): YamiboResult<ThreadPage> {
-    val indexed = knownPageForPost(tid, authorId, target)
+    val indexed = downloadRepository?.downloadedPageForPost(tid, authorId, target) ?: knownPageForPost(tid, authorId, target)
     val pageHint = indexed ?: initialPage
     val downloaded = downloadRepository?.getDownloadedPage(ThreadPageDownloadKey(tid.value, pageHint, authorId?.value))
         ?.takeIf { it.isValidThreadPage(tid, target = target, page = pageHint, authorId = authorId) }

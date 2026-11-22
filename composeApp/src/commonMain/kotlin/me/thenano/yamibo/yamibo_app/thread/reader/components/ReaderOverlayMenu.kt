@@ -33,6 +33,7 @@ internal fun ReaderOverlayMenu(
     onReply: () -> Unit,
     onRefresh: () -> Unit,
     onSettings: () -> Unit,
+    onReaderMode: (() -> Unit)? = null,
     singlePageProgress: ReaderSinglePageProgress? = null,
     onSinglePageProgressChange: ((Int) -> Unit)? = null,
     onSinglePageProgressCommit: (() -> Unit)? = null,
@@ -55,6 +56,7 @@ internal fun ReaderOverlayMenu(
             visible = visible,
             onRefresh = onRefresh,
             onSettings = onSettings,
+            onReaderMode = onReaderMode,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(bottom = floatButtonBottomPadding, end = 16.dp)

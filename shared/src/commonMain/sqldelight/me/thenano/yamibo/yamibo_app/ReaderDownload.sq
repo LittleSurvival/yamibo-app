@@ -1,0 +1,33 @@
+putPage:
+INSERT OR REPLACE INTO ReaderDownloadPage(storage,item,owner,tid,author,page,taskKey,generation) VALUES (?,?,?,?,?,?,?,?);
+
+putFloor:
+INSERT OR REPLACE INTO ReaderDownloadFloor(storage,item,pid) VALUES (?,?,?);
+
+clearFloors:
+DELETE FROM ReaderDownloadFloor WHERE storage = ? AND item = ?;
+
+clearPage:
+DELETE FROM ReaderDownloadPage WHERE storage = ? AND item = ?;
+
+pageCopies:
+SELECT taskKey,generation FROM ReaderDownloadPage
+WHERE storage = ? AND owner = ? AND tid = ? AND author = ? AND page = ?;
+
+pageForPid:
+SELECT p.page FROM ReaderDownloadPage p JOIN ReaderDownloadFloor f ON p.storage=f.storage AND p.item=f.item
+WHERE p.storage = ? AND p.owner = ? AND p.tid = ? AND p.author = ? AND f.pid = ? LIMIT 1;
+
+clearImages:
+DELETE FROM ReaderDownloadImage WHERE storage = ? AND item = ?;
+
+putImage:
+INSERT OR REPLACE INTO ReaderDownloadImage(storage,owner,sourceId,item,taskKey,generation,fileName,bytes)
+VALUES (?,?,?,?,?,?,?,?);
+
+imageCopies:
+SELECT taskKey,generation,fileName,bytes FROM ReaderDownloadImage
+WHERE storage = ? AND owner = ? AND sourceId = ?;
+
+availableTids:
+SELECT DISTINCT tid FROM ReaderDownloadPage WHERE storage = ? AND owner = ? AND tid IN ?;

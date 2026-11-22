@@ -24,10 +24,13 @@ suspend fun ReadHistoryRepository.textReaderStart(
     author: UserId?,
     threads: ThreadRepository,
     downloads: DownloadRepository,
+    offlineOnly: Boolean = false,
+    openingImage: ReadHistoryRepository.ImageReadingHistory? = null,
 ): TextReaderStart {
     val own = getPosition(tid, type, author)
     val recent = getLatestTextPosition(tid)
-    val image = getLatestImagePosition(tid)?.takeIf { it.anchor != null }
+    val image = listOfNotNull(openingImage, getLatestImagePosition(tid))
+        .filter { it.threadId == tid && it.anchor != null }.maxByOrNull { it.lastVisitTime }
     val fromImage = image != null && image.lastVisitTime > (recent?.lastVisitTime ?: 0L)
     val imageAnchor = image?.anchor.takeIf { fromImage }
     if (recent == null && imageAnchor == null) return TextReaderStart(own)
@@ -42,7 +45,10 @@ suspend fun ReadHistoryRepository.textReaderStart(
     if (author != null && floorAuthor != null && author != floorAuthor) return TextReaderStart(own, preserveUntilMoved = true)
     val pageHint = if (author == sourceScope) imageAnchor?.forumPage ?: recent?.page ?: 1
         else own?.takeIf { it.postId == pid }?.page ?: 1
-    val located = threads.locateReaderFloor(tid, pid, author, pageHint, downloads)
+    val located = (if (offlineOnly) {
+        val page = downloads.downloadedPageForPost(tid, author, pid) ?: pageHint
+        downloads.getDownloadedReaderPage(tid, author, page)?.page?.takeIf { it.posts.any { post -> post.pid == pid } }
+    } else threads.locateReaderFloor(tid, pid, author, pageHint, downloads))
         ?: return TextReaderStart(own, preserveUntilMoved = true)
     val post = located.posts.first { it.pid == pid }
     val page = located.pageNav?.currentPage ?: 1

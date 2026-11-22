@@ -1,5 +1,8 @@
 package me.thenano.yamibo.yamibo_app.thread.reader
 
+import io.github.littlesurvival.dto.model.ThreadSummary
+import me.thenano.yamibo.yamibo_app.forum.ReaderModeDialog
+import me.thenano.yamibo.yamibo_app.repository.settings.ForumReadingMode
 import me.thenano.yamibo.yamibo_app.repository.thread.textReaderStart
 import me.thenano.yamibo.yamibo_app.repository.thread.readerImageSourceId
 import me.thenano.yamibo.yamibo_app.repository.thread.readerImageUrls
@@ -622,6 +625,9 @@ internal fun ThreadReaderScreen(
     catalogRssTitle: String? = null,
     catalogRssQuery: String? = null,
     catalogRssPage: Int? = null,
+    openingImage: ReadHistoryRepository.ImageReadingHistory? = null,
+    offlineOnly: Boolean = false,
+    offlinePage: ThreadPageDownloadKey? = null,
 ) {
     val errorMessages = LocalForumErrorMessageResolver.current
     DebugRecomposeProbe("ThreadReaderScreen", tid.value.toString())
@@ -731,6 +737,7 @@ internal fun ThreadReaderScreen(
 
     var showMenu by remember { mutableStateOf(false) }
     var showSettingsPanel by remember { mutableStateOf(false) }
+    var showReadingMode by remember(tid) { mutableStateOf(false) }
     var showDownloadSheet by remember { mutableStateOf(false) }
     var downloadSheetOpenedAfterFavorite by remember { mutableStateOf(false) }
     var downloadSheetPage by remember(tid, authorId) { mutableIntStateOf(initialPage) }
@@ -2703,11 +2710,13 @@ internal fun ThreadReaderScreen(
         }
 
         suspend fun loadFromDownload(): Boolean {
-            val downloadKey = ThreadPageDownloadKey(tid.value, page, authorId?.value)
+            val downloadKey = offlinePage?.copy(page = page) ?: ThreadPageDownloadKey(tid.value, page, authorId?.value)
             val downloaded = downloadRepository.getDownloadedPage(downloadKey)
-                ?.takeIf { it.isValidThreadPage(tid, page = page, authorId = authorId) }
+                ?.takeIf { it.isValidThreadPage(tid, page = page, authorId = downloadKey.authorId?.let(::UserId)) }
                 ?: return false
-            loadedPostsByPage[page] = downloaded.posts
+            val visible = downloaded.posts.filter { authorId == null || it.author.uid == authorId }
+            if (visible.isEmpty()) return false
+            loadedPostsByPage[page] = visible
             rebuildPosts()
             threadInfo = downloaded.thread
             totalPages = downloaded.pageNav?.totalPages ?: 1
@@ -2744,6 +2753,13 @@ internal fun ThreadReaderScreen(
         }
 
         try {
+            if (offlineOnly && initialSnapshot == null) {
+                if (loadFromDownload()) return true
+                if (posts.isEmpty()) state = ReaderState.Error(i18n("這一頁尚未下載"))
+                else if (autoTriggered) failedAutoLoadPages[page] = i18n("這一頁尚未下載")
+                else feedbackController.post(i18n("這一頁尚未下載"))
+                return false
+            }
             if (forceRefresh) {
                 when (val result = threadRepository.fetchThread(tid, authorId, page)
                     .validatedThreadPage(tid, page = page, authorId = authorId)) {
@@ -3000,7 +3016,7 @@ internal fun ThreadReaderScreen(
     LaunchedEffect(tid, initialPage, targetPid) {
         try {
             val direct = if (targetPid == null) withContext(Dispatchers.Default) {
-                readHistoryRepo.textReaderStart(tid, threadType, authorId, threadRepository, downloadRepository)
+                readHistoryRepo.textReaderStart(tid, threadType, authorId, threadRepository, downloadRepository, offlineOnly, openingImage)
             } else null
             preserveRestoredProgress = direct?.preserveUntilMoved == true
             val catalogPosition = if (targetPid == null) null else withContext(Dispatchers.Default) {
@@ -3014,9 +3030,13 @@ internal fun ThreadReaderScreen(
                     ReadHistoryRepository.ThreadHistoryOrigin.Direct -> null
                 }
             }
-            val saved = catalogPosition ?: direct?.history
-            val snapshot = direct?.snapshot ?: targetPid?.let { pid ->
+            val saved = (catalogPosition ?: direct?.history)?.takeIf { offlinePage == null || offlinePage.page == it.page }
+            val snapshot = direct?.snapshot?.takeIf { offlinePage == null } ?: targetPid?.let { pid ->
                 withContext(Dispatchers.Default) {
+                    if (offlineOnly) {
+                        val number = downloadRepository.downloadedPageForPost(tid, authorId, pid) ?: saved?.page ?: initialPage
+                        return@withContext downloadRepository.getDownloadedPage(ThreadPageDownloadKey(tid.value, number, authorId?.value))
+                    }
                     val result = threadRepository.fetchReaderStartPage(tid, pid, authorId, saved?.page ?: initialPage, downloadRepository)
                     (result as? YamiboResult.Success)?.value
                 }
@@ -4814,6 +4834,7 @@ internal fun ThreadReaderScreen(
 
                     // Overlay menu
                     ReaderOverlayMenu(
+                        onReaderMode = { showReadingMode = true },
                         visible = showMenu,
                         title = threadInfo?.title ?: title,
                         isFavorited = isFavorited,
@@ -4932,6 +4953,42 @@ internal fun ThreadReaderScreen(
                     .background(colors.brownDeep)
                     .zIndex(2f)
             )
+        }
+
+        if (showReadingMode) {
+            val mode = if (isNovelThread) ForumReadingMode.Novel else ForumReadingMode.Forum
+            ReaderModeDialog(i18n("閱讀模式"), mode, { showReadingMode = false }) { target ->
+                showReadingMode = false
+                if (target != mode) scope.launch {
+                    val author = authorId ?: posts.firstOrNull { it.floor == 1 }?.author?.uid
+                        ?: run {
+                            val firstKey = ThreadPageDownloadKey(tid.value, 1, null)
+                            val first = downloadRepository.getDownloadedPage(firstKey)
+                                ?: withContext(Dispatchers.Default) { threadRepository.getCachedThread(tid, null, 1) }
+                                ?: if (offlineOnly) null else (threadRepository.fetchThread(tid, null, 1) as? YamiboResult.Success)?.value
+                            first?.posts?.firstOrNull { it.floor == 1 }?.author?.uid
+                        }
+                    val info = threadInfo ?: return@launch
+                    if (author == null && target != ForumReadingMode.Forum) {
+                        feedbackController.post(i18n("目前無法定位跳轉位置"))
+                        return@launch
+                    }
+                    persistCurrentReadingState(flush = true)
+                    val destination = if (target == ForumReadingMode.SmartComic) {
+                        val user = posts.firstOrNull { it.author.uid == author }?.author
+                        val seed = ThreadSummary(tid, info.title, info.forum.fid, hasPoll = false, url = "", author = user)
+                        IImageReaderScreen(tid, null, info.forum.fid, info.title, smartSeed = seed, authorId = author,
+                            loadHistory = true, offlineOnly = offlineOnly, offlinePage = offlinePage)
+                    } else {
+                        val novel = target == ForumReadingMode.Novel
+                        IThreadReaderScreen(tid, info.title, threadType = if (novel) ReadHistoryRepository.ThreadEntryType.Novel
+                            else ReadHistoryRepository.ThreadEntryType.Normal, authorId = if (novel) author else offlinePage?.authorId?.let(::UserId),
+                            offlineOnly = offlineOnly, offlinePage = offlinePage, initialPage = offlinePage?.page ?: 1)
+                    }
+                    showMenu = false
+                    navigator.navigate(destination)
+                }
+            }
         }
 
         if (showDownloadSheet) {

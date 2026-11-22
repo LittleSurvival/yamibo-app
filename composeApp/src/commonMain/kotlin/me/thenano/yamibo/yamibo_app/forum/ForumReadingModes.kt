@@ -22,9 +22,15 @@ internal fun ForumReadingMode.label() = when (this) {
 @Composable
 internal fun ForumReadingDialog(fid: ForumId, onDismiss: () -> Unit) {
     val setting = LocalAppSettingsRepository.current.forumReadingMode(fid)
+    ReaderModeDialog(i18n("板塊閱讀模式"), setting.state(), onDismiss) { setting.setValue(it) }
+}
+
+@Composable
+internal fun ReaderModeDialog(title: String, current: ForumReadingMode, onDismiss: () -> Unit,
+                             onSelect: (ForumReadingMode) -> Unit) {
     YamiboSingleSelectDialog(
-        title = i18n("板塊閱讀模式"), options = ForumReadingMode.entries,
-        selected = setting.state(), onDismiss = onDismiss, onSelect = { setting.setValue(it) },
+        title = title, options = ForumReadingMode.entries,
+        selected = current, onDismiss = onDismiss, onSelect = onSelect,
         label = { it.label() }, dismissOnSelect = true, footer = null,
     )
 }

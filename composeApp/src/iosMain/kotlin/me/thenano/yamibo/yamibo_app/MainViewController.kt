@@ -252,6 +252,7 @@ fun MainViewController() = ComposeUIViewController {
     }
     val downloadRepository = remember {
         DownloadRepositoryImpl(
+            accountId = { authRepository.currentUser()?.uid?.value ?: 0 },
             threadRepository = threadRepository,
             tagRepository = tagRepository,
             rssRepository = rssSearchSubscriptionRepository,
