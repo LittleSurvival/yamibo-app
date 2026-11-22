@@ -59,7 +59,11 @@ class ReaderResumeTest {
     @Test fun newerImageRestoresTheExactOccurrenceWithoutHttpOnLocalHit() = runBlocking {
         val start = history(novel, novel, comic).textReaderStart(tid, ThreadEntryType.Novel, author,
             mock { name, _ -> if (name == "knownPageForPost") 1 else error(name) },
-            mock { name, _ -> if (name == "getDownloadedPage") page else error(name) })
+            mock { name, _ -> when (name) {
+                "getDownloadedPage" -> page
+                "downloadedPageForPost" -> null
+                else -> error(name)
+            } })
         assertEquals(scope.sourceId, start.history?.imageSource)
         assertEquals(1, start.history?.imageOccurrence)
         assertEquals(pid, start.history?.postId)
@@ -73,7 +77,7 @@ class ReaderResumeTest {
                 "knownPageForPost", "getCachedThread", "setCachedThread" -> null
                 "fetchFindPost" -> { findCalls++; YamiboResult.Success(page) }
                 else -> error("unexpected second read: " + name)
-            } }, mock { name, _ -> if (name == "getDownloadedPage") null else error(name) })
+            } }, mock { name, _ -> if (name in setOf("getDownloadedPage", "downloadedPageForPost")) null else error(name) })
         assertEquals(1, findCalls)
         assertSame(page, start.snapshot)
         assertEquals("paragraph", start.history?.anchorBlockId)

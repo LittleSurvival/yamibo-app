@@ -1,5 +1,6 @@
 ﻿package me.thenano.yamibo.yamibo_app.thread.reader
 
+import me.thenano.yamibo.yamibo_app.repository.download.ThreadPageDownloadKey
 import androidx.compose.runtime.Composable
 import io.github.littlesurvival.dto.model.ThreadSummary
 import io.github.littlesurvival.dto.value.ForumId
@@ -34,6 +35,8 @@ private data class ImageReaderRestorePayload(
     val rssQuery: String? = null,
     val rssPage: Int? = null,
     val rssTotalPages: Int? = null,
+    val offlineOnly: Boolean = false,
+    val offlinePage: ThreadPageDownloadKey? = null,
 )
 @RestorableScreenEntry
 class IImageReaderScreen(
@@ -63,8 +66,11 @@ class IImageReaderScreen(
     private val rssThreads: List<ThreadSummary>? = null,
     val rssPage: Int? = null,
     val rssTotalPages: Int? = null,
+    val offlineOnly: Boolean = false,
+    val offlinePage: ThreadPageDownloadKey? = null,
 ) : RestorableNavigatable {
-    override val id = if (smartSeed != null) buildId("smart", fid?.value, tid.value)
+    override val id = if (offlineOnly) buildId("download", tid.value, offlinePage?.stableId, tagId?.value, rssSubscriptionId)
+        else if (smartSeed != null) buildId("smart", fid?.value, tid.value)
         else buildId(tid.value, postId?.value, tagId?.value, rssSubscriptionId)
     override val restoreDecoder = Decoder
 
@@ -88,6 +94,8 @@ class IImageReaderScreen(
             rssQuery = rssQuery,
             rssPage = rssPage,
             rssTotalPages = rssTotalPages,
+            offlineOnly = offlineOnly,
+            offlinePage = offlinePage,
         ),
     )
 
@@ -115,6 +123,8 @@ class IImageReaderScreen(
             rssThreads = rssThreads,
             rssPage = rssPage,
             rssTotalPages = rssTotalPages,
+            offlineOnly = offlineOnly,
+            offlinePage = offlinePage,
         )
     }
 
@@ -142,6 +152,8 @@ class IImageReaderScreen(
                 rssThreads = null,
                 rssPage = data.rssPage,
                 rssTotalPages = data.rssTotalPages,
+                offlineOnly = data.offlineOnly,
+                offlinePage = data.offlinePage,
             )
         }
     }

@@ -926,3 +926,20 @@ App 啟動時同步,Sync on app start,App 啟動時同步,App 启动时同步
 載入中,Loading,載入中,加载中
 搜尋分頁未前進,Search returned a repeated page,搜尋分頁未前進,搜索分页未前进
 缺少搜尋分頁識別碼,Search page identifier is missing,缺少搜尋分頁識別碼,缺少搜索分页标识
+下載 {} 話,Download {} chapters,下載 {} 話,下载 {} 话
+下載漫畫,Download manga,下載漫畫,下载漫画
+作品目錄共 {} 話,{} chapters in this work,作品目錄共 {} 話,作品目录共 {} 话
+加入下載佇列失敗,Could not queue the download,加入下載佇列失敗,加入下载队列失败
+整部作品,Entire work,整部作品,整部作品
+本話,Current chapter,本話,本话
+此話尚無可離線閱讀的圖片,No offline images for this chapter,此話尚無可離線閱讀的圖片,此话尚无可离线阅读的图片
+登入帳號已變更,The signed-in account has changed,登入帳號已變更,登录账号已变更
+目前找到 {} 話，目錄尚未確認完整,{} known chapters. The catalog is incomplete.,目前找到 {} 話，目錄尚未確認完整,目前找到 {} 话，目录尚未确认完整
+請先登入,Sign in first,請先登入,请先登录
+選取已知章節,Select known chapters,選取已知章節,选取已知章节
+這一頁尚未下載,This page is unavailable offline,這一頁尚未下載,这一页尚未下载
+開啟下載內容,Open downloaded content,開啟下載內容,打开下载内容
+缺少正文，僅可閱讀已下載圖片,Only downloaded images are available for this chapter,缺少正文，僅可閱讀已下載圖片,缺少正文，仅可阅读已下载图片
+繼續這部作品,Continue this work,繼續這部作品,继续这部作品
+可完整離線閱讀 {} 話,{} complete offline chapters,可完整離線閱讀 {} 話,可完整离线阅读 {} 话
+部分已下載,Partially downloaded,部分已下載,部分已下载

@@ -35,6 +35,9 @@ interface DownloadRepository {
     suspend fun getStatus(key: TagMangaChapterDownloadKey): DownloadStatus
     suspend fun getStatus(key: RssMangaChapterDownloadKey): DownloadStatus
     suspend fun getDownloadedPage(key: ThreadPageDownloadKey): ThreadPage?
+    /** True for a verified complete author scope, false for a locally readable subset. */
+    suspend fun chapterAvailability(chapters: List<ThreadSummary>): Map<ThreadId, Boolean> = emptyMap()
+    suspend fun downloadedPageForPost(tid: ThreadId, author: UserId?, pid: io.github.littlesurvival.dto.value.PostId): Int? = null
     /** Observe only the durable local copy. Collecting never contacts the image host. */
     fun observeLocalImage(image: MissingThreadImage): Flow<String?>
     /** Fetch and persist one missing image after an explicit reader action. */

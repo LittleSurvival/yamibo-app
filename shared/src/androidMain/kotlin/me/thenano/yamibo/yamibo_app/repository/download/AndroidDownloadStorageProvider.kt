@@ -164,7 +164,7 @@ class AndroidDownloadStorageProvider(
         return file.toString()
     }
 
-    override suspend fun readThreadPage(key: ThreadPageDownloadKey): ByteArray? {
+    override suspend fun readThreadPage(key: DownloadTaskKey): ByteArray? {
         val treeUri = selectedTreeUri() ?: return null
         val pageDir = itemDir(treeUri, key) ?: return null
         val file = findChild(treeUri, pageDir, "thread_page.json") ?: findChild(treeUri, pageDir, "thread_page.json.previous") ?: return null

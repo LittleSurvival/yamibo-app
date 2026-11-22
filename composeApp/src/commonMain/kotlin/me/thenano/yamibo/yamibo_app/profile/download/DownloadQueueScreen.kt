@@ -1045,6 +1045,8 @@ private fun DownloadContentItemRow(
     onClearItem: (DownloadedContentItem) -> Unit,
     onRefreshItem: (DownloadedContentItem) -> Unit,
 ) {
+    var opening by remember(item.key) { mutableStateOf(false) }
+    if (opening) DownloadedReaderDialog(item) { opening = false }
     val colors = YamiboTheme.colors
     Row(
         modifier = Modifier.fillMaxWidth()
@@ -1053,7 +1055,7 @@ private fun DownloadContentItemRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (selectionMode) DownloadSelectionMark(if (selected) ToggleableState.On else ToggleableState.Off, !busy)
-        Column(Modifier.weight(1f)) {
+        Column(Modifier.weight(1f).then(if (selectionMode) Modifier else Modifier.clickable(enabled = !busy) { opening = true })) {
             Text(when (val key = item.key) {
                 is ThreadPageDownloadKey -> i18n("第 {} 頁", key.page)
                 else -> item.title

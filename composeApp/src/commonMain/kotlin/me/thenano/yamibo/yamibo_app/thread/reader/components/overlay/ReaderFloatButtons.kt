@@ -25,6 +25,7 @@ fun ReaderFloatButtons(
     visible: Boolean,
     onRefresh: () -> Unit,
     onSettings: () -> Unit,
+    onReaderMode: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val colors = YamiboTheme.colors
@@ -44,6 +45,12 @@ fun ReaderFloatButtons(
                 horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.spacedBy(24.dp)
             ) {
+                if (onReaderMode != null) {
+                    IconButton(onClick = onReaderMode, modifier = Modifier.size(56.dp)
+                        .background(colors.brownPrimary.copy(alpha = 0.2f), CircleShape)) {
+                        Icon(YamiboIcons.Book, contentDescription = i18n("閱讀模式"), tint = colors.brownPrimary)
+                    }
+                }
                 IconButton(
                     onClick = onRefresh,
                     modifier = Modifier

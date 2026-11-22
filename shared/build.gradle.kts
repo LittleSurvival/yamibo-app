@@ -19,6 +19,7 @@ kotlin {
 
     sourceSets {
         commonTest.dependencies { implementation(kotlin("test")) }
+        androidUnitTest.dependencies { implementation("app.cash.sqldelight:sqlite-driver:2.3.2") }
         commonMain.dependencies {
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.content.negotiation)

@@ -45,6 +45,7 @@ fun MangaReaderOverlay(
     subtitle: String? = null,
     onShare: (() -> Unit)? = null,
     onRefresh: (() -> Unit)? = null,
+    onDownload: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val colors = YamiboTheme.colors
@@ -194,6 +195,12 @@ fun MangaReaderOverlay(
                                 tint = Color.White,
                                 modifier = Modifier.size(36.dp)
                             )
+                        }
+
+                        if (onDownload != null) {
+                            IconButton(onClick = onDownload) {
+                                Icon(YamiboIcons.Download, contentDescription = i18n("下載漫畫"), tint = Color.White)
+                            }
                         }
 
                         // Share button (copy URL)

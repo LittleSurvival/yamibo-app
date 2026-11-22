@@ -1,0 +1,44 @@
+memberWork:
+SELECT workId FROM SmartComicMember WHERE owner = ? AND fid = ? AND tid = ?;
+
+workById:
+SELECT * FROM SmartComicWork WHERE id = ? AND owner = ?;
+
+works:
+SELECT * FROM SmartComicWork WHERE owner = ? ORDER BY lastReadAt DESC, id DESC;
+
+members:
+SELECT summary FROM SmartComicMember WHERE workId = ? ORDER BY ordinal, tid;
+
+createWork:
+INSERT INTO SmartComicWork(owner,fid,title) VALUES (?,?,?);
+
+newId:
+SELECT last_insert_rowid();
+
+saveMember:
+INSERT OR REPLACE INTO SmartComicMember(owner,fid,tid,workId,summary,ordinal) VALUES (?,?,?,?,?,?);
+
+updateTitle:
+UPDATE SmartComicWork SET title = ?, completeAt = COALESCE(?,completeAt) WHERE id = ? AND owner = ?;
+
+visit:
+UPDATE SmartComicWork SET lastTid = ?, lastReadAt = :at WHERE id = ? AND owner = ?
+AND (lastReadAt IS NULL OR lastReadAt <= :at);
+
+memberOwners:
+SELECT tid,workId FROM SmartComicMember WHERE owner = ? AND fid = ? AND tid IN ?;
+
+lastOrdinal:
+SELECT ordinal FROM SmartComicMember WHERE workId = ? ORDER BY ordinal DESC LIMIT 1;
+
+progress:
+SELECT * FROM SmartComicProgress WHERE owner = ? AND fid = ? AND tid IN ?;
+
+saveProgress:
+INSERT OR REPLACE INTO SmartComicProgress(owner, fid, tid, page, imageIndex, imageCount, finished, observedAt)
+VALUES (?,?,?,?,?,?,?,?);
+
+setUnread:
+UPDATE SmartComicProgress SET finished = 0, observedAt = :at
+WHERE owner = ? AND fid = ? AND tid = ? AND observedAt <= :at;

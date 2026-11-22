@@ -1,5 +1,6 @@
 ﻿package me.thenano.yamibo.yamibo_app.thread.reader
 
+import me.thenano.yamibo.yamibo_app.repository.download.ThreadPageDownloadKey
 import androidx.compose.runtime.Composable
 import io.github.littlesurvival.dto.value.PostId
 import io.github.littlesurvival.dto.value.TagId
@@ -32,6 +33,8 @@ private data class ThreadReaderRestorePayload(
     val catalogRssTitle: String? = null,
     val catalogRssQuery: String? = null,
     val catalogRssPage: Int? = null,
+    val offlineOnly: Boolean = false,
+    val offlinePage: ThreadPageDownloadKey? = null,
 )
 
 /** Navigatable screen for reading a novel thread in continuous mode. */
@@ -52,8 +55,11 @@ class IThreadReaderScreen(
     val catalogRssTitle: String? = null,
     val catalogRssQuery: String? = null,
     val catalogRssPage: Int? = null,
+    val openingImage: ReadHistoryRepository.ImageReadingHistory? = null,
+    val offlineOnly: Boolean = false,
+    val offlinePage: ThreadPageDownloadKey? = null,
 ) : RestorableNavigatable {
-    override val id = buildId(
+    override val id = if (offlineOnly) buildId("download", tid.value, threadType.name, authorId?.value, offlinePage?.stableId) else buildId(
         tid.value,
         threadType.name,
         authorId?.value ?: "all",
@@ -80,6 +86,8 @@ class IThreadReaderScreen(
             catalogRssTitle = catalogRssTitle,
             catalogRssQuery = catalogRssQuery,
             catalogRssPage = catalogRssPage,
+            offlineOnly = offlineOnly,
+            offlinePage = offlinePage,
         ),
     )
 
@@ -101,6 +109,9 @@ class IThreadReaderScreen(
             catalogRssTitle = catalogRssTitle,
             catalogRssQuery = catalogRssQuery,
             catalogRssPage = catalogRssPage,
+            openingImage = openingImage,
+            offlineOnly = offlineOnly,
+            offlinePage = offlinePage,
         )
     }
 
@@ -124,6 +135,8 @@ class IThreadReaderScreen(
                 catalogRssTitle = data.catalogRssTitle,
                 catalogRssQuery = data.catalogRssQuery,
                 catalogRssPage = data.catalogRssPage,
+                offlineOnly = data.offlineOnly,
+                offlinePage = data.offlinePage,
             )
         }
     }

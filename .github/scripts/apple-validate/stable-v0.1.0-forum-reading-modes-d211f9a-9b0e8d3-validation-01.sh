@@ -14,6 +14,7 @@ for path in reports:
     tests.extend(ET.parse(path).getroot().iter("testcase"))
 names = {t.get("name", "") for t in tests}
 assert any("allAuthorFloors" in name for name in names), names
-assert len(tests) >= 7 and all(t.find("failure") is None and t.find("error") is None and t.find("skipped") is None for t in tests)
+assert any("copiesAreIsolatedByAccountStorageAndPagination" in name for name in names), names
+assert len(tests) >= 9 and all(t.find("failure") is None and t.find("error") is None and t.find("skipped") is None for t in tests)
 print(f"{len(tests)} shared reader tests on the iOS simulator target")
 PY

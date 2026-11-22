@@ -26,7 +26,7 @@ interface DownloadStorageProvider {
     suspend fun writeImage(
         storageKey: String, key: DownloadTaskKey, image: PendingDownloadedImage, manifestBytes: ByteArray,
     ): String
-    suspend fun readThreadPage(key: ThreadPageDownloadKey): ByteArray?
+    suspend fun readThreadPage(key: DownloadTaskKey): ByteArray?
     suspend fun readPageRecord(key: ThreadPageDownloadKey): Pair<ByteArray, ThreadPageDownloadManifest?>? =
         readThreadPage(key)?.let { it to readManifest(key) }
     suspend fun updateThreadPage(key: ThreadPageDownloadKey, manifestBytes: ByteArray, threadPageBytes: ByteArray)
