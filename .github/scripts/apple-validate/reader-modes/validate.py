@@ -64,21 +64,32 @@ def main():
         assert len(apps) == 1, apps
         run("Boot owned iPhone Simulator", ["xcrun", "simctl", "boot", simulator], 60)
         run("Wait for iPhone boot", ["xcrun", "simctl", "bootstatus", simulator, "-b"], 300)
-        run("Install independent QA App", ["xcrun", "simctl", "install", simulator, str(apps[0])], 120)
-        container = Path(subprocess.check_output(
-            ["xcrun", "simctl", "get_app_container", simulator, BUNDLE, "data"], text=True).strip())
-        fixture = container / "Documents/YamiboApp"
-        run("Seed real storage manifests and images", [sys.executable,
-            str(PROFILE / "generate_fixtures.py"), str(fixture)], 120)
-        assert (fixture / "YamiboDownloads/thread_140_page_1_author_7/thread_page.json").is_file()
-        print(f"Fixture root: {fixture}; manifests: {len(list(fixture.rglob('manifest.json')))}", flush=True)
-        run("Open the downloaded page in three reader modes from Profile", xcode + ["-resultBundlePath",
-            str(OUTPUT / "ios-ui.xcresult"), "-parallel-testing-enabled", "NO", "test-without-building"], 600)
-        summary = json.loads(run("Read individual UI execution summary", ["xcrun", "xcresulttool",
-            "get", "test-results", "summary", "--path", str(OUTPUT / "ios-ui.xcresult")],
-            60, capture=True).stdout)
-        (OUTPUT / "ui-summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
-        assert summary["passedTests"] == 3 and summary["failedTests"] == 0 and summary["skippedTests"] == 0, summary
+        simctl = ["xcrun", "simctl"]
+        results = {}
+        for appearance in ("light", "dark"):
+            run(f"Set {appearance} appearance", simctl + ["ui", simulator, "appearance", appearance], 30)
+            for case in ("testForum", "testNovel", "testComic"):
+                name = f"{appearance}-{case}"
+                run(f"Install clean App for {name}", simctl + ["install", simulator, str(apps[0])], 120)
+                container = Path(subprocess.check_output(simctl + [
+                    "get_app_container", simulator, BUNDLE, "data"], text=True).strip())
+                fixture = container / "Documents/YamiboApp"
+                run("Seed downloaded page", [sys.executable, str(PROFILE / "generate_fixtures.py"), str(fixture)], 120)
+                bundle = OUTPUT / f"{name}.xcresult"
+                try:
+                    run(name, xcode + ["-resultBundlePath", str(bundle), "-parallel-testing-enabled", "NO",
+                        f"-only-testing:ReaderModesUITests/ReaderModesUITests/{case}", "test-without-building"], 300)
+                    summary = json.loads(subprocess.check_output(["xcrun", "xcresulttool", "get",
+                        "test-results", "summary", "--path", str(bundle)], text=True))
+                    results[name] = (summary["passedTests"] == 1 and summary["failedTests"] == 0
+                                     and summary["skippedTests"] == 0)
+                except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+                    print(f"{name}: {error}", flush=True)
+                    results[name] = False
+                run("Remove QA App and its reading history", simctl + ["uninstall", simulator, BUNDLE], 60)
+                (OUTPUT / "ui-summary.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
+        if not all(results.values()):
+            raise RuntimeError(f"Reader UI results: {results}")
     finally:
         if simulator:
             subprocess.run(["xcrun", "simctl", "shutdown", simulator], check=False, timeout=60)
