@@ -27,7 +27,8 @@ final class ReaderModesUITests: XCTestCase {
         continueAfterFailure = false
         app.terminate()
         app.launchArguments = ["-AppleLanguages", "(zh-Hant)", "-AppleLocale", "zh_TW"]
-        if dark { app.launchArguments += ["-appsettings.themeScheme", "DEFAULT_DARK"] }
+        // SettingsRegistry stores delegated property names in lowercase.
+        if dark { app.launchArguments += ["-appsettings.themescheme", "DEFAULT_DARK"] }
         app.launch()
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let alert = springboard.alerts.firstMatch
