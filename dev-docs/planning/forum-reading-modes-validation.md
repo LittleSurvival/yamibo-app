@@ -25,7 +25,26 @@
 | 論壇 | 初次開下載時顯示第一樓 `READER_FLOOR_1`。 | 成功進入閱讀器，失敗時 UI 樹有 `3#`、`READER_FLOOR_3` 及 `1/1 100%`。第一樓位置斷言失敗。 |
 | 小說 | 初次開同一作者下載時顯示 `READER_FLOOR_1`。 | 成功進入小說閱讀器，UI 樹同樣顯示第三樓及頁尾。需逐案重置閱讀歷史，對照恢復前的位置及第一個可見樓層，才能區分首次定位與前案留下的進度。 |
 
-兩個文字案例均保留失敗判定。上述 UI 情境尚待在最終產品修訂重驗。
+這三個結果保留為 `7376834` 的歷史紀錄。後續使用相同樣本、逐案重裝 App 的對照結果見下節。
+
+### iPhone first-open regression
+
+Each case installs a fresh app on a dedicated iPhone Simulator and seeds the same author-scoped page (TID 140, author 7, PIDs 1401–1403). XCTest opens Profile → Downloads → Downloaded content, enters the page and dismisses the in-app update prompt when it appears. Forum and Novel require the first visible floor marker to settle on floor 1 without a scroll gesture. Smart Comic must paint the first image, advance from `1 / 3` to `2 / 3` after one swipe, and paint the second image in its distinct fixture color. The image URLs use an unresolvable fixture host. The simulator stays connected for startup services. These cases do not measure network attempts.
+
+The control used product `90c8780` and harness `8489336c`. With the iOS system appearance set to light, Forum and Novel opened at floor 3. With the system appearance set to dark, Forum opened at floor 3 and Novel opened at floor 1. Both Smart Comic cases passed. All three text failures showed page-end progress of 100% after a clean installation. Both system appearances used the same cream Yamibo chooser surface. [Control run and screenshots](https://github.com/LittleSurvival/yamibo-app/actions/runs/45157022982)
+
+Product `d10f7dca` keeps the end-of-page controls out of the lazy list until it can display a body entry. Previously the keyed refresh action could be measured first while the posts were being parsed. When body entries appeared above that action, the list retained its position near the end. With the same harness and fixture, all six cases passed on validation revision `c191ca1b`; the two text readers started at floor 1 in every case. The first attempt timed out while starting the simulator appearance service, before any tests ran. [Passing repeat on the same revision](https://github.com/LittleSurvival/yamibo-app/actions/runs/45157096225/attempts/2) · [Startup timeout](https://github.com/LittleSurvival/yamibo-app/actions/runs/45157096225/attempts/1)
+
+The candidate passed 20/20 Android shared tests, built the Android debug APK, passed 9/9 iOS native tests and compiled the Compose iOS Simulator target. The Android build used the validation checkout's debug signing because the primary checkout points to a missing local signing key. [Apple native run and XML](https://github.com/LittleSurvival/yamibo-app/actions/runs/45157149539)
+
+The final UI run used the same product code and harness `fe36880a`. Each test checked the rendered chooser surface against the selected Yamibo palette before opening the reader. All six passed on the simulator. [XCTest results and screenshots](https://github.com/LittleSurvival/yamibo-app/actions/runs/45164053906)
+
+| Built-in Yamibo palette | Forum | Novel | Smart Comic |
+| --- | --- | --- | --- |
+| Default (cream) | First visible marker at floor 1 | First visible marker at floor 1 | First and second local images painted in order |
+| Default Dark | First visible marker at floor 1 | First visible marker at floor 1 | First and second local images painted in order |
+
+These are first opens of one complete download. Resume from saved progress, incomplete downloads and cross-source selection have separate acceptance cases.
 
 ### 真站核對
 
