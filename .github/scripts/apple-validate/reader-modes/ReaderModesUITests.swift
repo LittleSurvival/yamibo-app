@@ -23,10 +23,11 @@ final class ReaderModesUITests: XCTestCase {
         XCTFail("Missing control " + labels.joined(separator: ", ") + " " + app.debugDescription)
     }
 
-    private func openDownload(_ labels: [String]) {
+    private func openDownload(_ labels: [String], dark: Bool) {
         continueAfterFailure = false
         app.terminate()
         app.launchArguments = ["-AppleLanguages", "(zh-Hant)", "-AppleLocale", "zh_TW"]
+        if dark { app.launchArguments += ["-appsettings.themeScheme", "DEFAULT_DARK"] }
         app.launch()
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let alert = springboard.alerts.firstMatch
@@ -37,6 +38,15 @@ final class ReaderModesUITests: XCTestCase {
         tap(["QA Three Readers"])
         tap(["第 1 頁", "第 1 页", "Page 1"])
         XCTAssertTrue(element(["開啟下載內容", "打开下载内容", "Open downloaded content"]).waitForExistence(timeout: 10), app.debugDescription)
+        // Inspect the chooser surface in sRGB. iOS appearance alone does not select a Yamibo palette.
+        let surface = dark ? (42, 30, 24) : (255, 247, 224)
+        let palette = NSPredicate { _, _ in
+            self.largeColorArea { red, green, blue in
+                abs(red - surface.0) < 8 && abs(green - surface.1) < 8 && abs(blue - surface.2) < 8
+            }
+        }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: palette, object: app)], timeout: 10),
+                       .completed, "Expected the selected Yamibo chooser palette")
         capture("download-reader-chooser")
         tap(labels)
     }
@@ -63,20 +73,20 @@ final class ReaderModesUITests: XCTestCase {
         XCTAssertEqual(result, .completed, app.debugDescription)
     }
 
-    func testNovel() {
-        openDownload(["小說閱讀", "小说阅读", "Novel reader"])
+    private func checkNovel(dark: Bool) {
+        openDownload(["小說閱讀", "小说阅读", "Novel reader"], dark: dark)
         assertFirstFloor()
         capture("novel-first-author-floor")
     }
 
-    func testForum() {
-        openDownload(["論壇模式", "论坛模式", "Forum mode"])
+    private func checkForum(dark: Bool) {
+        openDownload(["論壇模式", "论坛模式", "Forum mode"], dark: dark)
         assertFirstFloor()
         capture("forum-first-author-floor")
     }
 
-    func testComic() {
-        openDownload(["智能漫畫", "智能漫画", "Smart Comic"])
+    private func checkComic(dark: Bool) {
+        openDownload(["智能漫畫", "智能漫画", "Smart Comic"], dark: dark)
         XCTAssertTrue(element(["1 / 3"]).waitForExistence(timeout: 20), app.debugDescription)
         waitForImage(second: false)
         capture("comic-first-painted-image")
@@ -86,19 +96,31 @@ final class ReaderModesUITests: XCTestCase {
         capture("comic-second-floor")
     }
 
+    func testNovel() { checkNovel(dark: false) }
+    func testNovelDark() { checkNovel(dark: true) }
+    func testForum() { checkForum(dark: false) }
+    func testForumDark() { checkForum(dark: true) }
+    func testComic() { checkComic(dark: false) }
+    func testComicDark() { checkComic(dark: true) }
+
     private func waitForImage(second: Bool) {
-        let painted = NSPredicate { _, _ in self.localMarkerIsVisible(second: second) }
+        let painted = NSPredicate { _, _ in
+            self.largeColorArea { red, green, blue in
+                second ? red >= 190 && green < 100 && blue >= 140
+                       : red < 80 && green >= 140 && green <= 220 && blue >= 190
+            }
+        }
         expectation(for: painted, evaluatedWith: app)
         waitForExpectations(timeout: 15)
     }
 
-    private func localMarkerIsVisible(second: Bool) -> Bool {
+    private func largeColorArea(matching: (Int, Int, Int) -> Bool) -> Bool {
         let source = app.screenshot().image.cgImage!
         let width = source.width, height = source.height
         var pixels = [UInt8](repeating: 0, count: width * height * 4)
         pixels.withUnsafeMutableBytes { bytes in
             let context = CGContext(data: bytes.baseAddress, width: width, height: height,
-                bitsPerComponent: 8, bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitsPerComponent: 8, bytesPerRow: width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
                 bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue)!
             context.draw(source, in: CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)))
         }
@@ -108,9 +130,7 @@ final class ReaderModesUITests: XCTestCase {
             let red = Int(pixels[offset])
             let green = Int(pixels[offset + 1])
             let blue = Int(pixels[offset + 2])
-            let matches = second ? red >= 190 && green < 100 && blue >= 140
-                                 : red < 80 && green >= 140 && green <= 220 && blue >= 190
-            if matches {
+            if matching(red, green, blue) {
                 matchingPixels += 1
             }
             offset += 4

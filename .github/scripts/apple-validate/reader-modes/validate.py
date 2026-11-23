@@ -66,10 +66,10 @@ def main():
         run("Wait for iPhone boot", ["xcrun", "simctl", "bootstatus", simulator, "-b"], 300)
         simctl = ["xcrun", "simctl"]
         results = {}
-        for appearance in ("light", "dark"):
-            run(f"Set {appearance} appearance", simctl + ["ui", simulator, "appearance", appearance], 30)
-            for case in ("testForum", "testNovel", "testComic"):
-                name = f"{appearance}-{case}"
+        for palette in ("default", "default-dark"):
+            for reader in ("testForum", "testNovel", "testComic"):
+                case = reader if palette == "default" else f"{reader}Dark"
+                name = f"{palette}-{reader}"
                 run(f"Install clean App for {name}", simctl + ["install", simulator, str(apps[0])], 120)
                 container = Path(subprocess.check_output(simctl + [
                     "get_app_container", simulator, BUNDLE, "data"], text=True).strip())
