@@ -4152,6 +4152,9 @@ internal fun ThreadReaderScreen(
                                         bottom = bottomContentPadding,
                                     )
                                 ) {
+                                    // A keyed end-of-page action would become the first scroll anchor
+                                    // if it were measured before the background body parser returns.
+                                    if (posts.isNotEmpty() && displayedReaderEntries.isEmpty()) return@LazyColumn
                                     itemsIndexed(
                                         items = displayedReaderEntries,
                                         key = { _, entry -> entry.key },
