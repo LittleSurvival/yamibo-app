@@ -500,7 +500,7 @@ private fun ImageErrorContent(
         }
     }
     val retryButton: @Composable () -> Unit = {
-        if (localTitle != null) YamiboActionChip(i18n("重新下載這張圖"), onReload)
+        if (localTitle != null) YamiboActionChip(i18n("重新下載這張圖"), onReload, selected = true)
         else OutlinedButton(
             onClick = onReload,
             colors = ButtonDefaults.outlinedButtonColors(

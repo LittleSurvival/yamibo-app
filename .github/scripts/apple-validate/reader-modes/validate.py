@@ -104,7 +104,7 @@ def main():
                     assert not (fixture / "YamiboDownloads/thread_140_page_1_author_7").exists()
                     results[name] = (summary["passedTests"] == 1 and summary["failedTests"] == 0
                                      and summary["skippedTests"] == 0)
-                except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+                except (AssertionError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
                     print(f"{name}: {error}", flush=True)
                     results[name] = False
                 run("Remove QA App and its reading history", simctl + ["uninstall", simulator, BUNDLE], 60)
