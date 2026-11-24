@@ -995,3 +995,5 @@ RSS 目錄進度,RSS catalog progress,RSS 目錄進度,RSS 目录进度
 圖片轉換完成,Image conversion complete,圖片轉換完成,图片转换完成
 轉換失敗,Conversion failed,轉換失敗,转换失败
 重新掃描下載資料夾,Rescan download folder,重新掃描下載資料夾,重新扫描下载文件夹
+共 {} 帖，圖片 {} 張,"{} threads, {} images",共 {} 帖，圖片 {} 張,共 {} 帖，图片 {} 张
+將已下載的散圖和 CBZ 匯入共用下載庫。確認新檔可讀後才移除舊檔，中斷後可以繼續。,Import loose images and CBZ downloads into the shared library. Originals are removed after verification. You can resume after an interruption.,將已下載的散圖和 CBZ 匯入共用下載庫。確認新檔可讀後才移除舊檔，中斷後可以繼續。,将已下载的散图和 CBZ 导入共用下载库。确认新文件可读后才移除旧文件，中断后可以继续。

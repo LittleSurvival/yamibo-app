@@ -1,5 +1,7 @@
 """Run the three downloaded-reader UI paths on a dedicated iPhone Simulator."""
 
+import hashlib
+import zipfile
 import json
 import os
 from pathlib import Path
@@ -74,13 +76,26 @@ def main():
                 container = Path(subprocess.check_output(simctl + [
                     "get_app_container", simulator, BUNDLE, "data"], text=True).strip())
                 fixture = container / "Documents/YamiboApp"
-                run("Seed downloaded page", [sys.executable, str(PROFILE / "generate_fixtures.py"), str(fixture)], 120)
+                run("Seed downloaded page", [sys.executable, str(PROFILE / "generate_fixtures.py"), str(fixture)] + (["--cbz"] if palette == "default-dark" else []), 120)
                 bundle = OUTPUT / f"{name}.xcresult"
                 try:
                     run(name, xcode + ["-resultBundlePath", str(bundle), "-parallel-testing-enabled", "NO",
                         f"-only-testing:ReaderModesUITests/ReaderModesUITests/{case}", "test-without-building"], 300)
                     summary = json.loads(subprocess.check_output(["xcrun", "xcresulttool", "get",
                         "test-results", "summary", "--path", str(bundle)], text=True))
+                    library = fixture / "YamiboDownloads" / "library"
+                    manifests = list(library.glob("*/threads/140/manifest.json"))
+                    assert len(manifests) == 1, manifests
+                    state = json.loads(manifests[0].read_text(encoding="utf-8"))
+                    claim = state["claims"][0]
+                    assert [f["pid"] for f in claim["floors"]] == [1401, 1402, 1403]
+                    pack = manifests[0].parent / ("posts-" + state["generation"] + ".zip")
+                    with zipfile.ZipFile(pack) as archive:
+                        assert sorted(archive.namelist()) == ["1401.json", "1402.json", "1403.json"]
+                    blobs = list(library.glob("*/images/*/*"))
+                    assert len(blobs) == 3
+                    assert all(hashlib.sha256(f.read_bytes()).hexdigest() == f.name for f in blobs)
+                    assert not (fixture / "YamiboDownloads/thread_140_page_1_author_7").exists()
                     results[name] = (summary["passedTests"] == 1 and summary["failedTests"] == 0
                                      and summary["skippedTests"] == 0)
                 except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:

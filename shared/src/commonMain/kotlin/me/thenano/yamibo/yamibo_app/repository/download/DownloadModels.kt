@@ -125,10 +125,13 @@ data class DownloadedImage(
     val fileName: String,
     val bytes: Long,
     val packed: Boolean = false,
+    val digest: String? = null,
 )
 
 /** The archive generation changes only when the physical image pack is replaced. */
+@Serializable
 sealed interface DownloadManifest {
+    val shared: Boolean
     val owner: Int?
     val missingImageCount: Int
     val key: DownloadTaskKey
@@ -146,7 +149,8 @@ internal fun DownloadManifest.orderedSources(): List<String> {
 }
 
 @Serializable
-internal data class ArchivedImage(val storageId: String, val key: DownloadTaskKey, val fileName: String, val generation: String, val sourceId: String) {
+internal data class ArchivedImage(val storageId: String, val key: DownloadTaskKey, val fileName: String, val generation: String, val sourceId: String,
+    val owner: Int? = null, val digest: String? = null) {
     fun uri() = PREFIX + Json.encodeToString(this).encodeUtf8().base64Url()
 
     companion object {
@@ -170,6 +174,7 @@ data class ThreadPageDownloadManifest(
     val forumName: String? = null,
     override val images: List<DownloadedImage> = emptyList(),
     override val archiveId: String? = null,
+    override val shared: Boolean = false,
     override val owner: Int? = null,
     override val missingImageCount: Int = 0,
 ) : DownloadManifest
@@ -188,6 +193,7 @@ data class TagMangaChapterManifest(
     override val images: List<DownloadedImage> = emptyList(),
     override val archiveId: String? = null,
     val sourceOrder: List<String> = emptyList(),
+    override val shared: Boolean = false,
     override val owner: Int? = null,
     override val missingImageCount: Int = 0,
 ) : DownloadManifest
@@ -207,6 +213,7 @@ data class RssMangaChapterManifest(
     override val images: List<DownloadedImage> = emptyList(),
     override val archiveId: String? = null,
     val sourceOrder: List<String> = emptyList(),
+    override val shared: Boolean = false,
     override val owner: Int? = null,
     override val missingImageCount: Int = 0,
 ) : DownloadManifest
@@ -272,6 +279,8 @@ enum class DownloadedContentGroupType {
 @Serializable
 data class DownloadedContentItem(
     val sortPage: Int = 0,
+    val sharedImages: Map<String, Long> = emptyMap(),
+    val otherKeys: List<DownloadTaskKey> = emptyList(),
     val needsMigration: Boolean = false,
     val key: DownloadTaskKey,
     val title: String,

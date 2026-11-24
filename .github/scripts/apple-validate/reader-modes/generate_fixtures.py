@@ -33,3 +33,16 @@ for offset, image in enumerate(images, 1):
     path.write_bytes(markers[offset - 1])
 write(directory / "thread_page.json", {"thread": {"tid": 140, "title": title, "forum": {"fid": 30, "name": "QA Forum", "url": "forum.php?fid=30"}}, "posts": posts, "pageNav": {"currentPage": 1, "totalPages": 1}})
 write(root / "queue.json", [])
+
+
+if "--cbz" in sys.argv[2:]:
+    import zipfile
+    import shutil
+    with zipfile.ZipFile(directory / "images.cbz", "w", compression=zipfile.ZIP_STORED) as archive:
+        for image, data in zip(images, markers):
+            archive.writestr(image["fileName"], data)
+            image["packed"] = True
+    shutil.rmtree(directory / "images")
+    manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+    manifest.update(archiveId="fixture-cbz", images=images)
+    write(directory / "manifest.json", manifest)

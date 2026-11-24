@@ -1,0 +1,29 @@
+CREATE TABLE OfflineImageAlias (
+    storage TEXT NOT NULL,
+    owner INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    digest TEXT NOT NULL,
+    bytes INTEGER NOT NULL,
+    PRIMARY KEY (storage, owner, source)
+);
+
+CREATE TABLE OfflineLibraryDirty (
+    storage TEXT NOT NULL,
+    owner INTEGER NOT NULL,
+    tid INTEGER NOT NULL,
+    PRIMARY KEY (storage, owner, tid)
+);
+
+CREATE TABLE OfflineImageUse (
+    storage TEXT NOT NULL,
+    owner INTEGER NOT NULL,
+    tid INTEGER NOT NULL,
+    digest TEXT NOT NULL,
+    PRIMARY KEY (storage, owner, tid, digest)
+);
+CREATE INDEX offlineImageUsers ON OfflineImageUse(storage, owner, digest);
+CREATE TABLE OfflineInventory (
+    storage TEXT NOT NULL,
+    owner INTEGER NOT NULL,
+    PRIMARY KEY (storage, owner)
+);

@@ -17,6 +17,11 @@ import okio.FileSystem
 import okio.Path
 import okio.Path.Companion.toPath
 import okio.SYSTEM
+import okio.ByteString.Companion.encodeUtf8
+import okio.buffer
+import okio.use
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 class ReaderDownloadLifecycleTest {
     private val fs = FileSystem.SYSTEM
@@ -31,6 +36,9 @@ class ReaderDownloadLifecycleTest {
     private var scans = 0
     private var pageOpens = 0
     private var owner = 7
+    private var imageOnly: TagMangaChapterManifest? = null
+    private val binaries = mutableMapOf<String, ByteArray>()
+    private val loose = mutableMapOf<String, Path>()
     private var body = page("old", first, second)
     private var storedBytes: ByteArray? = null
     private var storedManifest: ThreadPageDownloadManifest? = null
@@ -49,6 +57,7 @@ class ReaderDownloadLifecycleTest {
     private fun repository(): DownloadRepositoryImpl {
         val storage = mock<DownloadStorageProvider> { name, args -> when (name) {
             "getStorageKey", "getSelectedFolderLabel" -> "fixture"
+            "getOfflineFiles" -> PathOfflineFiles(fs) { directory / "library" }
             "isReady" -> true
             "listManifests" -> {
                 scans++
@@ -56,15 +65,25 @@ class ReaderDownloadLifecycleTest {
                     key = ThreadPageDownloadKey(5000 + index, 1), title = "other", downloadedAt = 1,
                     sourceTotalPages = 1, pageKind = DownloadPageKind.LastAtDownloadTime) } + listOfNotNull(storedManifest)
             }
-            "listTagMangaManifests", "listRssMangaManifests", "readQueue" -> emptyList<Any>()
-            "readThreadPage" -> storedBytes
+            "listTagMangaManifests" -> listOfNotNull(imageOnly)
+            "listRssMangaManifests", "readQueue" -> emptyList<Any>()
+            "readThreadPage" -> storedBytes.takeIf { args[0] == key }
             "readPageRecord" -> {
                 pageOpens++
                 assertEquals(key, args[0])
                 storedBytes?.let { it to storedManifest }
             }
-            "readManifest" -> storedManifest
-            "looseImages" -> emptyMap<String, String>()
+            "readManifest" -> storedManifest?.takeIf { it.key == args[0] }
+            "readTagMangaManifest" -> imageOnly?.takeIf { it.key == args[0] }
+            "readRssMangaManifest" -> null
+            "deleteItems" -> {
+                val removed = args[1] as Set<*>
+                if (key in removed) { storedBytes = null; storedManifest = null }
+                if (imageOnly?.key in removed) imageOnly = null
+                emptyMap<DownloadTaskKey, Throwable>()
+            }
+            "looseImages" -> loose.mapValues { it.value.toString() }
+            "openLoose" -> fs.source((args[0] as String).toPath())
             "writeQueue" -> Unit
             "publishItem" -> {
                 val manifest = Json.decodeFromString<ThreadPageDownloadManifest>((args[2] as ByteArray).decodeToString())
@@ -73,7 +92,7 @@ class ReaderDownloadLifecycleTest {
                 storedBytes = args[3] as? ByteArray
                 Unit
             }
-            "openArchive" -> (directory / (args[1] as String)).takeIf(fs::exists)?.let { path ->
+            "openArchive" -> (args[1] as String).takeIf { it.isNotEmpty() }?.let { directory / it }?.takeIf(fs::exists)?.let { path ->
                 val data = fs.read(path) { readByteArray() }
                 object : SeekableSource {
                     override val size = data.size.toLong()
@@ -97,7 +116,7 @@ class ReaderDownloadLifecycleTest {
             override suspend fun fetch(url: String): ByteArray {
                 synchronized(requests) { requests += url }
                 if (url == unavailable) error("HTTP 503")
-                return url.encodeToByteArray()
+                return binaries[url] ?: url.encodeToByteArray()
             }
         }
         return DownloadRepositoryImpl(thread, storageProvider = storage, imageFetcher = fetcher,
@@ -112,7 +131,7 @@ class ReaderDownloadLifecycleTest {
         val partial = repo.queue.value.single()
         assertEquals(DownloadStatus.Failed, partial.status)
         assertEquals(1 to 2, partial.progressCurrent to partial.progressTotal)
-        assertEquals(1, storedManifest!!.missingImageCount)
+        assertEquals(1, repo.getManifest(key)!!.missingImageCount)
         val local = assertNotNull(repo.getDownloadedPage(key))
         assertTrue(local.posts.single().images.first().url.startsWith(ArchivedImage.PREFIX))
         assertTrue(MissingThreadImage.isReaderUri(local.posts.single().images.last().url))
@@ -120,7 +139,7 @@ class ReaderDownloadLifecycleTest {
         unavailable = null
         assertIs<YamiboResult.Success<ThreadPage>>(refresh(repo))
         assertEquals(listOf(second), requests)
-        assertEquals(0, storedManifest!!.missingImageCount)
+        assertEquals(0, repo.getManifest(key)!!.missingImageCount)
         assertEquals(DownloadStatus.Downloaded, repo.getStatus(key))
         requests.clear()
         assertIs<YamiboResult.Success<ThreadPage>>(refresh(repo))
@@ -131,10 +150,10 @@ class ReaderDownloadLifecycleTest {
         body = page("original", first)
         val repo = repository()
         assertIs<YamiboResult.Success<ThreadPage>>(refresh(repo))
-        val old = storedManifest
+        val old = assertNotNull(repo.getManifest(key))
         body = page("new revision", first, second)
         assertIs<YamiboResult.Failure>(refresh(repo))
-        assertEquals(old, storedManifest)
+        assertEquals(old, repo.getManifest(key))
         assertEquals("original", repo.getDownloadedPage(key)?.thread?.title)
         assertTrue(repo.queue.value.single().refreshSource)
         owner = 8
@@ -154,6 +173,156 @@ class ReaderDownloadLifecycleTest {
         assertEquals(0, scans)
         assertEquals(10_001, repo.getDownloadedContentGroups().sumOf { it.itemCount })
         assertEquals(1, scans)
+    }
+
+    private fun seedCbz(corrupt: Boolean = false): String {
+        unavailable = null
+        body = page("legacy CBZ", first, second, first)
+        storedBytes = Json.encodeToString(body).encodeToByteArray()
+        val images = listOf(first, second).mapIndexed { i, url ->
+            DownloadedImage(url, "$i.jpg", url.encodeToByteArray().size.toLong(), packed = true)
+        }
+        storedManifest = ThreadPageDownloadManifest(key, "legacy CBZ", 10, 1,
+            DownloadPageKind.LastAtDownloadTime, images = images, archiveId = "old.cbz", owner = owner)
+        ZipOutputStream((directory / "old.cbz").toFile().outputStream()).use { zip ->
+            for (img in images) {
+                zip.putNextEntry(ZipEntry(img.fileName))
+                zip.write(if (corrupt && img == images.last()) byteArrayOf(9) else img.sourceUrl.encodeToByteArray())
+                zip.closeEntry()
+            }
+        }
+        return images.first().fileName
+    }
+
+    @Test fun offlineCbzMigrationKeepsOldUrisAndIsIdempotent() = runBlocking {
+        seedCbz()
+        val repo = repository()
+        val oldPage = assertNotNull(repo.getDownloadedPage(key))
+        val oldUri = oldPage.posts.single().images.first().url
+        assertTrue(repo.migrateImages { _, _ -> }.isEmpty())
+        assertNull(storedManifest)
+        assertTrue(assertNotNull(repo.getManifest(key)).shared)
+        assertEquals(first, repo.openArchivedImage(oldUri).buffer().use { it.readUtf8() })
+        val after = assertNotNull(repo.getDownloadedPage(key)).posts.single().images
+        assertEquals(3, after.size)
+        assertEquals(after.first().url, after.last().url)
+        assertEquals(first, repo.openArchivedImage(after.first().url).buffer().use { it.readUtf8() })
+        val sizes = repo.getDownloadedContentSummary()
+        assertEquals(2, sizes.imageCount)
+        assertEquals((first.length + second.length).toLong(), sizes.imageBytes)
+        assertEquals(emptyMap(), repo.migrateImages { _, _ -> })
+        assertTrue(requests.isEmpty())
+    }
+
+    @Test fun damagedCbzKeepsItsSourceAndRetriesOffline() = runBlocking {
+        seedCbz(corrupt = true)
+        val repo = repository()
+        assertNotNull(repo.migrateImages { _, _ -> }[key])
+        assertNotNull(storedManifest)
+        assertFalse(assertNotNull(repo.getManifest(key)).shared)
+        seedCbz()
+        assertTrue(repo.migrateImages { _, _ -> }.isEmpty())
+        assertTrue(requests.isEmpty())
+    }
+
+    @Test fun threadAndRssShareOnePidAndImageFilesAfterRemovingOneClaim() = runBlocking {
+        unavailable = null
+        body = page("shared", first, second, first)
+        val repo = repository()
+        assertIs<YamiboResult.Success<ThreadPage>>(refresh(repo))
+        requests.clear()
+        val rss = RssMangaChapterDownloadKey(9, 140, 7)
+        assertIs<YamiboResult.Success<*>>(repo.refreshRssMangaChapter(rss))
+        assertTrue(requests.isEmpty())
+        val groups = repo.getDownloadedContentGroups(true)
+        assertEquals(1, groups.size)
+        assertEquals(1, groups.single().items.size)
+        assertEquals(setOf(key, rss), groups.single().items.single().sourceKeys.toSet())
+        val images = directory / "library/7/images"
+        assertEquals(2, fs.list(images).sumOf { fs.list(it).size })
+        val packs = fs.list(directory / "library/7/threads/140").filter { it.name.endsWith(".zip") }
+        assertEquals(1, packs.size)
+        java.util.zip.ZipFile(packs.single().toFile()).use { zip -> assertEquals(listOf("1402.json"), zip.entries().toList().map { it.name }) }
+        assertEquals(3, assertNotNull(repo.getRssMangaChapterImages(rss)).size)
+        assertTrue(repo.clearPage(key).isSuccess)
+        val uri = assertNotNull(repo.getRssMangaChapterImages(rss)).first()
+        assertEquals(first, repo.openArchivedImage(uri).buffer().use { it.readUtf8() })
+        assertTrue(repo.clearRssMangaChapter(rss).isSuccess)
+        assertEquals(0, fs.list(images).sumOf { fs.list(it).size })
+        assertTrue(requests.isEmpty())
+    }
+
+    @Test fun imageOnlyTagCbzKeepsItsEntryAndOriginalOrder() = runBlocking {
+        seedCbz()
+        val tag = TagMangaChapterDownloadKey(42, 140, 7)
+        imageOnly = TagMangaChapterManifest(tag, "legacy", title = "images only", tagPage = 1,
+            imageCount = 3, downloadedAt = 2, images = storedManifest!!.images, archiveId = "old.cbz",
+            sourceOrder = listOf(first, second, first))
+        storedBytes = null
+        storedManifest = null
+        val repo = repository()
+        val old = assertNotNull(repo.getTagMangaChapterImages(tag))
+        assertTrue(repo.migrateImages { _, _ -> }.isEmpty())
+        assertNull(imageOnly)
+        assertNull(repo.getDownloadedPage(key))
+        val images = assertNotNull(repo.getTagMangaChapterImages(tag))
+        assertEquals(images.first(), images.last())
+        assertEquals(3, images.size)
+        assertEquals(second, repo.openArchivedImage(old[1]).buffer().use { it.readUtf8() })
+        assertTrue(requests.isEmpty())
+    }
+
+    @Test fun looseMigrationRemapsPreciseAnchorAndUsesNoNetwork() = runBlocking {
+        seedCbz()
+        val old = storedManifest!!
+        storedManifest = old.copy(archiveId = null, images = old.images.map { it.copy(packed = false) })
+        fs.delete(directory / "old.cbz")
+        for (image in old.images) {
+            val path = directory / image.fileName
+            fs.write(path) { writeUtf8(image.sourceUrl) }
+            loose[image.fileName] = path
+        }
+        val oldId = loose.getValue("0.jpg").toString().encodeUtf8().sha256().hex()
+        val repo = repository()
+        Database(driver).imageReadingHistoryQueries.upsert(1402, 140, 2, 3, 2, 4, 1234)
+        Database(driver).imageReadingHistoryQueries.saveAnchor(1402, 1234, 1402, oldId, 1, 1, 7)
+        assertTrue(repo.migrateImages { _, _ -> }.isEmpty())
+        val anchor = Database(driver).imageReadingHistoryQueries.getAnchor(1402, 1234).executeAsOne()
+        assertEquals(me.thenano.yamibo.yamibo_app.repository.thread.readerImageSourceId(first), anchor.sourceId)
+        assertEquals(1L, anchor.occurrence)
+        assertTrue(requests.isEmpty())
+    }
+
+    @Test fun identicalBytesFromUnknownUrlsLeaveOnePhysicalFileAndDistinctPositions() = runBlocking {
+        unavailable = null
+        binaries[second] = first.encodeToByteArray()
+        val repo = repository()
+        assertIs<YamiboResult.Success<*>>(refresh(repo))
+        val result = repo.getDownloadedPage(key)!!.posts.single().images.map { it.url }
+        assertNotEquals(result[0], result[1])
+        assertEquals(first, repo.openArchivedImage(result[1]).buffer().use { it.readUtf8() })
+        assertEquals(1, repo.getDownloadedContentSummary().imageCount)
+        assertEquals(first.length.toLong(), repo.getDownloadedContentSummary().imageBytes)
+        val blobs = directory / "library/7/images"
+        assertEquals(1, fs.list(blobs).sumOf { fs.list(it).size })
+    }
+
+    @Test fun refreshedPostAndImageOrderReachRssWithoutOverwritingWithOlderEdit() = runBlocking {
+        unavailable = null
+        val repo = repository()
+        val rss = RssMangaChapterDownloadKey(9, 140, 7)
+        assertIs<YamiboResult.Success<*>>(repo.refreshRssMangaChapter(rss))
+        val newBody = page("corrected", second, second, first)
+        body = newBody.copy(posts = newBody.posts.map { it.copy(lastEditedTime = TimeInfo("edited", null, 100)) })
+        assertIs<YamiboResult.Success<*>>(refresh(repo))
+        val after = repo.getRssMangaChapterImages(rss)!!
+        assertEquals(3, after.size)
+        assertEquals(after[0], after[1])
+        assertEquals(second, repo.openArchivedImage(after[0]).buffer().use { it.readUtf8() })
+        body = page("stale", first)
+        assertIs<YamiboResult.Failure>(repo.refreshRssMangaChapter(rss))
+        assertEquals("corrected", repo.getDownloadedPage(key)!!.thread.title)
+        assertEquals(3, repo.getRssMangaChapterImages(rss)!!.size)
     }
 
     @AfterTest fun cleanUp() {

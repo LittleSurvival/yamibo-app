@@ -10,10 +10,7 @@ import kotlinx.coroutines.flow.map
 import kotlin.uuid.Uuid
 import no.synth.kmpzip.crypto.Crypto
 import no.synth.kmpzip.io.SeekableSource
-import no.synth.kmpzip.okio.ZipOutputStream
 import no.synth.kmpzip.okio.asSource
-import no.synth.kmpzip.zip.ZipConstants
-import no.synth.kmpzip.zip.ZipEntry
 import no.synth.kmpzip.zip.ZipFile
 import me.thenano.yamibo.yamibo_app.Database
 import okio.FileSystem
@@ -50,7 +47,7 @@ class DownloadRepositoryImpl(
     private val threadRepository: ThreadRepository,
     private val tagRepository: TagRepository? = null,
     private val rssRepository: RssSearchSubscriptionRepository? = null,
-    private val storageProvider: DownloadStorageProvider,
+    storageProvider: DownloadStorageProvider,
     private val imageFetcher: DownloadImageFetcher,
     private val cacheDirectory: Path,
     private val database: Database,
@@ -63,6 +60,10 @@ class DownloadRepositoryImpl(
     },
 ) : DownloadRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val library = OfflineLibrary(storageProvider, database, cacheDirectory, json, accountId)
+    private val storageProvider = library
+    // Readers can continue using the committed version while an image download is staged.
+    private val libraryMutation = Mutex()
     private val workerMutex = Mutex()
     private val taskMutex = Mutex()
     private val removalMutex = Mutex()
@@ -165,7 +166,7 @@ class DownloadRepositoryImpl(
                     queueCatalogStorage = storageKey
                 }
                 val owner = accountId()
-                catalog.groups.mapNotNull { group ->
+                val visibleGroups = catalog.groups.mapNotNull { group ->
                     val visible = group.items.filter { it.owner == null || it.owner == owner }
                     when (visible.size) {
                         0 -> null
@@ -176,6 +177,7 @@ class DownloadRepositoryImpl(
                         }
                     }
                 }
+                mergeDownloadedThreads(visibleGroups)
             }
         }
     }
@@ -207,25 +209,41 @@ class DownloadRepositoryImpl(
         }
     }
 
-    private data class DownloadedContentCatalog(val storageKey: String?, val groups: List<DownloadedContentGroup>)
+    private data class DownloadedContentCatalog(val storageKey: String?, val groups: List<DownloadedContentGroup>, val owner: Int)
 
     private suspend fun catalogLocked(storageKey: String?, refresh: Boolean = false): DownloadedContentCatalog {
-        if (!refresh) {
-            contentCatalog?.takeIf { it.storageKey == storageKey }?.let { return it }
-            val cached = storageKey?.let { DownloadCatalogIndex(cacheDirectory, it).read(::applyCatalogEdits) }
-            if (cached != null) return DownloadedContentCatalog(storageKey, cached).also { contentCatalog = it }
+        val owner = accountId()
+        val repair = storageKey != null && (!readerIndex.inventoryReady(storageKey, owner.toLong()).executeAsOne() ||
+            readerIndex.dirtyLibraryThreads(storageKey, owner.toLong()).executeAsList().isNotEmpty())
+        if (!refresh && !repair) {
+            contentCatalog?.takeIf { it.storageKey == storageKey && it.owner == owner }?.let { return it }
+            val cached = storageKey?.let { DownloadCatalogIndex(cacheDirectory, "library3/$owner/$it").read(::applyCatalogEdits) }
+            if (cached != null) return DownloadedContentCatalog(storageKey, cached, owner).also { contentCatalog = it }
         }
-        val groups = buildContentGroups(storageProvider.listManifests(), storageProvider.listTagMangaManifests(), storageProvider.listRssMangaManifests())
+        if (storageKey != null && (refresh || repair)) library.reconcile(storageKey, owner, collect = false)
+        val shared = library.inventory()
+        val legacy = library.legacy
+        val threads = legacy.listManifests()
+        val tags = legacy.listTagMangaManifests()
+        val feeds = legacy.listRssMangaManifests()
+        val legacyKeys = (threads + tags + feeds).filter { it.owner == null || it.owner == owner }.mapTo(hashSetOf()) { it.key }
+        val groups = buildContentGroups(
+            (shared.filterIsInstance<ThreadPageDownloadManifest>() + threads).distinctBy { (it.owner ?: owner) to it.key },
+            (shared.filterIsInstance<TagMangaChapterManifest>() + tags).distinctBy { (it.owner ?: owner) to it.key },
+            (shared.filterIsInstance<RssMangaChapterManifest>() + feeds).distinctBy { (it.owner ?: owner) to it.key },
+        ).map { group ->
+            group.copy(items = group.items.map { if (it.key in legacyKeys) it.copy(needsMigration = true) else it })
+        }
         check(storageProvider.getStorageKey() == storageKey) { "儲存資料夾已變更" }
-        if (storageKey != null) DownloadCatalogIndex(cacheDirectory, storageKey).commit(groups)
-        return DownloadedContentCatalog(storageKey, groups).also { contentCatalog = it }
+        if (storageKey != null) DownloadCatalogIndex(cacheDirectory, "library3/${accountId()}/$storageKey").commit(groups)
+        return DownloadedContentCatalog(storageKey, groups, accountId()).also { contentCatalog = it }
     }
 
     /** Invalidate the persistent snapshot before mutating user storage. A crash rebuilds it. */
     private suspend fun beginCatalogChange(): DownloadedContentCatalog {
         val storage = checkNotNull(storageProvider.getStorageKey())
         val catalog = catalogLocked(storage)
-        DownloadCatalogIndex(cacheDirectory, storage).begin()
+        DownloadCatalogIndex(cacheDirectory, "library3/${catalog.owner}/$storage").begin()
         contentCatalog = null
         return catalog
     }
@@ -234,8 +252,8 @@ class DownloadRepositoryImpl(
         val edit = CatalogEdit(removed, replacement)
         val groups = applyCatalogEdits(catalog.groups, listOf(edit))
         val storage = checkNotNull(catalog.storageKey)
-        DownloadCatalogIndex(cacheDirectory, storage).commit(groups, edit)
-        contentCatalog = DownloadedContentCatalog(storage, groups)
+        DownloadCatalogIndex(cacheDirectory, "library3/${catalog.owner}/$storage").commit(groups, edit)
+        contentCatalog = DownloadedContentCatalog(storage, groups, catalog.owner)
     }
 
     private fun applyCatalogEdits(previous: List<DownloadedContentGroup>, edits: List<CatalogEdit>): List<DownloadedContentGroup> {
@@ -284,14 +302,15 @@ class DownloadRepositoryImpl(
                         DownloadedContentItem(
                             key = manifest.key,
                             title = manifest.title,
-                            needsMigration = manifest.archiveId == null && manifest.images.isNotEmpty(),
+                            needsMigration = !manifest.shared,
+                            sharedImages = manifest.images.mapNotNull { img -> img.digest?.let { it to img.bytes } }.toMap(),
                             sortPage = manifest.key.page,
                             detail = "第 ${manifest.key.page} 頁",
                             downloadedAt = manifest.downloadedAt,
-                            imageCount = manifest.images.size,
+                            imageCount = if (manifest.shared) manifest.images.distinctBy { it.digest }.size else manifest.images.size,
                             missingImageCount = manifest.missingImageCount,
                             owner = manifest.owner,
-                            imageBytes = manifest.images.sumOf { it.bytes },
+                            imageBytes = (if (manifest.shared) manifest.images.distinctBy { it.digest } else manifest.images).sumOf { it.bytes },
                         )
                     },
                     filterKey = sorted.firstOrNull()?.forumId?.let { "forum_$it" }
@@ -313,14 +332,15 @@ class DownloadRepositoryImpl(
                         DownloadedContentItem(
                             key = manifest.key,
                             title = manifest.title,
-                            needsMigration = manifest.archiveId == null && manifest.images.isNotEmpty(),
+                            needsMigration = !manifest.shared,
+                            sharedImages = manifest.images.mapNotNull { img -> img.digest?.let { it to img.bytes } }.toMap(),
                             sortPage = manifest.tagPage,
                             detail = "標籤第 ${manifest.tagPage} 頁",
                             downloadedAt = manifest.downloadedAt,
-                            imageCount = manifest.images.size,
+                            imageCount = if (manifest.shared) manifest.images.distinctBy { it.digest }.size else manifest.images.size,
                             missingImageCount = manifest.missingImageCount,
                             owner = manifest.owner,
-                            imageBytes = manifest.images.sumOf { it.bytes },
+                            imageBytes = (if (manifest.shared) manifest.images.distinctBy { it.digest } else manifest.images).sumOf { it.bytes },
                         )
                     },
                     filterKey = DOWNLOADED_CONTENT_FILTER_TAG_MANGA,
@@ -340,14 +360,15 @@ class DownloadRepositoryImpl(
                         DownloadedContentItem(
                             key = manifest.key,
                             title = manifest.title,
-                            needsMigration = manifest.archiveId == null && manifest.images.isNotEmpty(),
+                            needsMigration = !manifest.shared,
+                            sharedImages = manifest.images.mapNotNull { img -> img.digest?.let { it to img.bytes } }.toMap(),
                             sortPage = manifest.subscriptionPage,
                             detail = "RSS 第 ${manifest.subscriptionPage} 頁",
                             downloadedAt = manifest.downloadedAt,
-                            imageCount = manifest.images.size,
+                            imageCount = if (manifest.shared) manifest.images.distinctBy { it.digest }.size else manifest.images.size,
                             missingImageCount = manifest.missingImageCount,
                             owner = manifest.owner,
-                            imageBytes = manifest.images.sumOf { it.bytes },
+                            imageBytes = (if (manifest.shared) manifest.images.distinctBy { it.digest } else manifest.images).sumOf { it.bytes },
                         )
                     },
                     filterKey = DOWNLOADED_CONTENT_FILTER_TAG_MANGA,
@@ -395,7 +416,7 @@ class DownloadRepositoryImpl(
         }
     }
 
-    private class DownloadAccount(val id: Int) : kotlin.coroutines.AbstractCoroutineContextElement(Key) {
+    private class DownloadAccount(val id: Int, val storage: String?, val observedAt: Long) : kotlin.coroutines.AbstractCoroutineContextElement(Key) {
         companion object Key : kotlin.coroutines.CoroutineContext.Key<DownloadAccount>
     }
 
@@ -403,6 +424,13 @@ class DownloadRepositoryImpl(
         val active = accountId()
         check(currentCoroutineContext()[DownloadAccount]?.let { it.id == active } != false) { "下載帳號已切換" }
         return active
+    }
+
+    private data class PageRequest(val storage: String?, val owner: Int, val page: ThreadPageDownloadKey)
+    private val pendingPages = me.thenano.yamibo.yamibo_app.repository.thread.InFlightReads<PageRequest, YamiboResult<ThreadPage>>()
+    private suspend fun fetchDownloadPage(key: ThreadPageDownloadKey): YamiboResult<ThreadPage> {
+        val request = PageRequest(storageProvider.getStorageKey(), activeOwner(), key)
+        return pendingPages.read(request) { threadRepository.fetchThread(ThreadId(key.tid), key.authorId?.let(::UserId), page = key.page) }
     }
 
     private val pendingImages = me.thenano.yamibo.yamibo_app.repository.thread.InFlightReads<String, ByteArray>()
@@ -415,8 +443,8 @@ class DownloadRepositoryImpl(
         val indexed = ids.chunked(400).flatMap { readerIndex.availableTids(storage, owner.toLong(), it).executeAsList() }.toHashSet()
         val missing = ids.filterNot { it in indexed }.toHashSet()
         val legacyKeys = if (missing.isEmpty()) emptySet() else getDownloadedContentGroups().asSequence()
-            .flatMap { it.items.asSequence() }.mapNotNull { it.key as? ThreadPageDownloadKey }
-            .map { it.tid.toLong() }.filter { it in missing }.toSet()
+            .flatMap { it.items.asSequence() }.flatMap { it.sourceKeys.asSequence() }
+            .map { it.pageKey.tid.toLong() }.filter { it in missing }.toSet()
         buildMap {
             for (chapter in chapters) {
                 val tid = chapter.tid.value
@@ -444,7 +472,7 @@ class DownloadRepositoryImpl(
     override suspend fun downloadedPageForPost(tid: ThreadId, author: UserId?, pid: io.github.littlesurvival.dto.value.PostId) =
         withContext(Dispatchers.IO) {
             storageProvider.getStorageKey()?.let { storage ->
-                readerIndex.pageForPid(storage, accountId().toLong(), tid.value.toLong(), author?.value?.toLong() ?: 0L,
+                library.pageForPost(storage, accountId(), tid.value, author?.value, pid.value) ?: readerIndex.pageForPid(storage, accountId().toLong(), tid.value.toLong(), author?.value?.toLong() ?: 0L,
                     pid.value.toLong()).executeAsOneOrNull()?.toInt()
             }
         }
@@ -463,6 +491,9 @@ class DownloadRepositoryImpl(
             return if (localImages) localPage(original, source, storage, manifest) else original
         }
         contentMutex.withLock {
+            library.covered(key)?.let { (snapshot, item) ->
+                return@withLock if (localImages) localPage(snapshot, item.key, storage, item) else snapshot
+            }
             storageProvider.readPageRecord(key)?.let { (bytes, manifest) ->
                 page(key, bytes, manifest)?.let { return@withLock it }
             }
@@ -547,9 +578,9 @@ class DownloadRepositoryImpl(
         val identity = owner to image
         val job = taskMutex.withLock {
             if (removing.any { it(image.key) }) return Result.failure(IllegalStateException("下載內容已移除"))
-            imageRepairs[identity]?.takeUnless { it.isCompleted } ?: scope.async(DownloadAccount(owner), start = CoroutineStart.LAZY) {
+            imageRepairs[identity]?.takeUnless { it.isCompleted } ?: scope.async(DownloadAccount(owner, storageProvider.getStorageKey(), currentTimeMillis()), start = CoroutineStart.LAZY) {
                 try {
-                    downloadResult("retryImage key=${image.key.stableId}") { repairImage(image, failedLocalUri) }
+                    downloadResult("retryImage key=${image.key.stableId}") { libraryMutation.withLock { repairImage(image, failedLocalUri) } }
                 } finally {
                     withContext(NonCancellable) { taskMutex.withLock { imageRepairs.remove(identity) } }
                 }
@@ -591,7 +622,8 @@ class DownloadRepositoryImpl(
             val manifest = checkNotNull(currentManifest(recover = true))
             val storage = checkNotNull(storageFor(image))
             val fileName = threadImageFileName(image.sourceUrl)
-            val saved = DownloadedImage(image.sourceUrl, fileName, bytes.size.toLong())
+            val saved = if (manifest.shared) library.storeImage(storage, activeOwner(), image.sourceUrl, bytes, repair = true)
+                else DownloadedImage(image.sourceUrl, fileName, bytes.size.toLong())
             val images = manifest.images.filterNot { it.sourceUrl == image.sourceUrl } + saved
             val missing = if (manifest.images.any { it.sourceUrl == image.sourceUrl }) manifest.missingImageCount
                 else (manifest.missingImageCount - 1).coerceAtLeast(0)
@@ -601,9 +633,11 @@ class DownloadRepositoryImpl(
                 is RssMangaChapterManifest -> manifest.copy(images = images, sourceOrder = manifest.orderedSources(), missingImageCount = missing)
             }
             val catalog = beginCatalogChange()
-            val uri = storageProvider.writeImage(
-                storage, key, PendingDownloadedImage(fileName, bytes), encodeManifest(updated),
-            )
+            val uri = if (manifest.shared) {
+                val page = storageProvider.readThreadPage(key)?.let { decodePage(key, it) }
+                library.save(storage, updated, page)
+                saved.archiveUri(image.storageId, key, checkNotNull(updated.archiveId))
+            } else storageProvider.writeImage(storage, key, PendingDownloadedImage(fileName, bytes), encodeManifest(updated))
             manifest.images.find { it.sourceUrl == image.sourceUrl }?.let { archives[storage to key]?.names?.remove(it.fileName) }
             finishCatalogChange(catalog, setOf(key), manifestGroup(updated))
             imageRevision.update { it + 1 }
@@ -849,7 +883,7 @@ class DownloadRepositoryImpl(
         val key = ThreadPageDownloadKey(tid.value, page, authorId?.value)
         runDownloadTask(key) task@{
             if (!storageProvider.isReady()) return@task YamiboResult.Failure("尚未選擇備份資料夾")
-            return@task when (val result = threadRepository.fetchThread(tid, authorId, page = page)) {
+            return@task when (val result = fetchDownloadPage(ThreadPageDownloadKey(tid.value, page, authorId?.value))) {
                 is YamiboResult.Success -> {
                     knownTitles[key] = title
                     try {
@@ -879,7 +913,7 @@ class DownloadRepositoryImpl(
             val tagName = oldManifest?.tagName ?: task?.tagName ?: ""
             val title = oldManifest?.title ?: task?.chapterTitle ?: knownTitles[key] ?: key.stableId
             val tagPage = oldManifest?.tagPage ?: task?.tagPage ?: 1
-            val result = threadRepository.fetchThread(ThreadId(key.tid), key.authorId?.let(::UserId), page = 1)
+            val result = fetchDownloadPage(key.pageKey)
             if (result !is YamiboResult.Success) {
                 return@task YamiboResult.Failure(result.message())
             }
@@ -909,7 +943,7 @@ class DownloadRepositoryImpl(
             val subscriptionQuery = oldManifest?.subscriptionQuery ?: task?.subscriptionQuery ?: subscriptionTitle
             val title = oldManifest?.title ?: task?.chapterTitle ?: knownTitles[key] ?: key.stableId
             val page = oldManifest?.subscriptionPage ?: task?.subscriptionPage ?: 1
-            val result = threadRepository.fetchThread(ThreadId(key.tid), key.authorId?.let(::UserId), page = 1)
+            val result = fetchDownloadPage(key.pageKey)
             if (result !is YamiboResult.Success) return@task YamiboResult.Failure(result.message())
             return@task try {
                 val queueTitle = rssMangaQueueTitle(subscriptionTitle, title)
@@ -966,12 +1000,12 @@ class DownloadRepositoryImpl(
     private suspend fun removeGroup(group: DownloadTaskKey, matches: (DownloadTaskKey) -> Boolean): Result<Unit> = downloadResult("removeGroup") {
         withContext(Dispatchers.IO) {
             withStoppedTasks(matches) {
-                contentMutex.withLock {
+                libraryMutation.withLock { contentMutex.withLock {
                     val storage = checkNotNull(storageProvider.getStorageKey())
                     val keys = storageProvider.groupKeys(storage, group) + queue.value.map { it.key }.filter(matches)
                     val failures = removeLocked(keys, false) {}
                     failures.values.firstOrNull()?.let { throw it }
-                }
+                } }
             }
         }
     }
@@ -981,7 +1015,7 @@ class DownloadRepositoryImpl(
         var failures = emptyMap<DownloadTaskKey, Throwable>()
         val result = downloadResult("removeItems") {
             withStoppedTasks(keys::contains) {
-                contentMutex.withLock { failures = removeLocked(keys, tasksOnly, onProgress) }
+                libraryMutation.withLock { contentMutex.withLock { failures = removeLocked(keys, tasksOnly, onProgress) } }
             }
         }
         result.exceptionOrNull()?.let { error -> keys.associateWith { error } } ?: failures
@@ -1025,7 +1059,7 @@ class DownloadRepositoryImpl(
             if (removing.any { it(key) } || activeTasks.containsKey(key) ||
                 expected != null && queue.value.firstOrNull { it.key == key } != expected) return@supervisorScope null
             val owner = expected?.owner ?: accountId()
-            async(DownloadAccount(owner), start = CoroutineStart.LAZY) {
+            async(DownloadAccount(owner, storageProvider.getStorageKey(), currentTimeMillis()), start = CoroutineStart.LAZY) {
                 activeOwner()
                 val existing = readManifest(key)
                 check(existing?.owner == null || existing.owner == owner) { "下載項目屬於其他帳號" }
@@ -1179,11 +1213,7 @@ class DownloadRepositoryImpl(
         val prefetched = prefetchedPages.remove(key)
         upsert(entry.copy(status = DownloadStatus.Downloading, stage = DownloadStage.FetchingContent, progressCurrent = 0, progressTotal = 0, message = null, updatedAt = currentTimeMillis()))
         val result = (prefetched ?: pageForDownload(entry, key))?.let { YamiboResult.Success(it) }
-            ?: threadRepository.fetchThread(
-                ThreadId(key.tid),
-                key.authorId?.let(::UserId),
-                page = key.page,
-            )
+            ?: fetchDownloadPage(key)
         when (result) {
             is YamiboResult.Success -> {
                 if (queue.value.none {
@@ -1218,7 +1248,7 @@ class DownloadRepositoryImpl(
         val tagPage = oldManifest?.tagPage ?: task?.tagPage ?: 1
         upsert(entry.copy(status = DownloadStatus.Downloading, stage = DownloadStage.FetchingContent, progressCurrent = 0, progressTotal = 0, message = null, updatedAt = currentTimeMillis()))
         when (val result = pageForDownload(entry, ThreadPageDownloadKey(key.tid, 1, key.authorId))?.let { YamiboResult.Success(it) }
-            ?: threadRepository.fetchThread(ThreadId(key.tid), key.authorId?.let(::UserId), page = 1)) {
+            ?: fetchDownloadPage(key.pageKey)) {
             is YamiboResult.Success -> {
                 if (queue.value.none { it.key == key && it.status == DownloadStatus.Downloading }) return
                 persistEntry(
@@ -1242,7 +1272,7 @@ class DownloadRepositoryImpl(
         val page = oldManifest?.subscriptionPage ?: task?.subscriptionPage ?: 1
         upsert(entry.copy(status = DownloadStatus.Downloading, stage = DownloadStage.FetchingContent, progressCurrent = 0, progressTotal = 0, message = null, updatedAt = currentTimeMillis()))
         when (val result = pageForDownload(entry, ThreadPageDownloadKey(key.tid, 1, key.authorId))?.let { YamiboResult.Success(it) }
-            ?: threadRepository.fetchThread(ThreadId(key.tid), key.authorId?.let(::UserId), page = 1)) {
+            ?: fetchDownloadPage(key.pageKey)) {
             is YamiboResult.Success -> {
                 if (queue.value.none { it.key == key && it.status == DownloadStatus.Downloading }) return
                 persistEntry(
@@ -1307,6 +1337,11 @@ class DownloadRepositoryImpl(
     }
 
     private suspend fun imageUris(storage: String, manifest: DownloadManifest, images: List<DownloadedImage> = manifest.images): Map<String, String> {
+        if (manifest.shared) {
+            check(manifest.owner == accountId())
+            val storageId = storage.encodeUtf8().sha256().hex()
+            return images.associate { image -> image.fileName to image.archiveUri(storageId, manifest.key, checkNotNull(manifest.archiveId), manifest.owner) }
+        }
         val safe = images.filter { it.fileName.isSafeImageFileName() }
         val urls = storageProvider.looseImages(manifest.key, safe.filterNot { it.packed }.map { it.fileName }).toMutableMap()
         val generation = manifest.archiveId ?: return urls
@@ -1326,8 +1361,9 @@ class DownloadRepositoryImpl(
         return urls
     }
 
-    private fun DownloadedImage.archiveUri(storageId: String, key: DownloadTaskKey, generation: String) =
-        ArchivedImage(storageId, key, fileName, generation, sourceUrl.encodeUtf8().sha256().hex()).uri()
+    private fun DownloadedImage.archiveUri(storageId: String, key: DownloadTaskKey, generation: String, owner: Int? = null) =
+        ArchivedImage(storageId, key, fileName, generation, sourceUrl.encodeUtf8().sha256().hex(), owner,
+            digest.takeIf { owner != null }).uri()
 
     private suspend fun orderedUris(manifest: DownloadManifest): List<String> {
         if (manifest.owner != null && manifest.owner != accountId()) return emptyList()
@@ -1346,6 +1382,7 @@ class DownloadRepositoryImpl(
         contentMutex.withLock {
             val storage = checkNotNull(storageProvider.getStorageKey())
             check(storage.encodeUtf8().sha256().hex() == ref.storageId)
+            ref.digest?.let { return@withLock library.openImage(storage, checkNotNull(ref.owner), it) }
             val cached = archives[storage to ref.key]?.takeIf { it.owner == null || it.owner == accountId() }
             var member = ref.fileName
             val open = if (cached?.generation == ref.generation && member in cached.names) cached else {
@@ -1353,6 +1390,7 @@ class DownloadRepositoryImpl(
                 check(saved.owner == null || saved.owner == accountId()) { "下載項目屬於其他帳號" }
                 val image = saved.images.first { it.sourceUrl.encodeUtf8().sha256().hex() == ref.sourceId }
                 member = image.fileName
+                image.digest?.let { return@withLock library.openImage(storage, checkNotNull(saved.owner), it) }
                 if (!image.packed) {
                     val loose = storageProvider.looseImages(ref.key, listOf(image.fileName)).getValue(image.fileName)
                     return@withLock storageProvider.openLoose(loose)
@@ -1382,100 +1420,6 @@ class DownloadRepositoryImpl(
     private fun ZipFile.imageBytes(name: String): ByteArray =
         getInputStream(name).asSource().buffer().use { it.readByteArray() }
 
-    private class ImagePack(val path: Path, val generation: String) {
-        private val writer = lazy { ZipOutputStream(FileSystem.SYSTEM.sink(path).buffer()) }
-        val checksums = mutableMapOf<String, Long>()
-        private var finished = false
-
-        fun add(image: DownloadedImage, bytes: ByteArray): DownloadedImage {
-            require(image.fileName.isSafeImageFileName()) { "下載圖片檔名無效" }
-            require(image.bytes == bytes.size.toLong()) {
-                "${image.fileName} 大小與下載清單不符（預期 ${image.bytes} B，實際 ${bytes.size} B）"
-            }
-            val checksum = Crypto.crc32(bytes)
-            check(checksums.put(image.fileName, checksum) == null) { "下載圖片檔名重複" }
-            val output = writer.value
-            output.putNextEntry(ZipEntry(image.fileName).apply { method = ZipConstants.STORED; size = image.bytes; crc = checksum })
-            output.write(bytes)
-            output.closeEntry()
-            return image.copy(packed = true)
-        }
-
-        fun finish() {
-            if (finished) return
-            finished = true
-            if (writer.isInitialized()) writer.value.close()
-        }
-
-        fun verify(source: SeekableSource) {
-            val zip = try { ZipFile(source) } catch (error: Throwable) { source.close(); throw error }
-            try {
-                check(zip.entries.size == checksums.size)
-                val discard = ByteArray(64 * 1024)
-                for (entry in zip.entries) {
-                    check(entry.method == ZipConstants.STORED && entry.crc == checksums.getValue(entry.name))
-                    val input = zip.getInputStream(entry)
-                    try {
-                        var bytes = 0L
-                        while (true) {
-                            val read = input.read(discard, 0, discard.size)
-                            if (read < 0) break
-                            check(read > 0)
-                            bytes += read
-                        }
-                        check(bytes == entry.size)
-                    } finally { input.close() }
-                }
-            } finally { zip.close() }
-        }
-    }
-
-    private suspend fun <T> withPack(block: suspend (ImagePack) -> T): T {
-        val generation = Uuid.random().toString()
-        FileSystem.SYSTEM.createDirectories(cacheDirectory)
-        val path = cacheDirectory / "$generation.cbz.tmp"
-        val pack = ImagePack(path, generation)
-        try { return block(pack) }
-        finally { try { pack.finish() } finally { FileSystem.SYSTEM.delete(path) } }
-    }
-
-    private suspend fun publish(storage: String, manifest: DownloadManifest, page: ByteArray?, pack: ImagePack,
-                                aliases: Map<String, String> = emptyMap(), verify: Boolean = false) {
-        check(storageProvider.getStorageKey() == storage) { "儲存資料夾已變更" }
-        val owner = activeOwner()
-        check(manifest.owner == null || manifest.owner == owner) { "下載帳號已切換" }
-        pack.finish()
-        val bytes = encodeManifest(manifest)
-        val catalog = beginCatalogChange()
-        archives.remove(storage to manifest.key)?.retire()
-        storageProvider.publishItem(storage, manifest.key, bytes, page, pack.path.takeIf { pack.checksums.isNotEmpty() },
-            if (verify) pack::verify else null)
-        if (aliases.isNotEmpty()) remapCovers(aliases)
-        if (page != null && manifest.owner != null && manifest.archiveId != null) {
-            val snapshot = json.decodeFromString<ThreadPage>(page.decodeToString())
-            val author = when (val key = manifest.key) {
-                is ThreadPageDownloadKey -> key.authorId
-                is RssMangaChapterDownloadKey -> key.authorId
-                is TagMangaChapterDownloadKey -> key.authorId
-            }
-            readerIndex.transaction {
-                readerIndex.putPage(storage, manifest.key.stableId, checkNotNull(manifest.owner).toLong(),
-                    snapshot.thread.tid.value.toLong(), author?.toLong() ?: 0L, (snapshot.pageNav?.currentPage ?: 1).toLong(),
-                    json.encodeToString<DownloadTaskKey>(manifest.key), checkNotNull(manifest.archiveId))
-                readerIndex.clearImages(storage, manifest.key.stableId)
-                manifest.images.filter { it.packed }.forEach { image ->
-                    readerIndex.putImage(storage, owner.toLong(), image.sourceUrl.encodeUtf8().sha256().hex(),
-                        manifest.key.stableId, json.encodeToString<DownloadTaskKey>(manifest.key),
-                        checkNotNull(manifest.archiveId), image.fileName, image.bytes)
-                }
-                readerIndex.clearFloors(storage, manifest.key.stableId)
-                snapshot.posts.forEach { readerIndex.putFloor(storage, manifest.key.stableId, it.pid.value.toLong()) }
-            }
-        }
-        finishCatalogChange(catalog, setOf(manifest.key), manifestGroup(manifest))
-        imageRevision.update { it + 1 }
-    }
-
     private fun encodeManifest(manifest: DownloadManifest) = when (manifest) {
         is ThreadPageDownloadManifest -> json.encodeToString(manifest)
         is TagMangaChapterManifest -> json.encodeToString(manifest)
@@ -1496,20 +1440,6 @@ class DownloadRepositoryImpl(
                 val replacement = aliases[url.removePrefix("https://bbs.yamibo.com/")] ?: continue
                 queries.remapLocalImage(newUrl = replacement, oldUrl = url)
             }
-        }
-    }
-
-    private suspend fun retain(storage: String, old: DownloadManifest, images: List<DownloadedImage>,
-                               pack: ImagePack, aliases: MutableMap<String, String>): List<DownloadedImage> {
-        val urls = imageUris(storage, old, images)
-        val storageId = storage.encodeUtf8().sha256().hex()
-        return images.mapNotNull { image ->
-            currentCoroutineContext().ensureActive()
-            val uri = urls[image.fileName] ?: return@mapNotNull null
-            val bytes = if (image.packed) checkNotNull(archive(storage, old)).zip.imageBytes(image.fileName)
-                else storageProvider.openLoose(uri).buffer().use { it.readByteArray() }
-            if (!image.packed) aliases[uri] = image.archiveUri(storageId, old.key, pack.generation)
-            pack.add(image, bytes)
         }
     }
 
@@ -1536,35 +1466,10 @@ class DownloadRepositoryImpl(
     }
 
     private suspend fun persistPage(key: ThreadPageDownloadKey, title: String, page: ThreadPage) {
-        updateStage(key, DownloadStage.DownloadingText)
         val urls = page.threadImageUrls()
-        val storage = checkNotNull(storageProvider.getStorageKey())
-        val existing = contentMutex.withLock {
-            val previous = readManifest(key) ?: return@withLock emptySet()
-            val available = imageUris(storage, previous)
-            previous.images.filter { it.fileName in available }.mapTo(hashSetOf()) { it.sourceUrl }
-        }
-        withPack { pack ->
-            val downloaded = downloadImages(key, urls.filterNot { it in existing }, 0, pack)
-            val received = downloaded.mapTo(hashSetOf()) { it.sourceUrl }
-            val totalPages = page.pageNav?.totalPages ?: 1
-            contentMutex.withLock {
-                check(storageProvider.getStorageKey() == storage)
-                val aliases = mutableMapOf<String, String>()
-                val previous = readManifest(key)
-                val retained = previous?.let { old ->
-                    retain(storage, old, old.images.filter { it.sourceUrl in urls && it.sourceUrl !in received }, pack, aliases)
-                }.orEmpty()
-                val receivedCount = retained.size + downloaded.size
-                val missing = urls.size - receivedCount
-                if (missing > 0 && isCompleteCopy(storage, previous)) throw MissingImages(receivedCount, urls.size, true)
-                val manifest = ThreadPageDownloadManifest(key, title, currentTimeMillis(), totalPages,
-                    if (key.page >= totalPages) DownloadPageKind.LastAtDownloadTime else DownloadPageKind.Normal,
-                    page.thread.forum.fid.value, page.thread.forum.name, retained + downloaded, pack.generation, owner = activeOwner(), missingImageCount = missing)
-                updateStage(key, DownloadStage.Saving, receivedCount, urls.size)
-                publish(storage, manifest, json.encodeToString(page).encodeToByteArray(), pack, aliases)
-                if (missing > 0) throw MissingImages(receivedCount, urls.size, false)
-            }
+        saveContent(key, page, urls) { images, missing, generation ->
+            page.downloadManifest(key).copy(title = title, images = images, owner = accountId(), archiveId = generation,
+                shared = true, missingImageCount = missing)
         }
         threadRepository.setCachedThread(ThreadId(key.tid), key.authorId?.let(::UserId), key.page, page)
     }
@@ -1584,89 +1489,147 @@ class DownloadRepositoryImpl(
 
     private suspend fun persistChapter(key: DownloadTaskKey, authorId: Int?, page: ThreadPage,
                                       manifest: (List<DownloadedImage>, List<String>, String, Int) -> DownloadManifest): List<String> {
-        val storage = checkNotNull(storageProvider.getStorageKey())
         val order = page.readerImages(authorId?.let(::UserId)).map { it.url }
-        val urls = order.distinct().filter { it.startsWith("https://") || it.startsWith("http://") }
         check(order.isNotEmpty()) { "此章節沒有可下載圖片" }
-        return withPack { pack ->
-            val images = downloadImages(key, urls, 1, pack)
-            updateStage(key, DownloadStage.Saving, urls.size, urls.size)
-            contentMutex.withLock {
-                val old = readManifest(key)
-                val aliases = mutableMapOf<String, String>()
-                val bySource = images.associateByTo(mutableMapOf()) { it.sourceUrl }
-                if (old != null && images.size < urls.size) {
-                    val previous = old.images.associateBy { it.sourceUrl }
-                    val available = imageUris(storage, old)
-                    for ((index, url) in urls.withIndex()) {
-                        if (url in bySource) continue
-                        val image = previous[url] ?: continue
-                        val uri = available[image.fileName] ?: continue
-                        val bytes = try {
-                            if (image.packed) checkNotNull(archive(storage, old)).zip.imageBytes(image.fileName)
-                            else storageProvider.openLoose(uri).buffer().use { it.readByteArray() }
-                        } catch (error: Exception) {
-                            if (error is CancellationException) throw error
-                            Logger.w(TAG, "Cannot reuse chapter image ${image.fileName}", error)
-                            continue
-                        }
-                        if (bytes.size.toLong() == image.bytes) {
-                            bySource[url] = pack.add(image.copy(fileName = imageFileName(index + 1, url)), bytes)
-                        }
-                    }
-                }
-                val missing = urls.size - bySource.size
-                if (missing > 0 && isCompleteCopy(storage, old)) throw MissingImages(bySource.size, urls.size, true)
-                val saved = manifest(urls.mapNotNull(bySource::get), order, pack.generation, missing)
-                if (old != null && old.images.any { !it.packed }) {
-                    val oldUris = storageProvider.looseImages(key, old.images.filterNot { it.packed }.map { it.fileName })
-                    val storageId = storage.encodeUtf8().sha256().hex()
-                    for (previous in old.images) {
-                        val uri = oldUris[previous.fileName] ?: continue
-                        val replacement = bySource[previous.sourceUrl] ?: continue
-                        aliases[uri] = replacement.archiveUri(storageId, key, pack.generation)
-                    }
-                }
-                publish(storage, saved, json.encodeToString(page).encodeToByteArray(), pack, aliases)
-                if (missing > 0) throw MissingImages(bySource.size, urls.size, false)
-                orderedUris(saved)
-            }
+        val saved = saveContent(key, page, order) { images, missing, generation ->
+            manifest(images, order, generation, missing).sharedCopy(images, accountId(), generation)
         }
+        return orderedUris(saved)
     }
 
+    private suspend fun saveContent(key: DownloadTaskKey, page: ThreadPage, order: Collection<String>,
+                                    make: (List<DownloadedImage>, Int, String) -> DownloadManifest): DownloadManifest =
+        libraryMutation.withLock {
+            val storage = checkNotNull(storageProvider.getStorageKey())
+            val owner = activeOwner()
+            val task = currentCoroutineContext()[DownloadAccount]
+            check(task == null || task.storage == storage) { "儲存資料夾已變更" }
+            val old = readManifest(key)
+            val urls = order.distinct().filter { it.startsWith("http://") || it.startsWith("https://") }
+            val previous = library.covered(key.pageKey)?.first?.posts.orEmpty().associateBy { it.pid }
+            val revised = page.posts.filter { post ->
+                val prior = previous[post.pid]
+                prior != null && post.lastEditedTime != prior.lastEditedTime
+            }.flatMapTo(mutableSetOf()) { it.readerImageUrls() }
+            val images = mutableListOf<DownloadedImage>()
+            for (chunk in urls.chunked(3)) {
+                coroutineScope {
+                    chunk.map { url -> async {
+                        try {
+                            val hit = if (url in revised) null else library.knownImage(storage, owner, url)
+                            hit ?: library.storeImage(storage, owner, url,
+                                if (url in revised) imageFetcher.fetch(url) else downloadedOrFetch(url))
+                        } catch (e: CancellationException) { throw e }
+                        catch (e: Exception) { Logger.w(TAG, "Cannot save downloaded image", e); null }
+                    } }.awaitAll().filterNotNullTo(images)
+                }
+                updateStage(key, DownloadStage.DownloadingImages, images.size, urls.size)
+            }
+            val missing = urls.size - images.size
+            val item = make(images, missing, Uuid.random().toString())
+            contentMutex.withLock {
+                check(owner == activeOwner() && storageProvider.getStorageKey() == storage)
+                if (missing > 0 && isCompleteCopy(storage, old)) throw MissingImages(images.size, urls.size, true)
+                val catalog = beginCatalogChange()
+                library.save(storage, item, page, observedAt = task?.observedAt ?: currentTimeMillis())
+                archives.remove(storage to key)?.retire()
+                finishCatalogChange(catalog, setOf(key), manifestGroup(item))
+                imageRevision.update { it + 1 }
+            }
+            if (missing > 0) throw MissingImages(images.size, urls.size, false)
+            item
+        }
+
     override suspend fun migrateImages(onProgress: (Int, Int) -> Unit): Map<DownloadTaskKey, Throwable> = withContext(Dispatchers.IO) {
+        val owner = accountId()
         val storage = checkNotNull(storageProvider.getStorageKey())
-        val targets = getDownloadedContentGroups().flatMap { g -> g.items.filter { it.needsMigration }.map { it.key } }
+        val oldStore = library.legacy
+        val targets = (oldStore.listManifests() + oldStore.listTagMangaManifests() + oldStore.listRssMangaManifests())
+            .filter { it.owner == null || it.owner == owner }.distinctBy { it.key }
         val errors = mutableMapOf<DownloadTaskKey, Throwable>()
         onProgress(0, targets.size)
-        for ((index, key) in targets.withIndex()) {
+        for ((index, target) in targets.withIndex()) {
             currentCoroutineContext().ensureActive()
-            check(storageProvider.getStorageKey() == storage) { "儲存資料夾已變更" }
-            downloadResult("migrate ${key.stableId}") {
-                contentMutex.withLock {
-                    val old = readManifest(key) ?: error("下載內容已移除")
-                    if (old.archiveId != null) return@withLock
-                    val loose = storageProvider.looseImages(key, null)
-                    val expected = old.images.mapTo(hashSetOf()) { it.fileName }
-                    check(loose.keys == expected && expected.all { it.isSafeImageFileName() }) { "舊圖片與下載清單不符，已保留原檔" }
-                    val page = storageProvider.readThreadPage(key)
-                    if (key is ThreadPageDownloadKey) checkNotNull(page)
-                    withPack { pack ->
-                        val aliases = mutableMapOf<String, String>()
-                        val images = retain(storage, old, old.images, pack, aliases)
-                        if (key !is ThreadPageDownloadKey) check(images.size == old.images.size) { "漫畫圖片不完整" }
-                        val saved = when (old) {
-                            is ThreadPageDownloadManifest -> old.copy(images = images, archiveId = pack.generation)
-                            is TagMangaChapterManifest -> old.copy(images = images, archiveId = pack.generation)
-                            is RssMangaChapterManifest -> old.copy(images = images, archiveId = pack.generation)
-                        }
-                        publish(storage, saved, page, pack, aliases, verify = true)
+            downloadResult("migrate ${target.key.stableId}") {
+                libraryMutation.withLock {
+                    contentMutex.withLock {
+                        check(owner == accountId() && storage == storageProvider.getStorageKey())
+                        migrateItem(storage, owner, target)
                     }
                 }
-            }.exceptionOrNull()?.let { errors[key] = it }
+            }.exceptionOrNull()?.let { errors[target.key] = it }
             onProgress(index + 1, targets.size)
         }
+        libraryMutation.withLock { library.reconcile(storage, owner, collect = true) }
         errors
+    }
+
+    private suspend fun migrateItem(storage: String, owner: Int, old: DownloadManifest) {
+        val key = old.key
+        val pageBytes = library.legacy.readThreadPage(key)
+        val page = pageBytes?.let { checkNotNull(decodePage(key, it)) }
+        if (key is ThreadPageDownloadKey) checkNotNull(page) { "舊版正文不完整" }
+        val packed = old.images.filter { it.packed }
+        val loose = library.legacy.looseImages(key, null)
+        val looseNames = old.images.filterNot { it.packed }.map { it.fileName }.toSet()
+        check(loose.keys == looseNames) { "舊圖片與下載清單不符，已保留原檔" }
+        val aliases = mutableMapOf<String, String>()
+        val images = mutableListOf<DownloadedImage>()
+        val source = library.legacy.openArchive(key, old.archiveId.orEmpty())
+        val zip = source?.let { try { ZipFile(it) } catch (e: Throwable) { it.close(); throw e } }
+        try {
+            val entries = zip?.entries.orEmpty().filterNot { it.name.endsWith("/") }
+            check(entries.size == packed.size && entries.map { it.name }.toSet() == packed.map { it.fileName }.toSet()) {
+                "CBZ 與下載清單不符，已保留原檔"
+            }
+            check(old.images.map { it.fileName }.distinct().size == old.images.size) { "舊圖片檔名重複，已保留原檔" }
+            val byName = entries.associateBy { it.name }
+            for (image in old.images) {
+                currentCoroutineContext().ensureActive()
+                require(image.fileName.isSafeImageFileName())
+                val bytes = if (image.packed) {
+                    val data = checkNotNull(zip).imageBytes(image.fileName)
+                    check(Crypto.crc32(data) == byName.getValue(image.fileName).crc) { "CBZ 圖片 CRC 錯誤" }
+                    data
+                } else library.legacy.openLoose(loose.getValue(image.fileName)).buffer().use { it.readByteArray() }
+                check(bytes.size.toLong() == image.bytes) { "舊版圖片長度不符，已保留原檔" }
+                images += library.storeImage(storage, owner, image.sourceUrl, bytes, verifyExisting = true)
+            }
+        } finally { zip?.close() }
+        val generation = old.archiveId ?: Uuid.random().toString()
+        val saved = old.sharedCopy(images, owner, generation)
+        val existing = readManifest(key)
+        val catalog = beginCatalogChange()
+        if (existing?.shared == true) {
+            check(existing.images.map { it.sourceUrl to it.digest } == images.map { it.sourceUrl to it.digest } &&
+                (page == null || storageProvider.readThreadPage(key)?.let { decodePage(key, it) } == page)) {
+                "舊下載與已儲存版本不同，保留原檔"
+            }
+        } else {
+            library.save(storage, saved, page, migrating = true)
+        }
+        val stored = checkNotNull(readManifest(key))
+        check(stored.shared && stored.orderedSources() == old.orderedSources())
+        if (page != null) check(storageProvider.readThreadPage(key)?.let { decodePage(key, it) } == page)
+        for ((i, image) in old.images.withIndex()) {
+            val replacement = images[i].archiveUri(storage.encodeUtf8().sha256().hex(), key, checkNotNull(stored.archiveId))
+            loose[image.fileName]?.let { aliases[it] = replacement }
+        }
+        database.transaction {
+            remapCovers(aliases)
+            for (image in old.images) {
+                val uri = loose[image.fileName] ?: continue
+                val previous = uri.encodeUtf8().sha256().hex()
+                val replacement = image.sourceUrl.encodeUtf8().sha256().hex()
+                readerIndex.remapImagePosition(replacement, previous, key.pageKey.tid.toLong())
+                readerIndex.remapTextPosition(replacement, previous, key.pageKey.tid.toLong())
+            }
+        }
+        check(owner == activeOwner() && storage == storageProvider.getStorageKey())
+        archives.remove(storage to key)?.retire()
+        library.legacy.deleteItems(storage, setOf(key)) {}[key]?.let { throw it }
+        finishCatalogChange(catalog, setOf(key), manifestGroup(stored))
+        imageRevision.update { it + 1 }
     }
 
     private suspend fun queueTagMangaPage(tagId: TagId, tagName: String, page: TagPage, pageNumber: Int) {
@@ -1733,47 +1696,6 @@ class DownloadRepositoryImpl(
             activeOwner()
             imageFetcher.fetch(source).also { activeOwner() }
         }
-    }
-
-    private suspend fun downloadImages(
-        key: DownloadTaskKey,
-        imageUrls: List<String>,
-        startIndex: Int,
-        pack: ImagePack,
-    ): List<DownloadedImage> {
-        updateStage(key, DownloadStage.DownloadingImages, 0, imageUrls.size)
-        var completed = 0
-        val results = mutableListOf<DownloadedImage>()
-        coroutineScope {
-            imageUrls.mapIndexed { index, url -> index to url }
-                .chunked(3)
-                .forEach { chunk ->
-                    val chunkResults = chunk.map { (index, url) ->
-                        async {
-                            val bytes = try {
-                                downloadedOrFetch(url)
-                            } catch (cancelled: CancellationException) {
-                                throw cancelled
-                            } catch (error: Exception) {
-                                Logger.d(TAG, "Leaving unavailable image in download ${key.stableId}", error)
-                                return@async null
-                            }
-                            val fileName = if (key is ThreadPageDownloadKey) threadImageFileName(url)
-                                else imageFileName(index + startIndex, url)
-                            PendingDownloadedImage(fileName, bytes) to DownloadedImage(url, fileName, bytes.size.toLong())
-                        }
-                    }.awaitAll()
-                    for ((pending, image) in chunkResults.filterNotNull()) results += pack.add(image, pending.bytes)
-                    completed += chunkResults.size
-                    updateStage(key, DownloadStage.DownloadingImages, completed, imageUrls.size)
-                }
-        }
-        return results
-    }
-
-    private fun imageFileName(index: Int, url: String): String {
-        val ext = url.substringBefore('?').substringAfterLast('.', "").takeIf { it.length in 2..5 && it.all(Char::isLetterOrDigit) } ?: "img"
-        return "${index.toString().padStart(4, '0')}.$ext"
     }
 
     private fun tagMangaKey(tagId: TagId, thread: ThreadSummary): TagMangaChapterDownloadKey =
@@ -1890,7 +1812,7 @@ private fun threadImageSource(raw: String): String? {
 private fun threadImageDocument(html: String) =
     if (html.contains("<img", ignoreCase = true)) Ksoup.parseBodyFragment(html) else null
 
-private fun ThreadPage.threadImageUrls(): Set<String> = buildSet {
+internal fun ThreadPage.threadImageUrls(): Set<String> = buildSet {
     for (post in posts) {
         post.readerImageUrls().filterTo(this) { it.startsWith("https://") || it.startsWith("http://") }
     }

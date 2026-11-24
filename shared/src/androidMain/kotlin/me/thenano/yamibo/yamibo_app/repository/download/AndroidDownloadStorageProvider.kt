@@ -5,6 +5,8 @@ import android.net.Uri
 import android.os.ParcelFileDescriptor
 import no.synth.kmpzip.io.SeekableSource
 import no.synth.kmpzip.okio.asSeekableSource
+import okio.buffer
+import okio.sink
 import okio.source
 import okio.FileSystem
 import okio.Path
@@ -291,6 +293,89 @@ class AndroidDownloadStorageProvider(
             }
         }
         return errors
+    }
+
+    override val offlineFiles: OfflineFiles = object : OfflineFiles {
+        private val immutableFiles = android.util.LruCache<Pair<String, String>, Uri>(256)
+        private fun tree(storage: String) = checkNotNull(selectedTreeUri()).also { check(it.toString() == storage) }
+        private fun dir(tree: Uri, parts: List<String>, create: Boolean = false): Uri? {
+            var current = rootDocumentUri(tree)
+            for (part in listOf(ROOT_DIR, "library") + parts) {
+                current = if (create) ensureDirectory(tree, current, part) else findChild(tree, current, part) ?: return null
+            }
+            return current
+        }
+
+        private fun find(tree: Uri, path: String): Uri? {
+            val parts = libraryParts(path)
+            val parent = dir(tree, parts.dropLast(1)) ?: return null
+            return findChild(tree, parent, parts.last()) ?: findChild(tree, parent, parts.last() + ".previous")
+        }
+
+        private fun <T> openKnown(storage: String, path: String, read: (Uri) -> T): T? {
+            val tree = tree(storage)
+            val cacheKey = storage to path
+            val immutable = !path.endsWith("/manifest.json")
+            if (immutable) immutableFiles.get(cacheKey)?.let { uri ->
+                try { return read(uri) } catch (_: FileNotFoundException) { immutableFiles.remove(cacheKey) }
+            }
+            val uri = find(tree, path) ?: return null
+            val result = read(uri)
+            if (immutable) immutableFiles.put(cacheKey, uri)
+            return result
+        }
+
+        override fun open(storage: String, path: String) = openKnown(storage, path) {
+            checkNotNull(resolver.openInputStream(it)).source()
+        }
+
+        override fun seek(storage: String, path: String) = openKnown(storage, path) { seekable(it, path) }
+
+        override fun names(storage: String, path: String): List<String> {
+            val tree = tree(storage)
+            return dir(tree, libraryParts(path))?.let { parent ->
+                listChildren(tree, parent).map { it.name.removeSuffix(".previous") }.distinct()
+            }.orEmpty()
+        }
+
+        override fun install(storage: String, path: String, checksum: String, source: () -> okio.Source) {
+            val tree = tree(storage)
+            val parts = libraryParts(path)
+            val name = parts.last()
+            val parent = checkNotNull(dir(tree, parts.dropLast(1), true))
+            val children = listChildren(tree, parent).associateBy { it.name }
+            children["$name.tmp"]?.let { check(DocumentsContract.deleteDocument(resolver, it.uri)) }
+            var current = children[name]?.uri
+            children["$name.previous"]?.let { previous ->
+                if (current == null) current = checkNotNull(DocumentsContract.renameDocument(resolver, previous.uri, name))
+                else check(DocumentsContract.deleteDocument(resolver, previous.uri))
+            }
+            immutableFiles.remove(storage to path)
+            val tmp = checkNotNull(DocumentsContract.createDocument(resolver, parent, "application/octet-stream", "$name.tmp"))
+            var previous: Uri? = null
+            try {
+                checkNotNull(resolver.openOutputStream(tmp, "wt")).sink().buffer().use { sink -> source().use(sink::writeAll) }
+                checkNotNull(resolver.openInputStream(tmp)).source().verifyDigest(checksum)
+                check(tree(storage) == tree)
+                previous = current?.let { checkNotNull(DocumentsContract.renameDocument(resolver, it, "$name.previous")) }
+                checkNotNull(DocumentsContract.renameDocument(resolver, tmp, name))
+            } catch (error: Throwable) {
+                previous?.let { renameDocumentSafely(it, name, "restore library file") }
+                deleteDocumentSafely(tmp, "discard incomplete library file")
+                throw error
+            }
+            previous?.let { deleteDocumentSafely(it, "clean previous library file") }
+        }
+
+        override fun remove(storage: String, path: String) {
+            immutableFiles.remove(storage to path)
+            val tree = tree(storage)
+            val parts = libraryParts(path)
+            val parent = dir(tree, parts.dropLast(1)) ?: return
+            for (suffix in listOf("", ".previous", ".tmp")) {
+                findChild(tree, parent, parts.last() + suffix)?.let { check(DocumentsContract.deleteDocument(resolver, it)) }
+            }
+        }
     }
 
     private fun selectedTreeUri(): Uri? =

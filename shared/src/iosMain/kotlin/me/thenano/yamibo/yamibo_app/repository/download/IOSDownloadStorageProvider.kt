@@ -38,6 +38,12 @@ class IOSDownloadStorageProvider(
 
     private val documentsDir by lazy { resolveIosStorageFolder("").parent!! }
 
+    override val offlineFiles: OfflineFiles = PathOfflineFiles(fileSystem) { storage ->
+        val folder = selectedFolder()
+        check(storageKeyFor(folder) == storage) { "儲存資料夾已變更" }
+        folder / "YamiboDownloads" / "library"
+    }
+
     private fun storageKeyFor(folder: Path): String {
         // The sandbox container UUID can change on an app update. Covers retain this key across launches.
         val path = folder.toString()

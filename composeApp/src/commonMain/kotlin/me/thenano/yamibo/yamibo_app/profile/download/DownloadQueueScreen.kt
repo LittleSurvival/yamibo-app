@@ -14,6 +14,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.LazyColumn
+import me.thenano.yamibo.yamibo_app.repository.download.sourceKeys
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.selection.toggleable
@@ -151,7 +152,7 @@ fun DownloadQueueScreen(screenId: ScreenId) {
         } else {
             filterAndSortDownloadedContentGroups(contentGroups, normalizedFilterKeys, contentSortMode, contentSortDescending)
                 .flatMap { it.items }.distinctBy { it.key }
-                .map { DownloadRemovalTarget(it.key, it.title, it.imageBytes) }
+                .flatMap { item -> item.sourceKeys.map { DownloadRemovalTarget(it, item.title) } }
         }
     }
     val selectableKeys = selectableTargets.mapTo(mutableSetOf()) { it.key }
@@ -363,10 +364,10 @@ fun DownloadQueueScreen(screenId: ScreenId) {
                         }
                     },
                     onClearGroup = { group ->
-                        requestRemoval(false, group.items.map { DownloadRemovalTarget(it.key, it.title, it.imageBytes) })
+                        requestRemoval(false, group.items.flatMap { item -> item.sourceKeys.map { DownloadRemovalTarget(it, item.title) } })
                     },
                     onClearItem = { item ->
-                        requestRemoval(false, listOf(DownloadRemovalTarget(item.key, item.title, item.imageBytes)))
+                        requestRemoval(false, item.sourceKeys.map { DownloadRemovalTarget(it, item.title) })
                     },
                     onRefreshItem = { item ->
                         val handle = appTaskManager.launch(AppTaskKey("download-control:refresh:${item.key.stableId}")) {
@@ -403,7 +404,7 @@ fun DownloadQueueScreen(screenId: ScreenId) {
             onDismissRequest = { confirmMigration = false; migrationError = null },
             title = { Text(i18n("轉換舊版圖片")) },
             text = {
-                if (failure == null) Text(i18n("按頁或章節將現有圖片轉為 CBZ。中斷後可以繼續。"))
+                if (failure == null) Text(i18n("將已下載的散圖和 CBZ 匯入共用下載庫。確認新檔可讀後才移除舊檔，中斷後可以繼續。"))
                 else LazyColumn(Modifier.heightIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     items(failure.lines()) { Text(it) }
                 }
@@ -782,7 +783,7 @@ private fun DownloadContentManagementTab(
                                 selectionMode = selectionMode,
                                 selectedKeys = selectedKeys,
                                 busy = busy,
-                                onToggleSelection = { onToggle(group.items.mapTo(mutableSetOf()) { it.key }) },
+                                onToggleSelection = { onToggle(group.items.flatMapTo(mutableSetOf()) { it.sourceKeys }) },
                                 expanded = expanded,
                                 onToggleExpanded = {
                                     expandedGroups = if (expanded) expandedGroups - group.id else expandedGroups + group.id
@@ -792,7 +793,7 @@ private fun DownloadContentManagementTab(
                         if (expanded) {
                             itemsIndexed(group.items, key = { _, item -> "item:${group.id}:${item.key.stableId}" }, contentType = { _, _ -> "content" }) { index, item ->
                                 DownloadPanelSection(modifier = downloadPanelMotion(), last = selectionMode && index == group.items.lastIndex) {
-                                    DownloadContentItemRow(item, selectionMode, item.key in selectedKeys, busy, { onToggle(setOf(item.key)) }, onClearItem, onRefreshItem)
+                                    DownloadContentItemRow(item, selectionMode, item.key in selectedKeys, busy, { onToggle(item.sourceKeys.toSet()) }, onClearItem, onRefreshItem)
                                 }
                             }
                             if (!selectionMode) item(key = "clear:${group.id}", contentType = "clear") {
@@ -922,17 +923,14 @@ private fun DownloadContentSummaryCard(summary: DownloadedContentSummary) {
         YamiboStorageUsageOverview(
             title = i18n("儲存空間"),
             usages = listOf(
-                CacheStorageUsage("thread_downloads", i18n("Thread"), summary.threadImageBytes),
-                CacheStorageUsage("tag_manga_downloads", i18n("標籤漫畫"), summary.tagMangaImageBytes),
+                CacheStorageUsage("offline_images", i18n("下載圖片"), summary.imageBytes),
             ),
         )
         Spacer(Modifier.height(12.dp))
         Text(
             i18n(
-                "共 {} 項，Thread {} 頁，標籤漫畫 {} 章，圖片 {} 張",
+                "共 {} 帖，圖片 {} 張",
                 summary.totalItems,
-                summary.threadPages,
-                summary.tagMangaChapters,
                 summary.imageCount,
             ),
             color = colors.textDark.copy(alpha = 0.72f),
