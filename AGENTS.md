@@ -5,6 +5,12 @@
 - Use shared Yamibo controls and `YamiboTheme.colors` for user-facing UI. When using Material components directly, set the surface, matching content colors, and action colors for the states the component supports, including selected and disabled states.
 - When changing a flow, open its affected dialogs and feedback states, including failure details and retry when applicable. Check the rendered controls in the default theme and a contrasting built-in theme, and record which states and themes were verified.
 
+- When the user asks to reuse an existing UI, identify its actual entry point and trigger the reference state on the pre-change version. Compare screenshots of the reference and the new case in the same reader, theme and layout. Reuse the renderer and its existing controls. Verify any new retry or recovery behavior separately.
+
+## Delivery authorization
+
+- Match each commit, push and manual Actions dispatch to the current delivery request. An instruction to implement or test authorizes local edits, builds and tests. A completed round's publication approval applies to that round. Use an existing authorization when it covers the current action; otherwise keep working locally and ask before the first uncovered delivery action.
+
 ## OpenSpec isolation
 
 - Keep `/openspec/` in the repository-local exclude file returned by `git rev-parse --git-path info/exclude`. Unlike `.gitignore`, this rule survives switching to older branches; ensure it is present before switching branches. Local exclude rules are not included in commits and must be set up per clone.
@@ -24,6 +30,11 @@
 - Release-preparation changes limited to Gradle app version fields, release/update metadata (including `update/manifest.json` and its generated `update/stable.json`), and `.changelog` files may be committed and pushed directly on `main` without a pull request. This exception does not cover application behavior, build logic, or release workflow changes.
 - Treat the PR as a checkpoint. Its description must record the problem and root cause, implementation and design decisions, user-visible behavior, verification evidence, and known risks, limits, or rollback notes.
 - Before opening or merging the PR, enforce the OpenSpec isolation guard above. Merge only after required checks pass, and prefer a merge commit to preserve branch lineage unless the user requests another strategy.
+
+## Subagent delegation
+
+- Prefer subagents when unfinished features and validation can proceed independently. Give each agent a concrete deliverable, owned files or a separate worktree, acceptance criteria, and the evidence to return. Check outstanding planning items when assigning work so implementation and verification both have an owner.
+- Assign one operator per emulator, simulator or other shared mutable resource. The lead integrates the changes, reviews the combined diff and verifies the complete user flow. Delegation carries the same delivery authorization as the parent task.
 
 ## Subagent worktree cleanup
 
