@@ -77,3 +77,6 @@ INSERT OR IGNORE INTO OfflineInventory(storage,owner) VALUES (?,?);
 
 clearStorageUses:
 DELETE FROM OfflineImageUse WHERE storage = ? AND owner = ?;
+
+canonicalPageItems:
+SELECT item FROM ReaderDownloadPage WHERE storage = ? AND owner = ? AND instr(item, '/') > 0;

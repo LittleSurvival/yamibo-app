@@ -116,9 +116,9 @@ internal class OfflineLibrary(
     }
 
     private fun imageFile(storage: String, owner: Int, digest: String) = files.open(storage, blob(owner, digest))
-    fun openImage(storage: String, owner: Int, digest: String): Source {
+    fun openImage(storage: String, owner: Int, digest: String): Source? {
         check(owner == account())
-        return checkNotNull(imageFile(storage, owner, digest)) { "下載的圖片檔案遺失" }
+        return imageFile(storage, owner, digest)
     }
     suspend fun storeImage(storage: String, owner: Int, url: String, bytes: ByteArray, repair: Boolean = false, verifyExisting: Boolean = false): DownloadedImage {
         val digest = bytes.digest()
@@ -201,6 +201,14 @@ internal class OfflineLibrary(
             checkNotNull(page(storage, owner, state, saved)) to saved.item
         }
     }
+    suspend fun imageInThread(storage: String, ref: ArchivedImage): Pair<DownloadManifest, DownloadedImage>? = writer.withLock {
+        val owner = account()
+        if (ref.owner != null && ref.owner != owner) return@withLock null
+        state(storage, owner, ref.key.pageKey.tid).claims.firstNotNullOfOrNull { claim ->
+            claim.item.images.firstOrNull { it.sourceUrl.encodeUtf8().sha256().hex() == ref.sourceId }?.let { claim.item to it }
+        }
+    }
+
     suspend fun pageForPost(storage: String, owner: Int, tid: Int, author: Int?, pid: Int): Int? = writer.withLock {
         state(storage, owner, tid).claims.firstOrNull { claim ->
             claim.item.key.pageKey.authorId == author && claim.floors.any { it.pid == pid }
@@ -440,6 +448,10 @@ internal class OfflineLibrary(
     suspend fun reconcile(storage: String, owner: Int, collect: Boolean) = writer.withLock {
         val claims = all(storage, owner)
         index.transaction {
+            for (item in index.canonicalPageItems(storage, owner.toLong()).executeAsList()) {
+                index.clearFloors(storage, item)
+                index.clearPage(storage, item)
+            }
             index.clearAliases(storage, owner.toLong())
             index.clearStorageUses(storage, owner.toLong())
             claims.groupBy { it.item.key.pageKey.tid }.forEach { (tid, group) ->

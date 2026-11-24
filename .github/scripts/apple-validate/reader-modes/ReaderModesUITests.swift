@@ -100,7 +100,7 @@ final class ReaderModesUITests: XCTestCase {
     }
 
     private func checkComic(dark: Bool) {
-        openDownload(["智能漫畫", "智能漫画", "Smart Comic"], dark: dark)
+        openDownload(["智能漫畫", "智能漫画", "Smart Comic"], dark: dark, damaged: dark)
         XCTAssertTrue(element(["1 / 3"]).waitForExistence(timeout: 20), app.debugDescription)
         waitForImage(second: false)
         capture("comic-first-painted-image")
@@ -108,6 +108,16 @@ final class ReaderModesUITests: XCTestCase {
         XCTAssertTrue(element(["2 / 3"]).waitForExistence(timeout: 8), app.debugDescription)
         waitForImage(second: true)
         capture("comic-second-floor")
+        if dark {
+            app.swipeLeft()
+            XCTAssertTrue(element(["3 / 3"]).waitForExistence(timeout: 10), app.debugDescription)
+            XCTAssertTrue(element(["這張圖片缺少離線檔案", "这张图片缺少离线文件", "This image is missing from the download"]).exists)
+            tap(["重新下載這張圖", "重新下载这张图", "Download this image again"])
+            XCTAssertTrue(element(["下載失敗", "下载失败", "Download failed"]).waitForExistence(timeout: 30), app.debugDescription)
+            capture("reader-missing-image-retry")
+            app.swipeRight()
+            waitForImage(second: true)
+        }
     }
 
     func testNovel() { checkNovel(dark: false) }

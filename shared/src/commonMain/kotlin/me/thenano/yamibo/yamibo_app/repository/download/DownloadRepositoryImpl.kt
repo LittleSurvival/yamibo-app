@@ -566,12 +566,24 @@ class DownloadRepositoryImpl(
     private suspend fun storageFor(image: MissingThreadImage): String? =
         storageProvider.getStorageKey()?.takeIf { it.encodeUtf8().sha256().hex() == image.storageId }
 
+    private suspend fun resolveArchiveMember(storage: String, ref: ArchivedImage): Pair<DownloadManifest, DownloadedImage>? {
+        val owner = accountId()
+        check(ref.owner == null || ref.owner == owner) { "下載項目屬於其他帳號" }
+        val item = readManifest(ref.key)
+        if (item != null && (item.owner == null || item.owner == owner)) {
+            item.images.find { it.sourceUrl.encodeUtf8().sha256().hex() == ref.sourceId }?.let { return item to it }
+        }
+        return library.imageInThread(storage, ref)
+    }
+
     override suspend fun retryArchivedImage(uri: String, failedLocalUri: String): Result<String> = withContext(Dispatchers.IO) {
         downloadResult("retry archived image") {
             val ref = requireNotNull(ArchivedImage.parse(uri))
             val image = contentMutex.withLock {
-                val source = readManifest(ref.key)?.images?.find { it.sourceUrl.encodeUtf8().sha256().hex() == ref.sourceId }
-                MissingThreadImage(ref.key, ref.storageId, checkNotNull(source) { "下載圖片已移除" }.sourceUrl)
+                val storage = checkNotNull(storageProvider.getStorageKey())
+                check(storage.encodeUtf8().sha256().hex() == ref.storageId)
+                val (item, source) = checkNotNull(resolveArchiveMember(storage, ref)) { "下載圖片已移除" }
+                MissingThreadImage(item.key, ref.storageId, source.sourceUrl)
             }
             retryImage(image, failedLocalUri).getOrThrow()
         }
@@ -626,7 +638,8 @@ class DownloadRepositoryImpl(
         return contentMutex.withLock {
             val manifest = checkNotNull(currentManifest(recover = true))
             val storage = checkNotNull(storageFor(image))
-            val fileName = threadImageFileName(image.sourceUrl)
+            val fileName = manifest.images.firstOrNull { it.sourceUrl == image.sourceUrl }?.fileName
+                ?.takeIf { it.isSafeImageFileName() } ?: threadImageFileName(image.sourceUrl)
             val saved = if (manifest.shared) library.storeImage(storage, activeOwner(), image.sourceUrl, bytes, repair = true)
                 else DownloadedImage(image.sourceUrl, fileName, bytes.size.toLong())
             val images = manifest.images.filterNot { it.sourceUrl == image.sourceUrl } + saved
@@ -1387,15 +1400,15 @@ class DownloadRepositoryImpl(
         contentMutex.withLock {
             val storage = checkNotNull(storageProvider.getStorageKey())
             check(storage.encodeUtf8().sha256().hex() == ref.storageId)
-            ref.digest?.let { return@withLock library.openImage(storage, checkNotNull(ref.owner), it) }
+            ref.digest?.let { digest ->
+                library.openImage(storage, checkNotNull(ref.owner), digest)?.let { return@withLock it }
+            }
             val cached = archives[storage to ref.key]?.takeIf { it.owner == null || it.owner == accountId() }
             var member = ref.fileName
             val open = if (cached?.generation == ref.generation && member in cached.names) cached else {
-                val saved = checkNotNull(readManifest(ref.key))
-                check(saved.owner == null || saved.owner == accountId()) { "下載項目屬於其他帳號" }
-                val image = saved.images.first { it.sourceUrl.encodeUtf8().sha256().hex() == ref.sourceId }
+                val (saved, image) = checkNotNull(resolveArchiveMember(storage, ref)) { "下載圖片已移除" }
                 member = image.fileName
-                image.digest?.let { return@withLock library.openImage(storage, checkNotNull(saved.owner), it) }
+                image.digest?.let { return@withLock checkNotNull(library.openImage(storage, checkNotNull(saved.owner), it)) { "下載的圖片檔案遺失" } }
                 if (!image.packed) {
                     val loose = storageProvider.looseImages(ref.key, listOf(image.fileName)).getValue(image.fileName)
                     return@withLock storageProvider.openLoose(loose)
@@ -1599,7 +1612,7 @@ class DownloadRepositoryImpl(
             val entries = zip?.entries.orEmpty().filterNot { it.name.endsWith("/") }
             val expected = packed.mapTo(hashSetOf()) { it.fileName }
             val byName = entries.associateBy { it.name }
-            check(byName.size == entries.size && expected.containsAll(byName.keys)) { "CBZ 含有無法對應的圖片，已保留原檔" }
+            check(byName.size == entries.size && (expected + looseNames).containsAll(byName.keys)) { "CBZ 含有無法對應的圖片，已保留原檔" }
             check(old.images.distinctBy { it.fileName }.size == old.images.size) { "舊圖片檔名重複，已保留原檔" }
             for (image in old.images) {
                 currentCoroutineContext().ensureActive()

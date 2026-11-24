@@ -78,7 +78,7 @@ def main():
                 name = f"{palette}-{reader}"
                 run(f"Install clean App for {name}", simctl + ["install", simulator, str(apps[0])], 120)
                 fixture = downloads_root()
-                damaged = case == "testForumDark"
+                damaged = case in ("testForumDark", "testComicDark")
                 run("Seed downloaded page", [sys.executable, str(PROFILE / "generate_fixtures.py"), str(fixture)] + (["--cbz"] if palette == "default-dark" else []) + (["--damaged"] if damaged else []), 120)
                 bundle = OUTPUT / f"{name}.xcresult"
                 try:

@@ -370,6 +370,44 @@ class ReaderDownloadLifecycleTest {
         assertEquals(3, repo.getRssMangaChapterImages(rss)!!.size)
     }
 
+    @Test fun storedCoverFollowsReplacedBytesAndLegacySourceSurvivesRemovalOfOneClaim() = runBlocking {
+        unavailable = null
+        seedCbz()
+        val repo = repository()
+        val oldLink = assertNotNull(repo.getDownloadedPage(key)).posts.single().images.first().url
+        assertTrue(repo.migrateImages { _, _ -> }.isEmpty())
+        val direct = assertNotNull(repo.getDownloadedPage(key)).posts.single().images.first().url
+        val rss = RssMangaChapterDownloadKey(9, 140, 7)
+        assertIs<YamiboResult.Success<*>>(repo.refreshRssMangaChapter(rss))
+        binaries[first] = "revised".encodeToByteArray()
+        body = body.copy(posts = body.posts.map { it.copy(lastEditedTime = TimeInfo("edited", null, 100)) })
+        assertIs<YamiboResult.Success<*>>(refresh(repo))
+        assertEquals("revised", repo.openArchivedImage(direct).buffer().use { it.readUtf8() })
+        repo.clearPage(key).getOrThrow()
+        assertEquals("revised", repo.openArchivedImage(oldLink).buffer().use { it.readUtf8() })
+        owner = 8
+        assertFails { repo.openArchivedImage(direct) }
+        assertFails { repo.openArchivedImage(oldLink) }
+        Unit
+    }
+
+    @Test fun rebuildAfterInterruptedPublicationRemovesStalePidsAndRestoresAliases() = runBlocking {
+        seedCbz()
+        val repo = repository()
+        assertTrue(repo.migrateImages { _, _ -> }.isEmpty())
+        val index = Database(driver).readerDownloadQueries
+        index.clearAliases("fixture", owner.toLong())
+        index.putPage("fixture", "7/stale", 7, 999, 7, 9, "{}", "old")
+        index.putFloor("fixture", "7/stale", 9999)
+        index.markLibraryDirty("fixture", 7, 999)
+        repo.getDownloadedContentGroups()
+        assertNull(index.pageForPid("fixture", 7, 999, 7, 9999).executeAsOneOrNull())
+        assertNotNull(index.imageAlias("fixture", 7, first).executeAsOneOrNull())
+        assertTrue(index.dirtyLibraryThreads("fixture", 7).executeAsList().isEmpty())
+        assertEquals(1L, index.pageForPid("fixture", 7, 140, 7, 1402).executeAsOneOrNull())
+        assertTrue(requests.isEmpty())
+    }
+
     @AfterTest fun cleanUp() {
         driver.close()
         fs.deleteRecursively(directory)
