@@ -23,7 +23,7 @@ final class ReaderModesUITests: XCTestCase {
         XCTFail("Missing control " + labels.joined(separator: ", ") + " " + app.debugDescription)
     }
 
-    private func openDownload(_ labels: [String], dark: Bool) {
+    private func openDownload(_ labels: [String], dark: Bool, damaged: Bool = false) {
         continueAfterFailure = false
         app.terminate()
         app.launchArguments = ["-AppleLanguages", "(zh-Hant)", "-AppleLocale", "zh_TW"]
@@ -39,6 +39,13 @@ final class ReaderModesUITests: XCTestCase {
         tap(["轉換舊版圖片", "转换旧版图片", "Convert legacy images"])
         capture("migration-confirmation")
         tap(["轉換", "转换", "Convert"])
+        if damaged {
+            XCTAssertTrue(element(["CBZ 損壞", "CBZ 损坏"]).waitForExistence(timeout: 15), app.debugDescription)
+            capture("damaged-cbz-retained")
+            tap(["自動移除損壞的 CBZ", "自动移除损坏的 CBZ", "Automatically remove damaged CBZ files"])
+            capture("damaged-cbz-opt-in")
+            tap(["重試", "重试", "Retry"])
+        }
         let migration = element(["轉換舊版圖片", "转换旧版图片", "Convert legacy images"])
         let gone = NSPredicate(format: "exists == false")
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: gone, object: migration)], timeout: 30), .completed)
@@ -87,7 +94,7 @@ final class ReaderModesUITests: XCTestCase {
     }
 
     private func checkForum(dark: Bool) {
-        openDownload(["論壇模式", "论坛模式", "Forum mode"], dark: dark)
+        openDownload(["論壇模式", "论坛模式", "Forum mode"], dark: dark, damaged: dark)
         assertFirstFloor()
         capture("forum-first-author-floor")
     }

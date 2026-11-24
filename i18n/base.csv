@@ -997,3 +997,6 @@ RSS 目錄進度,RSS catalog progress,RSS 目錄進度,RSS 目录进度
 重新掃描下載資料夾,Rescan download folder,重新掃描下載資料夾,重新扫描下载文件夹
 共 {} 帖，圖片 {} 張,"{} threads, {} images",共 {} 帖，圖片 {} 張,共 {} 帖，图片 {} 张
 將已下載的散圖和 CBZ 匯入共用下載庫。確認新檔可讀後才移除舊檔，中斷後可以繼續。,Import loose images and CBZ downloads into the shared library. Originals are removed after verification. You can resume after an interruption.,將已下載的散圖和 CBZ 匯入共用下載庫。確認新檔可讀後才移除舊檔，中斷後可以繼續。,将已下载的散图和 CBZ 导入共用下载库。确认新文件可读后才移除旧文件，中断后可以继续。
+自動移除損壞的 CBZ,Automatically remove damaged CBZ files,自動移除損壞的 CBZ,自动移除损坏的 CBZ
+僅限本次轉換。保留正文、閱讀進度和可讀圖片，缺圖可重新下載。,"For this conversion only. Keeps text, reading progress and readable images. Missing images can be downloaded again.",僅限本次轉換。保留正文、閱讀進度和可讀圖片，缺圖可重新下載。,仅限本次转换。保留正文、阅读进度和可读图片，缺图可重新下载。
+已移除 {} 個損壞的 CBZ，缺圖可重新下載,Removed {} damaged CBZ files. Missing images can be downloaded again.,已移除 {} 個損壞的 CBZ，缺圖可重新下載,已移除 {} 个损坏的 CBZ，缺图可重新下载

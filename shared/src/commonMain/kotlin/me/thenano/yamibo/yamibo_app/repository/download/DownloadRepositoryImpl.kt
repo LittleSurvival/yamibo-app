@@ -12,6 +12,7 @@ import no.synth.kmpzip.crypto.Crypto
 import no.synth.kmpzip.io.SeekableSource
 import no.synth.kmpzip.okio.asSource
 import no.synth.kmpzip.zip.ZipFile
+import no.synth.kmpzip.zip.ZipFormatException
 import me.thenano.yamibo.yamibo_app.Database
 import okio.FileSystem
 import okio.Path
@@ -204,8 +205,12 @@ class DownloadRepositoryImpl(
             val retained = current.filter { entry ->
                 entry.status != DownloadStatus.Downloaded && entry.status != DownloadStatus.UpdateAvailable || entry.key in stored
             }
-            val keys = retained.mapTo(hashSetOf()) { it.key }
-            (retained + stored.values.filterNot { it.key in keys }).sortedBy { it.key.stableId }
+            val updated = retained.map { entry ->
+                if (entry.status == DownloadStatus.Downloaded && stored[entry.key]?.status == DownloadStatus.Failed)
+                    stored.getValue(entry.key) else entry
+            }
+            val keys = updated.mapTo(hashSetOf()) { it.key }
+            (updated + stored.values.filterNot { it.key in keys }).sortedBy { it.key.stableId }
         }
     }
 
@@ -1540,7 +1545,7 @@ class DownloadRepositoryImpl(
             item
         }
 
-    override suspend fun migrateImages(onProgress: (Int, Int) -> Unit): Map<DownloadTaskKey, Throwable> = withContext(Dispatchers.IO) {
+    override suspend fun migrateImages(removeCorruptCbz: Boolean, onCorruptRemoved: () -> Unit, onProgress: (Int, Int) -> Unit): Map<DownloadTaskKey, Throwable> = withContext(Dispatchers.IO) {
         val owner = accountId()
         val storage = checkNotNull(storageProvider.getStorageKey())
         val oldStore = library.legacy
@@ -1554,7 +1559,7 @@ class DownloadRepositoryImpl(
                 libraryMutation.withLock {
                     contentMutex.withLock {
                         check(owner == accountId() && storage == storageProvider.getStorageKey())
-                        migrateItem(storage, owner, target)
+                        if (migrateItem(storage, owner, target, removeCorruptCbz)) onCorruptRemoved()
                     }
                 }
             }.exceptionOrNull()?.let { errors[target.key] = it }
@@ -1564,7 +1569,14 @@ class DownloadRepositoryImpl(
         errors
     }
 
-    private suspend fun migrateItem(storage: String, owner: Int, old: DownloadManifest) {
+    // Storage access, password and unsupported format errors must keep their original files.
+    private inline fun <T> inspectCbz(removeCorrupt: Boolean, read: () -> T): T? =
+        try { read() } catch (error: ZipFormatException) {
+            if (!removeCorrupt) throw IllegalStateException("CBZ 損壞，已保留原檔", error)
+            null
+        }
+
+    private suspend fun migrateItem(storage: String, owner: Int, old: DownloadManifest, removeCorrupt: Boolean): Boolean {
         val key = old.key
         val pageBytes = library.legacy.readThreadPage(key)
         val page = pageBytes?.let { checkNotNull(decodePage(key, it)) }
@@ -1576,28 +1588,48 @@ class DownloadRepositoryImpl(
         val aliases = mutableMapOf<String, String>()
         val images = mutableListOf<DownloadedImage>()
         val source = library.legacy.openArchive(key, old.archiveId.orEmpty())
-        val zip = source?.let { try { ZipFile(it) } catch (e: Throwable) { it.close(); throw e } }
+        check(source != null || packed.isEmpty()) { "找不到 CBZ，已保留原檔" }
+        val zip = source?.let {
+            try { inspectCbz(removeCorrupt) { ZipFile(it) }.also { opened -> if (opened == null) it.close() } }
+            catch (error: Throwable) { it.close(); throw error }
+        }
+        val missing = mutableSetOf<String>()
         try {
+            check(source == null || packed.isNotEmpty() || zip != null) { "CBZ 與下載清單不符，已保留原檔" }
             val entries = zip?.entries.orEmpty().filterNot { it.name.endsWith("/") }
-            check(entries.size == packed.size && entries.map { it.name }.toSet() == packed.map { it.fileName }.toSet()) {
-                "CBZ 與下載清單不符，已保留原檔"
-            }
-            check(old.images.map { it.fileName }.distinct().size == old.images.size) { "舊圖片檔名重複，已保留原檔" }
+            val expected = packed.mapTo(hashSetOf()) { it.fileName }
             val byName = entries.associateBy { it.name }
+            check(byName.size == entries.size && expected.containsAll(byName.keys)) { "CBZ 含有無法對應的圖片，已保留原檔" }
+            check(old.images.distinctBy { it.fileName }.size == old.images.size) { "舊圖片檔名重複，已保留原檔" }
             for (image in old.images) {
                 currentCoroutineContext().ensureActive()
                 require(image.fileName.isSafeImageFileName())
                 val bytes = if (image.packed) {
-                    val data = checkNotNull(zip).imageBytes(image.fileName)
-                    check(Crypto.crc32(data) == byName.getValue(image.fileName).crc) { "CBZ 圖片 CRC 錯誤" }
+                    inspectCbz(removeCorrupt) {
+                        val entry = byName[image.fileName] ?: throw ZipFormatException("Missing image")
+                        val data = checkNotNull(zip).imageBytes(image.fileName)
+                        if (data.size.toLong() != image.bytes || Crypto.crc32(data) != entry.crc) {
+                            throw ZipFormatException("Invalid image size or CRC")
+                        }
+                        data
+                    }
+                } else {
+                    val data = library.legacy.openLoose(loose.getValue(image.fileName)).buffer().use { it.readByteArray() }
+                    check(data.size.toLong() == image.bytes) { "舊版散圖長度不符，已保留原檔" }
                     data
-                } else library.legacy.openLoose(loose.getValue(image.fileName)).buffer().use { it.readByteArray() }
-                check(bytes.size.toLong() == image.bytes) { "舊版圖片長度不符，已保留原檔" }
-                images += library.storeImage(storage, owner, image.sourceUrl, bytes, verifyExisting = true)
+                }
+                if (bytes == null) missing += image.sourceUrl
+                else images += library.storeImage(storage, owner, image.sourceUrl, bytes, verifyExisting = true)
             }
         } finally { zip?.close() }
         val generation = old.archiveId ?: Uuid.random().toString()
-        val saved = old.sharedCopy(images, owner, generation)
+        val imported = old.sharedCopy(images, owner, generation)
+        val count = old.missingImageCount + (missing - images.map { it.sourceUrl }.toSet()).size
+        val saved = when (imported) {
+            is ThreadPageDownloadManifest -> imported.copy(missingImageCount = count)
+            is TagMangaChapterManifest -> imported.copy(missingImageCount = count, sourceOrder = old.orderedSources())
+            is RssMangaChapterManifest -> imported.copy(missingImageCount = count, sourceOrder = old.orderedSources())
+        }
         val existing = readManifest(key)
         val catalog = beginCatalogChange()
         if (existing?.shared == true) {
@@ -1609,10 +1641,13 @@ class DownloadRepositoryImpl(
             library.save(storage, saved, page, migrating = true)
         }
         val stored = checkNotNull(readManifest(key))
-        check(stored.shared && stored.orderedSources() == old.orderedSources())
+        check(stored.shared && stored.images == saved.images && stored.missingImageCount == count)
+        if (key !is ThreadPageDownloadKey) check(stored.orderedSources() == old.orderedSources())
         if (page != null) check(storageProvider.readThreadPage(key)?.let { decodePage(key, it) } == page)
-        for ((i, image) in old.images.withIndex()) {
-            val replacement = images[i].archiveUri(storage.encodeUtf8().sha256().hex(), key, checkNotNull(stored.archiveId))
+        val bySource = images.associateBy { it.sourceUrl }
+        for (image in old.images) {
+            val importedImage = bySource[image.sourceUrl] ?: continue
+            val replacement = importedImage.archiveUri(storage.encodeUtf8().sha256().hex(), key, checkNotNull(stored.archiveId))
             loose[image.fileName]?.let { aliases[it] = replacement }
         }
         database.transaction {
@@ -1629,7 +1664,9 @@ class DownloadRepositoryImpl(
         archives.remove(storage to key)?.retire()
         library.legacy.deleteItems(storage, setOf(key)) {}[key]?.let { throw it }
         finishCatalogChange(catalog, setOf(key), manifestGroup(stored))
+        queueCatalogStorage = null
         imageRevision.update { it + 1 }
+        return missing.isNotEmpty()
     }
 
     private suspend fun queueTagMangaPage(tagId: TagId, tagName: String, page: TagPage, pageNumber: Int) {

@@ -26,7 +26,7 @@ interface DownloadRepository {
     val queue: StateFlow<List<DownloadQueueEntry>>
 
     suspend fun openArchivedImage(uri: String): okio.Source
-    suspend fun migrateImages(onProgress: (Int, Int) -> Unit): Map<DownloadTaskKey, Throwable>
+    suspend fun migrateImages(removeCorruptCbz: Boolean = false, onCorruptRemoved: () -> Unit = {}, onProgress: (Int, Int) -> Unit): Map<DownloadTaskKey, Throwable>
     suspend fun isStorageReady(): Boolean
     suspend fun getSummary(): DownloadQueueSummary
     suspend fun getDownloadedContentSummary(): DownloadedContentSummary

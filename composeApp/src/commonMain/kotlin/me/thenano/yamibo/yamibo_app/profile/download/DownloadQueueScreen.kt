@@ -130,6 +130,7 @@ fun DownloadQueueScreen(screenId: ScreenId) {
     var selectionMode by remember { mutableStateOf(false) }
     var selectedKeys by remember { mutableStateOf(emptySet<DownloadTaskKey>()) }
     var confirmMigration by remember { mutableStateOf(false) }
+    var removeCorruptCbz by remember { mutableStateOf(false) }
     var migrationProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var migrationError by remember { mutableStateOf<String?>(null) }
     var pendingRemoval by remember { mutableStateOf<DownloadRemovalRequest?>(null) }
@@ -322,7 +323,7 @@ fun DownloadQueueScreen(screenId: ScreenId) {
                 )
                 DownloadManagerTab.Content -> DownloadContentManagementTab(
                     state = contentState,
-                    onMigrate = { confirmMigration = true },
+                    onMigrate = { removeCorruptCbz = false; confirmMigration = true },
                     onRescan = { contentReloadToken++ },
                     migrationProgress = migrationProgress,
                     selectionActions = {
@@ -404,9 +405,23 @@ fun DownloadQueueScreen(screenId: ScreenId) {
             onDismissRequest = { confirmMigration = false; migrationError = null },
             title = { Text(i18n("轉換舊版圖片")) },
             text = {
-                if (failure == null) Text(i18n("將已下載的散圖和 CBZ 匯入共用下載庫。確認新檔可讀後才移除舊檔，中斷後可以繼續。"))
-                else LazyColumn(Modifier.heightIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(failure.lines()) { Text(it) }
+                LazyColumn(Modifier.heightIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (failure == null) item { Text(i18n("將已下載的散圖和 CBZ 匯入共用下載庫。確認新檔可讀後才移除舊檔，中斷後可以繼續。")) }
+                    else items(failure.lines()) { Text(it) }
+                    item {
+                        Row(
+                            Modifier.fillMaxWidth().toggleable(value = removeCorruptCbz, role = Role.Checkbox,
+                                onValueChange = { removeCorruptCbz = it }).padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            DownloadSelectionMark(if (removeCorruptCbz) ToggleableState.On else ToggleableState.Off, true)
+                            Column {
+                                Text(i18n("自動移除損壞的 CBZ"), fontWeight = FontWeight.Medium)
+                                Text(i18n("僅限本次轉換。保留正文、閱讀進度和可讀圖片，缺圖可重新下載。"),
+                                    color = colors.textOnSurface, fontSize = 12.sp)
+                            }
+                        }
+                    }
                 }
             },
             confirmButton = { YamiboActionChip(if (failure == null) i18n("轉換") else i18n("重試"), onClick = {
@@ -415,9 +430,16 @@ fun DownloadQueueScreen(screenId: ScreenId) {
                 scope.launch {
                     migrationProgress = 0 to 0
                     try {
-                        val errors = repository.migrateImages { done, total -> migrationProgress = done to total }
-                        if (errors.isEmpty()) feedbackController.post(i18n("圖片轉換完成"))
-                        else migrationError = errors.entries.joinToString("\n") { (key, error) -> "${key.stableId} · ${error.message.orEmpty()}" }
+                        var removed = 0
+                        val errors = repository.migrateImages(removeCorruptCbz, { removed++ }) { done, total -> migrationProgress = done to total }
+                        if (removed > 0) feedbackController.post(i18n("已移除 {} 個損壞的 CBZ，缺圖可重新下載", removed))
+                        else if (errors.isEmpty()) feedbackController.post(i18n("圖片轉換完成"))
+                        if (errors.isNotEmpty()) {
+                            val titles = contentGroups.flatMap { it.items }.flatMap { item -> item.sourceKeys.map { it to item.title } }.toMap()
+                            migrationError = errors.entries.joinToString("\n") { (key, error) ->
+                                "${titles[key] ?: entries.firstOrNull { it.key == key }?.title ?: key.stableId} · ${error.message.orEmpty()}"
+                            }
+                        }
                     } catch (error: CancellationException) {
                         throw error
                     } catch (error: Exception) {

@@ -76,7 +76,8 @@ def main():
                 container = Path(subprocess.check_output(simctl + [
                     "get_app_container", simulator, BUNDLE, "data"], text=True).strip())
                 fixture = container / "Documents/YamiboApp"
-                run("Seed downloaded page", [sys.executable, str(PROFILE / "generate_fixtures.py"), str(fixture)] + (["--cbz"] if palette == "default-dark" else []), 120)
+                damaged = case == "testForumDark"
+                run("Seed downloaded page", [sys.executable, str(PROFILE / "generate_fixtures.py"), str(fixture)] + (["--cbz"] if palette == "default-dark" else []) + (["--damaged"] if damaged else []), 120)
                 bundle = OUTPUT / f"{name}.xcresult"
                 try:
                     run(name, xcode + ["-resultBundlePath", str(bundle), "-parallel-testing-enabled", "NO",
@@ -93,7 +94,8 @@ def main():
                     with zipfile.ZipFile(pack) as archive:
                         assert sorted(archive.namelist()) == ["1401.json", "1402.json", "1403.json"]
                     blobs = list(library.glob("*/images/*/*"))
-                    assert len(blobs) == 3
+                    assert len(blobs) == (2 if damaged else 3)
+                    assert claim["item"].get("missingImageCount", 0) == (1 if damaged else 0)
                     assert all(hashlib.sha256(f.read_bytes()).hexdigest() == f.name for f in blobs)
                     assert not (fixture / "YamiboDownloads/thread_140_page_1_author_7").exists()
                     results[name] = (summary["passedTests"] == 1 and summary["failedTests"] == 0

@@ -225,6 +225,51 @@ class ReaderDownloadLifecycleTest {
         assertTrue(requests.isEmpty())
     }
 
+    @Test fun optInRemovesDamagedArchiveAndKeepsReadableImagesBodyAndMissingPositions() = runBlocking {
+        seedCbz(corrupt = true)
+        val repo = repository()
+        var removed = 0
+        assertTrue(repo.migrateImages(true, { removed++ }) { _, _ -> }.isEmpty())
+        assertEquals(1, removed)
+        assertNull(storedManifest)
+        val saved = assertNotNull(repo.getManifest(key))
+        assertEquals(1, saved.missingImageCount)
+        val post = assertNotNull(repo.getDownloadedPage(key)).posts.single()
+        assertEquals(body.posts.single().pid, post.pid)
+        assertEquals(first, repo.openArchivedImage(post.images.first().url).buffer().use { it.readUtf8() })
+        assertEquals(second, MissingThreadImage.fromReaderUri(post.images[1].url)?.sourceUrl)
+        assertEquals(post.images.first().url, post.images.last().url)
+        assertTrue(repo.migrateImages(true, { removed++ }) { _, _ -> }.isEmpty())
+        assertEquals(1, removed)
+        assertTrue(requests.isEmpty())
+    }
+
+    @Test fun optInHandlesUnreadableZipDirectoryButKeepsMissingFileAndForeignMembers() = runBlocking {
+        seedCbz()
+        val archive = directory / checkNotNull(storedManifest?.archiveId)
+        val original = fs.read(archive) { readByteArray() }
+        val repo = repository()
+        var removed = 0
+        fs.delete(archive)
+        assertNotNull(repo.migrateImages(true, { removed++ }) { _, _ -> }[key])
+        fs.write(archive) { write(original.copyOf(8)) }
+        assertNotNull(repo.migrateImages { _, _ -> }[key])
+        assertNotNull(storedManifest)
+        ZipOutputStream(java.nio.file.Files.newOutputStream(java.nio.file.Paths.get(archive.toString()))).use { zip ->
+            zip.putNextEntry(ZipEntry("personal.png"))
+            zip.write(byteArrayOf(1))
+            zip.closeEntry()
+        }
+        assertNotNull(repo.migrateImages(true, { removed++ }) { _, _ -> }[key])
+        assertEquals(0, removed)
+        fs.write(archive) { write(original.copyOf(8)) }
+        assertTrue(repo.migrateImages(true, { removed++ }) { _, _ -> }.isEmpty())
+        assertEquals(1, removed)
+        assertEquals(2, repo.getManifest(key)?.missingImageCount)
+        assertEquals(body.posts.single().pid, repo.getDownloadedPage(key)?.posts?.single()?.pid)
+        assertTrue(requests.isEmpty())
+    }
+
     @Test fun threadAndRssShareOnePidAndImageFilesAfterRemovingOneClaim() = runBlocking {
         unavailable = null
         body = page("shared", first, second, first)

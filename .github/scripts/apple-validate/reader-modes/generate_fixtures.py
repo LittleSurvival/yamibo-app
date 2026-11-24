@@ -40,7 +40,7 @@ if "--cbz" in sys.argv[2:]:
     import shutil
     with zipfile.ZipFile(directory / "images.cbz", "w", compression=zipfile.ZIP_STORED) as archive:
         for image, data in zip(images, markers):
-            archive.writestr(image["fileName"], data)
+            archive.writestr(image["fileName"], data[:10] if "--damaged" in sys.argv and image is images[-1] else data)
             image["packed"] = True
     shutil.rmtree(directory / "images")
     manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
