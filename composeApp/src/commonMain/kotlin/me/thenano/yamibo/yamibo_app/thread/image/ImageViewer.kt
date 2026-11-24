@@ -25,7 +25,6 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.catch
 import me.thenano.yamibo.yamibo_app.LocalDownloadRepository
-import me.thenano.yamibo.yamibo_app.components.controls.YamiboActionChip
 import me.thenano.yamibo.yamibo_app.repository.download.MissingThreadImage
 import coil3.compose.AsyncImagePainter
 import coil3.compose.rememberAsyncImagePainter
@@ -146,9 +145,8 @@ fun ImageViewer(
     val scope = rememberCoroutineScope()
     var repairedUri by remember(url) { mutableStateOf<String?>(null) }
     var repairing by remember(url) { mutableStateOf(false) }
-    var repairError by remember(url) { mutableStateOf<String?>(null) }
-    val localRepairMessage = if (repairError != null) i18n("下載失敗，請確認網路或登入狀態後再試。") else ""
-    val unreadableTitle = if (localDownload) i18n("這張離線圖片無法讀取") else null
+    var repairFailed by remember(url) { mutableStateOf(false) }
+    val repairMessage = if (repairFailed) i18n("下載失敗，請確認網路或登入狀態後再試。") else null
     val localUrl = if (missing == null) original else key(missing) {
         val local by remember(repository, missing) {
             repository.observeLocalImage(missing).catch { emit(null) }
@@ -160,9 +158,8 @@ fun ImageViewer(
                     ImageLoadingContent(160.dp, onImageRetry = null)
                 } else {
                     ImageErrorContent(
-                        fullUrl = null,
-                        localTitle = i18n("這張圖片缺少離線檔案"),
-                        errorMessage = localRepairMessage,
+                        fullUrl = imageSourceForDiagnostics(missing.sourceUrl),
+                        errorMessage = repairMessage ?: i18n("這張圖片缺少離線檔案"),
                         compact = maxWidth <= 140.dp || maxHeight <= 140.dp,
                         errorBgColor = errorBgColor,
                         errorTextColor = errorTextColor,
@@ -173,7 +170,7 @@ fun ImageViewer(
                             repairing = true
                             scope.launch {
                                 try {
-                                    repository.retryImage(missing).onSuccess { repairedUri = it }.onFailure { repairError = it.message }
+                                    repository.retryImage(missing).onSuccess { repairedUri = it; repairFailed = false }.onFailure { repairFailed = true }
                                 } finally {
                                     repairing = false
                                 }
@@ -202,11 +199,11 @@ fun ImageViewer(
                 val result = if (missing != null) repository.retryImage(missing, fullUrl)
                     else repository.retryArchivedImage(original, fullUrl)
                 result.onSuccess {
-                    repairError = null
+                    repairFailed = false
                     repairedUri = it
                     localRetryKey++
                     onReload?.invoke()
-                }.onFailure { repairError = it.message }
+                }.onFailure { repairFailed = true }
             } finally { repairing = false }
         }
     }
@@ -301,8 +298,7 @@ fun ImageViewer(
             } else if (blockedErrorMessage != null && repairedUri == null) {
                 ImageErrorContent(
                     fullUrl = diagnosticUrl.takeUnless { localDownload },
-                    localTitle = unreadableTitle,
-                    errorMessage = if (localDownload) localRepairMessage else imageErrorForDiagnostics(blockedErrorMessage, fullUrl),
+                    errorMessage = if (localDownload) repairMessage ?: i18n("這張離線圖片無法讀取") else imageErrorForDiagnostics(blockedErrorMessage, fullUrl),
                     errorBgColor = errorBgColor,
                     errorTextColor = errorTextColor,
                     errorSubTextColor = errorSubTextColor,
@@ -346,8 +342,7 @@ fun ImageViewer(
 
                         ImageErrorContent(
                             fullUrl = diagnosticUrl.takeUnless { localDownload },
-                            localTitle = unreadableTitle,
-                            errorMessage = if (localDownload) localRepairMessage else errorMsg,
+                            errorMessage = if (localDownload) repairMessage ?: i18n("這張離線圖片無法讀取") else errorMsg,
                             errorBgColor = errorBgColor,
                             errorTextColor = errorTextColor,
                             errorSubTextColor = errorSubTextColor,
@@ -452,7 +447,6 @@ private fun ImageLoadingContent(
 @Composable
 private fun ImageErrorContent(
     fullUrl: String?,
-    localTitle: String?,
     errorMessage: String,
     errorBgColor: Color,
     errorTextColor: Color,
@@ -466,7 +460,7 @@ private fun ImageErrorContent(
     val details: @Composable (Modifier) -> Unit = { modifier ->
         Column(modifier) {
             Text(
-                text = localTitle ?: i18n("圖片載入失敗"),
+                text = i18n("圖片載入失敗"),
                 color = errorTextColor,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -500,11 +494,10 @@ private fun ImageErrorContent(
         }
     }
     val retryButton: @Composable () -> Unit = {
-        if (localTitle != null) YamiboActionChip(i18n("重新下載這張圖"), onReload, selected = true)
-        else OutlinedButton(
+        OutlinedButton(
             onClick = onReload,
             colors = ButtonDefaults.outlinedButtonColors(
-                contentColor = colors.brownPrimary
+                contentColor = if (errorTextColor == Color.White) errorTextColor else colors.brownPrimary
             ),
             contentPadding = PaddingValues(horizontal = if (compact) 4.dp else 12.dp, vertical = 8.dp)
         ) {
