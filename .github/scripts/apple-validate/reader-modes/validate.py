@@ -67,15 +67,17 @@ def main():
         run("Boot owned iPhone Simulator", ["xcrun", "simctl", "boot", simulator], 60)
         run("Wait for iPhone boot", ["xcrun", "simctl", "bootstatus", simulator, "-b"], 300)
         simctl = ["xcrun", "simctl"]
+        def downloads_root():
+            container = subprocess.check_output(simctl + ["get_app_container", simulator, BUNDLE, "data"], text=True).strip()
+            return Path(container) / "Documents/YamiboApp"
+
         results = {}
         for palette in ("default", "default-dark"):
             for reader in ("testForum", "testNovel", "testComic"):
                 case = reader if palette == "default" else f"{reader}Dark"
                 name = f"{palette}-{reader}"
                 run(f"Install clean App for {name}", simctl + ["install", simulator, str(apps[0])], 120)
-                container = Path(subprocess.check_output(simctl + [
-                    "get_app_container", simulator, BUNDLE, "data"], text=True).strip())
-                fixture = container / "Documents/YamiboApp"
+                fixture = downloads_root()
                 damaged = case == "testForumDark"
                 run("Seed downloaded page", [sys.executable, str(PROFILE / "generate_fixtures.py"), str(fixture)] + (["--cbz"] if palette == "default-dark" else []) + (["--damaged"] if damaged else []), 120)
                 bundle = OUTPUT / f"{name}.xcresult"
@@ -84,9 +86,11 @@ def main():
                         f"-only-testing:ReaderModesUITests/ReaderModesUITests/{case}", "test-without-building"], 300)
                     summary = json.loads(subprocess.check_output(["xcrun", "xcresulttool", "get",
                         "test-results", "summary", "--path", str(bundle)], text=True))
+                    # XCTest may reinstall the app, moving its data to a new container UUID.
+                    fixture = downloads_root()
                     library = fixture / "YamiboDownloads" / "library"
                     manifests = list(library.glob("*/threads/140/manifest.json"))
-                    assert len(manifests) == 1, manifests
+                    assert len(manifests) == 1, (fixture, list(fixture.rglob("manifest.json")))
                     state = json.loads(manifests[0].read_text(encoding="utf-8"))
                     claim = state["claims"][0]
                     assert [f["pid"] for f in claim["floors"]] == [1401, 1402, 1403]
