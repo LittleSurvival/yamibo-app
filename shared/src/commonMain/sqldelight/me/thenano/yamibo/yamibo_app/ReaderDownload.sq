@@ -31,3 +31,52 @@ WHERE storage = ? AND owner = ? AND sourceId = ?;
 
 availableTids:
 SELECT DISTINCT tid FROM ReaderDownloadPage WHERE storage = ? AND owner = ? AND tid IN ?;
+
+imageAlias:
+SELECT digest, bytes FROM OfflineImageAlias WHERE storage = ? AND owner = ? AND source = ?;
+
+putAlias:
+INSERT OR REPLACE INTO OfflineImageAlias(storage, owner, source, digest, bytes) VALUES (?, ?, ?, ?, ?);
+
+clearAliases:
+DELETE FROM OfflineImageAlias WHERE storage = ? AND owner = ?;
+
+removeDigestAliases:
+DELETE FROM OfflineImageAlias WHERE storage = ? AND owner = ? AND digest = ?;
+
+markLibraryDirty:
+INSERT OR IGNORE INTO OfflineLibraryDirty(storage, owner, tid) VALUES (?, ?, ?);
+
+clearLibraryDirty:
+DELETE FROM OfflineLibraryDirty WHERE storage = ? AND owner = ? AND tid = ?;
+
+dirtyLibraryThreads:
+SELECT tid FROM OfflineLibraryDirty WHERE storage = ? AND owner = ?;
+
+remapImagePosition:
+UPDATE ReaderImageAnchor SET sourceId = :newId WHERE sourceId = :oldId
+AND historyPostId IN (SELECT postId FROM ImageReadingHistory WHERE threadId = :tid);
+
+remapTextPosition:
+UPDATE ReaderTextAnchor SET imageSource = :newId WHERE imageSource = :oldId AND threadId = :tid;
+
+clearThreadUses:
+DELETE FROM OfflineImageUse WHERE storage = ? AND owner = ? AND tid = ?;
+
+putThreadUse:
+INSERT OR IGNORE INTO OfflineImageUse(storage,owner,tid,digest) VALUES (?,?,?,?);
+
+hasImageUse:
+SELECT EXISTS(SELECT 1 FROM OfflineImageUse WHERE storage = ? AND owner = ? AND digest = ?);
+
+inventoryReady:
+SELECT EXISTS(SELECT 1 FROM OfflineInventory WHERE storage = ? AND owner = ?);
+
+setInventoryReady:
+INSERT OR IGNORE INTO OfflineInventory(storage,owner) VALUES (?,?);
+
+clearStorageUses:
+DELETE FROM OfflineImageUse WHERE storage = ? AND owner = ?;
+
+canonicalPageItems:
+SELECT item FROM ReaderDownloadPage WHERE storage = ? AND owner = ? AND instr(item, '/') > 0;

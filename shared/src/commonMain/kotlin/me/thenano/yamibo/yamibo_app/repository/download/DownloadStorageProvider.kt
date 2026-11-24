@@ -14,6 +14,8 @@ import okio.use
 import okio.Path
 
 interface DownloadStorageProvider {
+    val offlineFiles: OfflineFiles
+
     suspend fun getSelectedFolderLabel(): String?
     suspend fun getStorageKey(): String? = getSelectedFolderLabel()
     suspend fun isReady(): Boolean
