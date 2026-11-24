@@ -408,6 +408,32 @@ class ReaderDownloadLifecycleTest {
         assertTrue(requests.isEmpty())
     }
 
+    @Test fun readerRetryRetiresOnlyTheDamagedCbzBeforeFetchAndCanRetryAnOldUriAfterFailure() = runBlocking {
+        seedCbz(corrupt = true)
+        val repo = repository()
+        val urls = assertNotNull(repo.getDownloadedPage(key)).posts.single().images.map { it.url }
+        val other = checkNotNull(storedManifest)
+        imageOnly = TagMangaChapterManifest(TagMangaChapterDownloadKey(5, 241, 7), "tag", title = "unrelated",
+            tagPage = 1, imageCount = other.images.size, downloadedAt = 1, images = other.images, archiveId = other.archiveId)
+        owner = 8
+        assertTrue(repo.retryArchivedImage(urls[1]).isFailure)
+        assertNotNull(storedManifest)
+        owner = 7
+        unavailable = second
+        assertTrue(repo.retryArchivedImage(urls[1]).isFailure) // HTTP 503 after retiring the CBZ
+        assertNull(storedManifest)
+        assertNotNull(imageOnly)
+        assertEquals(listOf(second), requests)
+        assertEquals(1, repo.getManifest(key)?.missingImageCount)
+        assertEquals(first, repo.openArchivedImage(urls.first()).buffer().use { it.readUtf8() })
+        unavailable = null
+        val fixed = repo.retryArchivedImage(urls[1]).getOrThrow()
+        assertEquals(second, repo.openArchivedImage(fixed).buffer().use { it.readUtf8() })
+        assertEquals(0, repo.getManifest(key)?.missingImageCount)
+        assertEquals(listOf(second, second), requests)
+        assertTrue(repo.getDownloadedPage(key)!!.posts.single().images.none { MissingThreadImage.isReaderUri(it.url) })
+    }
+
     @AfterTest fun cleanUp() {
         driver.close()
         fs.deleteRecursively(directory)

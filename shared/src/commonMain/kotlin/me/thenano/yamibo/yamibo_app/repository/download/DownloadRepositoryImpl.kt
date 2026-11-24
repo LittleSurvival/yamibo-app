@@ -11,6 +11,7 @@ import kotlin.uuid.Uuid
 import no.synth.kmpzip.crypto.Crypto
 import no.synth.kmpzip.io.SeekableSource
 import no.synth.kmpzip.okio.asSource
+import no.synth.kmpzip.zip.ZipEntry
 import no.synth.kmpzip.zip.ZipFile
 import no.synth.kmpzip.zip.ZipFormatException
 import me.thenano.yamibo.yamibo_app.Database
@@ -582,8 +583,19 @@ class DownloadRepositoryImpl(
             val image = contentMutex.withLock {
                 val storage = checkNotNull(storageProvider.getStorageKey())
                 check(storage.encodeUtf8().sha256().hex() == ref.storageId)
-                val (item, source) = checkNotNull(resolveArchiveMember(storage, ref)) { "下載圖片已移除" }
-                MissingThreadImage(item.key, ref.storageId, source.sourceUrl)
+                val member = resolveArchiveMember(storage, ref)
+                if (member != null) MissingThreadImage(member.first.key, ref.storageId, member.second.sourceUrl)
+                else {
+                    // A failed refetch can leave an old reader URI on screen after its CBZ was retired.
+                    val item = checkNotNull(readManifest(ref.key)) { "下載圖片已移除" }
+                    check(item.shared && item.owner == accountId()) { "下載圖片已移除" }
+                    val sources = when (val key = item.key) {
+                        is ThreadPageDownloadKey -> readOriginalPage(key)?.threadImageUrls().orEmpty()
+                        else -> item.orderedSources()
+                    }
+                    val url = sources.firstOrNull { it.encodeUtf8().sha256().hex() == ref.sourceId }
+                    MissingThreadImage(item.key, ref.storageId, checkNotNull(url) { "圖片已移除" })
+                }
             }
             retryImage(image, failedLocalUri).getOrThrow()
         }
@@ -624,16 +636,23 @@ class DownloadRepositoryImpl(
             check(manifest != null && image.sourceUrl in manifest.orderedSources()) { "圖片已從章節移除" }
             return manifest
         }
-        contentMutex.withLock {
-            val manifest = currentManifest(recover = false) ?: return@withLock
-            val existing = manifest.images.find { it.sourceUrl == image.sourceUrl }
-            if (existing != null) {
-                val local = imageUris(checkNotNull(storageFor(image)), manifest, listOf(existing))[existing.fileName]
+        val removedCorrupt = contentMutex.withLock {
+            val manifest = currentManifest(recover = false) ?: return@withLock false
+            val existing = manifest.images.find { it.sourceUrl == image.sourceUrl } ?: return@withLock false
+            val storage = checkNotNull(storageFor(image))
+            if (!manifest.shared && existing.packed && isDamagedMember(manifest, existing)) {
+                // Commit the recoverable local content and its missing slots before removing this archive.
+                migrateItem(storage, activeOwner(), manifest, removeCorrupt = true)
+                true
+            } else {
+                val local = imageUris(storage, manifest, listOf(existing))[existing.fileName]
                 if (local != null && local != failedLocalUri) return local
+                false
             }
         }
         activeOwner()
-        val bytes = if (failedLocalUri == null) downloadedOrFetch(image.sourceUrl) else imageFetcher.fetch(image.sourceUrl)
+        val bytes = if (removedCorrupt || failedLocalUri != null) imageFetcher.fetch(image.sourceUrl)
+            else downloadedOrFetch(image.sourceUrl)
         activeOwner()
         return contentMutex.withLock {
             val manifest = checkNotNull(currentManifest(recover = true))
@@ -1558,6 +1577,25 @@ class DownloadRepositoryImpl(
             item
         }
 
+    private suspend fun isDamagedMember(item: DownloadManifest, member: DownloadedImage): Boolean {
+        val source = library.legacy.openArchive(item.key, item.archiveId.orEmpty()) ?: return false
+        val zip = try { ZipFile(source) }
+            catch (_: ZipFormatException) { source.close(); return true }
+            catch (error: Throwable) { source.close(); throw error }
+        return try {
+            zip.checkedImage(member, zip.entries.firstOrNull { it.name == member.fileName })
+            false
+        } catch (_: ZipFormatException) { true }
+        finally { zip.close() }
+    }
+
+    private fun ZipFile.checkedImage(image: DownloadedImage, entry: ZipEntry?): ByteArray {
+        if (entry == null) throw ZipFormatException("Missing image")
+        val data = imageBytes(image.fileName)
+        if (data.size.toLong() != image.bytes || Crypto.crc32(data) != entry.crc) throw ZipFormatException("Invalid image size or CRC")
+        return data
+    }
+
     override suspend fun migrateImages(removeCorruptCbz: Boolean, onCorruptRemoved: () -> Unit, onProgress: (Int, Int) -> Unit): Map<DownloadTaskKey, Throwable> = withContext(Dispatchers.IO) {
         val owner = accountId()
         val storage = checkNotNull(storageProvider.getStorageKey())
@@ -1619,12 +1657,8 @@ class DownloadRepositoryImpl(
                 require(image.fileName.isSafeImageFileName())
                 val bytes = if (image.packed) {
                     inspectCbz(removeCorrupt) {
-                        val entry = byName[image.fileName] ?: throw ZipFormatException("Missing image")
-                        val data = checkNotNull(zip).imageBytes(image.fileName)
-                        if (data.size.toLong() != image.bytes || Crypto.crc32(data) != entry.crc) {
-                            throw ZipFormatException("Invalid image size or CRC")
-                        }
-                        data
+                        if (zip == null) throw ZipFormatException("Missing ZIP directory")
+                        zip.checkedImage(image, byName[image.fileName])
                     }
                 } else {
                     val data = library.legacy.openLoose(loose.getValue(image.fileName)).buffer().use { it.readByteArray() }

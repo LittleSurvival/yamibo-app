@@ -23,7 +23,7 @@ final class ReaderModesUITests: XCTestCase {
         XCTFail("Missing control " + labels.joined(separator: ", ") + " " + app.debugDescription)
     }
 
-    private func openDownload(_ labels: [String], dark: Bool, damaged: Bool = false) {
+    private func openDownload(_ labels: [String], dark: Bool, damaged: Bool = false, migrateInManager: Bool = true) {
         continueAfterFailure = false
         app.terminate()
         app.launchArguments = ["-AppleLanguages", "(zh-Hant)", "-AppleLocale", "zh_TW"]
@@ -36,19 +36,21 @@ final class ReaderModesUITests: XCTestCase {
         tap(["我的", "Profile"])
         tap(["下載管理", "下载管理", "Download manager", "Downloads"])
         tap(["下載內容管理", "下载内容管理", "Downloaded content", "內容管理"])
-        tap(["轉換舊版圖片", "转换旧版图片", "Convert legacy images"])
-        capture("migration-confirmation")
-        tap(["轉換", "转换", "Convert"])
-        if damaged {
-            XCTAssertTrue(element(["CBZ 損壞", "CBZ 损坏"]).waitForExistence(timeout: 15), app.debugDescription)
-            capture("damaged-cbz-retained")
-            tap(["自動移除損壞的 CBZ", "自动移除损坏的 CBZ", "Automatically remove damaged CBZ files"])
-            capture("damaged-cbz-opt-in")
-            tap(["重試", "重试", "Retry"])
+        if migrateInManager {
+            tap(["轉換舊版圖片", "转换旧版图片", "Convert legacy images"])
+            capture("migration-confirmation")
+            tap(["轉換", "转换", "Convert"])
+            if damaged {
+                XCTAssertTrue(element(["CBZ 損壞", "CBZ 损坏"]).waitForExistence(timeout: 15), app.debugDescription)
+                capture("damaged-cbz-retained")
+                tap(["自動移除損壞的 CBZ", "自动移除损坏的 CBZ", "Automatically remove damaged CBZ files"])
+                capture("damaged-cbz-opt-in")
+                tap(["重試", "重试", "Retry"])
+            }
+            let migration = element(["轉換舊版圖片", "转换旧版图片", "Convert legacy images"])
+            let gone = NSPredicate(format: "exists == false")
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: gone, object: migration)], timeout: 30), .completed)
         }
-        let migration = element(["轉換舊版圖片", "转换旧版图片", "Convert legacy images"])
-        let gone = NSPredicate(format: "exists == false")
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: gone, object: migration)], timeout: 30), .completed)
         tap(["QA Three Readers"])
         tap(["第 1 頁", "第 1 页", "Page 1"])
         XCTAssertTrue(element(["開啟下載內容", "打开下载内容", "Open downloaded content"]).waitForExistence(timeout: 10), app.debugDescription)
@@ -100,7 +102,7 @@ final class ReaderModesUITests: XCTestCase {
     }
 
     private func checkComic(dark: Bool) {
-        openDownload(["智能漫畫", "智能漫画", "Smart Comic"], dark: dark, damaged: dark)
+        openDownload(["智能漫畫", "智能漫画", "Smart Comic"], dark: dark, damaged: dark, migrateInManager: !dark)
         XCTAssertTrue(element(["1 / 3"]).waitForExistence(timeout: 20), app.debugDescription)
         waitForImage(second: false)
         capture("comic-first-painted-image")
@@ -111,8 +113,9 @@ final class ReaderModesUITests: XCTestCase {
         if dark {
             app.swipeLeft()
             XCTAssertTrue(element(["3 / 3"]).waitForExistence(timeout: 10), app.debugDescription)
-            XCTAssertTrue(element(["這張圖片缺少離線檔案", "这张图片缺少离线文件", "This image is missing from the download"]).exists)
-            XCTAssertTrue(element(["圖片載入失敗", "图片载入失败", "Image load failed", "Image failed to load"]).exists)
+            XCTAssertTrue(element(["圖片載入失敗", "图片载入失败", "Image load failed"]).waitForExistence(timeout: 15), app.debugDescription)
+            XCTAssertTrue(element(["這張離線圖片無法讀取", "这张离线图片无法读取", "This downloaded image could not be read"]).exists)
+            capture("reader-damaged-archive")
             tap(["重新載入", "重新载入", "Reload"])
             XCTAssertTrue(element(["下載失敗", "下载失败", "Download failed"]).waitForExistence(timeout: 30), app.debugDescription)
             capture("reader-missing-image-retry")
