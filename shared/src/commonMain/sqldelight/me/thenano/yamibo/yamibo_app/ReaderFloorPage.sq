@@ -1,3 +1,8 @@
+-- Include pages cached before PID indexing. Only the current access scope can supply a candidate.
+getReaderPageKeys:
+SELECT cacheKey FROM DiskCacheEntry WHERE namespace = 'thread_page' AND cacheKey GLOB :pattern
+ORDER BY lastAccessedAt DESC LIMIT 50;
+
 getPage:
 SELECT page FROM ReaderFloorPage WHERE accessScope = ? AND threadId = ? AND authorScope = ? AND pid = ?;
 
@@ -6,6 +11,9 @@ DELETE FROM ReaderFloorPage WHERE accessScope = ? AND threadId = ? AND authorSco
 
 rememberFloor:
 INSERT OR REPLACE INTO ReaderFloorPage(accessScope, threadId, authorScope, pid, page) VALUES (?, ?, ?, ?, ?);
+
+clearAll:
+DELETE FROM ReaderFloorPage;
 
 clearThread:
 DELETE FROM ReaderFloorPage WHERE threadId = ?;

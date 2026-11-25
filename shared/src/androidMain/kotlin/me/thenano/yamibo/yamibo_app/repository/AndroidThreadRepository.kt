@@ -79,6 +79,7 @@ class AndroidThreadRepository(
 
     override fun knownPageForPost(tid: ThreadId, author: UserId?, pid: PostId): Int? = pages.pageOf(tid, author, pid)
 
+    override fun cachedThreadPages(tid: ThreadId, authorId: UserId?) = pages.cachedPages(tid, authorId)
     override fun getCachedThread(tid: ThreadId, authorId: UserId?, page: Int) = pages.get(tid, authorId, page)
 
     override fun setCachedThread(tid: ThreadId, authorId: UserId?, page: Int, threadPage: ThreadPage) =

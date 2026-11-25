@@ -6,6 +6,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import io.github.littlesurvival.dto.model.ThreadSummary
+import io.github.littlesurvival.dto.model.User
 import io.github.littlesurvival.dto.page.ThreadPage
 import io.github.littlesurvival.dto.value.*
 import kotlinx.coroutines.CancellationException
@@ -35,15 +36,23 @@ internal fun DownloadedReaderDialog(item: DownloadedContentItem, onDismiss: () -
     val tid = ThreadId(pageKey.tid)
     var page by remember(key) { mutableStateOf<ThreadPage?>(null) }
     var work by remember(key) { mutableStateOf<SmartComicCatalog.SavedWork?>(null) }
+    var author by remember(key) { mutableStateOf<User?>(null) }
     var imageOnly by remember(key) { mutableStateOf(false) }
     var ready by remember(key) { mutableStateOf(false) }
     var error by remember(key) { mutableStateOf<String?>(null) }
     LaunchedEffect(key) {
         try {
-            page = downloads.getDownloadedPage(pageKey)
-            val fid = page?.thread?.forum?.fid
+            val current = downloads.getDownloadedPage(pageKey)
+            page = current
+            val fid = current?.thread?.forum?.fid
             if (fid != null) work = auth.currentUser()?.uid?.let { catalog.savedWork(it, fid, tid) }
-            if (page == null) imageOnly = when (key) {
+            if (current != null) {
+                author = work?.members?.firstOrNull { it.tid == tid }?.author
+                    ?: current.posts.firstOrNull { it.floor == 1 || it.author.uid.value == pageKey.authorId }?.author
+                if (author == null && pageKey.authorId == null && pageKey.page > 1) {
+                    author = downloads.getDownloadedPage(pageKey.copy(page = 1))?.posts?.firstOrNull { it.floor == 1 }?.author
+                }
+            } else imageOnly = when (key) {
                 is TagMangaChapterDownloadKey -> !downloads.getTagMangaChapterImages(key).isNullOrEmpty()
                 is RssMangaChapterDownloadKey -> !downloads.getRssMangaChapterImages(key).isNullOrEmpty()
                 else -> false
@@ -57,7 +66,6 @@ internal fun DownloadedReaderDialog(item: DownloadedContentItem, onDismiss: () -
         }
     }
     val chapter = work?.members?.firstOrNull { it.tid == tid }
-    val author = chapter?.author ?: page?.posts?.firstOrNull { it.floor == 1 || it.author.uid.value == pageKey.authorId }?.author
     val seed = chapter ?: page?.let { ThreadSummary(tid, it.thread.title, it.thread.forum.fid, hasPoll = false, url = "", author = author) }
     fun openComic(target: ThreadSummary) {
         onDismiss()

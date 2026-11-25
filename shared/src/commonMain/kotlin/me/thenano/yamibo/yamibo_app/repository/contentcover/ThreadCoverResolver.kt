@@ -19,19 +19,24 @@ class ThreadCoverResolver(
         findThreadCoverCandidate(firstPage, owner.uid, owner.name)?.let { return@withContext it }
 
         val totalPages = firstPage.pageNav?.totalPages ?: 1
-        for (page in 2..totalPages) {
-            val cached = threadRepository.getCachedThread(tid, null, page) ?: continue
-            findThreadCoverCandidate(cached, owner.uid, owner.name)?.let { return@withContext it }
+        if (totalPages > 1) {
+            for (page in threadRepository.cachedThreadPages(tid, null)) {
+                if (page !in 2..totalPages) continue
+                val cached = threadRepository.getCachedThread(tid, null, page) ?: continue
+                findThreadCoverCandidate(cached, owner.uid, owner.name)?.let { return@withContext it }
+            }
         }
 
-        val validUid = owner.uid.takeIf { it.value > 0 }
-        var page = 1
+        val validUid = owner.uid.takeIf { it.value > 0 } ?: return@withContext null
+        var nextPage = 1
         var scanTotal = totalPages
-        while (page <= scanTotal) {
+        for (page in threadRepository.cachedThreadPages(tid, validUid)) {
+            // The author-only view has separate page numbers. An absent earlier page ends that search.
+            if (page != nextPage || page > scanTotal) break
             val result = threadRepository.getCachedThread(tid, validUid, page) ?: return@withContext null
             scanTotal = result.pageNav?.totalPages ?: scanTotal
             findThreadCoverCandidate(result, owner.uid, owner.name)?.let { return@withContext it }
-            page += 1
+            nextPage++
         }
         null
     }

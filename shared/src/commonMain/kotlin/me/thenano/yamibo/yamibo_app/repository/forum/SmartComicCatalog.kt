@@ -5,6 +5,7 @@ import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.core.flatMapSuccess
 import io.github.littlesurvival.dto.model.ThreadSummary
 import io.github.littlesurvival.dto.page.SearchPage
+import io.github.littlesurvival.dto.value.SearchId
 import io.github.littlesurvival.dto.value.ThreadId
 import io.github.littlesurvival.dto.value.UserId
 import io.github.littlesurvival.dto.value.ForumId
@@ -26,7 +27,7 @@ class SmartComicCatalog(factory: DiskCacheFactory) {
     private data class Snapshot(val checkedAt: Long, val threads: List<ThreadSummary>, val verified: Boolean = false)
     private val cache = factory.create<Snapshot>("smart_comic", maxSize = 80)
 
-    private val searches = InFlightReads<String, YamiboResult<List<ThreadSummary>>>()
+    private val searches = InFlightReads<String, YamiboResult<ComicSearchPages>>()
 
     private val works = factory.database.smartComicWorkQueries
     private val json = factory.json
@@ -60,7 +61,8 @@ class SmartComicCatalog(factory: DiskCacheFactory) {
                 works.newId().executeAsOne()
             }
             val conflict = known.any { it != id }
-            val verified = complete && !conflict
+            val candidateIds = ordered.mapTo(hashSetOf()) { it.tid.value.toLong() }
+            val verified = complete && !conflict && candidateIds.containsAll(works.activeMemberTids(id).executeAsList())
             val accepted = if (conflict) listOf(seed) else ordered
             val previous = works.workById(id, account).executeAsOne()
             // Keep the last verified membership intact when an incomplete search discovers new candidates.
@@ -106,24 +108,19 @@ class SmartComicCatalog(factory: DiskCacheFactory) {
         }
     }
 
-    private suspend fun compatibleMembership(owner: UserId, fid: ForumId, chapters: List<ThreadSummary>) = withContext(Dispatchers.IO) {
+    private suspend fun compatibleMembership(owner: UserId, fid: ForumId, chapters: List<ThreadSummary>,
+                                             coverSaved: Boolean = false) = withContext(Dispatchers.IO) {
         val memberships = chapters.chunked(400).flatMap { batch ->
             works.memberOwners(owner.value.toLong(), fid.value.toLong(), batch.map { it.tid.value.toLong() }).executeAsList()
         }
-        memberships.map { it.workId }.distinct().size <= 1
+        val workIds = memberships.map { it.workId }.distinct()
+        if (workIds.size > 1) return@withContext false
+        val id = workIds.singleOrNull() ?: return@withContext true
+        !coverSaved || chapters.mapTo(hashSetOf()) { it.tid.value.toLong() }.containsAll(works.activeMemberTids(id).executeAsList())
     }
 
     fun chapters(seed: ThreadSummary, candidates: List<ThreadSummary>): List<ThreadSummary> {
-        val work = smartComicTitle(seed.title)
-        return (listOf(seed) + candidates).distinctBy { it.tid }
-            .map { it to smartComicTitle(it.title) }
-            .filter { (thread, title) ->
-                thread.tid == seed.tid || (work.matches(title) &&
-                    (work.credit != null && title.credit != null ||
-                        seed.author != null && seed.author?.uid == thread.author?.uid))
-            }
-            .sortedWith(compareBy({ it.second.chapter ?: Int.MAX_VALUE }, { it.second.part }, { it.first.tid.value }))
-            .map { it.first }
+        return orderedComicChapters(seed, seed.fid, candidates)
     }
 
     fun workName(seed: ThreadSummary) = smartComicTitle(seed.title).query
@@ -134,68 +131,104 @@ class SmartComicCatalog(factory: DiskCacheFactory) {
         onVerified: () -> Unit = {},
     ): YamiboResult<List<ThreadSummary>> {
         val work = smartComicTitle(seed.title)
-        suspend fun ordered(threads: List<ThreadSummary>) = withContext(Dispatchers.Default) { chapters(seed, threads) }
+        suspend fun ordered(threads: List<ThreadSummary>, saved: List<ThreadSummary> = emptyList()) =
+            withContext(Dispatchers.Default) { orderedComicChapters(seed, fid, threads, saved) }
         if (work.nameKey.length < 2) return YamiboResult.Success(ordered(local))
         val account = auth.currentUser()?.uid
         val key = listOf(account?.value, fid.value, work.nameKey, work.credit ?: seed.author?.uid?.value)
             .joinToString("|").encodeUtf8().sha256().hex()
         val snapshot = account?.let { withContext(Dispatchers.IO) { cache.get(key) } }
-        val initial = ordered(local + snapshot?.threads.orEmpty())
-        if (auth.currentUser()?.uid != account) return YamiboResult.NotLoggedIn
-        if (!refresh && snapshot?.verified == true && currentTimeMillis() - snapshot.checkedAt in 0L until 2.hours.inWholeMilliseconds &&
-            snapshot.threads.mapTo(hashSetOf()) { it.tid }.containsAll(initial.map { it.tid })) {
-            if (account != null && compatibleMembership(account, fid, initial)) onVerified()
-            return if (auth.currentUser()?.uid == account) YamiboResult.Success(initial) else YamiboResult.NotLoggedIn
-        }
-        onCached(initial)
-        return searches.read(key) { search(forum, auth, fid, work.query) }.flatMapSuccess { candidates ->
-            val sorted = ordered(local + candidates)
-            val returned = candidates.mapTo(hashSetOf()) { it.tid }
-            if (auth.currentUser()?.uid != account) return@flatMapSuccess YamiboResult.NotLoggedIn
-            // chapters() always inserts the seed. Only the actual search response can confirm coverage.
-            val covered = sorted.all { it.tid in returned }
-            if (covered && account != null && compatibleMembership(account, fid, sorted)) {
-                withContext(Dispatchers.IO) { cache.set(key, Snapshot(currentTimeMillis(), sorted, verified = true)) }
+        if (!refresh && snapshot?.verified == true &&
+            currentTimeMillis() - snapshot.checkedAt in 0L until 2.hours.inWholeMilliseconds) {
+            val cached = ordered(local, snapshot.threads)
+            val ids = snapshot.threads.mapTo(hashSetOf()) { it.tid }
+            // A warm hit needs only the saved member IDs, never another decode of the complete directory.
+            if (cached.all { it.tid in ids } && compatibleMembership(account, fid, cached, coverSaved = true)) {
+                if (auth.currentUser()?.uid != account) return YamiboResult.NotLoggedIn
                 onVerified()
-                val saved = withContext(Dispatchers.IO) {
-                    works.memberWork(account.value.toLong(), fid.value.toLong(), seed.tid.value.toLong()).executeAsOneOrNull()
-                }
-                if (saved != null) saveWork(account, fid, seed, sorted, complete = true)
+                return YamiboResult.Success(cached)
             }
+        }
+        val saved = account?.let { savedWork(it, fid, seed.tid) }
+        val known = snapshot?.threads.orEmpty() + saved?.members.orEmpty()
+        val initial = ordered(local, known)
+        if (auth.currentUser()?.uid != account) return YamiboResult.NotLoggedIn
+        onCached(initial)
+        return searches.read(key) { search(forum, auth, fid, work.query) }.flatMapSuccess { pages ->
             if (auth.currentUser()?.uid != account) return@flatMapSuccess YamiboResult.NotLoggedIn
-            if (!covered && snapshot != null) {
-                YamiboResult.Success(ordered(snapshot.threads + sorted))
-            } else YamiboResult.Success(sorted)
+            val sorted = ordered(pages.threads + local, known)
+            if (auth.currentUser()?.uid != account) return@flatMapSuccess YamiboResult.NotLoggedIn
+            val returned = pages.threads.mapTo(hashSetOf()) { it.tid }
+            val covered = pages.error == null && sorted.all { it.tid in returned }
+            if (!covered) {
+                onCached(sorted)
+                return@flatMapSuccess YamiboResult.Failure(pages.error ?: i18n("目前找到 {} 話，目錄尚未確認完整", sorted.size))
+            }
+            if (account != null && compatibleMembership(account, fid, sorted)) {
+                withContext(Dispatchers.IO) { cache.set(key, Snapshot(currentTimeMillis(), sorted, verified = true)) }
+                if (saved != null) saveWork(account, fid, seed, sorted, complete = true)
+                if (auth.currentUser()?.uid != account) return@flatMapSuccess YamiboResult.NotLoggedIn
+                onVerified()
+            }
+            YamiboResult.Success(sorted)
         }
     }
 
     private suspend fun search(forum: ForumRepository, auth: AuthRepository, fid: ForumId, name: String):
-        YamiboResult<List<ThreadSummary>> {
-        // Discuz limits search text. Match the full title locally, including for truncated queries.
+        YamiboResult<ComicSearchPages> {
         val query = name.take(32).trimEnd()
-        val first = auth.refreshFormHash().flatMapSuccess { forum.fetchSearch(query, fid, it) }
-        return first.flatMapSuccess { firstPage ->
-            val candidates = mutableListOf<ThreadSummary>()
-            val seen = mutableSetOf<Int>()
-            var page: SearchPage = firstPage
-            var index = 1
-            while (true) {
-                val fresh = page.threads.filter { seen.add(it.tid.value) }
-                if (index > 1 && fresh.isEmpty()) return@flatMapSuccess YamiboResult.Failure(i18n("搜尋分頁未前進"))
-                candidates += fresh.filter {
-                    val board = it.fid ?: it.tag?.let(YamiboForum::toForumId)
-                    board == null || board == fid
-                }
-                val nav = page.pageNav
-                if (nav?.nextPageIndex == null && index >= (nav?.totalPages ?: 1)) break
-                val id = firstPage.searchId ?: return@flatMapSuccess YamiboResult.Failure(i18n("缺少搜尋分頁識別碼"))
-                index++
-                when (val result = forum.fetchSearchById(query, id, index)) {
-                    is YamiboResult.Success -> page = result.value
-                    else -> return@flatMapSuccess YamiboResult.Failure(result.message())
-                }
-            }
-            YamiboResult.Success(candidates)
+        return auth.refreshFormHash().flatMapSuccess { forum.fetchSearch(query, fid, it) }.flatMapSuccess { first ->
+            YamiboResult.Success(collectComicSearch(first, fid) { id, index -> forum.fetchSearchById(query, id, index) })
+        }
+    }
+}
+
+private fun ThreadSummary.belongsTo(board: ForumId?): Boolean {
+    val declared = fid ?: tag?.let(YamiboForum::toForumId)
+    return declared == null || board == null || declared == board
+}
+
+internal fun orderedComicChapters(seed: ThreadSummary, board: ForumId?, candidates: List<ThreadSummary>,
+                                  saved: List<ThreadSummary> = emptyList()): List<ThreadSummary> {
+    val work = smartComicTitle(seed.title)
+    val known = saved.mapTo(hashSetOf()) { it.tid }
+    return (listOf(seed) + candidates + saved).asSequence().filter { it.belongsTo(board) }.distinctBy { it.tid }
+        .map { it to smartComicTitle(it.title) }
+        .filter { (thread, title) -> thread.tid == seed.tid || thread.tid in known || work.matches(title) &&
+            (work.credit != null && title.credit != null || seed.author != null && seed.author?.uid == thread.author?.uid) }
+        .sortedWith(compareBy({ it.second.chapter ?: Int.MAX_VALUE }, { it.second.part }, { it.first.tid.value }))
+        .map { it.first }.toList()
+}
+
+internal data class ComicSearchPages(val threads: List<ThreadSummary>, val error: String? = null)
+
+internal suspend fun collectComicSearch(first: SearchPage, board: ForumId,
+    fetch: suspend (SearchId, Int) -> YamiboResult<SearchPage>): ComicSearchPages {
+    val threads = mutableListOf<ThreadSummary>()
+    val seen = mutableSetOf<ThreadId>()
+    var page = first
+    var index = 1
+    var promisedPages = 1
+    var promisedCount = 0
+    fun incomplete() = ComicSearchPages(threads, i18n("搜尋分頁未前進"))
+    while (true) {
+        val nav = page.pageNav
+        if (nav?.currentPage?.let { it != index } == true ||
+            page.forumId?.let { it != board } == true ||
+            page.searchId?.let { first.searchId != null && it != first.searchId } == true) return incomplete()
+        val fresh = page.threads.filter { seen.add(it.tid) }
+        threads += fresh.filter { it.belongsTo(board) }
+        if (index > 1 && fresh.isEmpty()) return incomplete()
+        promisedCount = maxOf(promisedCount, page.totalCount)
+        promisedPages = maxOf(promisedPages, nav?.totalPages ?: 1)
+        if (nav?.nextPageIndex == null && nav?.nextUrl.isNullOrBlank() && index >= promisedPages) {
+            return if (seen.size < promisedCount) incomplete() else ComicSearchPages(threads)
+        }
+        if (nav?.nextPageIndex?.let { it != index + 1 } == true) return incomplete()
+        val id = first.searchId ?: return ComicSearchPages(threads, i18n("缺少搜尋分頁識別碼"))
+        when (val next = fetch(id, ++index)) {
+            is YamiboResult.Success -> page = next.value
+            else -> return ComicSearchPages(threads, next.message())
         }
     }
 }

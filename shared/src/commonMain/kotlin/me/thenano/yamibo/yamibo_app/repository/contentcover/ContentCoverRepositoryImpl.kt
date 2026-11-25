@@ -34,6 +34,7 @@ class ContentCoverRepositoryImpl(
         db.transaction {
             val existing = queries.getByTarget(key.targetType.toStorageValue(), key.targetId)
                 .executeAsOneOrNull()
+            if (existing?.automaticCoverUrl == normalized) return@transaction
             queries.upsert(
                 targetType = key.targetType.toStorageValue(),
                 targetId = key.targetId,
