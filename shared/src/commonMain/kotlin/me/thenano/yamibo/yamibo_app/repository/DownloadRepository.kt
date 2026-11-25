@@ -26,6 +26,7 @@ interface DownloadRepository {
     val queue: StateFlow<List<DownloadQueueEntry>>
 
     suspend fun openArchivedImage(uri: String): okio.Source
+    suspend fun archivedImageSource(uri: String): String?
     suspend fun migrateImages(removeCorruptCbz: Boolean = false, onCorruptRemoved: () -> Unit = {}, onProgress: (Int, Int) -> Unit): Map<DownloadTaskKey, Throwable>
     suspend fun isStorageReady(): Boolean
     suspend fun getSummary(): DownloadQueueSummary
@@ -37,6 +38,8 @@ interface DownloadRepository {
     suspend fun getDownloadedPage(key: ThreadPageDownloadKey): ThreadPage?
     /** True for a verified complete author scope, false for a locally readable subset. */
     suspend fun chapterAvailability(chapters: List<ThreadSummary>): Map<ThreadId, Boolean> = emptyMap()
+    /** Pages already listed in the open legacy download folder, scoped to this thread and projection. */
+    suspend fun listedReaderPages(tid: ThreadId, author: UserId?): List<Int> = emptyList()
     suspend fun downloadedPageForPost(tid: ThreadId, author: UserId?, pid: io.github.littlesurvival.dto.value.PostId): Int? = null
     /** Observe only the durable local copy. Collecting never contacts the image host. */
     fun observeLocalImage(image: MissingThreadImage): Flow<String?>

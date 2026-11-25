@@ -16,6 +16,9 @@ import okio.Path
 interface DownloadStorageProvider {
     val offlineFiles: OfflineFiles
 
+    /** False only when the provider can rule out local downloads without doing I/O. */
+    val mayHaveDownloads: Boolean get() = true
+
     suspend fun getSelectedFolderLabel(): String?
     suspend fun getStorageKey(): String? = getSelectedFolderLabel()
     suspend fun isReady(): Boolean
@@ -108,12 +111,16 @@ internal fun groupMember(group: DownloadTaskKey, raw: String): DownloadTaskKey? 
 }
 
 @Serializable
-internal data class CatalogEdit(val removed: Set<DownloadTaskKey>, val replacement: DownloadedContentGroup?)
+internal data class CatalogEdit(
+    val removed: Set<DownloadTaskKey>,
+    val replacements: List<DownloadedContentGroup>,
+    val migrated: DownloadTaskKey? = null,
+)
 
 /** App-private, rebuildable index. Interrupted storage operations leave the dirty marker in place. */
 internal class DownloadCatalogIndex(root: Path, storage: String) {
     private val fs = FileSystem.SYSTEM
-    private val dir = root / storage.encodeUtf8().sha256().hex() / "owner-catalog-v2"
+    private val dir = root / storage.encodeUtf8().sha256().hex() / "owner-catalog-v3"
     private val snapshot = dir / "catalog-v1.json"
     private val journal = dir / "updates.jsonl"
     private val dirty = dir / "pending"

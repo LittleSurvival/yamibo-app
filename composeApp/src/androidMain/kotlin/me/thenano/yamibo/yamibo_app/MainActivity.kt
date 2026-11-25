@@ -1,5 +1,6 @@
 package me.thenano.yamibo.yamibo_app
 
+import me.thenano.yamibo.yamibo_app.store.auth.UserStore
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
@@ -52,7 +53,7 @@ import me.thenano.yamibo.yamibo_app.repository.backup.BackupRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.chineseconversion.createChineseConversionRepository
 import me.thenano.yamibo.yamibo_app.repository.contentcover.ContentCoverRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.download.AndroidDownloadStorageProvider
-import me.thenano.yamibo.yamibo_app.repository.download.DownloadImageFetcher
+import me.thenano.yamibo.yamibo_app.util.readerDownloadImageFetcher
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.favorite.FavoriteShareRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.favorite.FavoriteSyncRepositoryImpl
@@ -319,13 +320,14 @@ class MainActivity : ComponentActivity() {
             val downloadRepository = remember {
                 DownloadRepositoryImpl(
                     accountId = { authRepository.currentUser()?.uid?.value ?: 0 },
+                    accessRevision = { UserStore.accountRevision + appSettingsRepository.backupFolderRevision },
                     threadRepository = threadRepository,
                     tagRepository = tagRepository,
                     rssRepository = rssSearchSubscriptionRepository,
                     storageProvider = AndroidDownloadStorageProvider(context, appSettingsRepository),
                     database = diskCacheFactory.database,
                     cacheDirectory = diskCacheFactory.rootCacheDir / "downloads",
-                    imageFetcher = DownloadImageFetcher { cookieStore.load().orEmpty() },
+                    imageFetcher = readerDownloadImageFetcher(context.applicationContext) { cookieStore.load().orEmpty() },
                     backgroundController = AndroidDownloadBackgroundController(context),
                 ).also { AndroidDownloadRuntime.repository = it }
             }

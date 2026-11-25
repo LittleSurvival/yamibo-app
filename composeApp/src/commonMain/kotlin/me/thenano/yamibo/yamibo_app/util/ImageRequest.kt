@@ -4,6 +4,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import me.thenano.yamibo.yamibo_app.repository.download.normalizeDownloadImageUrl
 import me.thenano.yamibo.yamibo_app.repository.thread.readerAccessScope
+import coil3.SingletonImageLoader
+import coil3.annotation.ExperimentalCoilApi
+import coil3.annotation.InternalCoilApi
 import coil3.ImageLoader
 import coil3.Uri
 import coil3.decode.DataSource
@@ -15,7 +18,15 @@ import me.thenano.yamibo.yamibo_app.repository.DownloadRepository
 import okio.buffer
 import coil3.PlatformContext
 import coil3.compose.LocalPlatformContext
+import coil3.network.CacheNetworkResponse
+import coil3.network.NetworkRequest
+import coil3.network.cachecontrol.CacheControlCacheStrategy
 import coil3.network.NetworkHeaders
+import io.ktor.http.Url
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import me.thenano.yamibo.yamibo_app.repository.download.DownloadImageFetcher
+import me.thenano.yamibo.yamibo_app.repository.download.isCompleteDownloadedImage
 import coil3.network.httpHeaders
 import coil3.request.CachePolicy
 import coil3.request.ImageRequest
@@ -39,11 +50,16 @@ internal fun buildImageNetworkHeaders(
     cookie: String,
     referer: String,
 ): NetworkHeaders = NetworkHeaders.Builder().apply {
-    if (normalizedUrl.startsWith("http://") || normalizedUrl.startsWith("https://")) {
-        add("User-Agent", FetchFactory.Device.MOBILE.userAgent)
-        add("Accept", IMAGE_ACCEPT)
+    if (!normalizedUrl.startsWith("http://") && !normalizedUrl.startsWith("https://")) return@apply
+    add("User-Agent", FetchFactory.Device.MOBILE.userAgent)
+    add("Accept", IMAGE_ACCEPT)
+    val target = try {
+        Url(normalizedUrl)
+    } catch (_: Exception) {
+        return@apply
     }
-    if (normalizedUrl.startsWith(YamiboRoute.Domain.build())) {
+    val forum = Url(YamiboRoute.Domain.build())
+    if (target.protocol == forum.protocol && target.host == forum.host && target.port == forum.port) {
         if (cookie.isNotBlank()) add("Cookie", cookie)
         add("Referer", referer)
     }
@@ -73,6 +89,33 @@ internal fun imageErrorForDiagnostics(errorMessage: String, url: String): String
     }
 }
 
+private fun readerImageCacheKey(url: String, cookie: String): String =
+    if (url.startsWith("https://") || url.startsWith("http://")) readerAccessScope(cookie) + "|" + url else url
+
+internal fun readerDownloadImageFetcher(context: PlatformContext, cookieProvider: suspend () -> String) =
+    DownloadImageFetcher(cookieProvider) { url, cookie -> readFreshReaderImage(context, url, cookie) }
+
+@OptIn(ExperimentalCoilApi::class, InternalCoilApi::class)
+internal suspend fun readFreshReaderImage(context: PlatformContext, url: String, cookie: String): ByteArray? =
+    withContext(Dispatchers.Default) {
+        val cache = SingletonImageLoader.get(context).diskCache ?: return@withContext null
+        cache.openSnapshot(readerImageCacheKey(url, cookie))?.use { snapshot ->
+            // A committed Coil snapshot holds the response headers and original body together.
+            val response = cache.fileSystem.read(snapshot.metadata) { CacheNetworkResponse.readFrom(this) }
+            val headers = response.headers
+            // Coil does not store the original request headers used to select a Vary representation.
+            if (response.code != 200 || headers["Content-Range"] != null || headers["Vary"] != null ||
+                response.requestMillis <= 0 || response.responseMillis < response.requestMillis) return@use null
+            val request = NetworkRequest(url = url, headers = buildImageNetworkHeaders(url, cookie, YamiboRoute.Domain.build()))
+            if (CacheControlCacheStrategy().read(response, request, Options(context)).response == null) return@use null
+            val length = headers["Content-Length"]
+            if (length != null && headers["Content-Encoding"] == null &&
+                length.toLongOrNull() != cache.fileSystem.metadata(snapshot.data).size) return@use null
+            val bytes = cache.fileSystem.read(snapshot.data) { readByteArray() }
+            bytes.takeIf { isCompleteDownloadedImage(it, headers["Content-Type"]) }
+        }
+    }
+
 fun buildImageRequest(
     context: PlatformContext,
     url: String,
@@ -82,9 +125,7 @@ fun buildImageRequest(
     enableCrossfade: Boolean = true,
 ): ImageRequest {
     val fullUrl = normalizeImageUrl(url)
-    val cacheKey = if (fullUrl.startsWith("https://") || fullUrl.startsWith("http://")) {
-        readerAccessScope(cookie) + "|" + fullUrl
-    } else fullUrl
+    val cacheKey = readerImageCacheKey(fullUrl, cookie)
     return ImageRequest.Builder(context)
         .data(fullUrl)
         .memoryCacheKey(cacheKey)

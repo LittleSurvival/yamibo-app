@@ -115,10 +115,10 @@ fun DownloadQueueScreen(screenId: ScreenId) {
     val feedbackController = me.thenano.yamibo.yamibo_app.LocalAppFeedbackController.current
     val appTaskManager = LocalAppTaskManager.current
     val scope = rememberCoroutineScope()
-    var summary by remember { mutableStateOf(DownloadQueueSummary()) }
+    var summary by remember(owner, storageFolderUri) { mutableStateOf(DownloadQueueSummary()) }
     var folderReady by remember { mutableStateOf(true) }
     var selectedTab by remember { mutableStateOf(DownloadManagerTab.Queue) }
-    var contentState by remember { mutableStateOf<DownloadContentManagementState>(DownloadContentManagementState.Loading) }
+    var contentState by remember(owner, storageFolderUri) { mutableStateOf<DownloadContentManagementState>(DownloadContentManagementState.Loading) }
     var contentReloadToken by remember { mutableStateOf(0) }
     var catalogUpdateToken by remember { mutableStateOf(0) }
     var lastContentReloadToken by remember { mutableStateOf(0) }
@@ -127,13 +127,13 @@ fun DownloadQueueScreen(screenId: ScreenId) {
     var selectedContentFilterKeys by rememberSaveable { mutableStateOf(emptyList<String>()) }
     val queueStatuses = remember(entries) { entries.map { it.key to it.status } }
     val contentRevision = remember(entries) { downloadedContentRevision(entries) }
-    var selectionMode by remember { mutableStateOf(false) }
-    var selectedKeys by remember { mutableStateOf(emptySet<DownloadTaskKey>()) }
+    var selectionMode by remember(owner, storageFolderUri) { mutableStateOf(false) }
+    var selectedKeys by remember(owner, storageFolderUri) { mutableStateOf(emptySet<DownloadTaskKey>()) }
     var confirmMigration by remember { mutableStateOf(false) }
     var removeCorruptCbz by remember { mutableStateOf(false) }
     var migrationProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var migrationError by remember { mutableStateOf<String?>(null) }
-    var pendingRemoval by remember { mutableStateOf<DownloadRemovalRequest?>(null) }
+    var pendingRemoval by remember(owner, storageFolderUri) { mutableStateOf<DownloadRemovalRequest?>(null) }
     val removalProgress by downloadRemovalProgress.collectAsState()
     val lastRemoval = removalProgress.request
     val outcomes = removalProgress.outcomes
@@ -222,14 +222,21 @@ fun DownloadQueueScreen(screenId: ScreenId) {
         }
     }
 
-    LaunchedEffect(selectedTab, queueStatuses, contentReloadToken, storageFolderUri) {
+    LaunchedEffect(selectedTab, owner, queueStatuses, contentReloadToken, storageFolderUri) {
         if (selectedTab == DownloadManagerTab.Queue) {
-            summary = repository.getSummary()
-            folderReady = repository.isStorageReady()
+            try {
+                summary = repository.getSummary()
+                folderReady = repository.isStorageReady()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Logger.e("DownloadQueueScreen", "Failed to load download summary", error)
+                feedbackController.post(error.message ?: i18n("載入下載內容失敗"))
+            }
         }
     }
 
-    LaunchedEffect(selectedTab, contentRevision, contentReloadToken, catalogUpdateToken, storageFolderUri) {
+    LaunchedEffect(selectedTab, owner, contentRevision, contentReloadToken, catalogUpdateToken, storageFolderUri) {
         if (selectedTab == DownloadManagerTab.Content) {
             val forceRefresh = lastContentReloadToken != contentReloadToken
             reloadContentManagement(forceRefresh)
@@ -682,7 +689,7 @@ private fun DownloadQueueEntryCard(
                 Text(entry.title, color = colors.textStrong, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
                     "${downloadEntryLabel(entry)} · ${entryDetailLabel(entry)}${entry.message?.let { " · ${i18n(forumErrorMessage(it))}" }.orEmpty()}",
-                    color = if (entry.status == DownloadStatus.Failed) colors.redAccent else colors.textDark.copy(alpha = 0.68f),
+                    color = if (entry.status == DownloadStatus.Failed) colors.textOnSurface else colors.textDark.copy(alpha = 0.68f),
                     fontSize = 12.sp,
                 )
             }

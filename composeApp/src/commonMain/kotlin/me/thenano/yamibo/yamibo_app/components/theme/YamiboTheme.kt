@@ -32,6 +32,7 @@ data class YamiboColors(
     val navBarBg: Color,
     val navBarIconSelected: Color,
     val navBarIconUnselected: Color,
+    val readerImageErrorLightSurface: Color = Color(0xFFF3F3F3),
 )
 
 /** Central theme object. Access colors via `YamiboTheme.colors`. */

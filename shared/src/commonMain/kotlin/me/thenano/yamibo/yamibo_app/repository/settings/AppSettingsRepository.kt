@@ -1,5 +1,8 @@
 package me.thenano.yamibo.yamibo_app.repository.settings
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
+
 import io.github.littlesurvival.YamiboForum
 import io.github.littlesurvival.dto.value.ForumId
 import me.thenano.yamibo.yamibo_app.repository.settings.core.EnumSetting
@@ -361,6 +364,14 @@ class AppSettingsRepository(store: SettingsStore) : SettingsRegistry(store, pref
     )
 
     /** 備份資料夾 */
+    private val folderChanges = MutableStateFlow(0L)
+    val backupFolderRevision: Long get() = folderChanges.value
+
+    internal fun selectBackupFolder(uri: String) {
+        if (backupFolderUri.getValue() != uri) folderChanges.update { it + 1 }
+        backupFolderUri.setValue(uri)
+    }
+
     val backupFolderUri by stringSetting(
         name = "backup_folder_uri",
         default = "",

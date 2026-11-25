@@ -4,7 +4,9 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -20,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
@@ -37,6 +40,9 @@ import me.thenano.yamibo.yamibo_app.util.imageErrorForDiagnostics
 import me.thenano.yamibo.yamibo_app.util.imageSourceForDiagnostics
 import me.thenano.yamibo.yamibo_app.util.normalizeImageUrl
 import me.thenano.yamibo.yamibo_app.util.rememberImageRequest
+import org.jetbrains.compose.resources.painterResource
+import yamibo_app.composeapp.generated.resources.Res
+import yamibo_app.composeapp.generated.resources.image_icon
 
 val LocalReaderOverlayVisible = compositionLocalOf { false }
 internal interface ReaderImagePainterCache {
@@ -127,6 +133,7 @@ fun ImageViewer(
     maxRenderedHeight: Dp? = null,
     imageVerticalPadding: Dp = 1.dp,
     showLoadingPlaceholder: Boolean = true,
+    loadingPlaceholderModifier: Modifier = Modifier,
     suppressLoadingPlaceholderWhenCached: Boolean = false,
     reuseCachedPainterWhileLoading: Boolean = false,
     onRenderedHeightChanged: ((Int) -> Unit)? = null,
@@ -136,7 +143,7 @@ fun ImageViewer(
     val original = normalizeImageUrl(url)
     val localDownload = missing != null || original.startsWith("yamibo-image://")
     val colors = YamiboTheme.colors
-    val errorBgColor = if (isDarkTheme) Color.White.copy(alpha = 0.08f) else colors.creamSurface
+    val errorBgColor = if (isDarkTheme) Color.White.copy(alpha = 0.08f) else colors.readerImageErrorLightSurface
     val errorTextColor = if (isDarkTheme) Color.White else colors.textDark
     val errorSubTextColor = if (isDarkTheme) Color.White.copy(alpha = 0.5f) else colors.textDark.copy(alpha = 0.6f)
     val errorUrlColor = if (isDarkTheme) Color.White.copy(alpha = 0.3f) else colors.brownDeep
@@ -146,6 +153,13 @@ fun ImageViewer(
     var repairedUri by remember(url) { mutableStateOf<String?>(null) }
     var repairing by remember(url) { mutableStateOf(false) }
     var repairFailed by remember(url) { mutableStateOf(false) }
+    val cachedHeight = with(LocalDensity.current) { cachedHeightPx?.toDp() }
+    fun placeholderHeight(width: Dp): Dp {
+        val estimated = cachedHeight ?: if (placeholderAspectRatio != null && width > 0.dp) {
+            (width * placeholderAspectRatio).coerceAtLeast(220.dp)
+        } else 220.dp
+        return maxRenderedHeight?.let { estimated.coerceAtMost(it) } ?: estimated
+    }
     val repairMessage = if (repairFailed) i18n("下載失敗，請確認網路或登入狀態後再試。") else null
     val localUrl = if (missing == null) original else key(missing) {
         val local by remember(repository, missing) {
@@ -153,14 +167,18 @@ fun ImageViewer(
         }.collectAsState(initial = null)
         val source = repairedUri ?: local
         if (source == null) {
-            BoxWithConstraints(modifier = modifier, contentAlignment = Alignment.Center) {
+            BoxWithConstraints(
+                modifier = modifier.then(maxRenderedHeight?.let { Modifier.heightIn(max = it) } ?: Modifier),
+                contentAlignment = Alignment.Center,
+            ) {
+                val reservedHeight = placeholderHeight(maxWidth)
                 if (repairing) {
-                    ImageLoadingContent(160.dp, onImageRetry = null)
+                    ImageLoadingContent(reservedHeight, onImageRetry = null)
                 } else {
                     ImageErrorContent(
                         fullUrl = imageSourceForDiagnostics(missing.sourceUrl),
                         errorMessage = repairMessage ?: i18n("這張圖片缺少離線檔案"),
-                        compact = maxWidth <= 140.dp || maxHeight <= 140.dp,
+                        reservedHeight = reservedHeight,
                         errorBgColor = errorBgColor,
                         errorTextColor = errorTextColor,
                         errorSubTextColor = errorSubTextColor,
@@ -213,7 +231,6 @@ fun ImageViewer(
     var hasReportedError by remember(fullUrl, localRetryKey, externalRetryKey) { mutableStateOf(false) }
 
     val isOverlayOpen = LocalReaderOverlayVisible.current
-    val density = LocalDensity.current
 
     val onSingleTap = LocalImageClickListener.current
     val onDoubleTap = LocalImageDoubleClickListener.current
@@ -277,16 +294,7 @@ fun ImageViewer(
             ),
         contentAlignment = Alignment.Center
     ) {
-        val reservedHeight = remember(cachedHeightPx, placeholderAspectRatio, maxWidth, density, maxRenderedHeight) {
-            val estimatedHeight = when {
-                cachedHeightPx != null -> with(density) { cachedHeightPx.toDp() }
-                placeholderAspectRatio != null && maxWidth > 0.dp -> {
-                    (maxWidth * placeholderAspectRatio).coerceAtLeast(220.dp)
-                }
-                else -> 220.dp
-            }
-            maxRenderedHeight?.let { estimatedHeight.coerceAtMost(it) } ?: estimatedHeight
-        }
+        val reservedHeight = placeholderHeight(maxWidth)
 
         Box(
             modifier = (if (fillContainer) Modifier.fillMaxSize() else Modifier.fillMaxWidth())
@@ -297,7 +305,8 @@ fun ImageViewer(
                 ImageLoadingContent(reservedHeight, onImageRetry = null)
             } else if (blockedErrorMessage != null && repairedUri == null) {
                 ImageErrorContent(
-                    fullUrl = diagnosticUrl.takeUnless { localDownload },
+                    reservedHeight = reservedHeight,
+                    fullUrl = if (localDownload) failedImageSource(original, missing?.sourceUrl) else diagnosticUrl,
                     errorMessage = if (localDownload) repairMessage ?: i18n("這張離線圖片無法讀取") else imageErrorForDiagnostics(blockedErrorMessage, fullUrl),
                     errorBgColor = errorBgColor,
                     errorTextColor = errorTextColor,
@@ -322,6 +331,7 @@ fun ImageViewer(
                             ImageLoadingContent(
                                 reservedHeight = reservedHeight,
                                 onImageRetry = onReload,
+                                modifier = loadingPlaceholderModifier,
                             )
                         }
                     }
@@ -341,7 +351,8 @@ fun ImageViewer(
                         }
 
                         ImageErrorContent(
-                            fullUrl = diagnosticUrl.takeUnless { localDownload },
+                            reservedHeight = reservedHeight,
+                            fullUrl = if (localDownload) failedImageSource(original, missing?.sourceUrl) else diagnosticUrl,
                             errorMessage = if (localDownload) repairMessage ?: i18n("這張離線圖片無法讀取") else errorMsg,
                             errorBgColor = errorBgColor,
                             errorTextColor = errorTextColor,
@@ -402,10 +413,11 @@ fun ImageViewer(
 private fun ImageLoadingContent(
     reservedHeight: Dp,
     onImageRetry: (() -> Unit)?,
+    modifier: Modifier = Modifier,
 ) {
     val colors = YamiboTheme.colors
     Surface(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .height(reservedHeight)
             .padding(vertical = 1.dp),
@@ -445,92 +457,99 @@ private fun ImageLoadingContent(
 }
 
 @Composable
+private fun failedImageSource(uri: String, knownSource: String?): String {
+    if (knownSource != null) return imageSourceForDiagnostics(knownSource)
+    val repository = LocalDownloadRepository.current
+    val source by produceState<String?>(null, repository, uri) { value = repository.archivedImageSource(uri) }
+    return source?.let(::imageSourceForDiagnostics) ?: i18n("離線圖片")
+}
+
+@Composable
 private fun ImageErrorContent(
-    fullUrl: String?,
+    fullUrl: String,
     errorMessage: String,
+    reservedHeight: Dp,
     errorBgColor: Color,
     errorTextColor: Color,
     errorSubTextColor: Color,
     errorUrlColor: Color,
-    compact: Boolean = false,
     onReload: () -> Unit,
 ) {
     val colors = YamiboTheme.colors
 
-    val details: @Composable (Modifier) -> Unit = { modifier ->
-        Column(modifier) {
-            Text(
-                text = i18n("圖片載入失敗"),
-                color = errorTextColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                fontSize = 14.sp,
-                lineHeight = 17.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-            if (errorMessage.isNotBlank()) {
-                Spacer(Modifier.height(2.dp))
+    BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        val compact = maxWidth <= 140.dp || maxHeight <= 140.dp
+        val bounded = constraints.hasBoundedHeight
+        Column(
+            modifier = Modifier.fillMaxWidth()
+                .heightIn(min = reservedHeight)
+                .padding(if (compact) 1.dp else 16.dp)
+                .background(errorBgColor, RoundedCornerShape(12.dp))
+                .padding(if (compact) 1.dp else 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            // In a fixed-height cover or page the retry action must stay reachable.
+            Column(
+                modifier = if (bounded) Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()) else Modifier,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                val heading: @Composable () -> Unit = {
+                    Image(
+                        painter = painterResource(Res.drawable.image_icon),
+                        contentDescription = "Image Load Failed",
+                        modifier = Modifier.size(if (compact) 18.dp else 64.dp),
+                    )
+                    Spacer(Modifier.size(if (compact) 3.dp else 12.dp))
+                    Text(
+                        text = i18n("圖片載入失敗"),
+                        color = errorTextColor,
+                        fontSize = 14.sp,
+                        lineHeight = if (compact) 15.sp else TextUnit.Unspecified,
+                        maxLines = if (compact) 1 else Int.MAX_VALUE,
+                        overflow = TextOverflow.Ellipsis,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                if (compact) {
+                    Row(verticalAlignment = Alignment.CenterVertically) { heading() }
+                } else {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) { heading() }
+                }
+                Spacer(Modifier.height(if (compact) 0.dp else 6.dp))
                 Text(
                     text = errorMessage,
                     color = errorSubTextColor,
                     fontSize = 11.sp,
-                    lineHeight = 14.sp,
-                    maxLines = 2,
+                    lineHeight = if (compact) 13.sp else TextUnit.Unspecified,
+                    maxLines = if (compact) 1 else 2,
                     overflow = TextOverflow.Ellipsis
                 )
-            }
-            if (fullUrl != null) {
-                Spacer(Modifier.height(2.dp))
+                Spacer(Modifier.height(if (compact) 2.dp else 4.dp))
                 Text(
                     text = fullUrl,
                     color = errorUrlColor,
                     fontSize = 10.sp,
-                    lineHeight = 12.sp,
+                    lineHeight = if (compact) 12.sp else TextUnit.Unspecified,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     style = TextStyle(textDecoration = TextDecoration.Underline)
                 )
             }
-        }
-    }
-    val retryButton: @Composable () -> Unit = {
-        OutlinedButton(
-            onClick = onReload,
-            colors = ButtonDefaults.outlinedButtonColors(
-                contentColor = if (errorTextColor == Color.White) errorTextColor else colors.brownPrimary
-            ),
-            contentPadding = PaddingValues(horizontal = if (compact) 4.dp else 12.dp, vertical = 8.dp)
-        ) {
-            Text(
-                text = i18n("重新載入"),
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
-    }
-
-    if (compact) {
-        Column(
-            modifier = Modifier.fillMaxWidth()
-                .padding(2.dp)
-                .background(errorBgColor, RoundedCornerShape(12.dp))
-                .padding(4.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            details(Modifier)
-            retryButton()
-        }
-    } else {
-        Row(
-            modifier = Modifier.fillMaxWidth()
-                .padding(horizontal = 12.dp)
-                .background(errorBgColor, RoundedCornerShape(12.dp))
-                .padding(horizontal = 12.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            details(Modifier.weight(1f))
-            retryButton()
+            Spacer(Modifier.height(if (compact) 1.dp else 16.dp))
+            OutlinedButton(
+                onClick = onReload,
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = colors.brownPrimary
+                ),
+                contentPadding = PaddingValues(horizontal = if (compact) 4.dp else 28.dp, vertical = 8.dp)
+            ) {
+                Text(
+                    text = i18n("重新載入"),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
     }
 }

@@ -95,6 +95,7 @@ kotlin {
             implementation(libs.androidx.lifecycle.runtimeCompose)
             implementation(libs.coil3.compose)
             implementation(libs.coil3.gif)
+            implementation(libs.coil3.network.cache.control)
             implementation(libs.coil3.network.ktor3)
             implementation(libs.coil3.svg)
             implementation(libs.kotlinx.serialization.json)

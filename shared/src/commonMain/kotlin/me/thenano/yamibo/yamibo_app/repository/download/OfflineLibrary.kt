@@ -79,6 +79,7 @@ internal class OfflineLibrary(
     private val blobLock = Mutex()
     private val writer = Mutex()
     private val digestPattern = Regex("[0-9a-f]{64}")
+    private val generationPattern = Regex("[0-9a-f-]{36}")
     private fun dir(owner: Int, tid: Int) = "$owner/threads/$tid"
     private fun blob(owner: Int, digest: String): String {
         require(digestPattern.matches(digest))
@@ -92,10 +93,8 @@ internal class OfflineLibrary(
     }
     private fun all(storage: String, owner: Int) = files.names(storage, "$owner/threads").mapNotNull { it.toIntOrNull() }
         .flatMap { state(storage, owner, it).claims }
-    suspend fun inventory(): List<DownloadManifest> {
-        val storage = getStorageKey() ?: return emptyList()
-        return writer.withLock { all(storage, account()).map { it.item } }
-    }
+    suspend fun inventory(storage: String, owner: Int): List<DownloadManifest> =
+        writer.withLock { all(storage, owner).map { it.item } }
 
     private fun indexUses(storage: String, owner: Int, tid: Int, digests: Set<String>) {
         index.clearThreadUses(storage, owner.toLong(), tid.toLong())
@@ -144,7 +143,7 @@ internal class OfflineLibrary(
     private fun ThreadFile.locations() = batches.ifEmpty { hashes.mapValues { checkNotNull(generation) } }
 
     private fun bodyPath(owner: Int, tid: Int, generation: String): String {
-        require(generation.matches(Regex("[0-9a-f-]{36}")))
+        require(generationPattern.matches(generation))
         return dir(owner, tid) + "/posts-$generation.zip"
     }
 
@@ -158,9 +157,9 @@ internal class OfflineLibrary(
 
     private fun page(storage: String, owner: Int, state: ThreadFile, claim: Claim): ThreadPage? {
         val header = claim.header ?: return null
-        val locations = state.locations()
         val posts = mutableMapOf<Int, Post>()
-        for ((batch, floors) in claim.floors.groupBy { locations.getValue(it.pid) }) {
+        val singleBatch = state.generation.takeIf { state.batches.isEmpty() }
+        for ((batch, floors) in claim.floors.groupBy { singleBatch ?: state.batches.getValue(it.pid) }) {
             withPosts(storage, owner, claim.item.key.pageKey.tid, batch) { zip ->
                 for (floor in floors.distinctBy { it.pid }) {
                     posts[floor.pid] = json.decodeFromString<Post>(checkNotNull(zip).bytes(floor.pid).decodeToString())
@@ -245,7 +244,8 @@ internal class OfflineLibrary(
             }
             pids.forEach { batches[it] = batch }
         }
-        return next.copy(batches = batches, generation = batches.values.firstOrNull())
+        val generation = batches.values.firstOrNull()
+        return next.copy(generation = generation, batches = if (batches.values.all { it == generation }) emptyMap() else batches)
     }
 
     private fun retireBatches(storage: String, owner: Int, tid: Int, old: ThreadFile, next: ThreadFile) {
@@ -310,12 +310,12 @@ internal class OfflineLibrary(
     }
 
     /** Call after the image payloads have been installed and validated. */
-    suspend fun save(storage: String, item: DownloadManifest, source: ThreadPage?, migrating: Boolean = false, observedAt: Long = currentTimeMillis()) {
+    suspend fun save(storage: String, item: DownloadManifest, source: ThreadPage?, migrating: Boolean = false, observedAt: Long = currentTimeMillis()): List<DownloadManifest> {
         val owner = checkNotNull(item.owner)
         val key = item.key
         val tid = key.pageKey.tid
         check(item.shared && item.images.all { it.digest?.matches(digestPattern) == true })
-        writer.withLock {
+        return writer.withLock {
             check(owner == account() && getStorageKey() == storage)
             val old = state(storage, owner, tid)
             val incoming = source?.posts.orEmpty()
@@ -334,7 +334,7 @@ internal class OfflineLibrary(
                     check(lastEdit >= (edits[id] ?: 0L) && (lastEdit > (edits[id] ?: 0L) ||
                         observedAt >= (observations[id] ?: 0L))) { "較新的樓層內容已儲存" }
                 }
-                edits[id] = maxOf(lastEdit, edits[id] ?: 0L)
+                if (lastEdit > (edits[id] ?: 0L)) edits[id] = lastEdit
                 observations[id] = maxOf(observedAt, observations[id] ?: 0L)
                 if (hash != before) {
                     check(!migrating || before == null) { "同一樓層的舊下載版本不同，已保留原檔" }
@@ -360,10 +360,11 @@ internal class OfflineLibrary(
                 val assets = urls.mapNotNull(available::get)
                 val missing = urls.size - assets.size
                 check(missing == 0 || other.item.missingImageCount > 0) { "更新缺少圖片，已保留完整下載" }
+                val explicitOrder = order.takeUnless { it == assets.map(DownloadedImage::sourceUrl) }.orEmpty()
                 val updated = when (val m = other.item) {
                     is ThreadPageDownloadManifest -> m.copy(title = snapshot.thread.title, images = assets, missingImageCount = missing)
-                    is TagMangaChapterManifest -> m.copy(title = snapshot.thread.title, images = assets, missingImageCount = missing, imageCount = order.size, sourceOrder = order)
-                    is RssMangaChapterManifest -> m.copy(title = snapshot.thread.title, images = assets, missingImageCount = missing, imageCount = order.size, sourceOrder = order)
+                    is TagMangaChapterManifest -> m.copy(title = snapshot.thread.title, images = assets, missingImageCount = missing, imageCount = order.size, sourceOrder = explicitOrder)
+                    is RssMangaChapterManifest -> m.copy(title = snapshot.thread.title, images = assets, missingImageCount = missing, imageCount = order.size, sourceOrder = explicitOrder)
                 }
                 Claim(updated, snapshot.copy(posts = emptyList()), snapshot.posts.map { Floor(it.pid.value, it.floor, it.isPinned) })
             } + incomingClaim
@@ -374,13 +375,16 @@ internal class OfflineLibrary(
             index.markLibraryDirty(storage, owner.toLong(), tid.toLong())
             val next = stagePosts(storage, owner, tid, old, draft, changed)
             writeState(storage, owner, tid, next)
+            val previous = old.claims.associateBy { it.item.key }
+            val updated = claims.filter { it.item.key == key || it != previous[it.item.key] }
             index.transaction {
-                claims.filter { it != claim(old, it.item.key) }.forEach { indexClaim(storage, owner, it) }
+                updated.forEach { indexClaim(storage, owner, it) }
                 indexUses(storage, owner, tid, next.digests())
                 index.clearLibraryDirty(storage, owner.toLong(), tid.toLong())
             }
             retireImages(storage, owner, old.digests() - next.digests())
             retireBatches(storage, owner, tid, old, next)
+            updated.map { it.item }
         }
     }
 
@@ -404,7 +408,7 @@ internal class OfflineLibrary(
         val owner = account()
         val ownedLegacy = keys.filterTo(mutableSetOf()) { key ->
             val saved = when (key) {
-                is ThreadPageDownloadKey -> legacy.readManifest(key)
+                is ThreadPageDownloadKey -> legacy.readManifest(key) ?: legacy.recoverListing(key.stableId, json)
                 is TagMangaChapterDownloadKey -> legacy.readTagMangaManifest(key)
                 is RssMangaChapterDownloadKey -> legacy.readRssMangaManifest(key)
             }

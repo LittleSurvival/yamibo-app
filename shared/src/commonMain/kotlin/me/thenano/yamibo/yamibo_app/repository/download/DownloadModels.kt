@@ -150,7 +150,7 @@ internal fun DownloadManifest.orderedSources(): List<String> {
 
 @Serializable
 internal data class ArchivedImage(val storageId: String, val key: DownloadTaskKey, val fileName: String, val generation: String, val sourceId: String,
-    val owner: Int? = null, val digest: String? = null) {
+    val owner: Int? = null, val digest: String? = null, val legacySourceId: String? = null) {
     fun uri() = PREFIX + Json.encodeToString(this).encodeUtf8().base64Url()
 
     companion object {
