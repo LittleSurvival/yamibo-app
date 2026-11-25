@@ -18,6 +18,7 @@ import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.profile.settings.access.IBackgroundAccessSetupScreen
 import me.thenano.yamibo.yamibo_app.profile.settings.backup.IBackupSettingsScreen
 import me.thenano.yamibo.yamibo_app.profile.settings.cloud.IAppSyncSettingsScreen
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncService
 import me.thenano.yamibo.yamibo_app.profile.settings.components.SettingsItem
 import me.thenano.yamibo.yamibo_app.profile.settings.update.IAppUpdateScreen
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
@@ -110,7 +111,8 @@ internal fun SettingsScreen() {
             SettingsItem(
                 icon = YamiboIcons.CloudSync,
                 title = i18n("雲端同步"),
-                subtitle = i18n("同步設定、收藏與閱讀紀錄"),
+                subtitle = if (AppSyncService.MODULE_ENABLED) i18n("同步設定、收藏與閱讀紀錄") else i18n("暫不可用"),
+                enabled = AppSyncService.MODULE_ENABLED,
                 onClick = { navigator.navigate(IAppSyncSettingsScreen()) },
             )
             SettingsDivider()

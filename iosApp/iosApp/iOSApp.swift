@@ -108,6 +108,7 @@ struct iOSApp: App {
             ContentView()
         }
         .onChange(of: scenePhase) { phase in
+            guard IOSAppSyncBackgroundKt.appSyncAvailable else { return }
             switch phase {
             case .active:
                 IOSAppSyncBackgroundKt.appSyncSceneDidBecomeActive()

@@ -9,6 +9,7 @@ import me.thenano.yamibo.yamibo_app.db.DatabaseFactory
 import me.thenano.yamibo.yamibo_app.network.AndroidYamiboClientProvider
 import me.thenano.yamibo.yamibo_app.repository.AndroidAuthRepository
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncService
+import me.thenano.yamibo.yamibo_app.repository.appsync.operationRecordingSettingsStore
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncServicePhase
 import me.thenano.yamibo.yamibo_app.repository.appsync.isDurableAutomaticTriggerOutcome
 import me.thenano.yamibo.yamibo_app.repository.backup.BackupRepositoryImpl
@@ -26,6 +27,11 @@ class AppSyncWorker(
     params: WorkerParameters,
 ) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result = try {
+        if (!AppSyncService.MODULE_ENABLED) {
+            // A periodic job from an older version can wake up before the first app launch.
+            AndroidAppSyncBackgroundScheduler(applicationContext).cancelScheduledWork()
+            return Result.success()
+        }
         if (runAttemptCount >= MAX_RETRY_ATTEMPTS) return Result.failure()
         val client = AndroidYamiboClientProvider.get(applicationContext)
         val auth = AndroidAuthRepository(

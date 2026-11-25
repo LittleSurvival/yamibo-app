@@ -1,5 +1,7 @@
 package me.thenano.yamibo.yamibo_app.profile.settings.cloud
 
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncService
+import me.thenano.yamibo.yamibo_app.profile.settings.ISettingsScreen
 import androidx.compose.runtime.Composable
 import me.thenano.yamibo.yamibo_app.navigation.RestorableNavigatable
 import me.thenano.yamibo.yamibo_app.navigation.RestorableScreenEntry
@@ -21,6 +23,7 @@ class IAppSyncSettingsScreen : RestorableNavigatable {
 
     companion object Decoder :
         TypedRestorableNavigatableDecoder<IAppSyncSettingsScreen>(IAppSyncSettingsScreen::class) {
-        override fun decode(payload: String): RestorableNavigatable = IAppSyncSettingsScreen()
+        override fun decode(payload: String): RestorableNavigatable =
+            if (AppSyncService.MODULE_ENABLED) IAppSyncSettingsScreen() else ISettingsScreen()
     }
 }

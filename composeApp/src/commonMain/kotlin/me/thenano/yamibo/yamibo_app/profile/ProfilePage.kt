@@ -35,6 +35,7 @@ import me.thenano.yamibo.yamibo_app.profile.download.IDownloadQueueScreen
 import me.thenano.yamibo.yamibo_app.profile.settings.ISettingsScreen
 import me.thenano.yamibo.yamibo_app.profile.settings.backup.IBackupSettingsScreen
 import me.thenano.yamibo.yamibo_app.profile.settings.cloud.IAppSyncSettingsScreen
+import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncService
 import me.thenano.yamibo.yamibo_app.profile.sign.ISignInfoScreen
 import me.thenano.yamibo.yamibo_app.profile.sign.ISignWebView
 import me.thenano.yamibo.yamibo_app.profile.sign.signActionFeedbackMessage
@@ -291,6 +292,8 @@ fun ProfilePage(
             EntryCard(
                 title = i18n("雲端同步"),
                 icon = YamiboIcons.CloudSync,
+                subtitle = if (AppSyncService.MODULE_ENABLED) null else i18n("暫不可用"),
+                enabled = AppSyncService.MODULE_ENABLED,
                 onClick = { navigator.navigate(IAppSyncSettingsScreen()) }
             )
 
@@ -420,13 +423,14 @@ private fun EntryCard(
     icon: ImageVector,
     subtitle: String? = null,
     showBadge: Boolean = false,
+    enabled: Boolean = true,
     onClick: () -> Unit = {},
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp)
-            .profilePressScaleClickable(onClick = onClick),
+            .profilePressScaleClickable(enabled = enabled, onClick = onClick),
         shape = RoundedCornerShape(18.dp),
         elevation = CardDefaults.cardElevation(2.dp),
         colors = CardDefaults.cardColors(containerColor = colors.creamSurface)
@@ -441,7 +445,7 @@ private fun EntryCard(
                 Icon(
                     imageVector = icon,
                     contentDescription = title,
-                    tint = colors.brownPrimary,
+                    tint = if (enabled) colors.brownPrimary else colors.textDark.copy(alpha = 0.55f),
                     modifier = Modifier.fillMaxSize(),
                 )
                 if (showBadge) {
@@ -460,7 +464,7 @@ private fun EntryCard(
                     text = title,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Medium,
-                    color = colors.textDark,
+                    color = if (enabled) colors.textDark else colors.textDark.copy(alpha = 0.65f),
                 )
                 if (!subtitle.isNullOrBlank()) {
                     Spacer(Modifier.height(3.dp))

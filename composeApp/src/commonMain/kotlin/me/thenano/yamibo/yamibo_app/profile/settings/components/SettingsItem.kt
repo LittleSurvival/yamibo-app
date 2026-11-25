@@ -29,6 +29,7 @@ fun SettingsItem(
     subtitle: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     val colors = YamiboTheme.colors
 
@@ -38,6 +39,7 @@ fun SettingsItem(
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
+                enabled = enabled,
                 onClick = onClick,
             )
             .padding(horizontal = 20.dp, vertical = 18.dp),
@@ -46,15 +48,20 @@ fun SettingsItem(
         Icon(
             imageVector = icon,
             contentDescription = title,
-            tint = colors.brownPrimary,
+            tint = if (enabled) colors.brownPrimary else colors.textDark.copy(alpha = 0.55f),
             modifier = Modifier.size(24.dp),
         )
         Spacer(Modifier.width(20.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(text = title, fontSize = 16.sp, fontWeight = FontWeight.Medium, color = colors.textDark)
+            Text(
+                text = title,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium,
+                color = if (enabled) colors.textDark else colors.textDark.copy(alpha = 0.65f),
+            )
             Spacer(Modifier.height(2.dp))
             Text(text = subtitle, fontSize = 13.sp, color = colors.textDark.copy(alpha = 0.6f))
         }
-        Text(">", color = colors.textDark.copy(alpha = 0.3f), fontSize = 14.sp)
+        if (enabled) Text(">", color = colors.textDark.copy(alpha = 0.3f), fontSize = 14.sp)
     }
 }

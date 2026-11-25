@@ -1,9 +1,38 @@
 package me.thenano.yamibo.yamibo_app.repository.appsync
 
 import me.thenano.yamibo.yamibo_app.Database
+import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncIdentityGenerator
 import me.thenano.yamibo.yamibo_app.repository.backup.favoriteUpdateEventIdentity
 
-internal fun backfillFavoriteUpdateSyncState(db: Database) {
+internal fun backfillLocalFavoriteData(db: Database) {
+    // These identities are also needed by local favorite filters and backups.
+    if (!AppSyncService.MODULE_ENABLED && !db.favoriteUpdateEventQueries.needsLocalFavoriteBackfill().executeAsOne()) return
+    db.transaction {
+        backfillStableContainerIds(db)
+        backfillFavoriteUpdateSyncState(db)
+    }
+}
+
+private fun backfillStableContainerIds(db: Database) {
+    db.localFavoriteCategoryQueries.getAll().executeAsList()
+        .filter { it.syncId == null }
+        .forEach {
+            db.localFavoriteCategoryQueries.setSyncId(
+                SyncIdentityGenerator.stableEntityId().value,
+                it.id,
+            )
+        }
+    db.localFavoriteCollectionQueries.getAll().executeAsList()
+        .filter { it.syncId == null }
+        .forEach {
+            db.localFavoriteCollectionQueries.setSyncId(
+                SyncIdentityGenerator.stableEntityId().value,
+                it.id,
+            )
+        }
+}
+
+private fun backfillFavoriteUpdateSyncState(db: Database) {
     val eventQueries = db.favoriteUpdateEventQueries
     val existingBySyncId = linkedMapOf<String, Long>()
     eventQueries.getAll().executeAsList()

@@ -5,13 +5,11 @@ import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.core.cache.DiskCacheFactory
 import me.thenano.yamibo.yamibo_app.db.DatabaseFactory
 import me.thenano.yamibo.yamibo_app.network.AndroidYamiboClientProvider
-import me.thenano.yamibo.yamibo_app.repository.AndroidAuthRepository
-import me.thenano.yamibo.yamibo_app.repository.AndroidForumRepository
-import me.thenano.yamibo.yamibo_app.repository.AndroidTagRepository
-import me.thenano.yamibo.yamibo_app.repository.AndroidThreadRepository
-import me.thenano.yamibo.yamibo_app.repository.FavoriteUpdateRepository
+import me.thenano.yamibo.yamibo_app.repository.*
 import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncService
-import me.thenano.yamibo.yamibo_app.repository.rss.RssSearchSubscriptionRepositoryImpl
+import me.thenano.yamibo.yamibo_app.repository.appsync.favoriteStoreRepository
+import me.thenano.yamibo.yamibo_app.repository.appsync.favoriteUpdateRepository
+import me.thenano.yamibo.yamibo_app.repository.appsync.rssSearchSubscriptionRepository
 import me.thenano.yamibo.yamibo_app.store.AndroidCookieStore
 import me.thenano.yamibo.yamibo_app.store.AndroidForumFavoriteStore
 import me.thenano.yamibo.yamibo_app.store.AndroidUserStore
@@ -31,7 +29,7 @@ internal object AndroidFavoriteUpdateSupport {
         )
         val db = Database(dbFactory.createDriver())
         val authRepository = AndroidAuthRepository(cookieStore, userStore, yamiboClient, forumFavoriteStore)
-        val appSyncService = AppSyncService(
+        val appSyncService = AppSyncService.createIfAvailable(
             db = db,
             settingsStore = AndroidSettingsStore(appContext),
             authRepository = authRepository,

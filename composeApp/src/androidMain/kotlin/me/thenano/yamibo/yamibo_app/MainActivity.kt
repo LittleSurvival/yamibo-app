@@ -1,7 +1,5 @@
 package me.thenano.yamibo.yamibo_app
 
-import me.thenano.yamibo.yamibo_app.repository.servernotice.ForumErrorMessageResolver
-import me.thenano.yamibo.yamibo_app.network.AndroidServerNoticeProvider
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
@@ -20,11 +18,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import io.github.littlesurvival.core.YamiboResult
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.*
+import me.thenano.yamibo.yamibo_app.appsync.AndroidAppSyncBackgroundScheduler
+import me.thenano.yamibo.yamibo_app.appsync.AndroidAppSyncLifecycleBridge
+import me.thenano.yamibo.yamibo_app.appsync.AppSyncLifecycleController
+import me.thenano.yamibo.yamibo_app.confirmation.AppConfirmationController
 import me.thenano.yamibo.yamibo_app.core.cache.DiskCacheFactory
 import me.thenano.yamibo.yamibo_app.db.DatabaseFactory
 import me.thenano.yamibo.yamibo_app.download.AndroidDownloadBackgroundController
@@ -34,26 +32,23 @@ import me.thenano.yamibo.yamibo_app.favorite.sync.AndroidBackgroundTaskRepositor
 import me.thenano.yamibo.yamibo_app.favorite.sync.FavoriteSyncRunner
 import me.thenano.yamibo.yamibo_app.favorite.updates.AndroidFavoriteUpdateScheduler
 import me.thenano.yamibo.yamibo_app.favorite.updates.FavoriteUpdateRunner
-import me.thenano.yamibo.yamibo_app.i18n.i18n
-import me.thenano.yamibo.yamibo_app.confirmation.AppConfirmationController
 import me.thenano.yamibo.yamibo_app.feedback.AppFeedbackController
+import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.navigation.rememberRestorableNavigator
+import me.thenano.yamibo.yamibo_app.network.AndroidServerNoticeProvider
 import me.thenano.yamibo.yamibo_app.network.AndroidYamiboClientProvider
-import me.thenano.yamibo.yamibo_app.notification.dismissActiveSignReminder
 import me.thenano.yamibo.yamibo_app.notification.AndroidMessageNotificationScheduler
 import me.thenano.yamibo.yamibo_app.notification.dismissActiveMessageNotification
+import me.thenano.yamibo.yamibo_app.notification.dismissActiveSignReminder
 import me.thenano.yamibo.yamibo_app.notification.requestOpenMessageCenterFromNotification
 import me.thenano.yamibo.yamibo_app.profile.settings.access.AndroidBackgroundAccessRepository
 import me.thenano.yamibo.yamibo_app.profile.settings.backup.AndroidBackupScheduler
 import me.thenano.yamibo.yamibo_app.profile.settings.sign.AndroidSignReminderScheduler
 import me.thenano.yamibo.yamibo_app.repository.*
+import me.thenano.yamibo.yamibo_app.repository.appsync.*
 import me.thenano.yamibo.yamibo_app.repository.appupdate.DefaultAppUpdateRepository
 import me.thenano.yamibo.yamibo_app.repository.backup.BackupRepositoryImpl
-import me.thenano.yamibo.yamibo_app.repository.appsync.AppSyncService
-import me.thenano.yamibo.yamibo_app.appsync.AndroidAppSyncBackgroundScheduler
-import me.thenano.yamibo.yamibo_app.appsync.AndroidAppSyncLifecycleBridge
-import me.thenano.yamibo.yamibo_app.appsync.AppSyncLifecycleController
 import me.thenano.yamibo.yamibo_app.repository.chineseconversion.createChineseConversionRepository
 import me.thenano.yamibo.yamibo_app.repository.contentcover.ContentCoverRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.download.AndroidDownloadStorageProvider
@@ -61,11 +56,10 @@ import me.thenano.yamibo.yamibo_app.repository.download.DownloadImageFetcher
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.favorite.FavoriteShareRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.favorite.FavoriteSyncRepositoryImpl
-import me.thenano.yamibo.yamibo_app.repository.favorite.FavoriteUpdateRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.font.AndroidFontPlatform
 import me.thenano.yamibo.yamibo_app.repository.font.DefaultFontRepository
 import me.thenano.yamibo.yamibo_app.repository.inapplinknavigation.DefaultInAppLinkNavigationRepository
-import me.thenano.yamibo.yamibo_app.repository.rss.RssSearchSubscriptionRepositoryImpl
+import me.thenano.yamibo.yamibo_app.repository.servernotice.ForumErrorMessageResolver
 import me.thenano.yamibo.yamibo_app.repository.settings.AppSettingsRepository
 import me.thenano.yamibo.yamibo_app.repository.settings.MangaReaderSettingsRepository
 import me.thenano.yamibo.yamibo_app.repository.settings.NovelReaderSettingsRepository
@@ -76,9 +70,9 @@ import me.thenano.yamibo.yamibo_app.store.AndroidCookieStore
 import me.thenano.yamibo.yamibo_app.store.AndroidForumFavoriteStore
 import me.thenano.yamibo.yamibo_app.store.AndroidUserStore
 import me.thenano.yamibo.yamibo_app.store.settings.AndroidSettingsStore
+import me.thenano.yamibo.yamibo_app.task.AppTaskManager
 import me.thenano.yamibo.yamibo_app.update.AndroidAppUpdatePlatform
 import me.thenano.yamibo.yamibo_app.util.state
-import me.thenano.yamibo.yamibo_app.task.AppTaskManager
 import kotlin.time.Duration.Companion.milliseconds
 
 class MainActivity : ComponentActivity() {
@@ -180,7 +174,7 @@ class MainActivity : ComponentActivity() {
             val dbFactory = remember { DatabaseFactory(context) }
             val appDatabase = remember { Database(dbFactory.createDriver()) }
             val appSyncService = remember {
-                AppSyncService(
+                AppSyncService.createIfAvailable(
                     db = appDatabase,
                     settingsStore = rawSettingsStore,
                     authRepository = authRepository,
@@ -199,7 +193,7 @@ class MainActivity : ComponentActivity() {
                 novelReaderSettingsRepository,
                 mangaReaderSettingsRepository,
             ) {
-                appSyncService.registerSyncableSettings(
+                appSyncService?.registerSyncableSettings(
                     listOf(appSettingsRepository, novelReaderSettingsRepository, mangaReaderSettingsRepository),
                 )
                 onDispose { }
@@ -233,10 +227,9 @@ class MainActivity : ComponentActivity() {
             val bookMarkRepository = remember { appSyncService.bookMarkRepository(appDatabase) }
             val chapterStateRepository = remember { AndroidLocalChapterStateRepository(dbFactory) }
             val remoteFavoriteRepository = remember { AndroidFavoriteRepository(cookieStore, yamiboClient) }
-            val favoriteSyncDatabase = appDatabase
             val favoriteSyncRepository = remember {
                 FavoriteSyncRepositoryImpl(
-                    db = favoriteSyncDatabase,
+                    db = appDatabase,
                     authRepository = authRepository,
                     favoriteRepository = remoteFavoriteRepository,
                     localFavoriteRepository = favoriteRepository,
@@ -245,7 +238,7 @@ class MainActivity : ComponentActivity() {
             }
             val rssSearchSubscriptionRepository = remember {
                 appSyncService.rssSearchSubscriptionRepository(
-                    db = favoriteSyncDatabase,
+                    db = appDatabase,
                     authRepository = authRepository,
                     forumRepository = forumRepository,
                 )
@@ -258,7 +251,7 @@ class MainActivity : ComponentActivity() {
             }
             val favoriteUpdateRepository = remember {
                 appSyncService.favoriteUpdateRepository(
-                    db = favoriteSyncDatabase,
+                    db = appDatabase,
                     localFavoriteRepository = favoriteRepository,
                     threadRepository = threadRepository,
                     tagRepository = tagRepository,
@@ -296,7 +289,7 @@ class MainActivity : ComponentActivity() {
             val backupStorageProvider = remember { AndroidBackupStorageProvider(context, appSettingsRepository) }
             val backupRepository = remember {
                 BackupRepositoryImpl(
-                    db = favoriteSyncDatabase,
+                    db = appDatabase,
                     settingsStore = settingsStore,
                     settingsRegistries = listOf(appSettingsRepository, novelReaderSettingsRepository, mangaReaderSettingsRepository),
                     storageProvider = backupStorageProvider,
@@ -304,7 +297,7 @@ class MainActivity : ComponentActivity() {
                 )
             }
             DisposableEffect(appSyncService, backupRepository) {
-                appSyncService.registerLocalSnapshotSource(backupRepository)
+                appSyncService?.registerLocalSnapshotSource(backupRepository)
                 onDispose { }
             }
             val appSyncBackgroundScheduler = remember {
