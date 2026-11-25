@@ -1,5 +1,7 @@
 package me.thenano.yamibo.yamibo_app.repository.backup
 
+import me.thenano.yamibo.yamibo_app.repository.storeImagePositionDetail
+import me.thenano.yamibo.yamibo_app.repository.storeTextPositionDetail
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import me.thenano.yamibo.yamibo_app.Database
@@ -194,7 +196,7 @@ class BackupRepositoryImpl(
                 )
             },
             readingState = BackupReadingState(
-                threadHistory = readingQueries.getAllForBackup().executeAsList().map {
+                threadHistory = readingQueries.getAllWithAnchors().executeAsList().map {
                     BackupThreadReadingHistory(
                         threadId = it.threadId,
                         threadType = it.threadType,
@@ -218,9 +220,12 @@ class BackupRepositoryImpl(
                         historyOrigin = it.historyOrigin,
                         lastVisitTime = it.lastVisitTime,
                         lastUpdatedTime = it.lastUpdatedTime,
+                        floorAuthor = it.floorAuthor,
+                        imageSource = it.imageSource,
+                        imageOccurrence = it.occurrence,
                     )
                 },
-                imageHistory = imageHistoryQueries.getAll().executeAsList().map {
+                imageHistory = imageHistoryQueries.getAllWithAnchors().executeAsList().map {
                     BackupImageReadingHistory(
                         postId = it.postId,
                         threadId = it.threadId,
@@ -229,6 +234,11 @@ class BackupRepositoryImpl(
                         firstVisibleItemIndex = it.firstVisibleItemIndex,
                         firstVisibleItemOffset = it.firstVisibleItemOffset,
                         lastVisitTime = it.lastVisitTime,
+                        floorPid = it.floorPid,
+                        sourceId = it.sourceId,
+                        imageOccurrence = it.occurrence,
+                        forumPage = it.forumPage,
+                        scopeAuthor = it.scopeAuthor,
                     )
                 },
                 tagMangaHistory = tagHistoryQueries.getAll().executeAsList().map {
@@ -741,16 +751,8 @@ class BackupRepositoryImpl(
             }
 
             backup.readingState.threadHistory.forEach history@{
-                val existing = readingQueries.getAllForBackup().executeAsList().firstOrNull { row ->
-                    row.threadId == it.threadId &&
-                        row.threadType == it.threadType &&
-                        row.authorId == it.authorId &&
-                        row.historyOrigin == it.historyOrigin
-                }
-                if (mode == BackupRepository.RestoreMode.Merge &&
-                    existing != null &&
-                    existing.lastVisitTime >= it.lastVisitTime
-                ) {
+                val existingTime = readingQueries.timeOfOrigin(it.threadId, it.threadType, it.authorId, it.historyOrigin).executeAsOneOrNull()
+                if (mode == BackupRepository.RestoreMode.Merge && existingTime != null && existingTime >= it.lastVisitTime) {
                     return@history
                 }
                 readingQueries.upsert(
@@ -777,6 +779,8 @@ class BackupRepositoryImpl(
                     lastVisitTime = it.lastVisitTime,
                     lastUpdatedTime = it.lastUpdatedTime,
                 )
+                db.storeTextPositionDetail(it.threadId, it.threadType, it.authorId, it.historyOrigin, it.lastVisitTime,
+                    it.floorAuthor, it.imageSource, it.imageOccurrence)
             }
 
             backup.readingState.imageHistory.forEach history@{
@@ -796,6 +800,8 @@ class BackupRepositoryImpl(
                     firstVisibleItemOffset = it.firstVisibleItemOffset,
                     lastVisitTime = it.lastVisitTime,
                 )
+                db.storeImagePositionDetail(it.postId, it.lastVisitTime, it.floorPid, it.sourceId,
+                    it.imageOccurrence, it.forumPage, it.scopeAuthor)
             }
 
             backup.readingState.tagMangaHistory.forEach history@{

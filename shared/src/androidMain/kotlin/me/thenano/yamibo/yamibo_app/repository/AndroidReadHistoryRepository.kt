@@ -32,11 +32,20 @@ class AndroidReadHistoryRepository(
         savePositionSynchronously(history)
     }
 
-    override fun savePositionSynchronously(history: ReadHistoryRepository.ThreadReadingHistory) {
-        db.transaction {
-            val previous = queries.timeOfOrigin(history.threadId.value.toLong(), history.threadType.name,
-                history.authorId?.value?.toLong() ?: 0L, history.historyOrigin.name).executeAsOneOrNull()
-            if (previous != null && previous > history.lastVisitTime) return@transaction
+    override fun threadHistoryForDeletion(tid: ThreadId, type: ReadHistoryRepository.ThreadEntryType, author: UserId?) =
+        queries.getAllByThreadKey(tid.value.toLong(), type.name, author?.value?.toLong() ?: 0L)
+            .executeAsList().map { it.toHistory() }
+
+    override fun allThreadHistoryForDeletion() = queries.getAllForBackup().executeAsList().map { it.toHistory() }
+
+    private fun lastVisitForOrigin(history: ReadHistoryRepository.ThreadReadingHistory): Long? =
+        queries.timeOfOrigin(history.threadId.value.toLong(), history.threadType.name,
+            history.authorId?.value?.toLong() ?: 0L, history.historyOrigin.name).executeAsOneOrNull()
+
+    override fun savePositionSynchronously(history: ReadHistoryRepository.ThreadReadingHistory): Long? =
+        db.transactionWithResult {
+            val previous = lastVisitForOrigin(history)
+            if (previous != null && previous > history.lastVisitTime) return@transactionWithResult previous
             queries.upsert(
                 threadId = history.threadId.value.toLong(),
                 threadType = history.threadType.name,
@@ -61,14 +70,14 @@ class AndroidReadHistoryRepository(
                 lastVisitTime = history.lastVisitTime,
                 lastUpdatedTime = history.lastUpdatedTime
             )
-            history.floorAuthor?.let { author ->
-                queries.saveTextAnchor(history.threadId.value.toLong(), history.threadType.name,
+            if (history.floorAuthor != null || previous == history.lastVisitTime) {
+                db.storeTextPositionDetail(history.threadId.value.toLong(), history.threadType.name,
                     history.authorId?.value?.toLong() ?: 0L, history.historyOrigin.name, history.lastVisitTime,
-                    author.value.toLong(), history.imageSource, history.imageOccurrence?.toLong())
+                    history.floorAuthor?.value?.toLong(), history.imageSource, history.imageOccurrence?.toLong())
             }
             queries.trimToLatest(MAX_HISTORY_ITEMS)
+            previous
         }
-    }
 
     override suspend fun getLastVisitTimes(
         lookups: Collection<ReadHistoryRepository.LastVisitLookup>,
@@ -257,10 +266,10 @@ class AndroidReadHistoryRepository(
         saveImagePositionSynchronously(history)
     }
 
-    override fun saveImagePositionSynchronously(history: ReadHistoryRepository.ImageReadingHistory) {
-        db.transaction {
+    override fun saveImagePositionSynchronously(history: ReadHistoryRepository.ImageReadingHistory): Long? =
+        db.transactionWithResult {
             val observed = imageQueries.getByPostId(history.postId.value.toLong()).executeAsOneOrNull()?.lastVisitTime
-            if (observed != null && observed > history.lastVisitTime) return@transaction
+            if (observed != null && observed > history.lastVisitTime) return@transactionWithResult observed
             imageQueries.upsert(
                 postId = history.postId.value.toLong(),
                 threadId = history.threadId.value.toLong(),
@@ -270,13 +279,15 @@ class AndroidReadHistoryRepository(
                 firstVisibleItemOffset = history.firstVisibleItemOffset?.toLong(),
                 lastVisitTime = history.lastVisitTime
             )
-            history.anchor?.let { anchor ->
-                imageQueries.saveAnchor(history.postId.value.toLong(), history.lastVisitTime, anchor.floorPid.value.toLong(),
-                    anchor.sourceId, anchor.occurrence.toLong(), anchor.forumPage.toLong(), anchor.scopeAuthor?.value?.toLong())
+            val anchor = history.anchor
+            if (anchor != null || observed == history.lastVisitTime) {
+                db.storeImagePositionDetail(history.postId.value.toLong(), history.lastVisitTime,
+                    anchor?.floorPid?.value?.toLong(), anchor?.sourceId, anchor?.occurrence?.toLong(), anchor?.forumPage?.toLong(),
+                    anchor?.scopeAuthor?.value?.toLong())
             }
             imageQueries.trimToLatest(MAX_HISTORY_ITEMS)
+            observed
         }
-    }
 
     override suspend fun getImagePosition(postId: PostId): ReadHistoryRepository.ImageReadingHistory? {
         return imageQueries.getByPostId(postId.value.toLong()).executeAsOneOrNull()?.toReaderPosition()

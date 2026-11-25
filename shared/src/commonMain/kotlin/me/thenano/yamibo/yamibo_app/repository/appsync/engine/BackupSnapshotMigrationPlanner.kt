@@ -1,5 +1,6 @@
 package me.thenano.yamibo.yamibo_app.repository.appsync.engine
 
+import me.thenano.yamibo.yamibo_app.repository.appsync.withReaderAnchorFields
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncDomainId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncEntityId
 import me.thenano.yamibo.yamibo_app.repository.appsync.operation.SyncOperationKind
@@ -175,7 +176,7 @@ internal class BackupSnapshotMigrationPlanner {
                             "firstVisibleItemOffset" to it.firstVisibleItemOffset?.toString(),
                             "lastVisitTime" to it.lastVisitTime.toString(),
                             "lastUpdatedTime" to it.lastUpdatedTime?.toString(),
-                        ),
+                        ).withReaderAnchorFields(it.floorAuthor, it.imageSource, it.imageOccurrence),
                     ),
                 )
             }
@@ -192,7 +193,7 @@ internal class BackupSnapshotMigrationPlanner {
                             "firstVisibleItemIndex" to it.firstVisibleItemIndex?.toString(),
                             "firstVisibleItemOffset" to it.firstVisibleItemOffset?.toString(),
                             "lastVisitTime" to it.lastVisitTime.toString(),
-                        ),
+                        ).withReaderAnchorFields(it.floorPid, it.sourceId, it.imageOccurrence, it.forumPage, it.scopeAuthor),
                     ),
                 )
             }
