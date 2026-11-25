@@ -40,7 +40,7 @@ class RssSearchSubscriptionRepositoryImpl private constructor(
         db: Database,
         authRepository: AuthRepository,
         forumRepository: ForumRepository,
-        mutationRecorder: AppSyncMutationRecorder,
+        mutationRecorder: AppSyncMutationRecorder?,
     ) : this(
         db,
         authRepository,

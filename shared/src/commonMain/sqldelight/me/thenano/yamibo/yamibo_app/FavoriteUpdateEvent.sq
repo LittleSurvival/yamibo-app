@@ -78,3 +78,21 @@ WHERE targetType = ? AND targetId = ? AND authorId = ?;
 deleteAll:
 DELETE FROM FavoriteUpdateEvent;
 
+needsLocalFavoriteBackfill:
+SELECT EXISTS(SELECT 1 FROM LocalFavoriteCategory WHERE syncId IS NULL)
+    OR EXISTS(SELECT 1 FROM LocalFavoriteCollection WHERE syncId IS NULL)
+    OR EXISTS(
+        SELECT 1 FROM FavoriteUpdateEvent
+        WHERE syncId = '' OR sourceFingerprint = '' OR sourceDiscriminator = ''
+    )
+    OR EXISTS(
+        SELECT 1 FROM FavoriteUpdateFidFilter AS f
+        WHERE NOT EXISTS (SELECT 1 FROM FavoriteUpdateFidChoice AS c WHERE c.fid = f.fid)
+    )
+    OR EXISTS(
+        SELECT 1 FROM FavoriteUpdateCategoryFilter AS f
+        JOIN LocalFavoriteCategory AS category ON category.id = f.categoryId
+        WHERE NOT EXISTS (
+            SELECT 1 FROM FavoriteUpdateCategoryChoice AS c WHERE c.categorySyncId = category.syncId
+        )
+    );
