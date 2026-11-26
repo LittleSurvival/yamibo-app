@@ -131,6 +131,45 @@ final class ReaderModesUITests: XCTestCase {
     func testComic() { checkComic(dark: false) }
     func testComicDark() { checkComic(dark: true) }
 
+    private func checkRepair(dark: Bool) {
+        openDownload(["智能漫畫", "智能漫画", "Smart Comic"], dark: dark, damaged: true)
+        waitForImage(second: false)
+        app.swipeLeft()
+        waitForImage(second: true)
+        app.swipeLeft()
+        XCTAssertTrue(element(["3 / 3"]).waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(element(["圖片載入失敗", "图片载入失败"]).waitForExistence(timeout: 15), app.debugDescription)
+        capture("missing-image-before-user-reload")
+
+        let ready = expectation(description: "Fixture server enabled after missing image is visible")
+        var request = URLRequest(url: URL(string: "https://127.0.0.1:18083/arm")!)
+        request.httpMethod = "POST"
+        URLSession.shared.dataTask(with: request) { _, response, error in
+            XCTAssertNil(error)
+            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 204)
+            ready.fulfill()
+        }.resume()
+        wait(for: [ready], timeout: 12)
+        tap(["重新載入", "重新载入", "Reload"])
+        waitForRepairedImage()
+        capture("repaired-third-image")
+        app.swipeRight()
+        waitForImage(second: true)
+        app.swipeLeft()
+        waitForRepairedImage()
+    }
+
+    private func waitForRepairedImage() {
+        let painted = NSPredicate { _, _ in
+            self.largeColorArea { red, green, blue in red < 80 && green > 145 && blue < 80 }
+        }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: painted, object: app)], timeout: 20),
+                       .completed, app.debugDescription)
+    }
+
+    func testRepair() { checkRepair(dark: false) }
+    func testRepairDark() { checkRepair(dark: true) }
+
     private enum Mode: String {
         case comic = "智能漫畫", novel = "小說閱讀", forum = "論壇模式"
     }

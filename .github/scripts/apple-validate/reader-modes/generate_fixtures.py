@@ -1,10 +1,17 @@
 import json
+import argparse
 import struct
-import sys
 import zlib
 from pathlib import Path
 
-root = Path(sys.argv[1]) / 'YamiboDownloads'
+parser = argparse.ArgumentParser()
+parser.add_argument("directory", type=Path)
+parser.add_argument("--cbz", action="store_true")
+parser.add_argument("--damaged", action="store_true")
+parser.add_argument("--origin", default="https://reader.invalid")
+parser.add_argument("--repair-image", type=Path)
+args = parser.parse_args()
+root = args.directory / 'YamiboDownloads'
 root.mkdir(parents=True, exist_ok=True)
 
 def write(path, value):
@@ -19,7 +26,9 @@ def marker_png(rgb):
     return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 800, 1200, 8, 2, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(pixels)) + chunk(b'IEND', b'')
 
 markers = [marker_png(rgb) for rgb in [(20, 180, 220), (220, 40, 180), (50, 170, 40)]]
-images = [{"sourceUrl": f"https://reader.invalid/marker-{i}.png", "fileName": f"{i:04d}.png", "bytes": len(png)} for i, png in enumerate(markers, 1)]
+if args.repair_image:
+    args.repair_image.write_bytes(markers[2])
+images = [{"sourceUrl": f"{args.origin}/marker-{i}.png", "fileName": f"{i:04d}.png", "bytes": len(png)} for i, png in enumerate(markers, 1)]
 directory = root / "thread_140_page_1_author_7"
 title = "QA Three Readers"
 key = {"tid": 140, "page": 1, "authorId": 7}
@@ -35,12 +44,12 @@ write(directory / "thread_page.json", {"thread": {"tid": 140, "title": title, "f
 write(root / "queue.json", [])
 
 
-if "--cbz" in sys.argv[2:]:
+if args.cbz:
     import zipfile
     import shutil
     with zipfile.ZipFile(directory / "images.cbz", "w", compression=zipfile.ZIP_STORED) as archive:
         for image, data in zip(images, markers):
-            archive.writestr(image["fileName"], data[:10] if "--damaged" in sys.argv and image is images[-1] else data)
+            archive.writestr(image["fileName"], data[:10] if args.damaged and image is images[-1] else data)
             image["packed"] = True
     shutil.rmtree(directory / "images")
     manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))

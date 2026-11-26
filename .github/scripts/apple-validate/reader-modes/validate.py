@@ -8,6 +8,9 @@ from pathlib import Path
 import plistlib
 import subprocess
 import sys
+import tempfile
+from contextlib import ExitStack
+from repair_origin import RepairOrigin
 
 
 PROFILE = Path(__file__).resolve().parent
@@ -29,6 +32,7 @@ def run(label, command, timeout, *, env=None, capture=False):
 
 def main():
     simulator = None
+    resources = ExitStack()
     Path("gradlew").chmod(0o755)
     try:
         run("Configure independent XCTest target", ["gem", "install", "xcodeproj",
@@ -76,14 +80,24 @@ def main():
         palettes = ("default",) if matrix else ("default", "default-dark")
         readers = (("testComicToNovel", "testNovelToComic", "testComicToForum", "testForumToComic",
                     "testNovelToForum", "testForumToNovel") if matrix else ("testForum", "testNovel", "testComic"))
+        origin = None
+        if "--repair" in sys.argv:
+            origin = RepairOrigin(simulator, resources.enter_context(tempfile.TemporaryDirectory()))
+            resources.callback(origin.close)
+            readers = ("testRepair",)
         for palette in palettes:
             for reader in readers:
                 case = reader if palette == "default" else f"{reader}Dark"
                 name = f"{palette}-{reader}"
                 run(f"Install clean App for {name}", simctl + ["install", simulator, str(apps[0])], 120)
                 fixture = downloads_root()
-                damaged = case in ("testForumDark", "testComicDark")
-                run("Seed downloaded page", [sys.executable, str(PROFILE / "generate_fixtures.py"), str(fixture)] + (["--cbz"] if palette == "default-dark" else []) + (["--damaged"] if damaged else []), 120)
+                damaged = origin is not None or case in ("testForumDark", "testComicDark")
+                fixture_args = ["--cbz"] if origin or palette == "default-dark" else []
+                if damaged:
+                    fixture_args.append("--damaged")
+                if origin:
+                    fixture_args.extend(["--origin", origin.begin(case), "--repair-image", str(origin.image)])
+                run("Seed downloaded page", [sys.executable, str(PROFILE / "generate_fixtures.py"), str(fixture)] + fixture_args, 120)
                 bundle = OUTPUT / f"{name}.xcresult"
                 try:
                     run(name, xcode + ["-resultBundlePath", str(bundle), "-parallel-testing-enabled", "NO",
@@ -102,8 +116,12 @@ def main():
                     with zipfile.ZipFile(pack) as archive:
                         assert sorted(archive.namelist()) == ["1401.json", "1402.json", "1403.json"]
                     blobs = list(library.glob("*/images/*/*"))
-                    assert len(blobs) == (2 if damaged else 3)
-                    assert claim["item"].get("missingImageCount", 0) == (1 if damaged else 0)
+                    missing = int(damaged and origin is None)
+                    assert len(blobs) == 3 - missing
+                    assert claim["item"].get("missingImageCount", 0) == missing
+                    if origin:
+                        assert origin.requests == [{"path": f"/{case}/marker-3.png", "armed": True}], origin.requests
+                        assert hashlib.sha256(origin.image.read_bytes()).hexdigest() in [f.name for f in blobs]
                     assert all(hashlib.sha256(f.read_bytes()).hexdigest() == f.name for f in blobs)
                     assert not (fixture / "YamiboDownloads/thread_140_page_1_author_7").exists()
                     results[name] = (summary["passedTests"] == 1 and summary["failedTests"] == 0
@@ -111,11 +129,14 @@ def main():
                 except (AssertionError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
                     print(f"{name}: {error}", flush=True)
                     results[name] = False
+                if origin:
+                    (OUTPUT / f"{name}-requests.json").write_text(json.dumps(origin.requests, indent=2))
                 run("Remove QA App and its reading history", simctl + ["uninstall", simulator, BUNDLE], 60)
                 (OUTPUT / "ui-summary.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
         if not all(results.values()):
             raise RuntimeError(f"Reader UI results: {results}")
     finally:
+        resources.close()
         if simulator:
             subprocess.run(["xcrun", "simctl", "shutdown", simulator], check=False, timeout=60)
             subprocess.run(["xcrun", "simctl", "delete", simulator], check=True, timeout=60)
