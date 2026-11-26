@@ -47,6 +47,8 @@ interface ThreadRepository {
 
     fun knownPageForPost(tid: ThreadId, author: UserId?, pid: PostId): Int? = null
 
+    /** Page numbers backed by cached metadata in the current account and author scope. */
+    fun cachedThreadPages(tid: ThreadId, authorId: UserId?): List<Int>
     fun getCachedThread(tid: ThreadId, authorId: UserId? = null, page: Int = 1): ThreadPage?
     fun setCachedThread(tid: ThreadId, authorId: UserId? = null, page: Int, threadPage: ThreadPage)
     fun clearCachedThread(tid: ThreadId)

@@ -24,9 +24,12 @@ fun readerImageSourceId(url: String): String {
     return source.encodeUtf8().sha256().hex()
 }
 
+fun matchesReaderImageSource(url: String?, sourceId: String?, savedId: String?): Boolean =
+    savedId != null && (sourceId == savedId || url?.let(ArchivedImage::parse)?.legacySourceId == savedId)
+
 /** A changed image list falls back to its floor before using the legacy numeric position. */
 fun List<ReaderImage>.positionOf(anchor: ImageAnchor): Int? {
-    val exact = indexOfFirst { it.postId == anchor.floorPid && it.sourceId == anchor.sourceId && it.occurrence == anchor.occurrence }
+    val exact = indexOfFirst { it.postId == anchor.floorPid && matchesReaderImageSource(it.url, it.sourceId, anchor.sourceId) && it.occurrence == anchor.occurrence }
     return if (exact >= 0) exact else indexOfFirst { it.postId == anchor.floorPid }.takeIf { it >= 0 }
 }
 

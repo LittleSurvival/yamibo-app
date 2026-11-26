@@ -21,7 +21,7 @@ class AndroidBackupStorageProvider(
 
     override suspend fun getSelectedFolderLabel(): String? {
         val uri = selectedTreeUri() ?: return null
-        return queryDisplayName(rootDocumentUri(uri)) ?: "YamiboApp"
+        return backupResult("getSelectedFolderLabel") { queryDisplayName(rootDocumentUri(uri)) }.getOrNull()
     }
 
     @SuppressLint("UseKtx")
@@ -35,7 +35,7 @@ class AndroidBackupStorageProvider(
         }.onFailure {
             Logger.d(TAG, "Failed to take persistable URI permission", it)
         }
-        appSettingsRepository.backupFolderUri.setValue(uri)
+        appSettingsRepository.selectBackupFolder(uri)
     }.map { }
 
     override suspend fun writeBackupFile(
@@ -66,8 +66,8 @@ class AndroidBackupStorageProvider(
             ?: error("無法讀取備份檔案")
     }
 
-    override suspend fun listBackupFiles(): List<BackupRepository.BackupFileInfo> {
-        val treeUri = selectedTreeUri() ?: return emptyList()
+    override suspend fun listBackupFiles(): List<BackupRepository.BackupFileInfo> = backupResult("listBackupFiles") {
+        val treeUri = selectedTreeUri() ?: return@backupResult emptyList()
         val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
             treeUri,
             DocumentsContract.getTreeDocumentId(treeUri),
@@ -79,7 +79,7 @@ class AndroidBackupStorageProvider(
             DocumentsContract.Document.COLUMN_LAST_MODIFIED,
         )
         val items = mutableListOf<BackupRepository.BackupFileInfo>()
-        resolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+        checkNotNull(resolver.query(childrenUri, projection, null, null, null)) { "無法讀取備份資料夾" }.use { cursor ->
             val idIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
             val nameIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
             val sizeIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
@@ -98,8 +98,8 @@ class AndroidBackupStorageProvider(
                 )
             }
         }
-        return items
-    }
+        items
+    }.getOrDefault(emptyList())
 
     override suspend fun getBackupStorageBytes(): Long =
         listBackupFiles().sumOf { it.bytes }
@@ -109,8 +109,13 @@ class AndroidBackupStorageProvider(
         DocumentsContract.deleteDocument(resolver, Uri.parse(fileInfo.uri))
     }.map { }
 
-    private fun selectedTreeUri(): Uri? =
-        appSettingsRepository.backupFolderUri.getValue().takeIf { it.isNotBlank() }?.let(Uri::parse)
+    private fun selectedTreeUri(): Uri? {
+        val stored = appSettingsRepository.backupFolderUri.getValue().takeIf { it.isNotBlank() } ?: return null
+        val uri = Uri.parse(stored)
+        return uri.takeIf { resolver.persistedUriPermissions.any { grant ->
+            grant.uri == uri && grant.isReadPermission && grant.isWritePermission
+        } }
+    }
 
     private fun rootDocumentUri(treeUri: Uri): Uri =
         DocumentsContract.buildDocumentUriUsingTree(treeUri, DocumentsContract.getTreeDocumentId(treeUri))
@@ -118,7 +123,7 @@ class AndroidBackupStorageProvider(
     private fun queryDisplayName(uri: Uri): String? {
         val projection = arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
         return resolver.query(uri, projection, null, null, null)?.use { cursor ->
-            if (cursor.moveToFirst()) cursor.getString(0) else null
+            if (cursor.moveToFirst()) cursor.getString(0)?.takeIf { it.isNotBlank() } ?: "YamiboApp" else null
         }
     }
 

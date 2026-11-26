@@ -10,7 +10,7 @@ import me.thenano.yamibo.yamibo_app.repository.chineseconversion.ChineseConversi
  * Usage:
  * - Inject the platform implementation through `LocalChineseConversionRepository`.
  * - Call [setConversionMode] once from settings state.
- * - Call [convert] from a coroutine. The repository applies the currently selected mode.
+ * - Call [convert] from a coroutine. Pass a mode for a batch that must use one consistent conversion.
  * - Check [isModeAvailable] before exposing the setting on platforms whose backend may be absent.
  *
  * Current implementation policy:
@@ -21,6 +21,6 @@ import me.thenano.yamibo.yamibo_app.repository.chineseconversion.ChineseConversi
 interface ChineseConversionRepository {
     val currentMode: StateFlow<ChineseConversionMode?>
     fun setConversionMode(mode: ChineseConversionMode?)
-    suspend fun convert(text: String): String
+    suspend fun convert(text: String, mode: ChineseConversionMode? = currentMode.value): String
     fun isModeAvailable(mode: ChineseConversionMode): Boolean
 }

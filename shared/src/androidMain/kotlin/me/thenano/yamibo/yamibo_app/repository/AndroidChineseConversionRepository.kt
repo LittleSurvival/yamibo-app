@@ -17,8 +17,8 @@ class AndroidChineseConversionRepository : ChineseConversionRepository {
         modeFlow.value = mode
     }
 
-    override suspend fun convert(text: String): String = withContext(Dispatchers.Default) {
-        when (modeFlow.value) {
+    override suspend fun convert(text: String, mode: ChineseConversionMode?): String = withContext(Dispatchers.Default) {
+        when (mode) {
             null -> text
             ChineseConversionMode.Simplified -> ZhConverterUtil.toSimple(text).fixSimplifiedConversion()
             ChineseConversionMode.Traditional -> ZhTwConverterUtil.toTraditional(text).fixTaiwanTraditionalConversion()

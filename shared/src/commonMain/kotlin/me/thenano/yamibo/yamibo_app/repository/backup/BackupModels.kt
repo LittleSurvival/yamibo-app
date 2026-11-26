@@ -1,5 +1,7 @@
 package me.thenano.yamibo.yamibo_app.repository.backup
 
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -142,6 +144,7 @@ internal data class BackupReadingState(
     val readingTimeStats: List<BackupReadingTimeStat> = emptyList(),
 )
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 internal data class BackupThreadReadingHistory(
     val threadId: Long,
@@ -166,8 +169,12 @@ internal data class BackupThreadReadingHistory(
     val historyOrigin: String = "Direct",
     val lastVisitTime: Long,
     val lastUpdatedTime: Long?,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val floorAuthor: Long? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val imageSource: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val imageOccurrence: Long? = null,
 )
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 internal data class BackupImageReadingHistory(
     val postId: Long,
@@ -177,6 +184,11 @@ internal data class BackupImageReadingHistory(
     val firstVisibleItemIndex: Long?,
     val firstVisibleItemOffset: Long?,
     val lastVisitTime: Long,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val floorPid: Long? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val sourceId: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val imageOccurrence: Long? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val forumPage: Long? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val scopeAuthor: Long? = null,
 )
 
 @Serializable

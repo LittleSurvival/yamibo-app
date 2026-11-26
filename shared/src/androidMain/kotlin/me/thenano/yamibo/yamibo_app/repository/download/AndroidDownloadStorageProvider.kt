@@ -29,6 +29,8 @@ class AndroidDownloadStorageProvider(
 ) : DownloadStorageProvider {
     private val resolver = context.applicationContext.contentResolver
 
+    override val mayHaveDownloads: Boolean get() = appSettingsRepository.backupFolderUri.getValue().isNotBlank()
+
     override suspend fun getSelectedFolderLabel(): String? =
         selectedTreeUri()?.let { queryDisplayName(rootDocumentUri(it)) }
 
@@ -244,10 +246,8 @@ class AndroidDownloadStorageProvider(
         val treeUri = selectedTreeUri() ?: return emptyList()
         val root = downloadsRoot(treeUri) ?: return emptyList()
         val file = findChild(treeUri, root, QUEUE_FILE) ?: findChild(treeUri, root, "$QUEUE_FILE.previous") ?: return emptyList()
-        val bytes = resolver.openInputStream(file)?.use { it.readBytes() } ?: return emptyList()
-        return runCatching { json.decodeFromString<List<DownloadQueueEntry>>(bytes.decodeToString()) }
-            .onFailure { Logger.w(TAG, "Failed to decode download queue", it) }
-            .getOrDefault(emptyList())
+        val bytes = checkNotNull(resolver.openInputStream(file)) { "無法讀取下載佇列" }.use { it.readBytes() }
+        return json.decodeFromString<List<DownloadQueueEntry>>(bytes.decodeToString())
     }
 
     override suspend fun writeQueue(entries: List<DownloadQueueEntry>) {
@@ -491,6 +491,7 @@ class AndroidDownloadStorageProvider(
             }
         } catch (error: Exception) {
             if (!error.isMissingDocumentFailure()) throw error
+            if (parent == rootDocumentUri(treeUri)) throw IllegalStateException("下載資料夾無法存取，請重新選擇資料夾", error)
             Logger.d(TAG, "Document disappeared while listing children uri=$parent", error)
         }
         return items

@@ -10,6 +10,9 @@ SELECT * FROM SmartComicWork WHERE owner = ? ORDER BY lastReadAt DESC, id DESC;
 members:
 SELECT summary FROM SmartComicMember WHERE workId = ? AND ordinal >= 0 ORDER BY ordinal, tid;
 
+activeMemberTids:
+SELECT tid FROM SmartComicMember WHERE workId = ? AND ordinal >= 0;
+
 retireMembers:
 UPDATE SmartComicMember SET ordinal = -1 WHERE workId = ? AND ordinal >= 0;
 

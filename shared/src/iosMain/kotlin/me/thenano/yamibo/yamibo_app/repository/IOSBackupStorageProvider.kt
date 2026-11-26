@@ -23,7 +23,7 @@ class IOSBackupStorageProvider(
         runCatching { selectedFolder().name }.getOrNull()
 
     override suspend fun setSelectedFolder(uri: String): Result<Unit> = backupResult("setSelectedFolder") {
-        appSettingsRepository.backupFolderUri.setValue(uri)
+        appSettingsRepository.selectBackupFolder(uri)
         ensureFolder(selectedFolder())
     }
 

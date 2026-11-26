@@ -24,64 +24,67 @@ internal class OperationRecordingReadHistoryRepository(
         isMangaMode: Boolean,
     ): Map<Long, Long> = delegate.getLastVisitTimes(lookups, isMangaMode)
 
-    override suspend fun savePosition(history: ReadHistoryRepository.ThreadReadingHistory) =
+    override suspend fun savePosition(history: ReadHistoryRepository.ThreadReadingHistory) {
         withContext(storageDispatcher) {
             historyWriteMutex.withLock {
-                val existing = delegate.getPosition(history.threadId, history.threadType, history.authorId)
-                if (existing?.historyOrigin == history.historyOrigin && existing.lastVisitTime > history.lastVisitTime) return@withLock
-                recordSynchronous("reading.thread", threadEntityId(history),
-                    if (existing == null) SyncOperationKind.Put else SyncOperationKind.Patch, history.fields()) {
-                    delegate.synchronousReaderPersistence().savePositionSynchronously(history)
+                recorder.recordCommand {
+                    val previous = delegate.synchronousReaderPersistence().savePositionSynchronously(history)
+                    if (previous != null && previous > history.lastVisitTime) emptyList()
+                    else listOf(draft("reading.thread", threadEntityId(history),
+                        if (previous == null) SyncOperationKind.Put else SyncOperationKind.Patch, history.fields()))
                 }
             }
         }
+    }
 
     override suspend fun deleteHistory(
         tid: io.github.littlesurvival.dto.value.ThreadId,
         threadType: ReadHistoryRepository.ThreadEntryType,
         authorId: io.github.littlesurvival.dto.value.UserId?,
     ) = withContext(storageDispatcher) {
-        val existing = delegate.getPosition(tid, threadType, authorId) ?: return@withContext
-        record("reading.thread", threadEntityId(existing), SyncOperationKind.Delete, existing.fields()) {
-            delegate.synchronousReaderPersistence().deleteHistorySynchronously(existing)
+        historyWriteMutex.withLock {
+            val persistence = delegate.synchronousReaderPersistence()
+            val rows = persistence.threadHistoryForDeletion(tid, threadType, authorId)
+            val first = rows.firstOrNull() ?: return@withLock
+            recordAuthorizedDeleteBatch(rows.map(::threadDeleteDraft), "reading-history:selected") {
+                persistence.deleteHistorySynchronously(first)
+            }
         }
     }
 
     override suspend fun deleteHistoryBatch(items: List<ReadHistoryRepository.ThreadReadingHistory>) =
         withContext(storageDispatcher) {
-        recordAuthorizedDeleteBatch(items.distinctBy(::threadEntityId).map {
-            draft("reading.thread", threadEntityId(it), SyncOperationKind.Delete, it.fields())
-        }, "reading-history:selected") {
-            delegate.synchronousReaderPersistence().deleteHistoryBatchSynchronously(items)
+        historyWriteMutex.withLock {
+            val drafts = threadDeleteDrafts(items)
+            recordAuthorizedDeleteBatch(drafts, "reading-history:selected") {
+                delegate.synchronousReaderPersistence().deleteHistoryBatchSynchronously(items)
+            }
         }
     }
 
     override suspend fun deleteAll() = withContext(storageDispatcher) {
-        val items = loadAllThreadHistory()
-        recordAuthorizedDeleteBatch(items.map {
-            draft("reading.thread", threadEntityId(it), SyncOperationKind.Delete, it.fields())
-        }, "reading-history:all-thread") {
-            delegate.synchronousReaderPersistence().deleteAllThreadHistorySynchronously()
+        historyWriteMutex.withLock {
+            val persistence = delegate.synchronousReaderPersistence()
+            recordAuthorizedDeleteBatch(persistence.allThreadHistoryForDeletion().map(::threadDeleteDraft), "reading-history:all-thread") {
+                persistence.deleteAllThreadHistorySynchronously()
+            }
         }
     }
 
     private val historyWriteMutex = Mutex()
 
-    override suspend fun saveImagePosition(history: ReadHistoryRepository.ImageReadingHistory) =
+    override suspend fun saveImagePosition(history: ReadHistoryRepository.ImageReadingHistory) {
         withContext(storageDispatcher) {
             historyWriteMutex.withLock {
-                val existing = delegate.getImagePosition(history.postId)
-                if (existing != null && existing.lastVisitTime > history.lastVisitTime) return@withLock
-                record(
-                    "reading.image",
-                    history.postId.value.toString(),
-                    if (existing == null) SyncOperationKind.Put else SyncOperationKind.Patch,
-                    history.fields(),
-                ) {
-                    delegate.synchronousReaderPersistence().saveImagePositionSynchronously(history)
+                recorder.recordCommand {
+                    val previous = delegate.synchronousReaderPersistence().saveImagePositionSynchronously(history)
+                    if (previous != null && previous > history.lastVisitTime) emptyList()
+                    else listOf(draft("reading.image", history.postId.value.toString(),
+                        if (previous == null) SyncOperationKind.Put else SyncOperationKind.Patch, history.fields()))
                 }
             }
         }
+    }
 
     override suspend fun saveTagMangaReaderModeHistory(
         history: ReadHistoryRepository.TagMangaReadingHistory,
@@ -202,82 +205,85 @@ internal class OperationRecordingReadHistoryRepository(
 
     override suspend fun deleteCombinedHistoryBatch(items: List<ReadHistoryRepository.AnyReadingHistory>) =
         withContext(storageDispatcher) {
-        val drafts = items.mapNotNull { item ->
-            when (item) {
-                is ReadHistoryRepository.ThreadReadingHistory ->
-                    draft("reading.thread", threadEntityId(item), SyncOperationKind.Delete, item.fields())
-                is ReadHistoryRepository.TagMangaReadingHistory ->
-                    draft(
-                        "reading.tag-manga",
-                        item.tagId.value.toString(),
-                        SyncOperationKind.Delete,
-                        item.fields(),
-                    )
-                is ReadHistoryRepository.ImageReadingHistory ->
-                    draft(
-                        "reading.image",
-                        item.postId.value.toString(),
-                        SyncOperationKind.Delete,
-                        item.fields(),
-                    )
-                is ReadHistoryRepository.TagCatalogReadingHistory ->
-                    draft(
-                        "reading.tag-catalog",
-                        item.tagId.value.toString(),
-                        SyncOperationKind.Delete,
-                        item.fields(),
-                    )
-                is ReadHistoryRepository.RssSearchReadingHistory ->
-                    delegate.getRssSubscriptionSyncId(item.subscriptionId)?.let { syncId ->
-                        draft("reading.rss-search", syncId, SyncOperationKind.Delete, item.fields(syncId))
-                    }
-                is ReadHistoryRepository.RssCatalogReadingHistory ->
-                    delegate.getRssSubscriptionSyncId(item.subscriptionId)?.let { syncId ->
-                        draft("reading.rss-catalog", syncId, SyncOperationKind.Delete, item.fields(syncId))
-                    }
+        historyWriteMutex.withLock {
+            val drafts = threadDeleteDrafts(items.filterIsInstance<ReadHistoryRepository.ThreadReadingHistory>()) + items.mapNotNull { item ->
+                when (item) {
+                    is ReadHistoryRepository.ThreadReadingHistory -> null
+                    is ReadHistoryRepository.TagMangaReadingHistory ->
+                        draft(
+                            "reading.tag-manga",
+                            item.tagId.value.toString(),
+                            SyncOperationKind.Delete,
+                            item.fields(),
+                        )
+                    is ReadHistoryRepository.ImageReadingHistory ->
+                        draft(
+                            "reading.image",
+                            item.postId.value.toString(),
+                            SyncOperationKind.Delete,
+                            item.fields(),
+                        )
+                    is ReadHistoryRepository.TagCatalogReadingHistory ->
+                        draft(
+                            "reading.tag-catalog",
+                            item.tagId.value.toString(),
+                            SyncOperationKind.Delete,
+                            item.fields(),
+                        )
+                    is ReadHistoryRepository.RssSearchReadingHistory ->
+                        delegate.getRssSubscriptionSyncId(item.subscriptionId)?.let { syncId ->
+                            draft("reading.rss-search", syncId, SyncOperationKind.Delete, item.fields(syncId))
+                        }
+                    is ReadHistoryRepository.RssCatalogReadingHistory ->
+                        delegate.getRssSubscriptionSyncId(item.subscriptionId)?.let { syncId ->
+                            draft("reading.rss-catalog", syncId, SyncOperationKind.Delete, item.fields(syncId))
+                        }
+                }
+            }.distinctBy { "${it.domainId.value}|${it.entityId.value}" }
+            recordAuthorizedDeleteBatch(drafts, "reading-history:selected-combined") {
+                delegate.synchronousReaderPersistence().deleteCombinedHistoryBatchSynchronously(items)
             }
-        }.distinctBy { "${it.domainId.value}|${it.entityId.value}" }
-        recordAuthorizedDeleteBatch(drafts, "reading-history:selected-combined") {
-            delegate.synchronousReaderPersistence().deleteCombinedHistoryBatchSynchronously(items)
         }
     }
 
     override suspend fun deleteAllCombinedHistory() = withContext(storageDispatcher) {
-        val threads = loadAllThreadHistory()
-        val images = delegate.getAllImageHistoryForSync()
-        val mangaTags = delegate.getAllTagMangaHistoryForSync()
-        val tagCatalogs = delegate.getAllTagCatalogHistoryForSync()
-        val rssSearch = delegate.getAllRssSearchHistoryForSync()
-        val rssCatalog = delegate.getAllRssCatalogHistoryForSync()
-        val drafts = threads.map {
-            draft("reading.thread", threadEntityId(it), SyncOperationKind.Delete, it.fields())
-        } + images.map {
-            draft("reading.image", it.postId.value.toString(), SyncOperationKind.Delete, it.fields())
-        } + mangaTags.map {
-            draft(
-                "reading.tag-manga",
-                it.tagId.value.toString(),
-                SyncOperationKind.Delete,
-                it.fields(),
-            )
-        } + tagCatalogs.map {
-            draft(
-                "reading.tag-catalog",
-                it.tagId.value.toString(),
-                SyncOperationKind.Delete,
-                it.fields(),
-            )
-        } + rssSearch.mapNotNull {
-            delegate.getRssSubscriptionSyncId(it.subscriptionId)?.let { syncId ->
-                draft("reading.rss-search", syncId, SyncOperationKind.Delete, it.fields(syncId))
+        historyWriteMutex.withLock {
+            val threads = delegate.synchronousReaderPersistence().allThreadHistoryForDeletion()
+            val images = delegate.getAllImageHistoryForSync()
+            val mangaTags = delegate.getAllTagMangaHistoryForSync()
+            val tagCatalogs = delegate.getAllTagCatalogHistoryForSync()
+            val rssSearch = delegate.getAllRssSearchHistoryForSync()
+            val rssCatalog = delegate.getAllRssCatalogHistoryForSync()
+            val drafts = threads.map {
+                draft("reading.thread", threadEntityId(it), SyncOperationKind.Delete, it.fields())
+            } + images.map {
+                draft("reading.image", it.postId.value.toString(), SyncOperationKind.Delete, it.fields())
+            } + mangaTags.map {
+                draft(
+                    "reading.tag-manga",
+                    it.tagId.value.toString(),
+                    SyncOperationKind.Delete,
+                    it.fields(),
+                )
+            } + tagCatalogs.map {
+                draft(
+                    "reading.tag-catalog",
+                    it.tagId.value.toString(),
+                    SyncOperationKind.Delete,
+                    it.fields(),
+                )
+            } + rssSearch.mapNotNull {
+                delegate.getRssSubscriptionSyncId(it.subscriptionId)?.let { syncId ->
+                    draft("reading.rss-search", syncId, SyncOperationKind.Delete, it.fields(syncId))
+                }
+            } + rssCatalog.mapNotNull {
+                delegate.getRssSubscriptionSyncId(it.subscriptionId)?.let { syncId ->
+                    draft("reading.rss-catalog", syncId, SyncOperationKind.Delete, it.fields(syncId))
+                }
             }
-        } + rssCatalog.mapNotNull {
-            delegate.getRssSubscriptionSyncId(it.subscriptionId)?.let { syncId ->
-                draft("reading.rss-catalog", syncId, SyncOperationKind.Delete, it.fields(syncId))
+            recordAuthorizedDeleteBatch(drafts, "reading-history:all-combined") {
+                delegate.synchronousReaderPersistence().deleteAllCombinedHistorySynchronously()
             }
-        }
-        recordAuthorizedDeleteBatch(drafts, "reading-history:all-combined") {
-            delegate.synchronousReaderPersistence().deleteAllCombinedHistorySynchronously()
         }
     }
 
@@ -300,10 +306,13 @@ internal class OperationRecordingReadHistoryRepository(
         }
     }
 
-    private suspend fun loadAllThreadHistory(): List<ReadHistoryRepository.ThreadReadingHistory> {
-        val count = delegate.getHistoryCount().coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-        return if (count == 0) emptyList() else delegate.getHistoryPage(1, count)
-    }
+    private fun threadDeleteDraft(history: ReadHistoryRepository.ThreadReadingHistory) =
+        draft("reading.thread", threadEntityId(history), SyncOperationKind.Delete, history.fields())
+
+    private fun threadDeleteDrafts(items: List<ReadHistoryRepository.ThreadReadingHistory>) =
+        items.distinctBy { Triple(it.threadId, it.threadType, it.authorId) }.flatMap {
+            delegate.synchronousReaderPersistence().threadHistoryForDeletion(it.threadId, it.threadType, it.authorId)
+        }.map(::threadDeleteDraft)
 
     private suspend fun record(
         domain: String,
@@ -392,7 +401,7 @@ internal class OperationRecordingReadHistoryRepository(
         "firstVisibleItemIndex" to firstVisibleItemIndex?.toString(),
         "firstVisibleItemOffset" to firstVisibleItemOffset?.toString(),
         "lastVisitTime" to lastVisitTime.toString(),
-    )
+    ).withReaderAnchorFields(floorAuthor?.value, imageSource, imageOccurrence)
 
     private fun ReadHistoryRepository.ImageReadingHistory.fields() = mapOf(
         "postId" to postId.value.toString(),
@@ -402,7 +411,7 @@ internal class OperationRecordingReadHistoryRepository(
         "firstVisibleItemIndex" to firstVisibleItemIndex?.toString(),
         "firstVisibleItemOffset" to firstVisibleItemOffset?.toString(),
         "lastVisitTime" to lastVisitTime.toString(),
-    )
+    ).withReaderAnchorFields(anchor?.floorPid?.value, anchor?.sourceId, anchor?.occurrence, anchor?.forumPage, anchor?.scopeAuthor?.value)
 
     private fun ReadHistoryRepository.TagMangaReadingHistory.fields() = mapOf(
         "tagId" to tagId.value.toString(),
@@ -478,3 +487,12 @@ internal class OperationRecordingReadHistoryRepository(
         "coverUrl" to coverUrl,
     )
 }
+
+internal fun Map<String, String?>.withReaderAnchorFields(author: Number?, source: String?, occurrence: Number?): Map<String, String?> =
+    if (author == null) this else this + mapOf("floorAuthor" to author.toString(),
+        "imageSource" to source, "imageOccurrence" to occurrence?.toString())
+
+internal fun Map<String, String?>.withReaderAnchorFields(floor: Number?, source: String?, occurrence: Number?, page: Number?, author: Number?): Map<String, String?> =
+    if (floor == null || source == null || occurrence == null || page == null) this else this + mapOf(
+        "floorPid" to floor.toString(), "sourceId" to source, "imageOccurrence" to occurrence.toString(),
+        "forumPage" to page.toString(), "scopeAuthor" to author?.toString())

@@ -1,8 +1,11 @@
 package me.thenano.yamibo.yamibo_app.thread.reader
 
+import androidx.compose.foundation.gestures.scrollBy
+import me.thenano.yamibo.yamibo_app.repository.thread.matchesReaderImageSource
 import io.github.littlesurvival.dto.model.ThreadSummary
 import me.thenano.yamibo.yamibo_app.forum.ReaderModeDialog
 import me.thenano.yamibo.yamibo_app.repository.settings.ForumReadingMode
+import me.thenano.yamibo.yamibo_app.repository.thread.TextReaderStart
 import me.thenano.yamibo.yamibo_app.repository.thread.textReaderStart
 import me.thenano.yamibo.yamibo_app.repository.thread.readerImageSourceId
 import me.thenano.yamibo.yamibo_app.repository.thread.readerImageUrls
@@ -59,7 +62,9 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import me.thenano.yamibo.yamibo_app.*
 import me.thenano.yamibo.yamibo_app.components.systembars.SystemBarsEffect
@@ -70,7 +75,9 @@ import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.profile.settings.ISettingsCategoryScreen
 import me.thenano.yamibo.yamibo_app.repository.BookMarkRepository
+import me.thenano.yamibo.yamibo_app.repository.chineseconversion.ChineseConversionMode
 import me.thenano.yamibo.yamibo_app.repository.ChapterStateRepository
+import me.thenano.yamibo.yamibo_app.repository.ChineseConversionRepository
 import me.thenano.yamibo.yamibo_app.repository.ContentCoverRepository
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository.ThreadReadingHistory
@@ -111,7 +118,7 @@ import kotlin.time.TimeSource
 internal sealed interface ReaderState {
     data object Loading : ReaderState
     data object Success : ReaderState
-    data class Error(val message: String) : ReaderState
+    data class Error(val message: String, val retryPage: Int? = null, val forceRefresh: Boolean = false) : ReaderState
 }
 
 private enum class ReaderEntryKind {
@@ -133,6 +140,56 @@ private fun ReaderEntryKind.isSegmentedBodyLike(): Boolean =
         this == ReaderEntryKind.SegmentedBodyWithHeaderAndFooter ||
         this == ReaderEntryKind.SegmentedBodyWithFooter ||
         this == ReaderEntryKind.SegmentedBody
+
+private data class PreparedReaderBody(
+    val sourceHtml: String,
+    val hasImages: Boolean,
+    val displayHtml: String,
+    val segments: List<ReaderBodySegment>?,
+)
+
+private data class ReaderPostsProjection(
+    val mode: ChineseConversionMode?,
+    val posts: List<Post>,
+    val bodies: Map<Long, PreparedReaderBody>,
+    val postIndexByPid: Map<Long, Int>,
+    val pageByPid: Map<Long, Int>,
+    val pageIndexBounds: Map<Int, IntRange>,
+)
+
+private suspend fun ChineseConversionRepository.projectReaderPosts(
+    pages: Map<Int, List<Post>>,
+    mode: ChineseConversionMode?,
+    previous: Map<Long, PreparedReaderBody>,
+): ReaderPostsProjection {
+    val posts = mutableListOf<Post>()
+    val bodies = mutableMapOf<Long, PreparedReaderBody>()
+    val postIndex = mutableMapOf<Long, Int>()
+    val pageByPid = mutableMapOf<Long, Int>()
+    val bounds = mutableMapOf<Int, IntRange>()
+    val context = currentCoroutineContext()
+    for (page in pages.keys.sorted()) {
+        val startIndex = posts.size
+        for (post in pages.getValue(page)) {
+            context.ensureActive()
+            val pid = post.pid.value.toLong()
+            if (pid in postIndex) continue
+            val old = previous[pid]
+            val hasImages = post.images.isNotEmpty()
+            bodies[pid] = if (old != null && old.sourceHtml == post.contentHtml && old.hasImages == hasImages) {
+                old
+            } else {
+                val html = if (mode == null) post.contentHtml else convert(post.contentHtml, mode)
+                PreparedReaderBody(post.contentHtml, hasImages, html, buildReaderBodySegments(post, html))
+            }
+            pageByPid[pid] = page
+            postIndex[pid] = posts.size
+            posts += post
+        }
+        if (startIndex < posts.size) bounds[page] = startIndex..posts.lastIndex
+    }
+    return ReaderPostsProjection(mode, posts, bodies, postIndex, pageByPid, bounds)
+}
 
 private data class ReaderBodySegment(
     val blocks: List<HtmlBlock>,
@@ -628,6 +685,7 @@ internal fun ThreadReaderScreen(
     openingImage: ReadHistoryRepository.ImageReadingHistory? = null,
     offlineOnly: Boolean = false,
     offlinePage: ThreadPageDownloadKey? = null,
+    fromModeSwitch: Boolean = false,
 ) {
     val errorMessages = LocalForumErrorMessageResolver.current
     DebugRecomposeProbe("ThreadReaderScreen", tid.value.toString())
@@ -773,12 +831,14 @@ internal fun ThreadReaderScreen(
 
     var hasRestoredPosition by remember { mutableStateOf(false) }
     var pendingSavedPosition by remember(tid, targetPid) { mutableStateOf<ThreadReadingHistory?>(null) }
+    var centeredEntry by remember(tid, targetPid) { mutableStateOf<Pair<String, Float>?>(null) }
     var hasResolvedInitialHistoryLookup by remember(tid, targetPid) { mutableStateOf(targetPid != null) }
     var imageGeometryPriorityPostId by remember(tid, targetPid) {
         mutableStateOf(targetPid?.value?.toLong())
     }
     var isRestoringSavedPosition by remember { mutableStateOf(false) }
     var preserveRestoredProgress by remember(tid, authorId, threadType) { mutableStateOf(false) }
+    var allowAdjacentPagePreload by remember(tid, authorId, threadType) { mutableStateOf(false) }
     var canPersistReadingState by remember(tid, targetPid) { mutableStateOf(false) }
     var hasPresentedInitialSinglePage by remember(tid, targetPid) { mutableStateOf(false) }
     var pendingTargetPid by remember(tid, targetPid) { mutableStateOf(targetPid?.value?.toLong()) }
@@ -794,6 +854,7 @@ internal fun ThreadReaderScreen(
 
     /** Extract image URL for thread avatar based on forum type */
     var coverUrl by remember { mutableStateOf<String?>(null) }
+    var restoredCover by remember(tid, threadType, authorId) { mutableStateOf<String?>(null) }
     var manualCoverUrlOverride by remember(tid) { mutableStateOf<String?>(null) }
     val coverKey = remember(tid, threadType) {
         ContentCoverRepository.Key(threadType.toCoverTargetType(), tid.value.toLong())
@@ -870,13 +931,24 @@ internal fun ThreadReaderScreen(
         canonicalCover?.resolvedUrl?.let { coverUrl = it }
     }
 
-    LaunchedEffect(tid, threadType, loadedPostsByPage[1]) {
-        if (threadType != ReadHistoryRepository.ThreadEntryType.Normal || loadedPostsByPage[1] == null) {
-            return@LaunchedEffect
-        }
-        threadCoverResolver.resolve(tid)?.let { resolved ->
-            contentCoverRepository.setAutomaticCover(coverKey, resolved)
-            catalogCoverKey?.let { contentCoverRepository.setAutomaticCover(it, resolved) }
+    if (state is ReaderState.Success) {
+        val firstPagePosts = loadedPostsByPage[1]
+        val historyCover = restoredCover
+        LaunchedEffect(coverKey, catalogCoverKey, firstPagePosts, historyCover) {
+            val findForumCover = threadType == ReadHistoryRepository.ThreadEntryType.Normal && firstPagePosts != null
+            if (!findForumCover && historyCover == null) return@LaunchedEffect
+            try {
+                withContext(Dispatchers.IO) {
+                    val resolved = if (findForumCover) threadCoverResolver.resolve(tid) else null
+                    val automatic = resolved ?: historyCover ?: return@withContext
+                    contentCoverRepository.setAutomaticCover(coverKey, automatic)
+                    catalogCoverKey?.let { contentCoverRepository.setAutomaticCover(it, automatic) }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Logger.w("ThreadReaderScreen", "Failed to update reader cover", error)
+            }
         }
     }
 
@@ -1093,31 +1165,48 @@ internal fun ThreadReaderScreen(
         )
     }
 
-    fun rebuildPosts() {
-        val mergedPosts = mutableListOf<Post>()
-        val pageByPidMutable = mutableMapOf<Long, Int>()
-        val pageIndexBoundsMutable = mutableMapOf<Int, IntRange>()
+    val chineseConversionRepository = LocalChineseConversionRepository.current
+    val chineseConversionMode by chineseConversionRepository.currentMode.collectAsState()
+    var appliedConversionMode by remember { mutableStateOf<ChineseConversionMode?>(null) }
+    var convertedContentVersion by remember { mutableIntStateOf(0) }
+    var preparedBodies by remember { mutableStateOf<Map<Long, PreparedReaderBody>>(emptyMap()) }
+    val pageProjectionMutex = remember { Mutex() }
 
-        loadedPostsByPage.keys.sorted().forEach { page ->
-            val startIndex = mergedPosts.size
-            loadedPostsByPage[page].orEmpty().forEach { post ->
-                val pid = post.pid.value.toLong()
-                if (pageByPidMutable.containsKey(pid)) return@forEach
-                pageByPidMutable[pid] = page
-                mergedPosts += post
-            }
-
-            val endIndex = mergedPosts.lastIndex
-            if (endIndex >= startIndex) {
-                pageIndexBoundsMutable[page] = startIndex..endIndex
-            }
+    suspend fun prepareReaderPosts(
+        pageNumber: Int? = null,
+        incoming: List<Post> = emptyList(),
+        openingProjection: ReaderPostsProjection? = null,
+    ) = pageProjectionMutex.withLock {
+        if (pageNumber == null && (posts.isEmpty() || appliedConversionMode == chineseConversionRepository.currentMode.value)) {
+            return@withLock false
         }
+        // A competing page load may have committed while the opening page was being prepared.
+        if (openingProjection != null && pageNumber != null && pageNumber in loadedPostsByPage) return@withLock false
+        val pages = loadedPostsByPage.toMutableMap()
+        if (pageNumber != null) pages[pageNumber] = incoming
 
-        posts = mergedPosts
-        postIndexByPid = mergedPosts.mapIndexed { index, post -> post.pid.value.toLong() to index }.toMap()
-        pageByPid = pageByPidMutable
-        pageIndexBounds = pageIndexBoundsMutable
+        while (true) {
+            val mode = chineseConversionRepository.currentMode.value
+            val previous = if (mode == appliedConversionMode) preparedBodies else emptyMap()
+            val projected = openingProjection?.takeIf { pages.size == 1 && it.mode == mode }
+                ?: withContext(Dispatchers.Default) {
+                    chineseConversionRepository.projectReaderPosts(pages, mode, previous)
+                }
+            if (mode != chineseConversionRepository.currentMode.value) continue
+            if (mode != appliedConversionMode || (mode != null && pageNumber != null)) convertedContentVersion++
+            appliedConversionMode = mode
+            preparedBodies = projected.bodies
+            if (pageNumber != null) loadedPostsByPage[pageNumber] = incoming
+            posts = projected.posts
+            postIndexByPid = projected.postIndexByPid
+            pageByPid = projected.pageByPid
+            pageIndexBounds = projected.pageIndexBounds
+            break
+        }
+        true
     }
+
+    LaunchedEffect(chineseConversionMode) { prepareReaderPosts() }
 
     val expectedImageUrlsByPost = remember(posts) {
         posts.associate { post ->
@@ -1137,38 +1226,13 @@ internal fun ThreadReaderScreen(
             currentThreadType = threadType,
         )
     }
-    val chineseConversionRepository = LocalChineseConversionRepository.current
-    val chineseConversionMode by chineseConversionRepository.currentMode.collectAsState()
-    val convertedContentByPid = remember { mutableStateMapOf<Long, String>() }
-    var convertedContentVersion by remember { mutableIntStateOf(0) }
-
-    LaunchedEffect(posts, chineseConversionMode) {
-        convertedContentByPid.clear()
-        convertedContentVersion++
-        if (chineseConversionMode != null) {
-            posts.forEach { post ->
-                convertedContentByPid[post.pid.value.toLong()] = chineseConversionRepository.convert(post.contentHtml)
-            }
-            convertedContentVersion++
-        }
-    }
-
     val isMangaForum = forumId?.let { YamiboForum.isMangaForum(it) } == true
     val isNovelForum = forumId?.let { YamiboForum.isNovelForum(it) } == true
     val showRegularFirstPostTagBanner = isMangaForum || (!isNovelForum && !isNovelThread)
     val showNovelFirstPostTagBanner = isNovelThread && isNovelForum
-    val segmentedBodyByPostId by produceState(emptyMap<Long, List<ReaderBodySegment>?>(), posts, convertedContentVersion) {
-        val content = convertedContentByPid.toMap()
-        value = withContext(Dispatchers.Default) {
-            posts.associate { post ->
-                val pid = post.pid.value.toLong()
-                pid to buildReaderBodySegments(post, content[pid] ?: post.contentHtml)
-            }
-        }
-    }
     val readerEntries = remember(
         posts,
-        segmentedBodyByPostId,
+        preparedBodies,
         pageByPid,
         isNovelThread,
         showRegularFirstPostTagBanner,
@@ -1178,8 +1242,7 @@ internal fun ThreadReaderScreen(
             posts.forEachIndexed { index, post ->
                 val postId = post.pid.value.toLong()
                 val postPage = pageByPid[postId] ?: 1
-                if (!segmentedBodyByPostId.containsKey(postId)) return@forEachIndexed
-                val segmentedBody = segmentedBodyByPostId[postId]
+                val segmentedBody = preparedBodies.getValue(postId).segments
 
                 if (segmentedBody.isNullOrEmpty()) {
                     add(
@@ -1498,7 +1561,7 @@ internal fun ThreadReaderScreen(
                 val postId = entry.post.pid.value.toLong()
                 if (!packedPostIds.add(postId)) return@forEachIndexed
 
-                val convertedContent = convertedContentByPid[postId] ?: entry.post.contentHtml
+                val convertedContent = preparedBodies.getValue(postId).displayHtml
                 val renderBlocks = singlePagePlanningCache.normalizedBlocks(
                     key = SinglePageNormalizedBlocksKey(postId, convertedContent),
                     metrics = singlePagePlanningMetrics,
@@ -1937,6 +2000,8 @@ internal fun ThreadReaderScreen(
     }
 
     fun moveSinglePage(delta: Int): Boolean {
+        allowAdjacentPagePreload = true
+        centeredEntry = null
         preserveRestoredProgress = false
         if (singlePageEntries.isEmpty()) return false
         val currentPosition = singlePageModelIndex.coerceIn(0, singlePageEntries.lastIndex)
@@ -2081,9 +2146,13 @@ internal fun ThreadReaderScreen(
         return 1.35f
     }
 
+    // Back, scroll-idle and lifecycle callbacks can outlive the projection that registered them.
+    val currentReaderEntries by rememberUpdatedState(readerEntries)
+
     /** Build a reading history snapshot from current scroll state (does NOT save) */
     fun buildHistory(): ThreadReadingHistory? {
-        if (posts.isEmpty() || readerEntries.isEmpty()) return null
+        val entries = currentReaderEntries
+        if (posts.isEmpty() || entries.isEmpty()) return null
         if (isSinglePageMode) {
             val currentIndex = singlePageSession?.currentPageIndex ?: return null
             val pageEntry = singlePageSession?.layoutResult?.entries?.getOrNull(currentIndex) ?: return null
@@ -2157,7 +2226,7 @@ internal fun ThreadReaderScreen(
             }
 
         val visibleEntries = visibleItems.mapNotNull { item ->
-            readerEntries.getOrNull(item.index)?.let { entry -> item to entry }
+            entries.getOrNull(item.index)?.takeIf { it.key == item.key }?.let { entry -> item to entry }
         }
         val centerEntry = visibleEntries
             .filter { (_, entry) -> entry.isScrollAnchor }
@@ -2550,6 +2619,7 @@ internal fun ThreadReaderScreen(
     }
 
     suspend fun scrollToChapterTarget(index: Int, pid: Long) {
+        centeredEntry = null
         preserveRestoredProgress = false
         val progressPercent = progressCoordinator.chapterStates.value[pid]
             ?.progressPercent
@@ -2693,15 +2763,50 @@ internal fun ThreadReaderScreen(
         }
     }
 
+    suspend fun downloadedPage(page: Int): ThreadPage? {
+        suspend fun local(key: ThreadPageDownloadKey) = downloadRepository.getDownloadedPage(key)
+            ?.takeIf { it.isValidThreadPage(tid, page = page, authorId = key.authorId?.let(::UserId)) }
+        val preferred = ThreadPageDownloadKey(tid.value, page, authorId?.value)
+        val original = offlinePage?.copy(page = page)
+        val downloaded = if (fromModeSwitch) {
+            local(preferred) ?: original?.takeIf { it != preferred }?.let { local(it) }
+        } else local(original ?: preferred)
+        if (downloaded == null) return null
+        if (authorId == null) return downloaded.takeIf { it.posts.isNotEmpty() }
+        val visible = downloaded.posts.filter { it.author.uid == authorId }
+        return downloaded.copy(posts = visible).takeIf { visible.isNotEmpty() }
+    }
+
+    fun cachedPage(page: Int) = threadRepository.getCachedThread(tid, authorId, page)
+        ?.takeIf { it.isValidThreadPage(tid, page = page, authorId = authorId) }
+
+    suspend fun readPage(page: Int, snapshot: ThreadPage? = null): YamiboResult<ThreadPage> {
+        val local = snapshot?.takeIf { it.isValidThreadPage(tid, page = page, authorId = authorId) }
+            ?: downloadedPage(page)
+        if (local != null) return YamiboResult.Success(local)
+        if (offlineOnly) return YamiboResult.Failure("這一頁尚未下載")
+        cachedPage(page)?.let { return YamiboResult.Success(it) }
+        return threadRepository.fetchThread(tid, authorId, page)
+            .validatedThreadPage(tid, page = page, authorId = authorId)
+    }
+
     suspend fun loadPage(
         page: Int,
         forceRefresh: Boolean = false,
         autoTriggered: Boolean = false,
-        initialSnapshot: ThreadPage? = null,
+        initialResult: YamiboResult<ThreadPage>? = null,
+        openingProjection: ReaderPostsProjection? = null,
     ): Boolean {
-        if (!forceRefresh && page in loadedPages) return true
+        if (!forceRefresh && page in loadedPages) {
+            if (state is ReaderState.Loading) state = ReaderState.Success
+            return true
+        }
         isLoadingNextPage = true
         var loadSucceeded = false
+
+        fun showPageError(message: String) {
+            state = ReaderState.Error(message, retryPage = page.takeIf { initialResult == null }, forceRefresh = forceRefresh)
+        }
 
         fun markPageLoadSucceeded() {
             if (state is ReaderState.Loading || page == initialPage || page == 1) {
@@ -2709,95 +2814,53 @@ internal fun ThreadReaderScreen(
             }
         }
 
-        suspend fun loadFromDownload(): Boolean {
-            val downloadKey = offlinePage?.copy(page = page) ?: ThreadPageDownloadKey(tid.value, page, authorId?.value)
-            val downloaded = downloadRepository.getDownloadedPage(downloadKey)
-                ?.takeIf { it.isValidThreadPage(tid, page = page, authorId = downloadKey.authorId?.let(::UserId)) }
-                ?: return false
-            val visible = downloaded.posts.filter { authorId == null || it.author.uid == authorId }
-            if (visible.isEmpty()) return false
-            loadedPostsByPage[page] = visible
-            rebuildPosts()
-            threadInfo = downloaded.thread
-            totalPages = downloaded.pageNav?.totalPages ?: 1
+        suspend fun updatePage(result: ThreadPage) {
+            if (!prepareReaderPosts(page, result.posts, openingProjection)) return
+            totalPages = result.pageNav?.totalPages ?: 1
             loadedPages = loadedPages + page
             failedAutoLoadPages.remove(page)
-            markPageLoadSucceeded()
-            return true
-        }
-
-        suspend fun loadFromCache(): Boolean {
-            val cached = withContext(Dispatchers.Default) { threadRepository.getCachedThread(tid, authorId, page) }
-                ?.takeIf { it.isValidThreadPage(tid, page = page, authorId = authorId) }
-            if (cached != null) {
-                loadedPostsByPage[page] = cached.posts
-                rebuildPosts()
-                threadInfo = cached.thread
-                totalPages = cached.pageNav?.totalPages ?: 1
-                loadedPages = loadedPages + page
-                failedAutoLoadPages.remove(page)
-                markPageLoadSucceeded()
-                return true
-            }
-            return false
-        }
-
-        fun updatePage(result: YamiboResult.Success<ThreadPage>) {
-            loadedPostsByPage[page] = result.value.posts
-            rebuildPosts()
-            totalPages = result.value.pageNav?.totalPages ?: 1
-            loadedPages = loadedPages + page
-            failedAutoLoadPages.remove(page)
-            threadInfo = result.value.thread
+            threadInfo = result.thread
             markPageLoadSucceeded()
         }
 
         try {
-            if (offlineOnly && initialSnapshot == null) {
-                if (loadFromDownload()) return true
-                if (posts.isEmpty()) state = ReaderState.Error(i18n("這一頁尚未下載"))
-                else if (autoTriggered) failedAutoLoadPages[page] = i18n("這一頁尚未下載")
-                else feedbackController.post(i18n("這一頁尚未下載"))
-                return false
-            }
-            if (forceRefresh) {
+            if (forceRefresh && !offlineOnly) {
                 when (val result = threadRepository.fetchThread(tid, authorId, page)
                     .validatedThreadPage(tid, page = page, authorId = authorId)) {
                     is YamiboResult.Success -> {
-                        updatePage(result)
+                        updatePage(result.value)
                         loadSucceeded = true
                     }
 
                     else -> {
                         feedbackController.post(i18n("刷新失敗: {}，嘗試讀取緩存", i18n(errorMessages.resolve(result))))
-                        if (loadFromCache()) {
+                        val cached = withContext(Dispatchers.Default) { cachedPage(page) }
+                        if (cached != null) {
+                            updatePage(cached)
                             loadSucceeded = true
-                        } else if (page == initialPage || page == 1) {
-                            state = ReaderState.Error(i18n(errorMessages.resolve(result)))
+                        } else if (state is ReaderState.Loading || page == initialPage || page == 1) {
+                            showPageError(i18n(errorMessages.resolve(result)))
                         }
                     }
                 }
             } else {
-                if (initialSnapshot?.isValidThreadPage(tid, page = page, authorId = authorId) == true) {
-                    updatePage(YamiboResult.Success(initialSnapshot))
-                    return true
-                }
-                if (loadFromDownload()) return true
-                if (loadFromCache()) return true
-
-                when (val result = threadRepository.fetchThread(tid, authorId, page)
-                    .validatedThreadPage(tid, page = page, authorId = authorId)) {
+                val result = initialResult ?: withContext(Dispatchers.Default) { readPage(page) }
+                when (result) {
                     is YamiboResult.Success -> {
-                        updatePage(result)
+                        updatePage(result.value)
                         loadSucceeded = true
                     }
 
                     else -> {
-                        if (autoTriggered && page != initialPage && page != 1) {
-                            failedAutoLoadPages[page] = i18n(errorMessages.resolve(result))
+                        val message = if (offlineOnly) i18n("這一頁尚未下載") else i18n(errorMessages.resolve(result))
+                        if (state is ReaderState.Loading || posts.isEmpty() || (!offlineOnly && (page == initialPage || page == 1))) {
+                            showPageError(message)
+                        } else if (offlineOnly && autoTriggered) {
+                            failedAutoLoadPages[page] = message
+                        } else {
+                            if (autoTriggered && page != initialPage && page != 1) failedAutoLoadPages[page] = message
+                            feedbackController.post(if (offlineOnly) message else i18n("載入失敗: {}", message))
                         }
-                        if (posts.isEmpty() || page == initialPage || page == 1) state = ReaderState.Error(i18n(errorMessages.resolve(result)))
-                        else feedbackController.post(i18n("載入失敗: {}", i18n(errorMessages.resolve(result))))
                     }
                 }
             }
@@ -2806,7 +2869,7 @@ internal fun ThreadReaderScreen(
             throw cancelled
         } catch (error: Exception) {
             Logger.w("ThreadReaderScreen", "Failed to load reader page", error)
-            if (posts.isEmpty()) state = ReaderState.Error(i18n("載入失敗，請重試"))
+            if (state is ReaderState.Loading || posts.isEmpty()) showPageError(i18n("載入失敗，請重試"))
             else feedbackController.post(i18n("載入失敗，請重試"))
             return false
         } finally {
@@ -2867,11 +2930,27 @@ internal fun ThreadReaderScreen(
         listState.scrollToItem(index, offset)
     }
 
+    suspend fun restoreEntryPosition(index: Int, ratio: Float?) {
+        if (isSinglePageMode) {
+            setSinglePageEntryIndex(index)
+            listState.scrollToItem(0)
+            return
+        }
+        listState.scrollToItem(index)
+        if (ratio == null) return
+        val layout = listState.layoutInfo
+        val item = layout.visibleItemsInfo.firstOrNull { it.index == index } ?: return
+        val center = (layout.viewportStartOffset + layout.viewportEndOffset) / 2f
+        listState.scrollBy(item.offset + item.size * ratio.coerceIn(0f, 1f) - center)
+        centeredEntry = readerEntries[index].key to ratio.coerceIn(0f, 1f)
+    }
+
     suspend fun restoreSavedPosition(savedPosition: ThreadReadingHistory) {
         if (savedPosition.imageSource != null) {
             val index = readerEntries.indexOfFirst { entry ->
-                entry.post.pid == savedPosition.postId && entry.imageSource == savedPosition.imageSource &&
-                    entry.imageOccurrence == savedPosition.imageOccurrence
+                entry.post.pid == savedPosition.postId && entry.imageOccurrence == savedPosition.imageOccurrence &&
+                    matchesReaderImageSource((entry.bodyBlocks.singleOrNull() as? HtmlBlock.Image)?.url,
+                        entry.imageSource, savedPosition.imageSource)
             }
             if (index >= 0) {
                 if (isSinglePageMode) setSinglePageEntryIndex(index)
@@ -2898,7 +2977,8 @@ internal fun ThreadReaderScreen(
         }
         val savedIndex = savedPosition.firstVisibleItemIndex
         val savedOffset = savedPosition.firstVisibleItemOffset
-        if (savedIndex != null && savedIndex >= 0 && savedIndex < readerEntries.size) {
+        if (savedIndex != null && savedIndex in readerEntries.indices &&
+            savedPosition.anchorBlockRatio == null && savedPosition.anchorPostRatio == null) {
             val entryAtSavedIndex = readerEntries[savedIndex]
             if (
                 entryAtSavedIndex.post.pid.value.toLong() == savedPosition.anchorPostId &&
@@ -2912,12 +2992,7 @@ internal fun ThreadReaderScreen(
         if (!savedPosition.anchorBlockId.isNullOrEmpty()) {
             val blockIndex = readerEntries.indexOfFirst { it.post.pid == savedPosition.postId && it.anchorBlockId == savedPosition.anchorBlockId }.takeIf { it >= 0 }
             if (blockIndex != null) {
-                if (isSinglePageMode) {
-                    setSinglePageEntryIndex(blockIndex)
-                    listState.scrollToItem(0)
-                } else {
-                    listState.scrollToItem(blockIndex)
-                }
+                restoreEntryPosition(blockIndex, savedPosition.anchorBlockRatio)
                 return
             }
         }
@@ -2925,12 +3000,8 @@ internal fun ThreadReaderScreen(
         if (savedPosition.anchorPostId > 0) {
             val postIndex = entryIndexByPid[savedPosition.anchorPostId] ?: -1
             if (postIndex >= 0) {
-                if (isSinglePageMode) {
-                    setSinglePageEntryIndex(postIndex)
-                    listState.scrollToItem(0)
-                } else {
-                    listState.scrollToItem(postIndex)
-                }
+                val ratio = savedPosition.anchorPostRatio.takeIf { readerEntries[postIndex].kind == ReaderEntryKind.WholePost }
+                restoreEntryPosition(postIndex, ratio)
             } else {
                 fallbackNearestPost(savedPosition.anchorPostId, savedPosition.page)
             }
@@ -2991,17 +3062,17 @@ internal fun ThreadReaderScreen(
         )
     }
 
-    val latestSeekEntries by rememberUpdatedState(readerEntries)
     val latestSeekPages by rememberUpdatedState(pageByPid)
     suspend fun seekReader(fraction: Float) {
+        centeredEntry = null
         preserveRestoredProgress = false
         val position = fraction.coerceIn(0f, 1f) * totalPages.coerceAtLeast(1)
         val page = (position.toInt() + 1).coerceIn(1, totalPages.coerceAtLeast(1))
         if (!loadPage(page)) return
         val entries = kotlinx.coroutines.withTimeoutOrNull(5_000) {
             snapshotFlow {
-                latestSeekEntries.indices.filter {
-                    latestSeekPages[latestSeekEntries[it].post.pid.value.toLong()] == page
+                currentReaderEntries.indices.filter {
+                    latestSeekPages[currentReaderEntries[it].post.pid.value.toLong()] == page
                 }
             }.first { it.isNotEmpty() }
         } ?: return
@@ -3012,48 +3083,110 @@ internal fun ThreadReaderScreen(
     }
     me.thenano.yamibo.yamibo_app.navigation.StatusBarScrollToTop { seekReader(0f) }
 
-    // Initial load + position restore
-    LaunchedEffect(tid, initialPage, targetPid) {
-        try {
-            val direct = if (targetPid == null) withContext(Dispatchers.Default) {
-                readHistoryRepo.textReaderStart(tid, threadType, authorId, threadRepository, downloadRepository, offlineOnly, openingImage)
-            } else null
-            preserveRestoredProgress = direct?.preserveUntilMoved == true
-            val catalogPosition = if (targetPid == null) null else withContext(Dispatchers.Default) {
-                when (threadHistoryOrigin) {
-                    ReadHistoryRepository.ThreadHistoryOrigin.TagCatalog -> catalogTagId
-                        ?.let { readHistoryRepo.getTagCatalogThreadHistoryPosition(it) }
-                        ?.takeIf { it.threadId == tid && it.postId == targetPid }?.toThreadReadingHistory()
-                    ReadHistoryRepository.ThreadHistoryOrigin.RssCatalog -> catalogRssSubscriptionId
-                        ?.let { readHistoryRepo.getRssCatalogThreadHistoryPosition(it) }
-                        ?.takeIf { it.threadId == tid && it.postId == targetPid }?.toThreadReadingHistory()
-                    ReadHistoryRepository.ThreadHistoryOrigin.Direct -> null
-                }
-            }
-            val saved = (catalogPosition ?: direct?.history)?.takeIf { offlinePage == null || offlinePage.page == it.page }
-            val snapshot = direct?.snapshot?.takeIf { offlinePage == null } ?: targetPid?.let { pid ->
-                withContext(Dispatchers.Default) {
-                    if (offlineOnly) {
-                        val number = downloadRepository.downloadedPageForPost(tid, authorId, pid) ?: saved?.page ?: initialPage
-                        return@withContext downloadRepository.getDownloadedPage(ThreadPageDownloadKey(tid.value, number, authorId?.value))
+    // A prepended page or decoded image can shift a saved paragraph after its first layout.
+    centeredEntry?.takeUnless { isSinglePageMode }?.let { (key, ratio) ->
+        LaunchedEffect(key, ratio, readerEntries) {
+            val index = readerEntries.indexOfFirst { it.key == key }
+            if (index < 0) return@LaunchedEffect
+            val anchorPage = pageByPid[readerEntries[index].post.pid.value.toLong()]
+            val checkedAdjacent = mutableSetOf<Int>()
+            snapshotFlow {
+                val layout = listState.layoutInfo
+                val item = layout.visibleItemsInfo.firstOrNull { it.key == key }
+                if (item == null) null else {
+                    val center = (layout.viewportStartOffset + layout.viewportEndOffset) / 2f
+                    val delta = item.offset + item.size * ratio - center
+                    when {
+                        delta < -1f && (listState.canScrollBackward || offlineOnly) -> delta
+                        delta > 1f && (listState.canScrollForward || offlineOnly) -> delta
+                        else -> 0f
                     }
-                    val result = threadRepository.fetchReaderStartPage(tid, pid, authorId, saved?.page ?: initialPage, downloadRepository)
-                    (result as? YamiboResult.Success)?.value
+                }
+            }.collect { delta ->
+                if (centeredEntry?.first != key) return@collect
+                if (listState.isScrollInProgress) {
+                    centeredEntry = null
+                    return@collect
+                }
+                if (delta == null) listState.scrollToItem(index)
+                else if (delta != 0f) {
+                    val consumed = listState.scrollBy(delta)
+                    // A paragraph near either edge can need the adjacent downloaded page to reach the center.
+                    if (offlineOnly && anchorPage != null && abs(delta - consumed) > 1f && centeredEntry?.first == key) {
+                        preserveRestoredProgress = true
+                        val adjacent = anchorPage + if (delta < 0f) -1 else 1
+                        if (adjacent in 1..totalPages && adjacent !in loadedPages && checkedAdjacent.add(adjacent)) {
+                            val page = withContext(Dispatchers.Default) { downloadedPage(adjacent) } ?: return@collect
+                            if (centeredEntry?.first == key && adjacent !in loadedPages) {
+                                loadPage(adjacent, initialResult = YamiboResult.Success(page))
+                            }
+                        }
+                    }
                 }
             }
-            val page = snapshot?.let { it.pageNav?.currentPage ?: 1 } ?: saved?.page ?: initialPage
+        }
+    }
+
+    fun TextReaderStart.pageNumber() = snapshot?.let { it.pageNav?.currentPage ?: 1 } ?: history?.page ?: initialPage
+
+    suspend fun readOpeningPage(): Pair<TextReaderStart, YamiboResult<ThreadPage>> {
+        val start = if (targetPid == null) {
+            val direct = readHistoryRepo.textReaderStart(tid, threadType, authorId, threadRepository, downloadRepository,
+                offlineOnly, openingImage, fallbackPage = offlinePage, stayOnSelectedPage = !fromModeSwitch)
+            if (fromModeSwitch || offlinePage == null || direct.history?.page == offlinePage.page) direct
+            else direct.copy(history = null)
+        } else {
+            val history = when (threadHistoryOrigin) {
+                ReadHistoryRepository.ThreadHistoryOrigin.TagCatalog -> catalogTagId
+                    ?.let { readHistoryRepo.getTagCatalogThreadHistoryPosition(it) }
+                    ?.takeIf { it.threadId == tid && it.postId == targetPid }?.toThreadReadingHistory()
+                ReadHistoryRepository.ThreadHistoryOrigin.RssCatalog -> catalogRssSubscriptionId
+                    ?.let { readHistoryRepo.getRssCatalogThreadHistoryPosition(it) }
+                    ?.takeIf { it.threadId == tid && it.postId == targetPid }?.toThreadReadingHistory()
+                ReadHistoryRepository.ThreadHistoryOrigin.Direct -> null
+            }?.takeIf { fromModeSwitch || offlinePage == null || offlinePage.page == it.page }
+            val hint = history?.page ?: initialPage
+            val snapshot = if (offlineOnly) {
+                val number = downloadRepository.downloadedPageForPost(tid, authorId, targetPid) ?: hint
+                downloadRepository.getDownloadedPage(ThreadPageDownloadKey(tid.value, number, authorId?.value))
+            } else {
+                val result = threadRepository.fetchReaderStartPage(tid, targetPid, authorId, hint, downloadRepository)
+                // An author's lookup already requests the actual reader page. Preserve its failure for Retry.
+                if (authorId != null && result !is YamiboResult.Success) return TextReaderStart(history) to result
+                (result as? YamiboResult.Success)?.value
+            }
+            TextReaderStart(history, snapshot)
+        }
+        return start to readPage(start.pageNumber(), start.snapshot)
+    }
+
+    suspend fun openReader() {
+        try {
+            val firstPage = loadedPostsByPage.isEmpty()
+            val (start, result, projection) = withContext(Dispatchers.Default) {
+                val (opening, response) = readOpeningPage()
+                val prepared = if (firstPage && response is YamiboResult.Success) {
+                    chineseConversionRepository.projectReaderPosts(
+                        mapOf(opening.pageNumber() to response.value.posts),
+                        chineseConversionRepository.currentMode.value,
+                        emptyMap(),
+                    )
+                } else null
+                Triple(opening, response, prepared)
+            }
+            preserveRestoredProgress = start.preserveUntilMoved
+            val saved = start.history
             if (saved != null) {
                 pendingTargetPid = null
                 pendingSavedPosition = saved
                 imageGeometryPriorityPostId = saved.anchorPostId
                 saved.threadCover?.let { cover ->
-                    coverUrl = cover
-                    contentCoverRepository.setAutomaticCover(coverKey, cover)
-                    catalogCoverKey?.let { contentCoverRepository.setAutomaticCover(it, cover) }
+                    coverUrl = canonicalCover?.resolvedUrl ?: cover
+                    restoredCover = cover
                 }
             }
             hasResolvedInitialHistoryLookup = true
-            val loaded = loadPage(page, initialSnapshot = snapshot)
+            val loaded = loadPage(start.pageNumber(), initialResult = result, openingProjection = projection)
             if (saved == null && targetPid == null && loaded) {
                 hasRestoredPosition = true
                 canPersistReadingState = true
@@ -3061,28 +3194,29 @@ internal fun ThreadReaderScreen(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
-            Logger.w("ThreadReaderScreen", "Failed to resolve reader start", error)
+            Logger.w("ThreadReaderScreen", "Failed to load initial reader page", error)
             hasResolvedInitialHistoryLookup = true
-            if (loadPage(initialPage) && targetPid == null) {
-                hasRestoredPosition = true
-                canPersistReadingState = true
-            }
+            state = ReaderState.Error(i18n("載入失敗，請重試"))
         }
     }
 
-    LaunchedEffect(state, readerEntries, singlePageEntries, pendingSavedPosition) {
+    LaunchedEffect(tid, initialPage, targetPid) { openReader() }
+
+    val anchorEntriesReady = pendingSavedPosition?.anchorPostId?.let { pid ->
+        pid !in entryIndexByPid || preparedBodies.containsKey(pid)
+    } ?: true
+    LaunchedEffect(state, readerEntries, singlePageEntries, pendingSavedPosition, anchorEntriesReady) {
         val savedPosition = pendingSavedPosition ?: return@LaunchedEffect
-        if (state != ReaderState.Success || readerEntries.isEmpty()) return@LaunchedEffect
+        if (state != ReaderState.Success || readerEntries.isEmpty() || !anchorEntriesReady) return@LaunchedEffect
         if (isSinglePageMode && singlePageEntries.isEmpty()) return@LaunchedEffect
 
         isRestoringSavedPosition = true
         try {
             restoreSavedPosition(savedPosition)
-        } finally {
-            pendingSavedPosition = null
             hasRestoredPosition = true
             canPersistReadingState = true
-            delay(300.milliseconds)
+            pendingSavedPosition = null
+        } finally {
             isRestoringSavedPosition = false
         }
     }
@@ -3403,8 +3537,9 @@ internal fun ThreadReaderScreen(
         isLoadingNextPage,
         loadedPages,
         totalPages,
+        allowAdjacentPagePreload,
     ) {
-        if (state != ReaderState.Success || posts.isEmpty() || readerEntries.isEmpty()) return@LaunchedEffect
+        if (!allowAdjacentPagePreload || state != ReaderState.Success || posts.isEmpty() || readerEntries.isEmpty()) return@LaunchedEffect
 
         val pagePreloadThreshold = 5
 
@@ -3470,11 +3605,12 @@ internal fun ThreadReaderScreen(
             .collect { range -> handleVisibleEntryRange(range) }
     }
 
-    /** Save on back before popping so the previous detail screen reads fresh progress. */
+    /** The registered handler stays installed while its snapshot follows the current list projection. */
+    val saveOnBack by rememberUpdatedState<() -> Unit> { saveCurrentHistoryAndPop() }
     DisposableEffect(tid, navigator) {
         val handler = {
             if (navigator.currentScreen is IThreadReaderScreen) {
-                saveCurrentHistoryAndPop()
+                saveOnBack()
                 true
             } else {
                 false
@@ -3651,6 +3787,7 @@ internal fun ThreadReaderScreen(
                                     requireUnconsumed = false,
                                     pass = PointerEventPass.Initial,
                                 )
+                                centeredEntry = null
                                 val gestureStartPosition =
                                     listState.firstVisibleItemIndex to
                                         listState.firstVisibleItemScrollOffset
@@ -3666,6 +3803,7 @@ internal fun ThreadReaderScreen(
                                         (trackedChange.position - down.position).getDistance() > viewConfiguration.touchSlop
                                     ) {
                                         exceededTouchSlop = true
+                                        if (state == ReaderState.Success) allowAdjacentPagePreload = true
                                         preserveRestoredProgress = false
                                     }
                                     pointerEvent = awaitPointerEvent(PointerEventPass.Initial)
@@ -3827,7 +3965,11 @@ internal fun ThreadReaderScreen(
                                 message = currentState.message,
                                 onRetry = {
                                     state = ReaderState.Loading
-                                    scope.launch { loadPage(1) }
+                                    scope.launch {
+                                        val page = currentState.retryPage
+                                        if (page == null) openReader()
+                                        else loadPage(page, forceRefresh = currentState.forceRefresh)
+                                    }
                                 }
                             )
                         }
@@ -4818,6 +4960,7 @@ internal fun ThreadReaderScreen(
                                 scope.launch {
                                     val targetIndex = scrollJumpTargetIndex()
                                     if (targetIndex != null) {
+                                        allowAdjacentPagePreload = true
                                         isJumpingToEdge = true
                                         try {
                                             listState.animateScrollToItem(targetIndex)
@@ -4981,12 +5124,12 @@ internal fun ThreadReaderScreen(
                         val user = posts.firstOrNull { it.author.uid == author }?.author
                         val seed = ThreadSummary(tid, info.title, info.forum.fid, hasPoll = false, url = "", author = user)
                         IImageReaderScreen(tid, null, info.forum.fid, info.title, smartSeed = seed, authorId = author,
-                            loadHistory = true, offlineOnly = offlineOnly, offlinePage = offlinePage)
+                            loadHistory = true, offlineOnly = offlineOnly, offlinePage = offlinePage, fromModeSwitch = true)
                     } else {
                         val novel = target == ForumReadingMode.Novel
                         IThreadReaderScreen(tid, info.title, threadType = if (novel) ReadHistoryRepository.ThreadEntryType.Novel
-                            else ReadHistoryRepository.ThreadEntryType.Normal, authorId = if (novel) author else offlinePage?.authorId?.let(::UserId),
-                            offlineOnly = offlineOnly, offlinePage = offlinePage, initialPage = offlinePage?.page ?: 1)
+                            else ReadHistoryRepository.ThreadEntryType.Normal, authorId = if (novel) author else null,
+                            offlineOnly = offlineOnly, offlinePage = offlinePage, initialPage = offlinePage?.page ?: 1, fromModeSwitch = true)
                     }
                     showMenu = false
                     navigator.navigate(destination)

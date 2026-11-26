@@ -16,6 +16,7 @@ private val extra = Regex("""(?:发售图|發售圖|贺图|賀圖|附赠|附贈|
 private val missingNumber = Regex("""第[话話]\s*$""")
 private val alias = Regex("""[（(][^（）()]+[）)]\s*$""")
 private val subpart = Regex("""^[话話章回]?\s*其\s*([0-9]+)""")
+private val namedSubpart = Regex("""(?:第\s*)?$number\s*[话話章回]\s*(?:[（(]\s*([上中下])篇?\s*[）)]|([上中下])篇)""")
 private val printedRoles = Regex("""(?:漫画|漫畫|原作|作画|作畫)\s*[：:]""")
 private val digits = "零一二三四五六七八九"
 
@@ -63,5 +64,8 @@ internal fun smartComicTitle(title: String): SmartComicTitle {
     val part = index?.let { parts!![it + 1].toIntOrNull() }
         ?: numberedMatch?.let { subpart.find(body.substring(it.range.last + 1)) }
             ?.groupValues?.get(1)?.toIntOrNull()
+        ?: index?.let { namedSubpart.matchEntire(body.substring(marker).trim()) }?.let { label ->
+            "上中下".indexOf(label.groupValues[1].ifEmpty { label.groupValues[2] }) + 1
+        }
     return SmartComicTitle(query, credit, index?.let { chapterNumber(parts!![it]) }, part ?: 0)
 }

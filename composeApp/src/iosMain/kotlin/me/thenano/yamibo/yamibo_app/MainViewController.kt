@@ -2,6 +2,7 @@
 
 package me.thenano.yamibo.yamibo_app
 
+import me.thenano.yamibo.yamibo_app.store.auth.UserStore
 import me.thenano.yamibo.yamibo_app.repository.servernotice.ForumErrorMessageResolver
 import me.thenano.yamibo.yamibo_app.repository.servernotice.DefaultServerNoticeRepository
 import me.thenano.yamibo.yamibo_app.repository.servernotice.ServerNoticeStore
@@ -48,7 +49,7 @@ import me.thenano.yamibo.yamibo_app.repository.appsync.operationRecordingSetting
 import me.thenano.yamibo.yamibo_app.repository.appsync.readHistoryRepository
 import me.thenano.yamibo.yamibo_app.repository.appsync.rssSearchSubscriptionRepository
 import me.thenano.yamibo.yamibo_app.repository.chineseconversion.createChineseConversionRepository
-import me.thenano.yamibo.yamibo_app.repository.download.DownloadImageFetcher
+import me.thenano.yamibo.yamibo_app.util.readerDownloadImageFetcher
 import me.thenano.yamibo.yamibo_app.repository.download.DownloadRepositoryImpl
 import me.thenano.yamibo.yamibo_app.repository.download.IOSDownloadStorageProvider
 import me.thenano.yamibo.yamibo_app.repository.favorite.FavoriteShareRepositoryImpl
@@ -250,16 +251,18 @@ fun MainViewController() = ComposeUIViewController {
     remember(appSyncService, backupRepository) {
         appSyncService?.registerLocalSnapshotSource(backupRepository)
     }
+    val imageContext = coil3.compose.LocalPlatformContext.current
     val downloadRepository = remember {
         DownloadRepositoryImpl(
             accountId = { authRepository.currentUser()?.uid?.value ?: 0 },
+            accessRevision = { UserStore.accountRevision + appSettingsRepository.backupFolderRevision },
             threadRepository = threadRepository,
             tagRepository = tagRepository,
             rssRepository = rssSearchSubscriptionRepository,
             storageProvider = IOSDownloadStorageProvider(appSettingsRepository),
             database = diskCacheFactory.database,
             cacheDirectory = diskCacheFactory.rootCacheDir / "downloads",
-            imageFetcher = DownloadImageFetcher { cookieStore.load().orEmpty() },
+            imageFetcher = readerDownloadImageFetcher(imageContext) { cookieStore.load().orEmpty() },
         )
     }
     val backupScheduler = remember { IOSBackupScheduler() }

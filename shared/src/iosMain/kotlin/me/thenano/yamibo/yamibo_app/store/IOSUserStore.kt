@@ -11,6 +11,7 @@ class IOSUserStore : UserStore {
     private val defaults = NSUserDefaults.standardUserDefaults
 
     override fun save(userInfo: ProfilePage) {
+        if (defaults.integerForKey("uid").toInt() != userInfo.uid.value) UserStore.accountChanged()
         defaults.setInteger(userInfo.uid.value.toLong(), forKey = "uid")
         defaults.setObject(userInfo.username, forKey = "username")
         defaults.setObject(userInfo.userGroup, forKey = "userGroup")
@@ -65,6 +66,7 @@ class IOSUserStore : UserStore {
     }
 
     override fun clear() {
+        if (defaults.objectForKey("uid") != null) UserStore.accountChanged()
         listOf(
             "uid",
             "username",

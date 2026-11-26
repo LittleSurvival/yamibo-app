@@ -5,6 +5,7 @@ import io.github.littlesurvival.dto.page.ThreadPage
 import io.github.littlesurvival.dto.value.PostId
 import io.github.littlesurvival.dto.value.ThreadId
 import io.github.littlesurvival.dto.value.UserId
+import me.thenano.yamibo.yamibo_app.repository.download.ThreadPageDownloadKey
 import me.thenano.yamibo.yamibo_app.repository.DownloadRepository
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository.ThreadEntryType
@@ -26,6 +27,8 @@ suspend fun ReadHistoryRepository.textReaderStart(
     downloads: DownloadRepository,
     offlineOnly: Boolean = false,
     openingImage: ReadHistoryRepository.ImageReadingHistory? = null,
+    fallbackPage: ThreadPageDownloadKey? = null,
+    stayOnSelectedPage: Boolean = false,
 ): TextReaderStart {
     val own = getPosition(tid, type, author)
     val recent = getLatestTextPosition(tid)
@@ -46,8 +49,8 @@ suspend fun ReadHistoryRepository.textReaderStart(
     val pageHint = if (author == sourceScope) imageAnchor?.forumPage ?: recent?.page ?: 1
         else own?.takeIf { it.postId == pid }?.page ?: 1
     val located = (if (offlineOnly) {
-        val page = downloads.downloadedPageForPost(tid, author, pid) ?: pageHint
-        downloads.getDownloadedReaderPage(tid, author, page)?.page?.takeIf { it.posts.any { post -> post.pid == pid } }
+        if (stayOnSelectedPage && fallbackPage != null) downloads.floorOnPage(fallbackPage, tid, author, pid)
+        else downloads.locateDownloadedFloor(tid, author, pid, pageHint, fallbackPage)
     } else threads.locateReaderFloor(tid, pid, author, pageHint, downloads))
         ?: return TextReaderStart(own, preserveUntilMoved = true)
     val post = located.posts.first { it.pid == pid }
@@ -82,4 +85,32 @@ private suspend fun ThreadRepository.locateReaderFloor(
         if (snapshot.isValidThreadPage(tid, pid, page, author)) return snapshot
     }
     return null
+}
+
+// Older download folders may contain valid pages that predate the PID index.
+// Search only pages of this thread in the requested projection, and stop on the first match.
+private suspend fun DownloadRepository.locateDownloadedFloor(tid: ThreadId, author: UserId?, pid: PostId,
+    hint: Int, fallback: ThreadPageDownloadKey?): ThreadPage? {
+    val checked = mutableSetOf<Int>()
+    suspend fun read(number: Int): ThreadPage? {
+        if (!checked.add(number)) return null
+        val page = getDownloadedReaderPage(tid, author, number)?.page ?: return null
+        return page.takeIf { it.posts.any { post -> post.pid == pid } }
+    }
+    val indexed = downloadedPageForPost(tid, author, pid)
+    if (indexed != null) read(indexed)?.let { return it }
+    read(hint)?.let { return it }
+    if (fallback == null) return null
+    for (number in listedReaderPages(tid, author)) {
+        read(number)?.let { return it }
+    }
+    if (fallback.authorId == author?.value) return null
+    return floorOnPage(fallback, tid, author, pid)
+}
+
+private suspend fun DownloadRepository.floorOnPage(key: ThreadPageDownloadKey, tid: ThreadId, author: UserId?, pid: PostId): ThreadPage? {
+    if (key.tid != tid.value) return null
+    val page = getDownloadedReaderPage(tid, key.authorId?.let(::UserId), key.page)?.page ?: return null
+    if (page.posts.none { it.pid == pid && (author == null || it.author.uid == author) }) return null
+    return if (author == null || key.authorId == author.value) page else page.copy(posts = page.posts.filter { it.author.uid == author })
 }

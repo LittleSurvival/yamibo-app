@@ -5,6 +5,11 @@ INSERT OR REPLACE INTO ImageReadingHistory(
     lastVisitTime
 ) VALUES (?, ?, ?, ?, ?, ?, ?);
 
+getAllWithAnchors:
+SELECT h.*, a.floorPid, a.sourceId, a.occurrence, a.page AS forumPage, a.authorId AS scopeAuthor FROM ImageReadingHistory AS h
+LEFT JOIN ReaderImageAnchor AS a ON a.historyPostId = h.postId AND a.observedAt = h.lastVisitTime
+ORDER BY h.lastVisitTime DESC;
+
 getByPostId:
 SELECT * FROM ImageReadingHistory WHERE postId = ?;
 
@@ -39,3 +44,6 @@ SELECT * FROM ReaderImageAnchor WHERE historyPostId = :postId AND observedAt = :
 saveAnchor:
 INSERT OR REPLACE INTO ReaderImageAnchor(historyPostId, observedAt, floorPid, sourceId, occurrence, page, authorId)
 VALUES (?, ?, ?, ?, ?, ?, ?);
+
+clearAnchorAt:
+DELETE FROM ReaderImageAnchor WHERE historyPostId = ? AND observedAt = ?;

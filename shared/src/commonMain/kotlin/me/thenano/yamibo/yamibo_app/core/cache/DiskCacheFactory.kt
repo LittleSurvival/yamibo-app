@@ -48,7 +48,8 @@ class DiskCacheFactory(
     inline fun <reified T : Any> create(
         namespace: String,
         maxSize: Int = 100,
-        expiration: Duration? = null
+        expiration: Duration? = null,
+        noinline removeIndex: ((String) -> Unit)? = null,
     ): DiskCache<T> {
         val serializer = try {
             kotlinx.serialization.serializer<T>()
@@ -65,7 +66,8 @@ class DiskCacheFactory(
             json = json,
             rootCacheDir = rootCacheDir,
             fileSystem = fileSystem,
-            serializer = serializer
+            serializer = serializer,
+            removeIndex = removeIndex,
         ).also { memoryCacheClearers += it::clearMemory }
     }
 
@@ -156,7 +158,10 @@ class DiskCacheFactory(
     suspend fun clearAllCache() = withContext(Dispatchers.IO) {
         val imageCacheDirectory = imageCacheClearer?.invoke()
         memoryCacheClearers.forEach { it() }
-        database.diskCacheEntryQueries.clearAll()
+        database.transaction {
+            database.diskCacheEntryQueries.clearAll()
+            database.readerFloorPageQueries.clearAll()
+        }
         if (fileSystem.exists(rootCacheDir)) {
             // Keep namespace directories available to existing cache instances.
             fileSystem.list(rootCacheDir).forEach { namespace ->
@@ -184,7 +189,8 @@ class DiskCacheImpl<T : Any>(
     private val json: Json,
     rootCacheDir: okio.Path,
     private val fileSystem: FileSystem,
-    private val serializer: KSerializer<T>?
+    private val serializer: KSerializer<T>?,
+    private val removeIndex: ((String) -> Unit)? = null,
 ) : DiskCache<T> {
 
     private val queries = database.diskCacheEntryQueries
@@ -209,7 +215,7 @@ class DiskCacheImpl<T : Any>(
 
     private fun getFilePath(key: String) = namespaceDir / "$key.json"
 
-    override fun set(key: String, value: T) {
+    override fun set(key: String, value: T, writeIndex: (() -> Unit)?) {
         val now = getTimeMillis()
         
         // L1 Cache
@@ -242,12 +248,14 @@ class DiskCacheImpl<T : Any>(
 
         // Update DB Metadata
         try {
-            queries.upsert(
-                namespace = namespace,
-                cacheKey = key,
-                createdAt = now,
-                lastAccessedAt = now
-            )
+            if (writeIndex == null) {
+                queries.upsert(namespace, key, now, now)
+            } else {
+                queries.transaction {
+                    queries.upsert(namespace, key, now, now)
+                    writeIndex()
+                }
+            }
             // Trigger LRU asynchronously
             maintainLRU()
         } catch (e: Exception) {
@@ -342,7 +350,11 @@ class DiskCacheImpl<T : Any>(
         memoryCache.remove(key)
         if (serializer == null) return
         try {
-            queries.delete(namespace, key)
+            if (removeIndex == null) queries.delete(namespace, key)
+            else queries.transaction {
+                queries.delete(namespace, key)
+                removeIndex.invoke(key)
+            }
             fileSystem.delete(getFilePath(key))
         } catch (e: Exception) {
             Logger.w("DiskCacheImpl", "Failed to remove cache value namespace=$namespace key=$key", e)
@@ -355,8 +367,13 @@ class DiskCacheImpl<T : Any>(
         
         if (serializer == null) return
         try {
-            val matchingKeys = queries.getKeysByPrefix(namespace, "$prefix%").executeAsList()
-            queries.deleteByPrefix(namespace, "$prefix%")
+            // SQLite GLOB is case-sensitive like startsWith; quote its three wildcard characters.
+            val pattern = prefix.replace("[", "[[]").replace("*", "[*]").replace("?", "[?]") + "*"
+            val matchingKeys = queries.getKeysByPrefix(namespace, pattern).executeAsList()
+            queries.transaction {
+                queries.deleteByPrefix(namespace, pattern)
+                if (removeIndex != null) matchingKeys.forEach(removeIndex)
+            }
             matchingKeys.forEach { key ->
                 try {
                     fileSystem.delete(getFilePath(key))
@@ -373,7 +390,11 @@ class DiskCacheImpl<T : Any>(
         memoryCache.clear()
         if (serializer == null) return
         try {
-            queries.clearNamespace(namespace)
+            if (removeIndex == null) queries.clearNamespace(namespace)
+            else queries.transaction {
+                queries.getKeysByPrefix(namespace, "*").executeAsList().forEach(removeIndex)
+                queries.clearNamespace(namespace)
+            }
             if (fileSystem.exists(namespaceDir)) {
                 fileSystem.deleteRecursively(namespaceDir)
                 fileSystem.createDirectories(namespaceDir)

@@ -37,6 +37,7 @@ private data class ImageReaderRestorePayload(
     val rssTotalPages: Int? = null,
     val offlineOnly: Boolean = false,
     val offlinePage: ThreadPageDownloadKey? = null,
+    val fromModeSwitch: Boolean = false,
 )
 @RestorableScreenEntry
 class IImageReaderScreen(
@@ -44,7 +45,7 @@ class IImageReaderScreen(
     val postId: PostId?,
     val fid: ForumId?,
     val threadTitle: String,
-    private val imageList: List<String> = emptyList(),
+    internal val imageList: List<String> = emptyList(),
     val initialPage: Int = 1,
     val loadHistory: Boolean = false,
     
@@ -52,22 +53,23 @@ class IImageReaderScreen(
     val tagId: TagId? = null,
     val tagName: String? = null,
     val authorId: UserId? = null,
-    private val tagThreads: List<ThreadSummary>? = null,
+    internal val tagThreads: List<ThreadSummary>? = null,
     val tagPage: Int? = null,
     val tagTotalPages: Int? = null,
 
     val smartSeed: ThreadSummary? = null,
-    private val smartNeighbors: List<ThreadSummary> = emptyList(),
+    internal val smartNeighbors: List<ThreadSummary> = emptyList(),
 
     // RSS Search Catalog Mode Fields:
     val rssSubscriptionId: Long? = null,
     val rssTitle: String? = null,
     val rssQuery: String? = null,
-    private val rssThreads: List<ThreadSummary>? = null,
+    internal val rssThreads: List<ThreadSummary>? = null,
     val rssPage: Int? = null,
     val rssTotalPages: Int? = null,
     val offlineOnly: Boolean = false,
     val offlinePage: ThreadPageDownloadKey? = null,
+    val fromModeSwitch: Boolean = false,
 ) : RestorableNavigatable {
     override val id = if (offlineOnly) buildId("download", tid.value, offlinePage?.stableId, tagId?.value, rssSubscriptionId)
         else if (smartSeed != null) buildId("smart", fid?.value, tid.value)
@@ -96,36 +98,13 @@ class IImageReaderScreen(
             rssTotalPages = rssTotalPages,
             offlineOnly = offlineOnly,
             offlinePage = offlinePage,
+            fromModeSwitch = fromModeSwitch,
         ),
     )
 
     @Composable
     override fun Content() {
-        ImagesReaderScreen(
-            tid = tid,
-            postId = postId,
-            fid = fid,
-            threadTitle = threadTitle,
-            smartNeighbors = smartNeighbors,
-            imageList = imageList,
-            initialPage = initialPage,
-            loadHistory = loadHistory,
-            tagId = tagId,
-            tagName = tagName,
-            authorId = authorId,
-            tagThreads = tagThreads,
-            tagPage = tagPage,
-            tagTotalPages = tagTotalPages,
-            smartSeed = smartSeed,
-            rssSubscriptionId = rssSubscriptionId,
-            rssTitle = rssTitle,
-            rssQuery = rssQuery,
-            rssThreads = rssThreads,
-            rssPage = rssPage,
-            rssTotalPages = rssTotalPages,
-            offlineOnly = offlineOnly,
-            offlinePage = offlinePage,
-        )
+        RenderImageReader()
     }
 
     companion object Decoder : TypedRestorableNavigatableDecoder<IImageReaderScreen>(IImageReaderScreen::class) {
@@ -154,6 +133,7 @@ class IImageReaderScreen(
                 rssTotalPages = data.rssTotalPages,
                 offlineOnly = data.offlineOnly,
                 offlinePage = data.offlinePage,
+                fromModeSwitch = data.fromModeSwitch,
             )
         }
     }

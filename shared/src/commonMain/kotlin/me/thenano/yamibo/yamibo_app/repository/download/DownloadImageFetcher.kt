@@ -8,6 +8,8 @@ import io.ktor.client.request.header
 import io.ktor.http.HttpHeaders
 import io.ktor.http.Url
 import io.ktor.http.isSuccess
+import kotlinx.coroutines.CancellationException
+import me.thenano.yamibo.yamibo_app.repository.thread.readerAccessScope
 import io.ktor.http.contentType
 import com.fleeksoft.ksoup.Ksoup
 import com.fleeksoft.ksoup.parser.Parser
@@ -16,8 +18,25 @@ import me.thenano.yamibo.yamibo_app.factory.IMAGE_ACCEPT
 
 open class DownloadImageFetcher(
     private val cookieProvider: suspend () -> String,
+    private val readFreshImage: (suspend (url: String, cookie: String) -> ByteArray?)?,
 ) {
+    constructor(cookieProvider: suspend () -> String) : this(cookieProvider, null)
+
     private val client = HttpClientFactory.create()
+
+    suspend fun fetchForDownload(url: String): ByteArray {
+        val readerCache = readFreshImage ?: return fetch(url)
+        val cookie = cookieProvider()
+        val cached = try {
+            readerCache(normalizeDownloadImageUrl(url), cookie)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
+        return if (cached != null && readerAccessScope(cookie) == readerAccessScope(cookieProvider())) cached
+        else fetch(url)
+    }
 
     open suspend fun fetch(url: String): ByteArray {
         val normalized = normalizeDownloadImageUrl(url)
@@ -37,18 +56,20 @@ open class DownloadImageFetcher(
         val length = response.headers[HttpHeaders.ContentLength]?.toLongOrNull()
         check(bytes.isNotEmpty() && (response.headers[HttpHeaders.ContentEncoding] != null ||
             length == null || length == bytes.size.toLong())) { "圖片資料不完整" }
-        val isSvg = response.contentType()?.contentSubtype == "svg+xml" ||
-            bytes.decodeToString(0, minOf(bytes.size, 256)).trimStart().let { it.startsWith("<svg") || it.startsWith("<?xml") }
-        val valid = if (isSvg) {
-            val xml = bytes.decodeToString().trim()
-            val root = Ksoup.parse(xml, parser = Parser.xmlParser()).children().firstOrNull()
-            root?.tagName() == "svg" && (xml.endsWith("</svg>") || xml.endsWith("/>"))
-        } else {
-            isReadableDownloadedBitmap(bytes)
-        }
-        check(valid) { "圖片資料不完整" }
+        check(isCompleteDownloadedImage(bytes, response.contentType()?.toString())) { "圖片資料不完整" }
         return bytes
     }
+}
+
+/** Check the original body before it becomes an offline copy, including bodies read from Coil. */
+fun isCompleteDownloadedImage(bytes: ByteArray, contentType: String?): Boolean {
+    if (bytes.isEmpty()) return false
+    val isSvg = contentType?.substringBefore(';')?.trim()?.equals("image/svg+xml", ignoreCase = true) == true ||
+        bytes.decodeToString(0, minOf(bytes.size, 256)).trimStart().let { it.startsWith("<svg") || it.startsWith("<?xml") }
+    if (!isSvg) return isReadableDownloadedBitmap(bytes)
+    val xml = bytes.decodeToString().trim()
+    val root = Ksoup.parse(xml, parser = Parser.xmlParser()).children().firstOrNull()
+    return root?.tagName() == "svg" && (xml.endsWith("</svg>") || xml.endsWith("/>"))
 }
 
 internal expect fun isReadableDownloadedBitmap(bytes: ByteArray): Boolean

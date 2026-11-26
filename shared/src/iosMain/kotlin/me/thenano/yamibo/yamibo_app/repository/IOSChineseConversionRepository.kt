@@ -20,6 +20,6 @@ class IOSChineseConversionRepository : ChineseConversionRepository {
         modeFlow.value = mode
     }
 
-    override suspend fun convert(text: String): String = text
+    override suspend fun convert(text: String, mode: ChineseConversionMode?): String = text
     override fun isModeAvailable(mode: ChineseConversionMode): Boolean = false
 }

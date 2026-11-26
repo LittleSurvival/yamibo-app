@@ -15,10 +15,10 @@ clearNamespace:
 DELETE FROM DiskCacheEntry WHERE namespace = ?;
 
 deleteByPrefix:
-DELETE FROM DiskCacheEntry WHERE namespace = ? AND cacheKey LIKE ?;
+DELETE FROM DiskCacheEntry WHERE namespace = :namespace AND cacheKey GLOB :pattern;
 
 getKeysByPrefix:
-SELECT cacheKey FROM DiskCacheEntry WHERE namespace = ? AND cacheKey LIKE ?;
+SELECT cacheKey FROM DiskCacheEntry WHERE namespace = :namespace AND cacheKey GLOB :pattern;
 
 clearAll:
 DELETE FROM DiskCacheEntry;

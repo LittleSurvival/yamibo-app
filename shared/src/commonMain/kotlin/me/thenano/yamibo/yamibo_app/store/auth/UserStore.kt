@@ -5,6 +5,10 @@ import io.github.littlesurvival.dto.model.TimeInfo
 import io.github.littlesurvival.dto.value.FormHash
 import io.github.littlesurvival.dto.value.UserId
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+
 interface UserStore {
     val prefName: String
         get() = "session_store"
@@ -14,6 +18,11 @@ interface UserStore {
     fun clear()
 
     companion object {
+        private val changes = MutableStateFlow(0L)
+        val accountRevisions = changes.asStateFlow()
+        val accountRevision: Long get() = changes.value
+        internal fun accountChanged() = changes.update { it + 1 }
+
         val Preview =
             ProfilePage(
                 uid = UserId(656626),

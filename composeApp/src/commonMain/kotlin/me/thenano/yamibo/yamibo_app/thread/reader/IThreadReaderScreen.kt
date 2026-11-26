@@ -35,6 +35,7 @@ private data class ThreadReaderRestorePayload(
     val catalogRssPage: Int? = null,
     val offlineOnly: Boolean = false,
     val offlinePage: ThreadPageDownloadKey? = null,
+    val fromModeSwitch: Boolean = false,
 )
 
 /** Navigatable screen for reading a novel thread in continuous mode. */
@@ -58,6 +59,7 @@ class IThreadReaderScreen(
     val openingImage: ReadHistoryRepository.ImageReadingHistory? = null,
     val offlineOnly: Boolean = false,
     val offlinePage: ThreadPageDownloadKey? = null,
+    val fromModeSwitch: Boolean = false,
 ) : RestorableNavigatable {
     override val id = if (offlineOnly) buildId("download", tid.value, threadType.name, authorId?.value, offlinePage?.stableId) else buildId(
         tid.value,
@@ -88,6 +90,7 @@ class IThreadReaderScreen(
             catalogRssPage = catalogRssPage,
             offlineOnly = offlineOnly,
             offlinePage = offlinePage,
+            fromModeSwitch = fromModeSwitch,
         ),
     )
 
@@ -112,6 +115,7 @@ class IThreadReaderScreen(
             openingImage = openingImage,
             offlineOnly = offlineOnly,
             offlinePage = offlinePage,
+            fromModeSwitch = fromModeSwitch,
         )
     }
 
@@ -137,6 +141,7 @@ class IThreadReaderScreen(
                 catalogRssPage = data.catalogRssPage,
                 offlineOnly = data.offlineOnly,
                 offlinePage = data.offlinePage,
+                fromModeSwitch = data.fromModeSwitch,
             )
         }
     }

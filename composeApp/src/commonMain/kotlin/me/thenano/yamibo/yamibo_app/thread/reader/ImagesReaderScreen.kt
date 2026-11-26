@@ -1,5 +1,7 @@
 package me.thenano.yamibo.yamibo_app.thread.reader
 
+import me.thenano.yamibo.yamibo_app.repository.thread.matchesReaderImageSource
+import me.thenano.yamibo.yamibo_app.store.auth.UserStore
 import me.thenano.yamibo.yamibo_app.repository.download.ThreadPageDownloadKey
 import me.thenano.yamibo.yamibo_app.repository.thread.readerImages
 import YamiboIcons
@@ -34,6 +36,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -100,33 +103,7 @@ private data class ImageReaderPageTarget(
 
 @Suppress("DuplicatedCode")
 @Composable
-fun ImagesReaderScreen(
-    tid: ThreadId,
-    postId: PostId?,
-    fid: ForumId?,
-    threadTitle: String,
-    imageList: List<String>,
-    initialPage: Int = 1,
-    loadHistory: Boolean = false,
-
-    smartSeed: ThreadSummary? = null,
-    smartNeighbors: List<ThreadSummary> = emptyList(),
-    // Tag Manga Mode Fields:
-    tagId: TagId? = null,
-    tagName: String? = null,
-    tagPage: Int? = null,
-    tagTotalPages: Int? = null,
-    authorId: UserId?,
-    tagThreads: List<ThreadSummary>?,
-    rssSubscriptionId: Long? = null,
-    rssTitle: String? = null,
-    rssQuery: String? = null,
-    rssPage: Int? = null,
-    rssTotalPages: Int? = null,
-    rssThreads: List<ThreadSummary>? = null,
-    offlineOnly: Boolean = false,
-    offlinePage: ThreadPageDownloadKey? = null,
-) {
+internal fun IImageReaderScreen.RenderImageReader() {
     val errorMessages = LocalForumErrorMessageResolver.current
     SystemBarsEffect(
         statusBarColor = Color.Black,
@@ -178,16 +155,24 @@ fun ImagesReaderScreen(
     val mangaSettingsRepo = LocalMangaReaderSettingsRepository.current
     val imageReaderModeOverrideRepository = LocalImageReaderModeOverrideRepository.current
     val globalReadingMode = mangaSettingsRepo.readingMode.state()
-    val tagLongStripEnabled by remember(tagId, rssSubscriptionId) {
-        when {
-            tagId != null -> imageReaderModeOverrideRepository.observeTagLongStrip(tagId)
-            rssSubscriptionId != null -> imageReaderModeOverrideRepository.observeRssLongStrip(rssSubscriptionId)
-            else -> flowOf(false)
+    val tagLongStripEnabled by key(tagId, rssSubscriptionId) {
+        val flow = remember {
+            when {
+                tagId != null -> imageReaderModeOverrideRepository.observeTagLongStrip(tagId)
+                rssSubscriptionId != null -> imageReaderModeOverrideRepository.observeRssLongStrip(rssSubscriptionId)
+                else -> flowOf(false)
+            }
         }
-    }.collectAsState(false)
-    val threadModeOverride by remember(activeTid, activeAuthorId) {
-        imageReaderModeOverrideRepository.observeThreadMode(activeTid, activeAuthorId)
-    }.collectAsState(null)
+        flow.collectAsState(when {
+            tagId != null -> imageReaderModeOverrideRepository.isTagLongStripEnabled(tagId)
+            rssSubscriptionId != null -> imageReaderModeOverrideRepository.isRssLongStripEnabled(rssSubscriptionId)
+            else -> false
+        })
+    }
+    val threadModeOverride by key(activeTid, activeAuthorId) {
+        val flow = remember { imageReaderModeOverrideRepository.observeThreadMode(activeTid, activeAuthorId) }
+        flow.collectAsState(imageReaderModeOverrideRepository.getThreadMode(activeTid, activeAuthorId))
+    }
     val effectiveReadingMode = remember(globalReadingMode, tagLongStripEnabled, threadModeOverride) {
         resolveEffectiveReadingMode(
             global = globalReadingMode,
@@ -268,6 +253,7 @@ fun ImagesReaderScreen(
     var sourcePage by remember(activeTid) { mutableIntStateOf(offlinePage?.takeIf { it.tid == activeTid.value }?.page ?: 1) }
     var sourcePageCount by remember(activeTid) { mutableIntStateOf(1) }
     var sourceAuthor by remember(activeTid) { mutableStateOf(if (offlinePage?.tid == activeTid.value) offlinePage.authorId?.let(::UserId) else activeAuthorId.takeIf { smartMode }) }
+    var usingOfflineFallback by remember(activeTid) { mutableStateOf(false) }
     var skipTextAnchor by remember(activeTid) { mutableStateOf(false) }
     var passiveImageIndex by remember(activeTid) { mutableStateOf<Int?>(null) }
     var startFromLastPage by remember { mutableStateOf(false) }
@@ -426,6 +412,7 @@ fun ImagesReaderScreen(
     }
 
     val scrollListState = rememberLazyListState()
+    var pendingScrollRestore by remember(activeTid, sourcePage, readingMode) { mutableStateOf<Pair<Int, Int>?>(null) }
     val totalContentPages: () -> Int = { actualImageList.size.coerceAtLeast(1) }
     val minPage: () -> Int = { if (isCatalogMode) -1 else 0 }
     val maxPage: () -> Int = { if (isCatalogMode) totalContentPages() else totalContentPages() - 1 }
@@ -523,7 +510,8 @@ fun ImagesReaderScreen(
                 !skipTextAnchor && activeAuthorId != null && (it.floorAuthor ?: it.authorId) == activeAuthorId
             }
             val anchor = savedImage?.anchor?.takeIf { it.scopeAuthor == null || it.scopeAuthor == activeAuthorId }
-            if ((textAnchor != null || anchor != null) && !(offlineOnly && offlinePage?.tid == activeTid.value)) {
+            if ((textAnchor != null || anchor != null) && !usingOfflineFallback &&
+                (fromModeSwitch || !offlineOnly || offlinePage?.tid != activeTid.value)) {
                 sourceAuthor = if (textAnchor != null) textAnchor.authorId else anchor?.scopeAuthor
                 val targetPage = textAnchor?.page ?: checkNotNull(anchor).forumPage
                 if (sourcePage != targetPage) {
@@ -540,7 +528,7 @@ fun ImagesReaderScreen(
                         imageFloors = withContext(Dispatchers.Default) { threadPage.readerImages(activeAuthorId) }
                         val textIndex = textAnchor?.let { text ->
                             val exact = imageFloors.indexOfFirst {
-                                it.postId == text.postId && it.sourceId == text.imageSource && it.occurrence == text.imageOccurrence
+                                it.postId == text.postId && matchesReaderImageSource(it.url, it.sourceId, text.imageSource) && it.occurrence == text.imageOccurrence
                             }
                             exact.takeIf { it >= 0 } ?: imageFloors.indexOfFirst { it.postId == text.postId }.takeIf { it >= 0 }
                         }
@@ -591,14 +579,15 @@ fun ImagesReaderScreen(
                                             is ReadHistoryRepository.RssSearchReadingHistory -> history.firstVisibleItemOffset
                                             is ReadHistoryRepository.ImageReadingHistory -> history.firstVisibleItemOffset
                                         }
-                                        if (firstVisibleItemIndex != null && finalPageToRestore > 0 && isScrollMode) {
-                                            scope.launch {
-                                                while (scrollListState.layoutInfo.totalItemsCount == 0) delay(20.milliseconds)
-                                                val index = if (smartMode && history is ReadHistoryRepository.ImageReadingHistory && history.anchor != null) {
-                                                    finalPageToRestore + 1
-                                                } else firstVisibleItemIndex
-                                                scrollListState.scrollToItem(index, firstVisibleItemOffset ?: 0)
-                                            }
+                                        if (isScrollMode && firstVisibleItemIndex != null && firstVisibleItemIndex >= 0) {
+                                            val index = if (smartMode && history is ReadHistoryRepository.ImageReadingHistory && history.anchor != null) {
+                                                finalPageToRestore + 1
+                                            } else firstVisibleItemIndex
+                                            val offset = firstVisibleItemOffset?.coerceAtLeast(0) ?: 0
+                                            val image = actualImageList.getOrNull(if (isCatalogMode) index - 1 else index)
+                                            // A saved offset can be taller than the loading placeholder.
+                                            pendingScrollRestore = if (offset > 0 && image != null && !MissingThreadImage.isReaderUri(image)) index to offset else null
+                                            scrollListState.requestScrollToItem(index, if (image == null) offset else 0)
                                         }
                                         didRestore = true
                                     }
@@ -652,6 +641,13 @@ fun ImagesReaderScreen(
                 downloadRepository.getDownloadedReaderPage(activeTid, sourceAuthor, sourcePage,
                     allowFullView = textAnchor == null && anchor == null && sourcePage == 1)
             } else null
+            if (local == null && offlineOnly && fromModeSwitch && !usingOfflineFallback && offlinePage?.tid == activeTid.value &&
+                (sourcePage != offlinePage.page || sourceAuthor?.value != offlinePage.authorId)) {
+                usingOfflineFallback = true
+                sourceAuthor = offlinePage.authorId?.let(::UserId)
+                if (sourcePage == offlinePage.page) retryTrigger++ else sourcePage = offlinePage.page
+                return@LaunchedEffect
+            }
             if (local != null) sourceAuthor = local.author
             val cachedPage = local?.page ?: if (!offlineOnly && forceNetworkLoadTrigger == 0) {
                 withContext(Dispatchers.Default) { threadRepository.getCachedThread(activeTid, sourceAuthor, sourcePage) }
@@ -666,14 +662,14 @@ fun ImagesReaderScreen(
     var lastCapturedAt by remember { mutableLongStateOf(0L) }
     var lastSmartSnapshot by remember(activeTid) { mutableStateOf<ReadHistoryRepository.ImageReadingHistory?>(null) }
     val currentHistorySaver by rememberUpdatedState {
-        if ((isMangaForum || isCatalogMode) && actualImageList.isNotEmpty() && !restoreHistoryForActiveThread && passiveImageIndex != currentPage) {
+        if ((isMangaForum || isCatalogMode) && actualImageList.isNotEmpty() && !restoreHistoryForActiveThread && pendingScrollRestore == null && passiveImageIndex != currentPage) {
             val isScroll = readingMode == ReadingMode.SCROLL_CONTINUOUS || readingMode == ReadingMode.SCROLL_GAP
             val finalIdx = if (isScroll) scrollListState.firstVisibleItemIndex else null
             val finalOffset = if (isScroll) scrollListState.firstVisibleItemScrollOffset else null
-            val snapshotPage = currentPage
+            val snapshotPage = finalIdx?.let { if (isCatalogMode) it - 1 else it } ?: currentPage
             val total = actualImageList.size
             val titleSnap = activeTitle
-            val displayPage = currentPage.coerceIn(minPage(), maxPage())
+            val displayPage = snapshotPage.coerceIn(minPage(), maxPage())
             passiveImageIndex = null
             val activeTidSnap = activeTid
             val postIdSnap = actualPostId
@@ -834,7 +830,7 @@ fun ImagesReaderScreen(
     }
 
     LaunchedEffect(readingMode) {
-        if (isScrollMode) {
+        if (isScrollMode && actualImageList.isNotEmpty() && !restoreHistoryForActiveThread && pendingScrollRestore == null) {
             val targetIndex = if (isCatalogMode) currentPage.coerceAtLeast(0) + 1 else currentPage.coerceAtLeast(0)
             if (targetIndex >= 0) {
                 while (scrollListState.layoutInfo.totalItemsCount == 0 && actualImageList.isNotEmpty()) {
@@ -846,18 +842,29 @@ fun ImagesReaderScreen(
     }
 
     // Wait until the visible image has succeeded before giving adjacent pages network slots.
-    var displayedImage by remember(activeTid, sourcePage) { mutableStateOf<String?>(null) }
-    LaunchedEffect(isScrollMode, actualImageList, currentPage, displayedImage) {
-        val visible = actualImageList.getOrNull(currentPage) ?: return@LaunchedEffect
-        if (isScrollMode || displayedImage != visible) return@LaunchedEffect
+    val accountRevision by UserStore.accountRevisions.collectAsState()
+    var displayedImage by remember(activeTid, sourcePage, accountRevision) { mutableStateOf<String?>(null) }
+    LaunchedEffect(activeTid, sourcePage, actualImageList, isScrollMode, accountRevision) {
+        if (isScrollMode) return@LaunchedEffect
         val imageLoader = SingletonImageLoader.get(platformContext)
-        val cookie = authRepository.cookieStore.load().orEmpty()
-        listOfNotNull(actualImageList.getOrNull(currentPage + 1), actualImageList.getOrNull(currentPage - 1))
-            .distinct()
-            .filter { it != visible && !MissingThreadImage.isReaderUri(it) }
-            .forEach { url ->
-                launch { imageLoader.execute(buildImageRequest(platformContext, url, cookie = cookie, enableCrossfade = false)) }
+        val jobs = mutableMapOf<String, kotlinx.coroutines.Job>()
+        snapshotFlow { currentPage to displayedImage }.collect { (page, displayed) ->
+            val visible = actualImageList.getOrNull(page) ?: return@collect
+            val neighbors = listOfNotNull(actualImageList.getOrNull(page + 1), actualImageList.getOrNull(page - 1))
+                .distinct().filter { it != visible && !MissingThreadImage.isReaderUri(it) }
+            // A preload that becomes the visible image still owns its in-flight network request.
+            for (url in jobs.keys.toList()) {
+                if (url != visible && url !in neighbors) jobs.remove(url)?.cancel()
             }
+            if (visible == displayed) {
+                val cookie = authRepository.cookieStore.load().orEmpty()
+                for (url in neighbors) {
+                    jobs.getOrPut(url) {
+                        launch { imageLoader.execute(buildImageRequest(platformContext, url, cookie = cookie, enableCrossfade = false)) }
+                    }
+                }
+            }
+        }
     }
 
     /** Reset zoom with animation */
@@ -885,6 +892,7 @@ fun ImagesReaderScreen(
         resumeTarget: Boolean = false,
     ) {
         currentHistorySaver()
+        pendingScrollRestore = null
         passiveImageIndex = null
         skipTextAnchor = false
         cancelPageDrag()
@@ -904,6 +912,7 @@ fun ImagesReaderScreen(
     }
 
     fun setReaderPage(page: Int) {
+        pendingScrollRestore = null
         cancelPageDrag()
         snapNextTransition = false
         pageTurnDirection = 0
@@ -1094,9 +1103,13 @@ fun ImagesReaderScreen(
     }
 
     // Scroll Mode boundary jumper (Overscroll Chapter Jump)
-    val nestedScrollConnection = remember(hasNextChapter, hasPrevChapter) {
+    val nestedScrollConnection = remember(activeTid, sourcePage, hasNextChapter, hasPrevChapter) {
         object : NestedScrollConnection {
+            private val chapterAtStart = pageTransitionSerial
+            private var userScrolled = false
+
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.UserInput && available.y != 0f) pendingScrollRestore = null
                 if (available.y > 0f && scrollListState.canScrollForward) scrollOverscrollY = 0f
                 if (available.y < 0f && scrollListState.canScrollBackward) scrollOverscrollY = 0f
                 return Offset.Zero
@@ -1106,7 +1119,11 @@ fun ImagesReaderScreen(
                 available: Offset,
                 source: NestedScrollSource
             ): Offset {
-                if (source.toString() != "Fling" && source.toString() != "SideEffect") {
+                if (source == NestedScrollSource.UserInput) {
+                    if (consumed.y != 0f && !restoreHistoryForActiveThread) {
+                        userScrolled = true
+                        passiveImageIndex = null
+                    }
                     if (!scrollListState.canScrollForward && available.y < 0f) {
                         scrollOverscrollY += available.y
                         if (scrollOverscrollY < -100f && hasNextChapter) {
@@ -1126,6 +1143,14 @@ fun ImagesReaderScreen(
                     scrollOverscrollY = 0f
                 }
                 return Offset.Zero
+            }
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                if (userScrolled && chapterAtStart == pageTransitionSerial) {
+                    userScrolled = false
+                    currentHistorySaver()
+                }
+                return Velocity.Zero
             }
         }
     }
@@ -1476,14 +1501,35 @@ fun ImagesReaderScreen(
                         }
                     } else {
                         itemsIndexed(actualImageList, key = { index, url -> "${activeTid.value}:$index:$url" }) { index, url ->
+                            val listIndex = if (isCatalogMode) index + 1 else index
+                            val target = pendingScrollRestore?.takeIf { it.first == listIndex }
+                            var renderedHeight by remember { mutableIntStateOf(0) }
+                            if (target != null && renderedHeight != 0) {
+                                LaunchedEffect(target, renderedHeight) {
+                                    if (pendingScrollRestore == target) {
+                                        if (renderedHeight > 0) {
+                                            scrollListState.requestScrollToItem(listIndex, target.second.coerceAtMost(renderedHeight - 1))
+                                        }
+                                        pendingScrollRestore = null
+                                    }
+                                }
+                            }
                             ImageViewer(
                                 url = url,
                                 contentDescription = i18n("第{}頁", index + 1),
                                 contentScale = ContentScale.FillWidth,
                                 modifier = Modifier.fillMaxWidth(),
+                                // A short placeholder composes distant pages before the first image has dimensions.
+                                loadingPlaceholderModifier = Modifier.fillParentMaxHeight(),
                                 enableContextMenu = false,
                                 isDarkTheme = true,
                                 imageVerticalPadding = 0.dp,
+                                onRenderedHeightChanged = if (restoreHistoryForActiveThread || target != null) {
+                                    { renderedHeight = it }
+                                } else null,
+                                onError = if (restoreHistoryForActiveThread || target != null) {
+                                    { _, _ -> renderedHeight = -1 }
+                                } else null,
                                 enableCrossfade = false
                             )
                             if (readingMode == ReadingMode.SCROLL_GAP && index < actualImageList.lastIndex) {
@@ -1763,8 +1809,10 @@ fun ImagesReaderScreen(
                     val novel = mode == ForumReadingMode.Novel
                     navigator.navigate(IThreadReaderScreen(activeTid, activeTitle,
                         threadType = if (novel) ReadHistoryRepository.ThreadEntryType.Novel else ReadHistoryRepository.ThreadEntryType.Normal,
-                        authorId = if (novel) activeAuthorId else offlinePage?.authorId?.let(::UserId),
-                        offlineOnly = offlineOnly, offlinePage = offlinePage, initialPage = offlinePage?.page ?: 1,
+                        authorId = if (novel) activeAuthorId else null,
+                        offlineOnly = offlineOnly, fromModeSwitch = true,
+                        offlinePage = if (offlineOnly) ThreadPageDownloadKey(activeTid.value, sourcePage, sourceAuthor?.value) else null,
+                        initialPage = sourcePage,
                         openingImage = lastSmartSnapshot))
                     showOverlay = false
                 }

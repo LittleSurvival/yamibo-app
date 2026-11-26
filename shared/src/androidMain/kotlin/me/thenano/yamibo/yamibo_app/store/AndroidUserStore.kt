@@ -13,6 +13,7 @@ class AndroidUserStore(context: Context) : UserStore {
 
     @SuppressLint("UseKtx")
     override fun save(userInfo: ProfilePage) {
+        if (prefs.getInt("uid", -1) != userInfo.uid.value) UserStore.accountChanged()
         prefs.edit().apply {
             putInt("uid", userInfo.uid.value)
             putString("username", userInfo.username)
@@ -71,6 +72,7 @@ class AndroidUserStore(context: Context) : UserStore {
 
     @SuppressLint("UseKtx")
     override fun clear() {
+        if (prefs.contains("uid")) UserStore.accountChanged()
         prefs.edit().clear().apply()
     }
 }

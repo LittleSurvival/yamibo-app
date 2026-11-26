@@ -4,8 +4,8 @@ package me.thenano.yamibo.yamibo_app.core.cache
  * Interface representing a simple persistent file cache.
  */
 interface DiskCache<T : Any> {
-    /** Sets value in the cache by specific key. Automatically serializes and handles eviction asynchronously. */
-    fun set(key: String, value: T)
+    /** Persist the value and, when provided, its lookup index in the same metadata transaction. */
+    fun set(key: String, value: T, writeIndex: (() -> Unit)? = null)
 
     /** Retrieves value from the cache by key. May return null if missing or expired. */
     fun get(key: String): T?

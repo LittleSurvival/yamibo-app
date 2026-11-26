@@ -1,5 +1,7 @@
 package me.thenano.yamibo.yamibo_app.repository.appsync.engine
 
+import me.thenano.yamibo.yamibo_app.repository.storeImagePositionDetail
+import me.thenano.yamibo.yamibo_app.repository.storeTextPositionDetail
 import me.thenano.yamibo.yamibo_app.Database
 import me.thenano.yamibo.yamibo_app.repository.appsync.isAppSyncLocalOnlySetting
 import me.thenano.yamibo.yamibo_app.repository.appsync.appSyncThreadCoverOrNull
@@ -415,6 +417,10 @@ internal class DatabaseSyncDomainMaterializer(
             lastVisitTime = fields.long("lastVisitTime"),
             lastUpdatedTime = fields["lastUpdatedTime"]?.toLongOrNull(),
         )
+        val position = entity.fields.getValue("lastVisitTime").operation.fields
+        db.storeTextPositionDetail(fields.long("threadId"), fields.require("threadType"), fields.long("authorId"),
+            fields.require("historyOrigin"), fields.long("lastVisitTime"), position["floorAuthor"]?.toLongOrNull(),
+            position["imageSource"], position["imageOccurrence"]?.toLongOrNull())
     }
 
     private fun applyImageHistory(entity: ResolvedSyncEntity) {
@@ -432,6 +438,11 @@ internal class DatabaseSyncDomainMaterializer(
             fields["firstVisibleItemOffset"]?.toLongOrNull(),
             fields.long("lastVisitTime"),
         )
+        // Older writers have only the numeric page. Optional fields must come from the winning position.
+        val position = entity.fields.getValue("lastVisitTime").operation.fields
+        db.storeImagePositionDetail(fields.long("postId"), fields.long("lastVisitTime"), position["floorPid"]?.toLongOrNull(),
+            position["sourceId"], position["imageOccurrence"]?.toLongOrNull(), position["forumPage"]?.toLongOrNull(),
+            position["scopeAuthor"]?.toLongOrNull())
     }
 
     private fun applyTagHistory(entity: ResolvedSyncEntity) {

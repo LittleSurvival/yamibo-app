@@ -16,6 +16,9 @@ WHERE threadId = ? AND threadType = ? AND authorId = ?
 ORDER BY lastVisitTime DESC
 LIMIT 1;
 
+getAllByThreadKey:
+SELECT * FROM ReadingHistory WHERE threadId = ? AND threadType = ? AND authorId = ?;
+
 getByThreadIds:
 SELECT * FROM ReadingHistory
 WHERE threadId IN ? AND historyOrigin = 'Direct'
@@ -31,6 +34,12 @@ getAll:
 SELECT * FROM ReadingHistory
 WHERE historyOrigin = 'Direct'
 ORDER BY lastVisitTime DESC;
+
+getAllWithAnchors:
+SELECT h.*, a.floorAuthor, a.imageSource, a.occurrence FROM ReadingHistory AS h
+LEFT JOIN ReaderTextAnchor AS a ON a.threadId = h.threadId AND a.threadType = h.threadType
+ AND a.authorId = h.authorId AND a.origin = h.historyOrigin AND a.observedAt = h.lastVisitTime
+ORDER BY h.lastVisitTime DESC;
 
 getAllForBackup:
 SELECT * FROM ReadingHistory
@@ -144,3 +153,6 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 
 timeOfOrigin:
 SELECT lastVisitTime FROM ReadingHistory WHERE threadId = ? AND threadType = ? AND authorId = ? AND historyOrigin = ?;
+
+clearTextAnchorAt:
+DELETE FROM ReaderTextAnchor WHERE threadId = ? AND threadType = ? AND authorId = ? AND origin = ? AND observedAt = ?;
