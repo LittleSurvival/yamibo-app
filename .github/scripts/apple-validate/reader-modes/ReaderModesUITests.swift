@@ -131,6 +131,73 @@ final class ReaderModesUITests: XCTestCase {
     func testComic() { checkComic(dark: false) }
     func testComicDark() { checkComic(dark: true) }
 
+    private enum Mode: String {
+        case comic = "智能漫畫", novel = "小說閱讀", forum = "論壇模式"
+    }
+
+    private func openModePicker(from mode: Mode) {
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        tap(mode == .comic ? ["📖"] : ["閱讀模式"])
+        let selected = element(["已選擇"])
+        XCTAssertTrue(selected.waitForExistence(timeout: 8), app.debugDescription)
+        let row = element([mode.rawValue])
+        XCTAssertTrue(row.exists, app.debugDescription)
+        XCTAssertLessThan(abs(selected.frame.midY - row.frame.midY), 16, app.debugDescription)
+    }
+
+    // This fixture gives PID 1402 a unique magenta image. Aim the text reader's
+    // viewport anchor at it before switching, without relying on scroll distance.
+    private func atSecondImage() -> Bool {
+        largeColorArea(centerOnly: true) { $0 >= 190 && $1 < 100 && $2 >= 140 }
+    }
+
+    private func assertSecondImage(in mode: Mode) {
+        if mode == .comic {
+            XCTAssertTrue(element(["2 / 3"]).waitForExistence(timeout: 12), app.debugDescription)
+        }
+        let marker = NSPredicate { _, _ in self.atSecondImage() }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: marker, object: app)], timeout: 15),
+                       .completed, "Expected PID 1402 image at reading center in \(mode.rawValue): \(app.debugDescription)")
+    }
+
+    private func checkSwitch(from source: Mode, to target: Mode) {
+        openDownload([source.rawValue], dark: false)
+        if source == .comic {
+            waitForImage(second: false)
+            app.swipeLeft()
+        } else {
+            assertFirstFloor()
+            for _ in 0..<12 {
+                if atSecondImage() { break }
+                let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.46, dy: 0.68))
+                let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.46, dy: 0.47))
+                start.press(forDuration: 0.12, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.18)
+            }
+        }
+        assertSecondImage(in: source)
+        capture("source-pid-1402")
+        openModePicker(from: source)
+        tap([target.rawValue])
+        assertSecondImage(in: target)
+        capture("destination-pid-1402")
+        openModePicker(from: target)
+        tap([source.rawValue])
+        assertSecondImage(in: source)
+        capture("return-pid-1402")
+        XCUIDevice.shared.press(.home)
+        openDownload([target.rawValue], dark: false, migrateInManager: false)
+        assertSecondImage(in: target)
+        capture("cold-reopen-pid-1402")
+        openModePicker(from: target)
+    }
+
+    func testComicToNovel() { checkSwitch(from: .comic, to: .novel) }
+    func testNovelToComic() { checkSwitch(from: .novel, to: .comic) }
+    func testComicToForum() { checkSwitch(from: .comic, to: .forum) }
+    func testForumToComic() { checkSwitch(from: .forum, to: .comic) }
+    func testNovelToForum() { checkSwitch(from: .novel, to: .forum) }
+    func testForumToNovel() { checkSwitch(from: .forum, to: .novel) }
+
     private func waitForImage(second: Bool) {
         let painted = NSPredicate { _, _ in
             self.largeColorArea { red, green, blue in
@@ -142,7 +209,7 @@ final class ReaderModesUITests: XCTestCase {
         waitForExpectations(timeout: 15)
     }
 
-    private func largeColorArea(matching: (Int, Int, Int) -> Bool) -> Bool {
+    private func largeColorArea(centerOnly: Bool = false, matching: (Int, Int, Int) -> Bool) -> Bool {
         let source = app.screenshot().image.cgImage!
         let width = source.width, height = source.height
         var pixels = [UInt8](repeating: 0, count: width * height * 4)
@@ -151,6 +218,16 @@ final class ReaderModesUITests: XCTestCase {
                 bitsPerComponent: 8, bytesPerRow: width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
                 bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue)!
             context.draw(source, in: CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)))
+        }
+        if centerOnly {
+            var hits = 0
+            for y in -4...4 {
+                for x in -4...4 {
+                    let offset = ((height / 2 + y * height / 100) * width + width / 2 + x * width / 100) * 4
+                    if matching(Int(pixels[offset]), Int(pixels[offset + 1]), Int(pixels[offset + 2])) { hits += 1 }
+                }
+            }
+            return hits >= 42
         }
         var matchingPixels = 0
         var offset = 0

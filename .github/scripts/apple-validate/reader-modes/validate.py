@@ -72,8 +72,12 @@ def main():
             return Path(container) / "Documents/YamiboApp"
 
         results = {}
-        for palette in ("default", "default-dark"):
-            for reader in ("testForum", "testNovel", "testComic"):
+        matrix = "--matrix" in sys.argv[1:]
+        palettes = ("default",) if matrix else ("default", "default-dark")
+        readers = (("testComicToNovel", "testNovelToComic", "testComicToForum", "testForumToComic",
+                    "testNovelToForum", "testForumToNovel") if matrix else ("testForum", "testNovel", "testComic"))
+        for palette in palettes:
+            for reader in readers:
                 case = reader if palette == "default" else f"{reader}Dark"
                 name = f"{palette}-{reader}"
                 run(f"Install clean App for {name}", simctl + ["install", simulator, str(apps[0])], 120)
