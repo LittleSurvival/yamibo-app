@@ -34,8 +34,19 @@ final class ReaderModesUITests: XCTestCase {
         let alert = springboard.alerts.firstMatch
         if alert.waitForExistence(timeout: 3) { alert.buttons.firstMatch.tap() }
         tap(["我的", "Profile"])
-        tap(["下載管理", "下载管理", "Download manager", "Downloads"])
-        tap(["下載內容管理", "下载内容管理", "Downloaded content", "內容管理"])
+        let contentLabels = ["下載內容管理", "下载内容管理", "Downloaded content", "內容管理"]
+        let manager = app.buttons.matching(NSPredicate(format: "label IN %@",
+            ["下載管理, 下載管理", "下載管理", "下载管理, 下载管理", "下载管理", "Download manager", "Downloads"])).firstMatch
+        // The Profile row contains a separately accessible image with the same
+        // label. Confirm navigation before touching the next screen.
+        for _ in 0..<3 {
+            if element(contentLabels).exists { break }
+            let later = app.buttons["稍後"]
+            if later.exists && later.isHittable { later.tap() }
+            if manager.waitForExistence(timeout: 5) && manager.isHittable { manager.tap() }
+            if element(contentLabels).waitForExistence(timeout: 5) { break }
+        }
+        tap(contentLabels)
         if migrateInManager {
             tap(["轉換舊版圖片", "转换旧版图片", "Convert legacy images"])
             capture("migration-confirmation")
