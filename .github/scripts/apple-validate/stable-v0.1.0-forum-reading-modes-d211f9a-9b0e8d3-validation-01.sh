@@ -23,6 +23,8 @@ expected = {
     "missingHtmlFallsBackToFilteredNormalizedApiSources",
     "copiesAreIsolatedByAccountStorageAndPagination",
     "deletingReadingHistoryClearsTheWorkResumeButRetainsMembershipAndDownload",
+    "currentBackupRestoresTextAndImageAnchorsIntoFreshNativeDatabase",
+    "olderWritesAndSameTimeLegacyImageReplayKeepTheCorrectPosition",
 }
 names = [case.attrib["name"].split("[")[0] for case in tests]
 failed = [name for name, case in zip(names, tests)
