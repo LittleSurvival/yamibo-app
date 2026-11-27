@@ -65,7 +65,8 @@ final class ReaderModesUITests: XCTestCase {
             if element(contentLabels).exists { break }
             let later = app.buttons["稍後"]
             if later.exists && later.isHittable { later.tap() }
-            if manager.waitForExistence(timeout: 5) && manager.isHittable { manager.tap() }
+            if manager.waitForExistence(timeout: 2) && manager.isHittable { manager.tap() }
+            else if benchmarkChapters>0 { app.swipeUp() }
             if element(contentLabels).waitForExistence(timeout: 5) { break }
         }
         tap(contentLabels)
@@ -321,20 +322,27 @@ final class ReaderModesUITests: XCTestCase {
             }
             if guardLocalTransfers || benchmarkNetwork != "none" {
                 let runKey="ios-\(round)-\(mode == .comic ? "comic" : (mode == .novel ? "novel":"forum"))-\(benchmarkNetwork)"
-                let ack=expectation(description:"loopback replay armed")
-                var hostNanoseconds: Double?
-                let lo=ProcessInfo.processInfo.systemUptime
                 let caseURL=URL(string:"http://127.0.0.1:18928/__case/"+runKey)!
-                URLSession.shared.dataTask(with:caseURL) { _,resp,error in
-                    XCTAssertNil(error)
-                    let reply=resp as? HTTPURLResponse
-                    XCTAssertEqual(reply?.statusCode,204)
-                    hostNanoseconds=reply?.value(forHTTPHeaderField:"X-Fixture-Monotonic-Ns").flatMap(Double.init)
-                    ack.fulfill()
-                }.resume()
-                wait(for:[ack],timeout:8)
-                XCTAssertNotNil(hostNanoseconds)
-                rows.append(["action":"origin","round":round,"case":runKey,"lo":lo,"hi":ProcessInfo.processInfo.systemUptime,"host_ns":hostNanoseconds ?? -1])
+                var probes=[(low: Double,high: Double,host: Double)]()
+                for _ in 0..<4 {
+                    let ack=expectation(description:"loopback replay armed")
+                    var hostNanoseconds: Double?
+                    let lo=ProcessInfo.processInfo.systemUptime
+                    var received: Double?
+                    URLSession.shared.dataTask(with:caseURL) { _,resp,error in
+                        received=ProcessInfo.processInfo.systemUptime
+                        XCTAssertNil(error)
+                        let reply=resp as? HTTPURLResponse
+                        XCTAssertEqual(reply?.statusCode,204)
+                        hostNanoseconds=reply?.value(forHTTPHeaderField:"X-Fixture-Monotonic-Ns").flatMap(Double.init)
+                        ack.fulfill()
+                    }.resume()
+                    wait(for:[ack],timeout:8)
+                    if let hostNanoseconds,let received { probes.append((lo,received,hostNanoseconds)) }
+                }
+                guard let fastest=probes.min(by:{ $0.high-$0.low < $1.high-$1.low }) else { XCTFail("No origin clock reply"); return }
+                rows.append(["action":"origin","round":round,"case":runKey,"lo":fastest.low,"hi":fastest.high,"host_ns":fastest.host,
+                             "clock_probe_ms":probes.map { ($0.high-$0.low)*1000 }])
             }
             if benchmarkNetwork != "none" {
                 continueAfterFailure = false
@@ -376,7 +384,16 @@ final class ReaderModesUITests: XCTestCase {
             }
             if mode == .comic { waitForImage(second: true) }
             if mode == .comic { app.swipeRight(); waitForImage(second: false) }
-            else { app.swipeDown(); assertFirstFloor() }
+            else {
+                // Reverse the unmeasured setup motion until the first full label is on screen.
+                // A single reverse fling has variable distance; preserve the original response window.
+                for _ in 0..<4 {
+                    app.swipeDown()
+                    let first=app.staticTexts["READER_FLOOR_1"]
+                    if first.exists && app.frame.contains(first.frame) && first.isHittable { break }
+                }
+                assertFirstFloor()
+            }
             if promptInput {
                 verifyFirstContent()
                 app.coordinate(withNormalizedOffset: CGVector(dx:0.5,dy:0.5)).tap()

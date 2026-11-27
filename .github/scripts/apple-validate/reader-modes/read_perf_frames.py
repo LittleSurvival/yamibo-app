@@ -295,10 +295,11 @@ def analyze(directory, mode, sequence, rounds, config):
                 if "touch_up_ms" not in sample: continue
                 a=sample["touch_up_ms"]/1000+host_offset; b=sample["presented_marker_ms"]/1000+host_offset
                 inside=[(op,line) for ts,op,line in events if (ts-a)%86400<=b-a]
-                others=[op for op,line in inside if "/threads/780001/" in line]
+                others=[op for op,line in inside if any(780001<=int(tid)<=780100 for tid in re.findall(r"/threads/(\d+)(?:/|\s|$)",line))]
+                root_lists=[op for op,line in inside if re.search(r"/(?:library/7/)?threads/?(?:\s|$)",line) and ("direntr" in op.lower() or "readdir" in op.lower())]
                 sample["file_trace"]={"host_events":len(inside),"selected_asset_positive_controls_entire_run":positive,
-                    "trace_reliable":positive>0 and bool(inside),"unrelated_operations":others,
-                    "caveat":"fs_usage for the App executable. A missing trace/selected-file control cannot demonstrate zero unrelated physical opens."}
+                    "trace_reliable":positive>0 and bool(inside),"unrelated_operations":others,"thread_root_enumerations_with_resolved_path":root_lists,
+                    "caveat":"fs_usage for the App executable. Missing traces or selected-file controls cannot demonstrate zero unrelated opens. Directory enumeration without a resolved root path cannot establish a zero inspection count."}
     if (directory/"requests.ndjson").is_file():
         events=[json.loads(l) for l in (directory/"requests.ndjson").read_text().splitlines() if l]
         for sample in samples:
@@ -350,6 +351,12 @@ def analyze(directory, mode, sequence, rounds, config):
         summary["settled_glyph"]={"usable":len(glyphs),"p50":percentile(glyphs,50),"p95":percentile(glyphs,95)}
         summary["secondary_image_usable"]=len(valid);summary["usable"]=len(glyphs)
         if len(glyphs)!=rounds:problems.append("missing physically matched primary text witness")
+    navigation_summary={}
+    for stage in ("board","download_group","download_page","open"):
+        values=[s["navigation_to_correct_content_ms"][stage] for s in valid if stage in s.get("navigation_to_correct_content_ms",{})]
+        if values:
+            navigation_summary[stage]={"usable":len(values),"p50":percentile(values,50),"p95":percentile(values,95)}
+    summary["navigation_to_correct_content_ms"]=navigation_summary
     if conditions.get("network") or conditions.get("guard_local"):
         for s in valid:
             req=s.get("controlled_network",{})
