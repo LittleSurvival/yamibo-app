@@ -21,7 +21,7 @@ internal suspend fun runNativeStorageSample(database: Database, cache: Path, pla
                                             provider: () -> DownloadStorageProvider): JsonObject {
     val clock = TimeSource.Monotonic
     val json = Json { ignoreUnknownKeys = true }
-    val owner = 7
+    val owner = 0 // Synthetic guest library, also readable from an unsigned-in UI.
     val tid = 874311
     val pageCount = 12
     val perPage = 20
@@ -41,7 +41,7 @@ internal suspend fun runNativeStorageSample(database: Database, cache: Path, pla
             val floor = (page - 1) * perPage + offset
             val pid = 100000 + floor
             val url = urls[(floor - 1) % urls.size]
-            Post(pid = PostId(pid), floor = floor, title = "", author = User(UserId(owner), "QA"),
+            Post(pid = PostId(pid), floor = floor, title = "", author = User(UserId(7), "QA"),
                 timeCreate = TimeInfo("", null, 0), contentHtml = "<p>" + text(pid) + "</p><img src='$url'>",
                 images = listOf(PostImage(url, "")), tags = Tags(), poll = null)
         }
@@ -95,7 +95,7 @@ internal suspend fun runNativeStorageSample(database: Database, cache: Path, pla
         val key = ThreadPageDownloadKey(tid, index + 1)
         val meta = ThreadPageDownloadManifest(key, "Storage fixture", stamp, pageCount,
             if (index == pages.lastIndex) DownloadPageKind.LastAtDownloadTime else DownloadPageKind.Normal,
-            images = images, shared = true, owner = owner)
+            images = images, archiveId = kotlin.uuid.Uuid.random().toString(), shared = true, owner = owner)
         library.save(storage, meta, page, observedAt = stamp)
     }
     pages.forEachIndexed { index, page -> save(index, page, 1000L + index) }

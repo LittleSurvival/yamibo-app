@@ -47,6 +47,11 @@ class IOSReaderHistoryBackupTest {
                 IOSDownloadStorageProvider(settings)
             }
             println("NATIVE_STORAGE_BENCH_V1 $measurement")
+            // Preserve only the synthetic download tree for a separate reader UI launch.
+            val exported = FileSystem.SYSTEM_TEMPORARY_DIRECTORY / "reader-storage-export-${Uuid.random()}"
+            FileSystem.SYSTEM.createDirectories(exported)
+            FileSystem.SYSTEM.atomicMove(directory / "YamiboDownloads", exported / "YamiboDownloads")
+            println("NATIVE_STORAGE_TREE_V1 $exported")
         } finally {
             settings.backupFolderUri.setValue(previous)
             FileSystem.SYSTEM.deleteRecursively(directory, mustExist = false)

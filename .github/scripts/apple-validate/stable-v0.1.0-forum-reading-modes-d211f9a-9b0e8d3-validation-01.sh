@@ -35,21 +35,24 @@ summary = {"executed": names, "missing": sorted(expected - set(names)), "failedO
 if summary["missing"] or failed or len(names) != len(set(names)):
     raise SystemExit(f"Incomplete iOS reader coverage: {summary}")
 print(f"{len(tests)} shared reader tests on the iOS simulator target")
-prefix = "NATIVE_STORAGE_BENCH_V1 "
-observations = set()
-for report in reports:
-    for node in ET.parse(report).getroot().iter("system-out"):
-        for line in (node.text or "").splitlines():
-            if prefix in line:
-                observations.add(line.split(prefix, 1)[1].strip())
-if not observations:
-    for line in (out / "native-build.log").read_text(encoding="utf-8").splitlines():
-        if prefix in line:
-            observations.add(line.split(prefix, 1)[1].strip())
-if len(observations) != 1:
-    raise SystemExit(f"Expected one native storage measurement in JUnit or runner stdout, found {len(observations)}")
-sample = json.loads(observations.pop())
+def result_line(prefix):
+    lines = []
+    for report in reports:
+        for node in ET.parse(report).getroot().iter("system-out"):
+            lines.extend((node.text or "").splitlines())
+    lines.extend((out / "native-build.log").read_text(encoding="utf-8").splitlines())
+    values = {line.split(prefix, 1)[1].strip() for line in lines if prefix in line}
+    if len(values) != 1:
+        raise SystemExit(f"Expected one {prefix} value, found {len(values)}")
+    return values.pop()
+
+sample = json.loads(result_line("NATIVE_STORAGE_BENCH_V1 "))
 if sample["platform"] != "ios-filesystem" or sample["floors"] != 240 or sample["distinct_image_files"] != 1:
     raise SystemExit("Unexpected native benchmark fixture or provider")
 (out / "native-storage-benchmark.json").write_text(json.dumps(sample, indent=2), encoding="utf-8")
+source = pathlib.Path(result_line("NATIVE_STORAGE_TREE_V1 ")).resolve(strict=True)
+if not source.name.startswith("reader-storage-export-") or not (source / "YamiboDownloads/library/0").is_dir():
+    raise SystemExit("Expected an isolated guest fixture tree")
+shutil.make_archive(str(out / "long-thread-native-fixture"), "zip", source, "YamiboDownloads")
+shutil.rmtree(source)
 PY
