@@ -36,6 +36,7 @@ def run(label, command, timeout, *, env=None, capture=False):
 
 def main():
     simulator = None
+    booted = False
     resources = ExitStack()
     perf = "--perf" in sys.argv
     scale = tuple(map(int,sys.argv[sys.argv.index("--scale")+1:sys.argv.index("--scale")+3])) if "--scale" in sys.argv else None
@@ -131,10 +132,22 @@ def main():
         compiler_args=["--max-workers=1","-Dorg.gradle.jvmargs=-Xmx6g -Dfile.encoding=UTF-8"] if config=="Release" else ["--max-workers=2"]
         if perf:
             (OUTPUT/"runner-hardware.txt").write_text(subprocess.check_output(["sysctl","hw.model","hw.ncpu","hw.memsize","machdep.cpu.brand_string"],text=True)+"\n"+" ".join(compiler_args))
-        run("Prepare framework before booting UI Simulator", ["./gradlew",
-            ":composeApp:embedAndSignAppleFrameworkForXcode", "--console=plain", *compiler_args],
-            1800, env=framework_env)
-        run("Stop Gradle before UI execution", ["./gradlew", "--stop"], 60)
+        receipt=os.environ.get("READER_FRAMEWORK_RECEIPT","")
+        if perf and (receipt or "--export-framework" in sys.argv):
+            from perf_framework import conditions as framework_conditions,export,restore
+            definition=framework_conditions(sdk,config,bool(network_mode or guard_local))
+        if receipt:
+            assert perf and config=="Release"
+            restore(receipt,products,OUTPUT,definition)
+        else:
+            run("Prepare framework before booting UI Simulator", ["./gradlew",
+                ":composeApp:embedAndSignAppleFrameworkForXcode", "--console=plain", *compiler_args],
+                4500 if config=="Release" else 1800, env=framework_env)
+            run("Stop Gradle before UI execution", ["./gradlew", "--stop"], 60)
+        if "--export-framework" in sys.argv:
+            assert not receipt
+            export(products,OUTPUT,definition)
+            return
         xcode = ["xcodebuild", "-project", PROJECT, "-scheme", SCHEME, "-configuration", config,
                  "-destination", f"id={simulator}", "-derivedDataPath", str(DERIVED), "CODE_SIGNING_ALLOWED=NO"]
         run("Build App and UI test bundle", xcode + ["-sdk", "iphonesimulator", "build-for-testing"],
@@ -144,6 +157,7 @@ def main():
                 if plistlib.loads((path / "Info.plist").read_bytes()).get("CFBundleIdentifier") == BUNDLE]
         assert len(apps) == 1, apps
         run("Boot owned iPhone Simulator", ["xcrun", "simctl", "boot", simulator], 60)
+        booted=True
         run("Wait for iPhone boot", ["xcrun", "simctl", "bootstatus", simulator, "-b"], 300)
         simctl = ["xcrun", "simctl"]
         def downloads_root():
@@ -233,7 +247,7 @@ def main():
                     test_problem=None
                     try:
                         run(name, xcode + ["-resultBundlePath", str(bundle), "-parallel-testing-enabled", "NO",
-                            f"-only-testing:ReaderModesUITests/ReaderModesUITests/{case}", "test-without-building"], 1800 if perf else 300)
+                            f"-only-testing:ReaderModesUITests/ReaderModesUITests/{case}", "test-without-building"], max(1800,rounds*100) if perf else 300)
                     except (subprocess.CalledProcessError,subprocess.TimeoutExpired) as exc:
                         test_problem=exc
                     finally:
@@ -293,7 +307,7 @@ def main():
     finally:
         resources.close()
         if simulator:
-            subprocess.run(["xcrun", "simctl", "shutdown", simulator], check=False, timeout=60)
+            if booted: subprocess.run(["xcrun", "simctl", "shutdown", simulator], check=False, timeout=60)
             subprocess.run(["xcrun", "simctl", "delete", simulator], check=True, timeout=60)
 
 

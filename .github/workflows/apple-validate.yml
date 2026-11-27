@@ -20,9 +20,14 @@ on:
         description: Script filename without .sh when validation_script is custom
         required: false
         type: string
+      reader_framework_receipt:
+        description: Optional hosted iOS framework receipt (artifact ID, donor commit, archive SHA-256 separated by colons)
+        required: false
+        type: string
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: apple-validation-${{ inputs.validation_ref }}-${{ inputs.validation_script }}-${{ inputs.custom_script }}
@@ -31,7 +36,7 @@ concurrency:
 jobs:
   validate:
     runs-on: macos-latest
-    timeout-minutes: 60
+    timeout-minutes: 115
     env:
       APPLE_VALIDATE_OUTPUT: ${{ github.workspace }}/.tmp/qa/apple-validate/results
     steps:
@@ -53,11 +58,13 @@ jobs:
           path: ~/.konan
           key: apple-native-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('gradle/libs.versions.toml', 'gradle/wrapper/gradle-wrapper.properties') }}
       - name: Run selected validation script
-        timeout-minutes: 50
+        timeout-minutes: 100
         shell: bash
         env:
           SELECTED_SCRIPT: ${{ inputs.validation_script }}
           CUSTOM_SCRIPT: ${{ inputs.custom_script }}
+          READER_FRAMEWORK_RECEIPT: ${{ inputs.reader_framework_receipt }}
+          GH_TOKEN: ${{ inputs.reader_framework_receipt != '' && github.token || '' }}
         run: |
           set -euo pipefail
           script="$SELECTED_SCRIPT"

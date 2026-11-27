@@ -1,3 +1,3 @@
 #!/usr/bin/env bash
 set -euo pipefail
-exec bash "$(dirname "$0")/reader-modes/run_perf.sh" --tag-12 --network fast --perf Forum cold 10 Release
+exec bash "$(dirname "$0")/reader-modes/run_perf.sh" --tag-12 --network fast --perf Forum cold 40 Release
