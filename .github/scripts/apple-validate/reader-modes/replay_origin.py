@@ -75,6 +75,9 @@ class Handler(BaseHTTPRequestHandler):
         elif (m:=re.fullmatch(r"/bench-(\d{1,2})\.jpg",path.path)) and 1<=int(m[1])<=20:
             kind="image-"+m[1];ctype="image/jpeg";data=(F/f"YamiboDownloads/thread_140_page_1_author_7/images/{int(m[1]):04}.jpg").read_bytes()
         else:kind="unknown";data=b"unmapped fixture resource";code=404
+        with self.server.link.mu:
+            with (F/"begins.ndjson").open("a",encoding="utf8") as arrivals:
+                arrivals.write(json.dumps({"run":case,"resource":kind,"method":self.command,"begin_host_ns":start})+"\n")
         held=hold and kind=="catalog-post";time.sleep(.1+(5 if held else 0))
         released=time.monotonic_ns()
         self.send_response(code);self.send_header("Content-Type",ctype);self.send_header("Content-Length",str(len(data)))

@@ -40,6 +40,7 @@ final class ReaderFrameProbe: UIView {
         p.isOpaque = true
         p.layer.zPosition = 10000
         let link = CADisplayLink(target: p, selector: #selector(drawClock(_:)))
+        link.preferredFramesPerSecond = 60
         link.add(to: .main, forMode: .common)
         p.link = link
     }
@@ -56,7 +57,9 @@ final class ReaderFrameProbe: UIView {
             let row: [String: Any] = ["time": t.timestamp, "phase": t.phase.rawValue, "x": point.x, "y": point.y,
                                       "wall": Date().timeIntervalSince1970, "uptime": ProcessInfo.processInfo.systemUptime,
                                       "width": window.bounds.width, "height": window.bounds.height,
-                                      "scale": window.screen.scale, "pid": ProcessInfo.processInfo.processIdentifier]
+                                      "scale": window.screen.scale, "pid": ProcessInfo.processInfo.processIdentifier,
+                                      "screen_max_hz": window.screen.maximumFramesPerSecond,
+                                      "display_link_duration_ms": (p.link?.duration ?? 0) * 1000]
             p.stream.async {
                 let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                 let url = dir.appendingPathComponent(p.filename)

@@ -28,13 +28,17 @@ on:
         description: Five-pair block number (0 through 7) on one hosted simulator
         required: false
         type: string
+      reader_rounds:
+        description: Optional reader sample count for a smoke run (1 to 40)
+        required: false
+        type: string
 
 permissions:
   contents: read
   actions: read
 
 concurrency:
-  group: apple-validation-${{ inputs.validation_ref }}-${{ inputs.validation_script }}-${{ inputs.custom_script }}-${{ inputs.reader_pair_block }}
+  group: apple-validation-${{ inputs.validation_ref }}-${{ inputs.validation_script }}-${{ inputs.custom_script }}-${{ inputs.reader_pair_block }}-${{ inputs.reader_rounds }}
   cancel-in-progress: false
 
 jobs:
@@ -67,6 +71,7 @@ jobs:
         env:
           SELECTED_SCRIPT: ${{ inputs.validation_script }}
           CUSTOM_SCRIPT: ${{ inputs.custom_script }}
+          READER_ROUND_COUNT: ${{ inputs.reader_rounds }}
           READER_PAIR_BLOCK: ${{ inputs.reader_pair_block }}
           READER_FRAMEWORK_RECEIPT: ${{ inputs.reader_framework_receipt }}
           GH_TOKEN: ${{ inputs.reader_framework_receipt != '' && github.token || '' }}

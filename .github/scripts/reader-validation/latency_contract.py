@@ -227,8 +227,8 @@ class ReaderDevice:
         self.serial, self.package, self.folder = serial, package, Path(folder)
         self.size = (720,1280)
 
-    def adb(self,*args,timeout=35,input=None,data=None,check=True,**kwargs):
-        return subprocess.run(["adb","-s",self.serial,*map(str,args)],input=data if data is not None else input,stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=check,timeout=timeout,**kwargs).stdout
+    def adb(self,*args,timeout=35,input=None,data=None,check=True,stdout=subprocess.PIPE,**kwargs):
+        return subprocess.run(["adb","-s",self.serial,*map(str,args)],input=data if data is not None else input,stdout=stdout,stderr=subprocess.PIPE,check=check,timeout=timeout,**kwargs).stdout
 
     def shell(self,*args,**kwargs):
         return self.adb("shell",*args,**kwargs).decode("utf-8",errors="replace").strip()
@@ -604,39 +604,47 @@ def _pull_finalized_recording(d, source, target, expected_boot, expected_size=No
     import hashlib
     import subprocess
     import time
-    deadline = time.monotonic() + retry_seconds
-    attempt = 0
+    def guest_identity():
+        if d.shell("cat", "/proc/sys/kernel/random/boot_id") != expected_boot:
+            raise ValueError("AVD boot changed during transfer: " + source)
+        size = int(d.shell("stat", "-c", "%s", source))
+        if size < 1024 or (expected_size is not None and size != expected_size):
+            raise ValueError("device recording was not finalized: " + source)
+        sha = d.shell("sha256sum", source).partition(" ")[0]
+        if not re.fullmatch(r"[0-9a-f]{64}", sha):
+            raise ValueError("invalid guest recording digest: " + source)
+        return size, sha
+
     known = None
-    last_error = None
-    while True:
-        attempt += 1
+    for attempt, transport in enumerate(("pull", "exec-out"), 1):
         partial = target.with_suffix(target.suffix + f".attempt-{attempt}")
         try:
-            if d.shell("cat", "/proc/sys/kernel/random/boot_id") != expected_boot:
-                raise ValueError("AVD boot changed during transfer: " + source)
-            size = int(d.shell("stat", "-c", "%s", source))
-            if size < 1024 or (expected_size is not None and size != expected_size):
-                raise ValueError("device recording was not finalized: " + source)
-            sha = d.shell("sha256sum", source).split()[0]
-            if not re.fullmatch(r"[0-9a-f]{64}", sha) or (known is not None and known != (size,sha)):
+            identity = guest_identity()
+            if known is not None and known != identity:
                 raise ValueError("finalized guest recording changed: " + source)
-            known = (size, sha)
-            d.adb("pull", source, str(partial))
-            if d.shell("cat", "/proc/sys/kernel/random/boot_id") != expected_boot:
-                raise ValueError("AVD boot changed while reading: " + source)
-            with partial.open("rb") as file:
-                received = hashlib.file_digest(file, "sha256").hexdigest()
-            if partial.stat().st_size != size or received != sha:
-                raise OSError("truncated or corrupted adb pull")
+            known = identity
+            if transport == "pull":
+                d.adb("pull", source, str(partial))
+            else:
+                # The sync service may have stalled for its entire timeout. Give the
+                # independent shell stream its own timeout and keep both partial files.
+                with partial.open("wb") as output:
+                    d.adb("exec-out", "cat", source, stdout=output, timeout=max(1,retry_seconds))
+            if guest_identity() != known:
+                raise ValueError("finalized guest recording changed while reading: " + source)
+            with partial.open("rb") as received:
+                if (partial.stat().st_size,hashlib.file_digest(received,"sha256").hexdigest()) != known:
+                    raise OSError("truncated or corrupted " + transport)
             partial.replace(target)
             return
-        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-            last_error = exc
+        except (OSError, ValueError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
             with (target.parent / "transfer-errors.txt").open("a",encoding="utf-8") as log:
-                print(f"{source} attempt={attempt} partial_bytes={partial.stat().st_size if partial.exists() else 0}",
+                print(f"{source} attempt={attempt} transport={transport} partial_bytes={partial.stat().st_size if partial.exists() else 0}",
                       repr(exc), repr(getattr(exc,"stderr",None)), file=log)
-            if time.monotonic() >= deadline:
-                raise RuntimeError(f"Guest recording could not be retrieved: {source}; see transfer-errors.txt") from last_error
+            if isinstance(exc,ValueError):
+                raise
+            if transport == "exec-out":
+                raise RuntimeError(f"Guest recording could not be retrieved: {source}; see transfer-errors.txt") from exc
             time.sleep(pause)
 
 

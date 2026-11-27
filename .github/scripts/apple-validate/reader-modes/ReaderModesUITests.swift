@@ -291,17 +291,19 @@ final class ReaderModesUITests: XCTestCase {
         let rounds = 1 // READER_PERF_ROUNDS
         let cold = true // READER_PERF_COLD
         var rows = [[String: Any]]()
-        func record(_ key: String, round: Int, action: () -> Void) {
-            let before = ProcessInfo.processInfo.systemUptime
-            action()
-            let row: [String: Any] = ["round": round, "action": key, "lo": before, "hi": ProcessInfo.processInfo.systemUptime]
+        func checkpoint(_ row: [String:Any]) {
             rows.append(row)
-            if let data = try? JSONSerialization.data(withJSONObject: [row]) {
-                let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
-                attachment.name = "input-\(round)-\(key)"
+            if let data=try? JSONSerialization.data(withJSONObject:[row]) {
+                let attachment=XCTAttachment(data:data,uniformTypeIdentifier:"public.json")
+                attachment.name="round-\(row["round"] ?? 0)-\(row["action"] ?? "unknown")"
                 attachment.lifetime = .keepAlways
                 add(attachment)
             }
+        }
+        func record(_ key: String,round: Int,action: () -> Void) {
+            let before=ProcessInfo.processInfo.systemUptime
+            action()
+            checkpoint(["round":round,"action":key,"lo":before,"hi":ProcessInfo.processInfo.systemUptime])
         }
         defer {
             if let data = try? JSONSerialization.data(withJSONObject: rows) {
@@ -314,7 +316,7 @@ final class ReaderModesUITests: XCTestCase {
         let first = cold ? 1 : 0
         defer { measureNavigation=nil }
         for round in first...rounds {
-            measureNavigation={ key,lo,hi in rows.append(["action":key,"round":round,"lo":lo,"hi":hi]) }
+            measureNavigation={ key,lo,hi in checkpoint(["action":key,"round":round,"lo":lo,"hi":hi]) }
             let select = {
                 let button = self.element([mode.rawValue])
                 XCTAssertTrue(button.exists)
@@ -341,7 +343,7 @@ final class ReaderModesUITests: XCTestCase {
                     if let hostNanoseconds,let received { probes.append((lo,received,hostNanoseconds)) }
                 }
                 guard let fastest=probes.min(by:{ $0.high-$0.low < $1.high-$1.low }) else { XCTFail("No origin clock reply"); return }
-                rows.append(["action":"origin","round":round,"case":runKey,"lo":fastest.low,"hi":fastest.high,"host_ns":fastest.host,
+                checkpoint(["action":"origin","round":round,"case":runKey,"lo":fastest.low,"hi":fastest.high,"host_ns":fastest.host,
                              "clock_probe_ms":probes.map { ($0.high-$0.low)*1000 }])
             }
             if benchmarkNetwork != "none" {
@@ -357,7 +359,16 @@ final class ReaderModesUITests: XCTestCase {
                 tap(["QA Forum"])
                 if mode == .novel {
                     record("board",round:round) { tap(["QA Three Readers"]) }
-                    record("open",round:round) { tap(["開始閱讀","繼續閱讀"]) }
+                    let choices=["開始閱讀","繼續閱讀"]
+                    let button=element(choices)
+                    XCTAssertTrue(button.waitForExistence(timeout:12) && button.isHittable,app.debugDescription)
+                    let text=app.staticTexts.matching(NSPredicate(format:"label IN %@",choices)).firstMatch
+                    if text.exists && text.isHittable {
+                        let bounds=text.frame,now=ProcessInfo.processInfo.systemUptime
+                        checkpoint(["round":round,"action":"detail_ready","lo":now,"hi":now,"label":text.label,
+                                    "rect":[bounds.minX,bounds.minY,bounds.maxX,bounds.maxY]])
+                    }
+                    record("open",round:round) { button.tap() }
                 } else {
                     record("open",round:round) { tap(["QA Three Readers"]) }
                 }
@@ -374,7 +385,7 @@ final class ReaderModesUITests: XCTestCase {
                     assertFirstFloor()
                     let node=app.staticTexts.matching(NSPredicate(format:"label == %@", "READER_FLOOR_1")).firstMatch
                     let bbox=node.frame, t=ProcessInfo.processInfo.systemUptime
-                    rows.append(["round":round,"action":"glyph","lo":t,"hi":t,"label":node.label,
+                    checkpoint(["round":round,"action":"glyph","lo":t,"hi":t,"label":node.label,
                                  "rect":[bbox.minX,bbox.minY,bbox.maxX,bbox.maxY]])
                 }
             }
@@ -411,6 +422,11 @@ final class ReaderModesUITests: XCTestCase {
                 XCTAssertTrue(element(["降冪"]).waitForExistence(timeout:10),app.debugDescription)
                 XCTAssertTrue(element(["QA CHAPTER 0003"]).waitForExistence(timeout:10),app.debugDescription)
                 capture("uid7-reversed-catalog")
+                record("switch_chapter",round:round) { tap(["QA CHAPTER 0005"]) }
+                waitForImage(second:true)
+                capture("selected-next-chapter-magenta")
+                app.coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5)).tap()
+                tap(["◀"])
             }
             if !cold {
                 app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()

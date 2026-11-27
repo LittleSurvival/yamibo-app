@@ -51,9 +51,12 @@ def main():
         mode, sequence, rounds_raw, config = sys.argv[sys.argv.index("--perf")+1:]
         assert mode in ("Comic","Novel","Forum") and sequence in ("cold","warm")
         assert config in ("Debug", "Release")
-        rounds = int(rounds_raw)
+        override=os.environ.get("READER_ROUND_COUNT","")
+        if shared_simulator and override:
+            raise ValueError("Paired runs define their individual input count")
+        rounds = int(override or rounds_raw)
         assert 1 <= rounds <= 40
-        (OUTPUT/"profile-conditions.json").write_text(json.dumps({"mode":mode,"sequence":sequence,"demanded_samples":rounds,"configuration":config,
+        (OUTPUT/"profile-conditions.json").write_text(json.dumps({"mode":mode,"sequence":sequence,"demanded_samples":rounds,"profile_default_samples":int(rounds_raw),"configuration":config,
             "network":network_mode,"guard_local":guard_local,"native_long":long_image,"catalog_scale":scale,"sustain":sustain,
             "prompt_input":"--prompt-input" in sys.argv,"reference":"12" if "--tag-12" in sys.argv else "candidate"}))
         testsrc = PROFILE / "ReaderModesUITests.swift"
@@ -107,7 +110,7 @@ def main():
                 except OSError: time.sleep(.2)
             else: raise RuntimeError("Loopback origin failed to start")
             def collect_origin():
-                for name in ("contract.json","requests.ndjson","fixture-generator.log"):
+                for name in ("contract.json","begins.ndjson","requests.ndjson","generator.log"):
                     f=PROFILE/"network-fixture"/name
                     if f.is_file():shutil.copy2(f,OUTPUT)
             resources.callback(collect_origin)
@@ -273,6 +276,14 @@ def main():
                         if network_mode or guard_local: collect_origin()
                         run("Inspect encoded content and input traces",[sys.executable,str(PROFILE/"read_perf_frames.py"),str(OUTPUT),("Sustain" if sustain else ("NativeLong" if long_image else mode)),sequence,str(rounds),config],1200)
                         if test_problem: raise test_problem
+                        if scale:
+                            import sqlite3
+                            database=next(downloads_root().parent.parent.rglob("yamibo.db"))
+                            with sqlite3.connect(f"file:{database}?mode=ro",uri=True) as db:
+                                progress=db.execute("SELECT h.threadId,h.pageIndex,h.totalPages,a.floorPid FROM ImageReadingHistory h LEFT JOIN ReaderImageAnchor a ON a.historyPostId=h.postId AND a.observedAt=h.lastVisitTime WHERE h.threadId IN (140,300004) ORDER BY h.threadId").fetchall()
+                            (OUTPUT/"catalog-progress.json").write_text(json.dumps(progress))
+                            if not any(row[0]==300004 and row[2]==1 and row[3]==3000041 for row in progress):
+                                raise AssertionError(f"Next-chapter progress was not persisted: {progress}")
                         results[name] = True
                         continue
                     if test_problem: raise test_problem

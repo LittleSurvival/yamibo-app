@@ -68,15 +68,17 @@ def percentile(a,p):
     return float(sorted(a)[max(0,math.ceil(len(a)*p/100)-1)]) if a else None
 
 
-def match_glyphs(directory, actions, samples, offset, width, height):
+def match_glyphs(directory, actions, samples, offset, width, height, detail=False):
     """Locate the exact settled label glyphs, including its distinguishing last digit."""
     import cv2
     templates=[]
     with av.open(str(directory/"presented.mp4")) as video:
         stream=video.streams.video[0]
+        labels=("開始閱讀","繼續閱讀") if detail else ("READER_FLOOR_1","READER_TEXT_1")
+        action="detail_ready" if detail else "glyph"
         for sample in samples:
-            row=next((r for r in actions if r["round"]==sample["round"] and r["action"]=="glyph"),None)
-            if not row or row.get("label") not in ("READER_FLOOR_1","READER_TEXT_1") or "touch_up_ms" not in sample: continue
+            row=next((r for r in actions if r["round"]==sample["round"] and r["action"]==action),None)
+            if not row or row.get("label") not in labels or "touch_up_ms" not in sample: continue
             target=row["lo"]*1000-offset; video.seek(max(0,int(target/1000/stream.time_base)),stream=stream,backward=True)
             f=next((f for f in video.decode(stream) if f.pts is not None and float(f.pts*f.time_base)*1000>=target),None)
             if f is None: continue
@@ -85,7 +87,10 @@ def match_glyphs(directory, actions, samples, offset, width, height):
             x0=max(0,x0);y0=max(0,y0);x1=min(width,x1);y1=min(height,y1)
             region=frame[y0:y1,x0:x1]
             if not region.size: continue
-            ry,rx=np.where(region<110)
+            if detail:
+                background=np.median(np.r_[region[0,:],region[-1,:],region[:,0],region[:,-1]])
+                ry,rx=np.where(np.abs(region.astype(float)-background)>38)
+            else: ry,rx=np.where(region<110)
             if not len(rx):continue
             a=max(0,int(rx.min())-1);b=min(region.shape[1],int(rx.max())+2)
             c=max(0,int(ry.min())-1);d=min(region.shape[0],int(ry.max())+2)
@@ -95,7 +100,7 @@ def match_glyphs(directory, actions, samples, offset, width, height):
             template=frame[y0+c:y0+d,x0+a:right].copy()
             if not (5<=d-c<=60 and 30<=b-a<=310 and template.std()>17):continue
             if right < x0+b+4 or template[:,-4:].std()>15:continue
-            if not templates: cv2.imwrite(str(directory/"pid1401-glyph-template.png"),template)
+            if not templates: cv2.imwrite(str(directory/("continue-glyph-template.png" if detail else "pid1401-glyph-template.png")),template)
             templates.append([sample,template,x0+a,y0+c,False,False])
     if not templates:return
     with av.open(str(directory/"presented.mp4")) as video:
@@ -229,20 +234,34 @@ def analyze(directory, mode, sequence, rounds, config):
             if not before or max(f[1] for f in before)>=.035: raise ValueError("first-floor marker was visible before selection, or no pre-input frames")
             opened=[f for f in aligned if t0<=f[0]<=g0 and f[1]>=.035]
             if not opened: raise ValueError("correct first-floor cyan image missing in recorded frames")
-            t1=opened[0][0]
+            first_image=opened[0][0]
             still=[f for f in opened if g0-300<=f[0]<g0]
             if not still: raise ValueError("missing settled pre-gesture reference")
             prev=still[-1]
+            if mode=="Comic":
+                complete=[f for f in opened if abs(f[1]-prev[1])<=max(.004,prev[1]*.018)
+                          and abs(f[3]-prev[3])<=2 and abs(f[4]-prev[4])<=2]
+                # Compare the moving image's visible area and centroid to its terminal geometry.
+                # Two consecutive captured frames prevent a single coincidental crossing.
+                pairs=zip(opened,opened[1:])
+                complete_times={f[0] for f in complete}
+                aligned_image=next((a[0] for a,b in pairs if a[0] in complete_times and b[0] in complete_times and b[0]-a[0]<=67),None)
+                if aligned_image is None:raise ValueError("first comic image never matched settled geometry twice")
+                t1=aligned_image
+            else:
+                t1=first_image
             changed=[f for f in aligned if g0<=f[0]<=g1+1300 and (f[2]>.035 or
                      (abs(f[1]-prev[1])>.02) or (f[1]>.02 and (abs(f[3]-prev[3])>6 or abs(f[4]-prev[4])>6)))]
             if not changed: raise ValueError("no visible response to first gesture")
             t2=changed[0][0]
             if not all(near_edges(t) for t in (t0,t1,g0,t2)):raise ValueError("unbracketed input/presentation time; independent clock edge exceeds 100 ms")
-            sample.update(touch_up_ms=t0,presented_marker_ms=t1,gesture_down_ms=g0,gesture_up_ms=g1,
+            sample.update(touch_up_ms=t0,first_image_pixel_ms=first_image,presented_marker_ms=t1,gesture_down_ms=g0,gesture_up_ms=g1,
                 first_motion_ms=t2,t1_t0_ms=t1-t0,t2_t0_ms=t2-t0,t2_t1_ms=t2-t1,
                 harness_delay_ms=g0-t1,gesture_to_response_ms=t2-g0)
             panels=[a for a in actions if a["round"]==i and a["action"]=="settings"]
-            windows={"entry":(t0,t1+120),"gesture":(g0,g1+120)}
+            next_down=min((r["time"]*1000 for r in touches if r["phase"]==0 and r["time"]*1000>g1),default=g1+5000)
+            gesture_end=min(g1+5000,next_down)
+            windows={"entry":(t0,t1+120),"gesture":(g0,g1+120),"gesture_and_inertia":(g0,gesture_end)}
             if panels:
                 p0=touch(panels[0],3);windows["settings"]=(p0,p0+700)
             sample["active_windows"]={}
@@ -277,6 +296,20 @@ def analyze(directory, mode, sequence, rounds, config):
         sample["navigation_touch_up_ms"]=navigation
         sample["navigation_to_correct_content_ms"]={k:primary-t for k,t in navigation.items() if primary is not None and t is not None}
         sample["navigation_to_first_motion_ms"]={k:sample["first_motion_ms"]-t for k,t in navigation.items() if t is not None}
+    details=[{"round":s["round"],"touch_up_ms":s["navigation_touch_up_ms"]["board"],"glyph_search_end_ms":s["touch_up_ms"]}
+             for s in samples if s.get("navigation_touch_up_ms",{}).get("board") is not None]
+    if details:
+        match_glyphs(directory,actions,details,offset,width,height,detail=True)
+        for detail in details:
+            sample=next(s for s in samples if s["round"]==detail["round"])
+            ready=detail.get("settled_correct_glyph_ms")
+            sample["novel_detail"]={"board_touch_up_ms":detail["touch_up_ms"],"continue_touch_up_ms":sample["touch_up_ms"],
+                "control_glyph_matched":ready is not None and near_edges(ready)}
+            if ready is not None and near_edges(ready):
+                sample["novel_detail"].update(board_to_visible_control_ms=ready-detail["touch_up_ms"],
+                    tester_wait_on_details_ms=sample["touch_up_ms"]-ready)
+                if "glyph_t1_t0_ms" in sample:
+                    sample["novel_detail"]["two_stages_excluding_tester_wait_ms"]=ready-detail["touch_up_ms"]+sample["glyph_t1_t0_ms"]
     if (directory/"fs-usage.log").is_file():
         watch=(directory/"fs-usage.log").read_text(errors="replace")
         events=[]
@@ -293,15 +326,21 @@ def analyze(directory, mode, sequence, rounds, config):
             host_offset=clockref["wall"]-day0-clockref["uptime"]
             for sample in samples:
                 if "touch_up_ms" not in sample: continue
-                a=sample["touch_up_ms"]/1000+host_offset; b=sample["presented_marker_ms"]/1000+host_offset
-                inside=[(op,line) for ts,op,line in events if (ts-a)%86400<=b-a]
-                others=[op for op,line in inside if any(780001<=int(tid)<=780100 for tid in re.findall(r"/threads/(\d+)(?:/|\s|$)",line))]
-                root_lists=[op for op,line in inside if re.search(r"/(?:library/7/)?threads/?(?:\s|$)",line) and ("direntr" in op.lower() or "readdir" in op.lower())]
-                sample["file_trace"]={"host_events":len(inside),"selected_asset_positive_controls_entire_run":positive,
-                    "trace_reliable":positive>0 and bool(inside),"unrelated_operations":others,"thread_root_enumerations_with_resolved_path":root_lists,
-                    "caveat":"fs_usage for the App executable. Missing traces or selected-file controls cannot demonstrate zero unrelated opens. Directory enumeration without a resolved root path cannot establish a zero inspection count."}
+                b=sample["presented_marker_ms"]/1000+host_offset
+                def filesystem_window(t0):
+                    a=t0/1000+host_offset
+                    inside=[(op,line) for ts,op,line in events if (ts-a)%86400<=b-a]
+                    others=[op for op,line in inside if any(780001<=int(tid)<=780100 for tid in re.findall(r"/threads/(\d+)(?:/|\s|$)",line))]
+                    root_lists=[op for op,line in inside if re.search(r"/(?:library/7/)?threads/?(?:\s|$)",line) and ("direntr" in op.lower() or "readdir" in op.lower())]
+                    return {"host_events":len(inside),"selected_asset_positive_controls_entire_run":positive,
+                        "trace_reliable":positive>0 and bool(inside),"unrelated_operations":others,"thread_root_enumerations_with_resolved_path":root_lists,
+                        "caveat":"Missing traces or selected-file controls cannot demonstrate zero unrelated opens. Directory enumeration without a resolved root path cannot establish a zero inspection count."}
+                sample["file_trace"]=filesystem_window(sample["touch_up_ms"])
+                sample["file_trace_from_navigation"]={stage:filesystem_window(t) for stage,t in sample["navigation_touch_up_ms"].items() if t is not None}
     if (directory/"requests.ndjson").is_file():
         events=[json.loads(l) for l in (directory/"requests.ndjson").read_text().splitlines() if l]
+        arrived=directory/"begins.ndjson"
+        arrivals=[json.loads(l) for l in arrived.read_text().splitlines() if l] if arrived.is_file() else None
         for sample in samples:
             arm=next((r for r in actions if r["round"]==sample["round"] and r["action"]=="origin"),None)
             if not arm or "touch_up_ms" not in sample: continue
@@ -326,9 +365,12 @@ def analyze(directory, mode, sequence, rounds, config):
                 net["elapsed_outside_required_http_ms"]=t1-t0-total
             if arm["case"].endswith("-none"):
                 # Count attempted case-specific content operations even if the client cancelled/404ed.
-                trace=[r for r in rr if t0<=r["begin_host_ns"]/1e6-host_delta<=t2+700]
-                net["content_attempts_open_through_first_gesture"]=[r["resource"] for r in trace if r["resource"] in
-                    ("thread","catalog-post","catalog-results","unknown") or r["resource"].startswith("image-")]
+                net["ingress_recording_available"]=arrivals is not None
+                if arrivals is not None:
+                    guard=net["origin_clock_uncertainty_ms"]
+                    trace=[r for r in arrivals if r["run"]==arm["case"] and t0-guard<=r["begin_host_ns"]/1e6-host_delta<=t2+700+guard]
+                    net["content_attempts_open_through_first_gesture"]=[r["resource"] for r in trace if r["resource"] in
+                        ("thread","catalog-post","catalog-results","unknown") or r["resource"].startswith("image-")]
                 net["negative_window_ms"]=[t0,t2+700]
                 net["coverage"]="Observed the fixture-origin SDK and image URL traffic only. Positive network board tests on the same code are separate. No airplane-mode claim."
             sample["controlled_network"]=net
@@ -340,6 +382,10 @@ def analyze(directory, mode, sequence, rounds, config):
         "coverage":"Seeded local author page. Cyan is an independently rendered PID 1401 image, including in text modes. Earliest textual glyph is not measured. Gesture injection after XCTest readiness checks is recorded separately. No network-attempt or tag-12 comparison in this run."}
     for key in ("t1_t0_ms","t2_t0_ms","t2_t1_ms","harness_delay_ms","gesture_to_response_ms"):
         vals=[s[key] for s in valid];summary[key]={"p50":percentile(vals,50),"p95":percentile(vals,95)}
+    summary["display_link_observations"]={
+        "screen_max_hz":sorted({t["screen_max_hz"] for t in touches if "screen_max_hz" in t}),
+        "nominal_callback_period_ms":sorted({round(t["display_link_duration_ms"],2) for t in touches if t.get("display_link_duration_ms",0)>0}),
+        "measurement":"Capture of visible content changes and simulator display-link timestamps. Physical device scanout and operating-system compositor deadline misses are not observed."}
     summary["percentile"]="nearest rank ceil(n*p/100), p95 of 40 is the 38th ordered sample"
     conditions=json.loads((directory/"profile-conditions.json").read_text()) if (directory/"profile-conditions.json").is_file() else {}
     problems=[]
