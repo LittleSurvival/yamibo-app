@@ -10,6 +10,15 @@ SELECT * FROM SmartComicWork WHERE owner = ? ORDER BY lastReadAt DESC, id DESC;
 members:
 SELECT summary FROM SmartComicMember WHERE workId = ? AND ordinal >= 0 ORDER BY ordinal, tid;
 
+downloadedReaderChapters:
+SELECT currentChapter.summary, currentChapter.ordinal, resumeChapter.tid AS resumeTid, resumeChapter.summary AS resumeSummary
+FROM SmartComicMember AS currentChapter
+JOIN SmartComicWork AS work ON work.id = currentChapter.workId AND work.owner = currentChapter.owner
+LEFT JOIN SmartComicMember AS resumeChapter ON resumeChapter.owner = currentChapter.owner
+    AND resumeChapter.fid = currentChapter.fid AND resumeChapter.tid = work.lastTid
+    AND resumeChapter.workId = work.id AND resumeChapter.ordinal >= 0 AND resumeChapter.tid != currentChapter.tid
+WHERE currentChapter.owner = ? AND currentChapter.fid = ? AND currentChapter.tid = ?;
+
 activeMemberTids:
 SELECT tid FROM SmartComicMember WHERE workId = ? AND ordinal >= 0;
 

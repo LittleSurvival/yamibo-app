@@ -10,11 +10,11 @@ parser.add_argument("--cbz", action="store_true")
 parser.add_argument("--damaged", action="store_true")
 parser.add_argument("--origin", default="https://reader.invalid")
 parser.add_argument("--repair-image", type=Path)
+parser.add_argument("--origin-images-only", action="store_true", help="Write only the three PNGs served by the local HTTP fixture")
 parser.add_argument("--bench", action="store_true", help="50 floors, 20 deterministic 1080x1600 JPEGs and about 64 KiB of encoded forum content")
 parser.add_argument("--pure-text",action="store_true")
 args = parser.parse_args()
 root = args.directory / 'YamiboDownloads'
-root.mkdir(parents=True, exist_ok=True)
 
 def write(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -28,6 +28,12 @@ def marker_png(rgb):
     return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 800, 1200, 8, 2, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(pixels)) + chunk(b'IEND', b'')
 
 markers = [marker_png(rgb) for rgb in [(20, 180, 220), (220, 40, 180), (50, 170, 40)]]
+if args.origin_images_only:
+    args.directory.mkdir(parents=True, exist_ok=True)
+    for i, image in enumerate(markers, 1):
+        (args.directory / f"marker-{i}.png").write_bytes(image)
+    raise SystemExit(0)
+root.mkdir(parents=True, exist_ok=True)
 if args.bench:
     import io
     import hashlib

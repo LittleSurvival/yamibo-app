@@ -44,7 +44,7 @@ import org.jetbrains.compose.resources.painterResource
 import yamibo_app.composeapp.generated.resources.Res
 import yamibo_app.composeapp.generated.resources.image_icon
 
-val LocalReaderOverlayVisible = compositionLocalOf { false }
+val LocalReaderOverlayVisible = compositionLocalOf<() -> Boolean> { { false } }
 internal interface ReaderImagePainterCache {
     operator fun get(url: String): Painter?
     fun put(url: String, painter: Painter)
@@ -282,7 +282,7 @@ fun ImageViewer(
                                 latestOnDoubleTap?.invoke(original)
                             },
                             onLongPress = {
-                                if (latestEnableContextMenu && !latestOverlayOpen) {
+                                if (latestEnableContextMenu && !latestOverlayOpen()) {
                                     showMenu = true
                                 }
                             }

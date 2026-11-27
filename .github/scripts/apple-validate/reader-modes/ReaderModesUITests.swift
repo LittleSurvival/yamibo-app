@@ -18,7 +18,7 @@ final class ReaderModesUITests: XCTestCase {
     private func tap(_ labels: [String]) {
         let deadline = Date().addingTimeInterval(20)
         repeat {
-            if benchmarkNetwork != "none" || benchmarkChapters>0 {
+            if benchmarkNetwork != "none" || benchmarkChapters>0 || app.launchArguments.contains("-uid") {
                 let signPrompt=app.staticTexts["你今天還沒簽到"]
                 if signPrompt.exists {
                     let suppress=element(["今日不再提醒"])
@@ -43,10 +43,10 @@ final class ReaderModesUITests: XCTestCase {
         measureNavigation?(stage,start,ProcessInfo.processInfo.systemUptime)
     }
 
-    private func openDownload(_ labels: [String], dark: Bool, damaged: Bool = false, migrateInManager: Bool = true, groupTitle: String = "QA Three Readers", beforeOpen: (() -> Void)? = nil) {
+    private func openDownload(_ labels: [String], dark: Bool, damaged: Bool = false, migrateInManager: Bool = true, groupTitle: String = "QA Three Readers", accountArguments: [String] = [], beforeOpen: (() -> Void)? = nil) {
         continueAfterFailure = false
-        app.terminate()
-        app.launchArguments = ["-AppleLanguages", "(zh-Hant)", "-AppleLocale", "zh_TW"]
+        if app.state != .notRunning { app.terminate() }
+        app.launchArguments = ["-AppleLanguages", "(zh-Hant)", "-AppleLocale", "zh_TW"] + accountArguments
         // SettingsRegistry stores delegated property names in lowercase.
         if dark { app.launchArguments += ["-appsettings.themescheme", "DEFAULT_DARK"] }
         if beforeOpen != nil { app.launchArguments += ["--reader-frame-probe"] }
@@ -189,15 +189,15 @@ final class ReaderModesUITests: XCTestCase {
         }.resume()
         wait(for: [ready], timeout: 12)
         tap(["重新載入", "重新载入", "Reload"])
-        waitForRepairedImage()
+        waitForGreenImage()
         capture("repaired-third-image")
         app.swipeRight()
         waitForImage(second: true)
         app.swipeLeft()
-        waitForRepairedImage()
+        waitForGreenImage()
     }
 
-    private func waitForRepairedImage() {
+    private func waitForGreenImage() {
         let painted = NSPredicate { _, _ in
             self.largeColorArea { red, green, blue in red < 80 && green > 145 && blue < 80 }
         }
@@ -274,6 +274,171 @@ final class ReaderModesUITests: XCTestCase {
     func testForumToComic() { checkSwitch(from: .forum, to: .comic) }
     func testNovelToForum() { checkSwitch(from: .novel, to: .forum) }
     func testForumToNovel() { checkSwitch(from: .forum, to: .novel) }
+
+    private func waitForOfflineControl(_ path: String, status: Int = 204, retryConflict: Bool = false) async throws {
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:18928" + path)!,
+                                 cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)
+        if status == 503 {
+            request.setValue("offline-witness", forHTTPHeaderField: "X-Reader-Control")
+        } else {
+            request.httpMethod = "POST"
+        }
+        let deadline = ProcessInfo.processInfo.systemUptime + 45
+        while true {
+            let (body, response) = try await session.data(for: request)
+            let code = (response as? HTTPURLResponse)?.statusCode
+            if code == status { return }
+            guard retryConflict, code == 409, ProcessInfo.processInfo.systemUptime < deadline else {
+                throw NSError(domain: "OfflineOrigin", code: code ?? -1, userInfo: [
+                    NSLocalizedDescriptionKey: "\(path) expected \(status), received \(String(describing: code)): \(String(decoding: body.prefix(512), as: UTF8.self))"
+                ])
+            }
+            try await Task.sleep(nanoseconds: 300_000_000)
+        }
+    }
+
+    private func tapSettingsRow(_ label: String) {
+        for _ in 0..<7 {
+            let row = element([label])
+            if row.waitForExistence(timeout: 1), row.isHittable,
+               app.frame.contains(CGPoint(x: row.frame.midX, y: row.frame.midY)) {
+                row.tap()
+                return
+            }
+            app.swipeUp()
+        }
+        XCTFail("Missing settings action \(label): \(app.debugDescription)")
+    }
+
+    // Both markers are distinct quote blocks. A neighboring floor in the
+    // accessibility tree provides no evidence of the active reading position.
+    private func offlineParagraphY(_ label: String) -> CGFloat? {
+        let node = app.staticTexts[label]
+        guard node.exists, node.label == label, node.isHittable, app.frame.contains(node.frame) else { return nil }
+        return node.frame.midY
+    }
+
+    private func positionOfflineParagraph(_ label: String, towardLater: Bool) -> CGFloat {
+        let frame = app.frame
+        for _ in 0..<18 {
+            let y = offlineParagraphY(label)
+            if let y, abs(y - frame.midY) <= 10 { return y }
+            let distance = y.map { ($0 - frame.midY) / frame.height } ?? (towardLater ? 0.28 : -0.28)
+            let delta = min(0.28, max(-0.28, distance))
+            // Allow for the iOS drag recognition threshold near the target.
+            let drag = delta + (delta >= 0 ? 0.012 : -0.012)
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.42, dy: 0.5 + drag / 2))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.42, dy: 0.5 - drag / 2))
+            start.press(forDuration: 0.12, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.18)
+        }
+        XCTFail("Could not position \(label) at reading center: \(app.debugDescription)")
+        return frame.midY
+    }
+
+    private func assertOfflineParagraph(_ label: String, near y: CGFloat) {
+        // Do not scroll the destination to make this assertion pass. Requiring
+        // a stable position also rejects a transient frame of the outgoing mode.
+        var since: TimeInterval?
+        let restored = NSPredicate { _, _ in
+            guard let actual = self.offlineParagraphY(label), abs(actual - y) <= 22 else {
+                since = nil
+                return false
+            }
+            let now = ProcessInfo.processInfo.systemUptime
+            if since == nil { since = now }
+            return now - (since ?? now) >= 1
+        }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: restored, object: app)],
+                                      timeout: 15), .completed, "Expected \(label) near y=\(y): \(app.debugDescription)")
+    }
+
+    @MainActor
+    func testRealDownloadOfflineColdOpen() async throws {
+        continueAfterFailure = false
+        let account = ["-appsettings.forumReadingMode.30", "Forum", "-uid", "7", "-username", "QA Author",
+                       "-userGroup", "QA", "-cookie", "EeqY_2132_auth=synthetic; EeqY_2132_saltkey=synthetic"]
+        app.launchArguments = ["-AppleLanguages", "(zh-Hant)", "-AppleLocale", "zh_TW"] + account
+        app.launch()
+        let alert = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch
+        if alert.waitForExistence(timeout: 2) { alert.buttons.firstMatch.tap() }
+        tap(["QA Forum"])
+        tap(["QA Three Readers"])
+        assertFirstFloor()
+        waitForImage(second: false)
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        tap(["☰"])
+        tap(["下載"])
+        let download = element(["下載完整 Thread"])
+        XCTAssertTrue(download.waitForExistence(timeout: 8) && download.isHittable, app.debugDescription)
+        capture("forum-full-thread-download-action")
+        try await waitForOfflineControl("/__offline/issue")
+        download.tap()
+        try await waitForOfflineControl("/__offline/downloaded", retryConflict: true)
+
+        let back = element(["◀"])
+        if !back.exists || !back.isHittable {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        }
+        tap(["◀"])
+        XCTAssertTrue(element(["QA Three Readers"]).waitForExistence(timeout: 8), app.debugDescription)
+        tap(["◀"])
+        tap(["我的", "Profile"])
+        tapSettingsRow("設定")
+        tapSettingsRow("儲存空間")
+        tapSettingsRow("立即清除所有緩存")
+        XCTAssertTrue(element(["已清除所有緩存"]).waitForExistence(timeout: 10), app.debugDescription)
+        capture("general-cache-cleared")
+        app.terminate()
+        XCTAssertTrue(app.wait(for: .notRunning, timeout: 10))
+        try await waitForOfflineControl("/__offline/block", retryConflict: true)
+        try await waitForOfflineControl("/marker-1.png", status: 503)
+
+        // Cold start with the same synthetic account. All fixture content is
+        // now denied by the origin; this does not switch the simulator's radio.
+        openDownload([Mode.forum.rawValue], dark: false, migrateInManager: false, accountArguments: account)
+        assertFirstFloor()
+        waitForImage(second: false)
+        let page = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "1/1 [0-9]{1,3}%")).firstMatch
+        XCTAssertTrue(page.waitForExistence(timeout: 8) && page.isHittable, app.debugDescription)
+        capture("offline-forum-page-1-floor-1401-cyan")
+        try await waitForOfflineControl("/__offline/cold-opened")
+
+        openModePicker(from: .forum)
+        tap([Mode.comic.rawValue])
+        XCTAssertTrue(element(["1 / 2"]).waitForExistence(timeout: 10), app.debugDescription)
+        waitForImage(second: false)
+        app.swipeLeft()
+        XCTAssertTrue(element(["2 / 2"]).waitForExistence(timeout: 10), app.debugDescription)
+        waitForImage(second: true)
+        capture("offline-comic-author-page-2-magenta")
+
+        openModePicker(from: .comic)
+        tap([Mode.novel.rawValue])
+        assertSecondImage(in: .novel)
+        let paragraph = "PID1402_PARA2", comment = "PID1403_COMMENT"
+        let novelY = positionOfflineParagraph(paragraph, towardLater: false)
+        assertOfflineParagraph(paragraph, near: novelY)
+        capture("offline-novel-author-paragraph")
+        openModePicker(from: .novel)
+        tap([Mode.forum.rawValue])
+        assertOfflineParagraph(paragraph, near: novelY)
+        let forumY = positionOfflineParagraph(comment, towardLater: true)
+        assertOfflineParagraph(comment, near: forumY)
+        waitForGreenImage()
+        capture("offline-forum-guest-comment")
+        openModePicker(from: .forum)
+        tap([Mode.novel.rawValue])
+        assertOfflineParagraph(paragraph, near: novelY)
+        XCTAssertNil(offlineParagraphY(comment), "Guest comment visible in author-only novel")
+        capture("offline-novel-restored-own-paragraph")
+        openModePicker(from: .novel)
+        tap([Mode.forum.rawValue])
+        assertOfflineParagraph(comment, near: forumY)
+        capture("offline-forum-restored-guest-comment")
+        try await waitForOfflineControl("/__offline/verified")
+    }
 
     private func waitForImage(second: Bool) {
         let painted = NSPredicate { _, _ in

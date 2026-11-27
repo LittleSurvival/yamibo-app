@@ -19,6 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import me.thenano.yamibo.yamibo_app.repository.thread.InFlightReads
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import me.thenano.yamibo.yamibo_app.util.time.currentTimeMillis
 import kotlin.time.Duration.Companion.hours
 
@@ -42,6 +43,21 @@ class SmartComicCatalog(factory: DiskCacheFactory) {
         val work = works.workById(id, account).executeAsOneOrNull() ?: return@withContext null
         SavedWork(work.id, fid, work.title, work.lastTid?.let { ThreadId(it.toInt()) }, work.completeAt,
             works.members(work.id).executeAsList().map { json.decodeFromString<ThreadSummary>(it) })
+    }
+
+    suspend fun downloadedReaderChapters(owner: UserId, fid: ForumId, tid: ThreadId): List<ThreadSummary> = withContext(Dispatchers.IO) {
+        val chapters = works.downloadedReaderChapters(owner.value.toLong(), fid.value.toLong(), tid.value.toLong())
+            .executeAsOneOrNull() ?: return@withContext emptyList()
+        listOfNotNull(
+            chapterSummary(chapters.summary.takeIf { chapters.ordinal >= 0 }, tid.value.toLong()),
+            chapterSummary(chapters.resumeSummary, chapters.resumeTid),
+        )
+    }
+
+    private fun chapterSummary(summary: String?, expectedTid: Long?): ThreadSummary? = if (summary == null) null else try {
+        json.decodeFromString<ThreadSummary>(summary).takeIf { it.tid.value.toLong() == expectedTid }
+    } catch (_: SerializationException) {
+        null
     }
 
     suspend fun saveWork(owner: UserId, fid: ForumId, seed: ThreadSummary,

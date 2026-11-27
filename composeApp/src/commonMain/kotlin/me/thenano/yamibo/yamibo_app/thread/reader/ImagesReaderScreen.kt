@@ -806,6 +806,7 @@ internal fun IImageReaderScreen.RenderImageReader() {
     val offsetYAnim = remember { Animatable(0f) }
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
     var pageDragOffset by remember { mutableFloatStateOf(0f) }
+    val hasPageDragOffset by remember { derivedStateOf { pageDragOffset != 0f } }
     var pageDragTarget by remember { mutableStateOf<Int?>(null) }
     var isPageDragSettling by remember { mutableStateOf(false) }
     var committedPageOverlay by remember { mutableStateOf<Int?>(null) }
@@ -1640,7 +1641,7 @@ internal fun IImageReaderScreen.RenderImageReader() {
 
                 val dragTarget = pageDragTarget
                 val activeDragTarget = dragTarget?.takeIf {
-                    pageDragOffset != 0f &&
+                    hasPageDragOffset &&
                         currentPage in actualImageList.indices &&
                         it in actualImageList.indices &&
                         (it != currentPage || committedPageOverlay == it) &&
@@ -1688,17 +1689,18 @@ internal fun IImageReaderScreen.RenderImageReader() {
                     }
 
                     if (activeDragTarget != null) {
-                        val side = if (pageDragOffset < 0f) 1 else -1
                         SinglePageContent(
                             page = activeDragTarget,
                             modifier = Modifier
                                 .fillMaxSize()
                                 .zIndex(if (committedPageOverlay == activeDragTarget) 2f else 1f)
                                 .graphicsLayer {
+                                    val offset = pageDragOffset
+                                    val side = if (offset < 0f) 1 else -1
                                     if (isVerticalMode) {
-                                        translationY = pageDragOffset + side * containerSize.height
+                                        translationY = offset + side * containerSize.height
                                     } else {
-                                        translationX = pageDragOffset + side * containerSize.width
+                                        translationX = offset + side * containerSize.width
                                     }
                                 },
                             showLoadingPlaceholder = false,
@@ -1890,8 +1892,8 @@ internal fun IImageReaderScreen.RenderImageReader() {
         if (isCatalogMode) {
             AnimatedVisibility(
                 visible = showCatalog,
-                enter = slideInHorizontally(tween(250)) { -it } + fadeIn(tween(200)),
-                exit = slideOutHorizontally(tween(250)) { -it } + fadeOut(tween(200))
+                enter = EnterTransition.None,
+                exit = ExitTransition.None,
             ) {
                 TagCatalogPanel(
                     totalPages = currentTagTotalPages ?: 1,

@@ -44,6 +44,7 @@ def main():
     network_mode = sys.argv[sys.argv.index("--network")+1] if "--network" in sys.argv else None
     sustain = "--sustain" in sys.argv
     guard_local = "--guard-local" in sys.argv
+    real_download = sys.argv[1:] == ["--real-download"]
     long_image = "--long-image" in sys.argv
     config = "Debug"
     if perf:
@@ -76,7 +77,7 @@ def main():
     try:
         run("Configure independent XCTest target", ["gem", "install", "xcodeproj",
             "-v", "1.27.0", "--no-document", "--user-install"], 180)
-        if network_mode or guard_local:
+        if network_mode or guard_local or real_download:
             import urllib.request
             sdk=Path(os.environ["RUNNER_TEMP"])/"reader-replay-yamibo-api"
             upstream="6a794c8c3b7a4e14802d62d1d2c3b2c289685475"
@@ -93,27 +94,28 @@ def main():
             info=Path("iosApp/iosApp/Info.plist"); plist=plistlib.loads(info.read_bytes())
             plist["NSAppTransportSecurity"]={"NSAllowsLocalNetworking":True,"NSExceptionDomains":{"127.0.0.1":{"NSExceptionAllowsInsecureHTTPLoads":True}}}
             info.write_bytes(plistlib.dumps(plist))
-            if mode=="Novel" and network_mode:
+            if network_mode and mode=="Novel":
                 # FID55 uses the native novel-details entry in *both* versions; FID30 is a normal forum on tag12.
                 origin_script=PROFILE/"replay_origin.py"
                 text=origin_script.read_text()
                 assert text.count("fid=30") >= 3
                 origin_script.write_text(text.replace("fid=30","fid=55"))
                 testsrc.write_text(testsrc.read_text().replace("-appsettings.forumReadingMode.30","-appsettings.forumReadingMode.55"))
-            run("Generate fixed shaped HTTP corpus",[sys.executable,str(PROFILE/"replay_origin.py"),"--generate",str(PROFILE/"generate_fixtures.py")],120)
-            origin_process=subprocess.Popen([sys.executable,str(PROFILE/"replay_origin.py")])
-            resources.callback(lambda: (origin_process.terminate(),origin_process.wait(timeout=10)))
-            for _ in range(50):
-                try:
-                    urllib.request.urlopen(f"http://127.0.0.1:18928/__case/ios-{mode.lower()}-{network_mode}",timeout=2).read()
-                    break
-                except OSError: time.sleep(.2)
-            else: raise RuntimeError("Loopback origin failed to start")
-            def collect_origin():
-                for name in ("contract.json","begins.ndjson","requests.ndjson","generator.log"):
-                    f=PROFILE/"network-fixture"/name
-                    if f.is_file():shutil.copy2(f,OUTPUT)
-            resources.callback(collect_origin)
+            if not real_download:
+                run("Generate fixed shaped HTTP corpus",[sys.executable,str(PROFILE/"replay_origin.py"),"--generate",str(PROFILE/"generate_fixtures.py")],120)
+                origin_process=subprocess.Popen([sys.executable,str(PROFILE/"replay_origin.py")])
+                resources.callback(lambda: (origin_process.terminate(),origin_process.wait(timeout=10)))
+                for _ in range(50):
+                    try:
+                        urllib.request.urlopen(f"http://127.0.0.1:18928/__case/ios-{mode.lower()}-{network_mode}",timeout=2).read()
+                        break
+                    except OSError: time.sleep(.2)
+                else: raise RuntimeError("Loopback origin failed to start")
+                def collect_origin():
+                    for name in ("contract.json","begins.ndjson","requests.ndjson","generator.log"):
+                        f=PROFILE/"network-fixture"/name
+                        if f.is_file():shutil.copy2(f,OUTPUT)
+                resources.callback(collect_origin)
         run("Create QA scheme", ["ruby", str(PROFILE / "configure_tests.rb")], 60)
         devices = json.loads(subprocess.check_output(
             ["xcrun", "simctl", "list", "devices", "available", "-j"], text=True))
@@ -171,6 +173,22 @@ def main():
         def downloads_root():
             container = subprocess.check_output(simctl + ["get_app_container", simulator, BUNDLE, "data"], text=True).strip()
             return Path(container) / "Documents/YamiboApp"
+
+        if real_download:
+            from real_download import RealDownloadOrigin
+            run("Install on clean dedicated simulator", simctl + ["install", simulator, str(apps[0])], 120)
+            case = "testRealDownloadOfflineColdOpen"
+            bundle = OUTPUT / "real-download.xcresult"
+            with RealDownloadOrigin(simulator, BUNDLE, OUTPUT, downloads_root) as controlled:
+                run(case, xcode + ["-resultBundlePath", str(bundle), "-parallel-testing-enabled", "NO",
+                    f"-only-testing:ReaderModesUITests/ReaderModesUITests/{case}", "test-without-building"], 480)
+                summary = json.loads(subprocess.check_output(["xcrun", "xcresulttool", "get", "test-results",
+                    "summary", "--path", str(bundle)], text=True))
+                if (summary["passedTests"], summary["failedTests"], summary["skippedTests"]) != (1, 0, 0):
+                    raise ValueError(f"Expected exactly one successful non-skipped XCTest: {summary}")
+                controlled.verify()
+                (OUTPUT / "ui-summary.json").write_text(json.dumps({case: True, "isolation": "controlled HTTP origin only"}))
+            return
 
         results = {}
         matrix = "--matrix" in sys.argv[1:]
