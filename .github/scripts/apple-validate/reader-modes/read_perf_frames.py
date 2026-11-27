@@ -1,5 +1,6 @@
 """Analyze the simulator recording independently of XCTest polling or action duration."""
 import bisect
+from array import array
 import csv
 import math
 import re
@@ -133,6 +134,73 @@ def match_glyphs(directory, actions, samples, offset, width, height, detail=Fals
                     if "first_motion_ms" in sample: sample["glyph_t2_t1_ms"]=sample["first_motion_ms"]-time_ms
                     if "gesture_down_ms" in sample: sample["glyph_harness_delay_ms"]=sample["gesture_down_ms"]-time_ms
                     current[5]=True
+
+
+def filesystem_windows(directory,touches,samples):
+    if not (directory/"fs-usage.log").is_file():return
+    meta=directory/"file-observer.json"
+    binary=json.loads(meta.read_text())["executable"] if meta.exists() else "yamibo_app"
+    process=re.compile(r"\s"+re.escape(binary)+r"\.\d+\s*$")
+    stamps=array("d")
+    relevant=[]
+    tracked_descriptors={}
+    positive=0
+    # The system tool can include renderer and kernel lines even with an executable filter.
+    # Stream the raw file once and keep only lightweight timing and related storage operations.
+    with (directory/"fs-usage.log").open(errors="replace") as watch:
+        for line in watch:
+            owner=process.search(line)
+            if not owner:continue
+            stamp=re.match(r"\s*(\d{2}):(\d{2}):(\d{2}\.\d+)\s+(\S+)",line)
+            if not stamp:continue
+            hh,mm,ss,op=stamp.groups()
+            t=3600*int(hh)+60*int(mm)+float(ss)
+            stamps.append(t)
+            if "YamiboDownloads" in line and ("thread_140_" in line or "/threads/140/" in line or "/images/" in line):
+                positive+=1
+            other=any(780001<=int(tid)<=780100 for tid in re.findall(r"/threads/(\d+)(?:/|\s|$)",line))
+            root=bool(re.search(r"/(?:library/7/)?threads/?(?:\s|$)",line)) and ("direntr" in op.lower() or "readdir" in op.lower())
+            file_number=re.search(r"\bF=(\d+)\b",line)
+            descriptor=int(file_number[1]) if file_number else None
+            thread=owner.group().strip()
+            enumeration="direntr" in op.lower() or "readdir" in op.lower()
+            if descriptor is not None and op.startswith("open"):
+                named_root=bool(re.search(r"/YamiboDownloads/library/7/threads/?\s+",line))
+                resolved=named_root or re.search(r"/(?:Documents|System|Library|usr|private)/|\.app/",line) is not None
+                tracked_descriptors[descriptor]=(thread,t,named_root,resolved)
+            unresolved=False
+            if enumeration and not root:
+                entry=tracked_descriptors.get(descriptor)
+                # fs_usage's final ID is a thread ID. Associate only a recent open on the exact
+                # same app thread and FD; a reused/closed or unresolvable FD remains unknown.
+                if entry and entry[0]==thread and (t-entry[1])%86400<2 and entry[3]:root=entry[2]
+                else:unresolved=True
+            if descriptor is not None and (op.startswith("close") or op.startswith("dup")):
+                tracked_descriptors.pop(descriptor,None)
+            if other or root or unresolved:relevant.append((t,op,other,root,unresolved))
+    stamps=array("d",sorted(stamps))
+    clockref=next((t for t in touches if "wall" in t and "uptime" in t),None)
+    if clockref:
+        daytime=datetime.datetime.fromtimestamp(clockref["wall"])
+        day0=daytime.replace(hour=0,minute=0,second=0,microsecond=0).timestamp()
+        host_offset=clockref["wall"]-day0-clockref["uptime"]
+        for sample in samples:
+            if "touch_up_ms" not in sample: continue
+            b=sample["presented_marker_ms"]/1000+host_offset
+            def filesystem_window(t0):
+                a=t0/1000+host_offset
+                left,right=a%86400,b%86400
+                count=bisect.bisect_right(stamps,right)-bisect.bisect_left(stamps,left)
+                if left>right:count+=len(stamps)
+                inside=[(op,other,root,unknown) for ts,op,other,root,unknown in relevant if (ts-left)%86400<=b-a]
+                others=[op for op,other,_,_ in inside if other]
+                root_lists=[op for op,_,root,_ in inside if root]
+                unknown=sum(1 for _,_,_,unresolved in inside if unresolved)
+                return {"app_events":count,"selected_asset_positive_controls_entire_run":positive,
+                    "trace_reliable":positive>0 and count>0,"unrelated_operations":others,"thread_root_enumerations_with_resolved_path":root_lists,"unresolved_directory_calls":unknown,
+                    "caveat":"Missing traces or selected-file controls cannot demonstrate zero unrelated opens. Directory enumeration without a resolved root path cannot establish a zero inspection count."}
+            sample["file_trace"]=filesystem_window(sample["touch_up_ms"])
+            sample["file_trace_from_navigation"]={stage:filesystem_window(t) for stage,t in sample["navigation_touch_up_ms"].items() if t is not None}
 
 
 def analyze(directory, mode, sequence, rounds, config):
@@ -310,33 +378,7 @@ def analyze(directory, mode, sequence, rounds, config):
                     tester_wait_on_details_ms=sample["touch_up_ms"]-ready)
                 if "glyph_t1_t0_ms" in sample:
                     sample["novel_detail"]["two_stages_excluding_tester_wait_ms"]=ready-detail["touch_up_ms"]+sample["glyph_t1_t0_ms"]
-    if (directory/"fs-usage.log").is_file():
-        watch=(directory/"fs-usage.log").read_text(errors="replace")
-        events=[]
-        for line in watch.splitlines():
-            stamp=re.match(r"\s*(\d{2}):(\d{2}):(\d{2}\.\d+)\s+(\S+)",line)
-            if not stamp: continue
-            hh,mm,ss,op=stamp.groups()
-            events.append((3600*int(hh)+60*int(mm)+float(ss),op,line))
-        clockref=next((t for t in touches if "wall" in t and "uptime" in t),None)
-        positive=sum("YamiboDownloads" in line and ("thread_140_" in line or "/threads/140/" in line or "/images/" in line) for _,_,line in events)
-        if clockref:
-            daytime=datetime.datetime.fromtimestamp(clockref["wall"])
-            day0=daytime.replace(hour=0,minute=0,second=0,microsecond=0).timestamp()
-            host_offset=clockref["wall"]-day0-clockref["uptime"]
-            for sample in samples:
-                if "touch_up_ms" not in sample: continue
-                b=sample["presented_marker_ms"]/1000+host_offset
-                def filesystem_window(t0):
-                    a=t0/1000+host_offset
-                    inside=[(op,line) for ts,op,line in events if (ts-a)%86400<=b-a]
-                    others=[op for op,line in inside if any(780001<=int(tid)<=780100 for tid in re.findall(r"/threads/(\d+)(?:/|\s|$)",line))]
-                    root_lists=[op for op,line in inside if re.search(r"/(?:library/7/)?threads/?(?:\s|$)",line) and ("direntr" in op.lower() or "readdir" in op.lower())]
-                    return {"host_events":len(inside),"selected_asset_positive_controls_entire_run":positive,
-                        "trace_reliable":positive>0 and bool(inside),"unrelated_operations":others,"thread_root_enumerations_with_resolved_path":root_lists,
-                        "caveat":"Missing traces or selected-file controls cannot demonstrate zero unrelated opens. Directory enumeration without a resolved root path cannot establish a zero inspection count."}
-                sample["file_trace"]=filesystem_window(sample["touch_up_ms"])
-                sample["file_trace_from_navigation"]={stage:filesystem_window(t) for stage,t in sample["navigation_touch_up_ms"].items() if t is not None}
+    filesystem_windows(directory,touches,samples)
     if (directory/"requests.ndjson").is_file():
         events=[json.loads(l) for l in (directory/"requests.ndjson").read_text().splitlines() if l]
         arrived=directory/"begins.ndjson"

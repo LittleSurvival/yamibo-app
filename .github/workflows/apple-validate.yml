@@ -116,6 +116,27 @@ jobs:
                 xcrun xcresulttool export attachments --path "$result" --output-path "${result%.xcresult}-attachments"
               done
           fi
+      - name: Publish compact reader measurements
+        if: always() && (hashFiles('.tmp/qa/apple-validate/results/reader-perf.json') != '' || hashFiles('.tmp/qa/apple-validate/results/paired-reader.json') != '')
+        uses: actions/upload-artifact@v4
+        with:
+          name: apple-reader-metrics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.APPLE_VALIDATE_OUTPUT }}/reader-perf.json
+            ${{ env.APPLE_VALIDATE_OUTPUT }}/paired-reader.json
+            ${{ env.APPLE_VALIDATE_OUTPUT }}/profile-conditions.json
+            ${{ env.APPLE_VALIDATE_OUTPUT }}/runner-hardware.txt
+            ${{ env.APPLE_VALIDATE_OUTPUT }}/catalog-*.json
+            ${{ env.APPLE_VALIDATE_OUTPUT }}/environment.log
+            ${{ env.APPLE_VALIDATE_OUTPUT }}/simulator.json
+            ${{ env.APPLE_VALIDATE_OUTPUT }}/reused-framework.json
+            ${{ env.APPLE_VALIDATE_OUTPUT }}/contract.json
+            ${{ env.APPLE_VALIDATE_OUTPUT }}/begins.ndjson
+            ${{ env.APPLE_VALIDATE_OUTPUT }}/requests.ndjson
+            ${{ env.APPLE_VALIDATE_OUTPUT }}/exit-code.txt
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
       - uses: actions/upload-artifact@v4
         if: always()
         with:
