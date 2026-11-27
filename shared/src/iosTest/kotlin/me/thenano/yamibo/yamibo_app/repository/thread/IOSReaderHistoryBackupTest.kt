@@ -10,8 +10,11 @@ import me.thenano.yamibo.yamibo_app.repository.IOSBackupStorageProvider
 import me.thenano.yamibo.yamibo_app.repository.IOSReadHistoryRepository
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository.*
 import me.thenano.yamibo.yamibo_app.repository.backup.BackupRepositoryImpl
+import me.thenano.yamibo.yamibo_app.repository.download.IOSDownloadStorageProvider
+import me.thenano.yamibo.yamibo_app.repository.download.resolveIosStorageFolder
 import me.thenano.yamibo.yamibo_app.repository.settings.AppSettingsRepository
 import me.thenano.yamibo.yamibo_app.store.settings.IOSSettingsStore
+import okio.FileSystem
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -33,6 +36,22 @@ class IOSReaderHistoryBackupTest {
         floorAuthor = author, imageSource = "marker-a", imageOccurrence = 1)
 
     @AfterTest fun close() { driver.close() }
+
+    @Test fun measuresLongThreadOnIosNativeStorage() = runBlocking {
+        val settings = AppSettingsRepository(IOSSettingsStore())
+        val previous = settings.backupFolderUri.getValue()
+        val directory = resolveIosStorageFolder("") / "reader-storage-qa-${Uuid.random()}"
+        try {
+            settings.backupFolderUri.setValue(directory.toString())
+            val measurement = runNativeStorageSample(db, directory / "scratch", "ios-filesystem") {
+                IOSDownloadStorageProvider(settings)
+            }
+            println("NATIVE_STORAGE_BENCH_V1 $measurement")
+        } finally {
+            settings.backupFolderUri.setValue(previous)
+            FileSystem.SYSTEM.deleteRecursively(directory, mustExist = false)
+        }
+    }
 
     @Test fun currentBackupRestoresTextAndImageAnchorsIntoFreshNativeDatabase() = runBlocking {
         val settings = IOSSettingsStore()

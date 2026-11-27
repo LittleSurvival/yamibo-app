@@ -25,6 +25,7 @@ expected = {
     "deletingReadingHistoryClearsTheWorkResumeButRetainsMembershipAndDownload",
     "currentBackupRestoresTextAndImageAnchorsIntoFreshNativeDatabase",
     "olderWritesAndSameTimeLegacyImageReplayKeepTheCorrectPosition",
+    "measuresLongThreadOnIosNativeStorage",
 }
 names = [case.attrib["name"].split("[")[0] for case in tests]
 failed = [name for name, case in zip(names, tests)
@@ -34,4 +35,21 @@ summary = {"executed": names, "missing": sorted(expected - set(names)), "failedO
 if summary["missing"] or failed or len(names) != len(set(names)):
     raise SystemExit(f"Incomplete iOS reader coverage: {summary}")
 print(f"{len(tests)} shared reader tests on the iOS simulator target")
+prefix = "NATIVE_STORAGE_BENCH_V1 "
+observations = set()
+for report in reports:
+    for node in ET.parse(report).getroot().iter("system-out"):
+        for line in (node.text or "").splitlines():
+            if prefix in line:
+                observations.add(line.split(prefix, 1)[1].strip())
+if not observations:
+    for line in (out / "native-build.log").read_text(encoding="utf-8").splitlines():
+        if prefix in line:
+            observations.add(line.split(prefix, 1)[1].strip())
+if len(observations) != 1:
+    raise SystemExit(f"Expected one native storage measurement in JUnit or runner stdout, found {len(observations)}")
+sample = json.loads(observations.pop())
+if sample["platform"] != "ios-filesystem" or sample["floors"] != 240 or sample["distinct_image_files"] != 1:
+    raise SystemExit("Unexpected native benchmark fixture or provider")
+(out / "native-storage-benchmark.json").write_text(json.dumps(sample, indent=2), encoding="utf-8")
 PY
