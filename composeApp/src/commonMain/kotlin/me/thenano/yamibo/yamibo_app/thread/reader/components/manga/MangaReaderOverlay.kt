@@ -3,6 +3,7 @@ package me.thenano.yamibo.yamibo_app.thread.reader.components.manga
 import YamiboIcons
 import me.thenano.yamibo.yamibo_app.components.navigation.NavigationBackSymbol
 import androidx.compose.animation.*
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -12,9 +13,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
@@ -50,51 +53,44 @@ fun MangaReaderOverlay(
 ) {
     val colors = YamiboTheme.colors
 
-    Box(modifier = modifier.fillMaxSize()) {
-        // Scrim — intercepts all taps when overlay is visible
-        AnimatedVisibility(
-            visible = visible,
-            enter = fadeIn(tween(150)),
-            exit = fadeOut(tween(150)),
-            modifier = Modifier.fillMaxSize()
-        ) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = EnterTransition.None,
+        exit = ExitTransition.None,
+        modifier = modifier.fillMaxSize(),
+    ) {
+        val scrimAlpha by transition.animateFloat(transitionSpec = { tween(150) }, label = "Reader scrim") {
+            if (it == EnterExitState.Visible) 0.3f else 0f
+        }
+        Box(Modifier.fillMaxSize()) {
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.3f))
+                modifier = Modifier.fillMaxSize()
+                    .drawBehind { drawRect(Color.Black, alpha = scrimAlpha) }
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) { onDismiss() }
+                        indication = null,
+                        onClick = onDismiss,
+                    )
             )
-        }
-
-        // Top Bar
-        AnimatedVisibility(
-            visible = visible,
-            enter = slideInVertically(animationSpec = tween(150), initialOffsetY = { -it }),
-            exit = slideOutVertically(animationSpec = tween(150), targetOffsetY = { -it }),
-            modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth()
-        ) {
             YamiboTopBar(
                 title = title,
                 subtitle = subtitle,
                 titleFontSize = 16,
                 onBack = onBack,
                 systemBarsPriority = 30,
+                modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth()
+                    .animateEnterExit(
+                        enter = slideInVertically(tween(150)) { -it },
+                        exit = slideOutVertically(tween(150)) { -it },
+                    ),
             )
-        }
-
-        // Bottom Bar
-        AnimatedVisibility(
-            visible = visible,
-            enter = slideInVertically(animationSpec = tween(150), initialOffsetY = { it }),
-            exit = slideOutVertically(animationSpec = tween(150), targetOffsetY = { it }),
-            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-        ) {
             Surface(
                 color = colors.brownDeep.copy(alpha = 0.95f),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                    .animateEnterExit(
+                        enter = slideInVertically(tween(150)) { it },
+                        exit = slideOutVertically(tween(150)) { it },
+                    ),
             ) {
                 Column(
                     modifier = Modifier

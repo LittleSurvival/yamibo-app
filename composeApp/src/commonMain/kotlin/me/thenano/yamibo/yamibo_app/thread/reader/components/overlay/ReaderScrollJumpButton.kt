@@ -18,8 +18,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboColors
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
@@ -66,7 +66,7 @@ fun ReaderScrollJumpButton(
                 tint = buttonColors.icon,
                 modifier = Modifier
                     .size(24.dp)
-                    .rotate(rotation),
+                    .graphicsLayer { rotationZ = rotation },
             )
         }
     }

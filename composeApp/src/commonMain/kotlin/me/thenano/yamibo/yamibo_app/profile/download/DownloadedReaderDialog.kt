@@ -16,7 +16,6 @@ import me.thenano.yamibo.yamibo_app.i18n.i18n
 import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.repository.ReadHistoryRepository.ThreadEntryType
 import me.thenano.yamibo.yamibo_app.repository.download.*
-import me.thenano.yamibo.yamibo_app.repository.forum.SmartComicCatalog
 import me.thenano.yamibo.yamibo_app.thread.reader.IImageReaderScreen
 import me.thenano.yamibo.yamibo_app.thread.reader.IThreadReaderScreen
 
@@ -35,7 +34,7 @@ internal fun DownloadedReaderDialog(item: DownloadedContentItem, onDismiss: () -
     }
     val tid = ThreadId(pageKey.tid)
     var page by remember(key) { mutableStateOf<ThreadPage?>(null) }
-    var work by remember(key) { mutableStateOf<SmartComicCatalog.SavedWork?>(null) }
+    var chapters by remember(key) { mutableStateOf(emptyList<ThreadSummary>()) }
     var author by remember(key) { mutableStateOf<User?>(null) }
     var imageOnly by remember(key) { mutableStateOf(false) }
     var ready by remember(key) { mutableStateOf(false) }
@@ -44,10 +43,18 @@ internal fun DownloadedReaderDialog(item: DownloadedContentItem, onDismiss: () -
         try {
             val current = downloads.getDownloadedPage(pageKey)
             page = current
-            val fid = current?.thread?.forum?.fid
-            if (fid != null) work = auth.currentUser()?.uid?.let { catalog.savedWork(it, fid, tid) }
             if (current != null) {
-                author = work?.members?.firstOrNull { it.tid == tid }?.author
+                val owner = auth.currentUser()?.uid
+                if (owner != null) {
+                    try {
+                        chapters = catalog.downloadedReaderChapters(owner, current.thread.forum.fid, tid)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (e: Exception) {
+                        error = e.message
+                    }
+                }
+                author = chapters.firstOrNull { it.tid == tid }?.author
                     ?: current.posts.firstOrNull { it.floor == 1 || it.author.uid.value == pageKey.authorId }?.author
                 if (author == null && pageKey.authorId == null && pageKey.page > 1) {
                     author = downloads.getDownloadedPage(pageKey.copy(page = 1))?.posts?.firstOrNull { it.floor == 1 }?.author
@@ -65,7 +72,7 @@ internal fun DownloadedReaderDialog(item: DownloadedContentItem, onDismiss: () -
             ready = true
         }
     }
-    val chapter = work?.members?.firstOrNull { it.tid == tid }
+    val chapter = chapters.firstOrNull { it.tid == tid }
     val seed = chapter ?: page?.let { ThreadSummary(tid, it.thread.title, it.thread.forum.fid, hasPoll = false, url = "", author = author) }
     fun openComic(target: ThreadSummary) {
         onDismiss()
@@ -88,7 +95,7 @@ internal fun DownloadedReaderDialog(item: DownloadedContentItem, onDismiss: () -
                         threadType = ThreadEntryType.Novel, authorId = author?.uid, initialPage = pageKey.page,
                         offlineOnly = true, offlinePage = pageKey)) }, enabled = author != null, colors = actions) { Text(i18n("小說閱讀")) }
                     if (seed != null && author != null) TextButton({ openComic(seed) }, colors = actions) { Text(i18n("智能漫畫")) }
-                    val last = work?.members?.firstOrNull { it.tid == work?.lastTid && it.tid != tid }
+                    val last = chapters.firstOrNull { it.tid != tid }
                     if (last != null) TextButton({ openComic(last) }, colors = actions) { Text(i18n("繼續這部作品")) }
                 } else if (imageOnly) {
                     Text(i18n("缺少正文，僅可閱讀已下載圖片"))

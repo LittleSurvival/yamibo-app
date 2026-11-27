@@ -4,6 +4,7 @@ import me.thenano.yamibo.yamibo_app.i18n.i18n
 
 import YamiboIcons
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
@@ -38,8 +39,8 @@ fun ReaderFloatButtons(
         // Refresh & Settings: tied to overlay visibility
         AnimatedVisibility(
             visible = visible,
-            enter = fadeIn(),
-            exit = fadeOut()
+            enter = fadeIn(tween(150)),
+            exit = fadeOut(tween(150))
         ) {
             Column(
                 horizontalAlignment = Alignment.End,

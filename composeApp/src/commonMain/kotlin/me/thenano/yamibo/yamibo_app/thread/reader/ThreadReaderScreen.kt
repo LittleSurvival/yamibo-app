@@ -29,6 +29,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.SubcomposeLayout
@@ -62,6 +63,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
@@ -814,6 +816,7 @@ internal fun ThreadReaderScreen(
     var singlePageTurnAnimating by remember { mutableStateOf(false) }
     var committedSinglePageOverlay by remember(tid, targetPid) { mutableStateOf<ReaderListEntry?>(null) }
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    var catalogRequested by remember(tid, authorId, drawerState) { mutableStateOf(drawerState.isOpen) }
 
     val authRepo = LocalAuthRepository.current
     val feedbackController = LocalAppFeedbackController.current
@@ -822,12 +825,8 @@ internal fun ThreadReaderScreen(
 
     // isOpen changes only after the animation; cover the status bar from its start.
     val catalogVisible = drawerState.isOpen || drawerState.targetValue == DrawerValue.Open
-    val readerUsesBrownSystemBar = showMenu || showSettingsPanel || catalogVisible
-    SystemBarsEffect(
-        statusBarColor = if (readerUsesBrownSystemBar) colors.brownDeep else colors.creamBackground,
-        navigationBarColor = colors.creamBackground,
-        priority = 20,
-    )
+    val readerUsesBrownSystemBar = { showMenu || showSettingsPanel || catalogVisible }
+    ReaderSystemBars(readerUsesBrownSystemBar)
 
     var hasRestoredPosition by remember { mutableStateOf(false) }
     var pendingSavedPosition by remember(tid, targetPid) { mutableStateOf<ThreadReadingHistory?>(null) }
@@ -1910,9 +1909,10 @@ internal fun ThreadReaderScreen(
         )
         return true
     }
-    LaunchedEffect(isSinglePageMode, showMenu, currentSinglePageState?.currentPostPageCount) {
-        if (!isSinglePageMode) return@LaunchedEffect
-        rememberCurrentSinglePageAnchor()
+    if (isSinglePageMode) {
+        LaunchedEffect(showMenu, currentSinglePageState?.currentPostPageCount) {
+            rememberCurrentSinglePageAnchor()
+        }
     }
     LaunchedEffect(
         isSinglePageMode,
@@ -3431,7 +3431,9 @@ internal fun ThreadReaderScreen(
         }
 
         var anchorY: Long? = null
-        var visibilityToken = 0
+        val hideDelay = 1800.milliseconds
+        var lastMotion = TimeSource.Monotonic.markNow()
+        var hideJob: Job? = null
         snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
             .distinctUntilChanged()
             .collect { (index, offset) ->
@@ -3453,14 +3455,15 @@ internal fun ThreadReaderScreen(
                 }
 
                 if (scrollButtonDisplayMode == ReaderScrollButtonDisplayMode.WHEN_USER_SLIDE) {
-                    if (!showScrollJumpButtonAfterSlide) {
+                    lastMotion = TimeSource.Monotonic.markNow()
+                    if (hideJob?.isActive != true) {
                         showScrollJumpButtonAfterSlide = true
-                    }
-                    visibilityToken += 1
-                    val token = visibilityToken
-                    this@LaunchedEffect.launch {
-                        delay(1800.milliseconds)
-                        if (visibilityToken == token) {
+                        hideJob = launch {
+                            var remaining = hideDelay
+                            do {
+                                delay(remaining)
+                                remaining = hideDelay - lastMotion.elapsedNow()
+                            } while (remaining.isPositive())
                             showScrollJumpButtonAfterSlide = false
                         }
                     }
@@ -3480,21 +3483,24 @@ internal fun ThreadReaderScreen(
         if (!hasRestoredPosition) return@LaunchedEffect
         if (isSinglePageMode && !imageGeometryPreflightReady) return@LaunchedEffect
         val images = if (isSinglePageMode) singlePageImagePositions else scrollImagePositions
+        if (images.isEmpty()) return@LaunchedEffect
         val imageLoader = SingletonImageLoader.get(platformContext)
         val cookie = authRepo.cookieStore.load().orEmpty()
         val widthPx = (readerViewportWidthPx * readerContentWidthFraction).toInt().coerceAtLeast(1)
         snapshotFlow {
             if (isJumpingToEdge) {
-                emptyList()
+                null
             } else if (isSinglePageMode) {
                 val index = singlePageSession?.currentPageIndex ?: 0
-                nearbyReaderImages(images, index, index)
+                index..index
             } else {
                 val visible = listState.layoutInfo.visibleItemsInfo
                 val first = visible.firstOrNull()?.index
                 val last = visible.lastOrNull()?.index
-                if (first == null || last == null) emptyList() else nearbyReaderImages(images, first, last)
+                if (first == null || last == null) null else first..last
             }
+        }.map { range ->
+            if (range == null) emptyList() else nearbyReaderImages(images, range.first, range.last)
         }.distinctUntilChanged().collectLatest { urls ->
             debugPerfLog("image_prefetch_window|count=${urls.size}|ahead=3|behind=2")
             // A new window cancels outstanding work; completed images stay in Coil's bounded cache.
@@ -3663,6 +3669,8 @@ internal fun ThreadReaderScreen(
                     drawerContainerColor = colors.creamBackground,
                     modifier = Modifier.fillMaxWidth(0.7f)
                 ) {
+                    // Keep the sheet's geometry, and retain its search and scroll state after first use.
+                    if (!catalogRequested) return@ModalDrawerSheet
                     key(tid, authorId) {
                         ReaderCatalogPanelWithPosition(
                             listState = listState,
@@ -3763,7 +3771,7 @@ internal fun ThreadReaderScreen(
             }
 
             CompositionLocalProvider(
-                LocalReaderOverlayVisible provides showMenu,
+                LocalReaderOverlayVisible provides remember { { showMenu } },
                 LocalReaderImagePainterCache provides singlePageImagePainterCache,
                 LocalImageClickListener provides { showMenu = !showMenu },
                 LocalImageDoubleClickListener provides handleImageDoubleTap,
@@ -4881,7 +4889,7 @@ internal fun ThreadReaderScreen(
                                 .align(Alignment.TopCenter)
                                 .fillMaxWidth()
                                 .windowInsetsTopHeight(WindowInsets.statusBars)
-                                .background(if (readerUsesBrownSystemBar) colors.brownDeep else colors.creamBackground)
+                                .drawBehind { drawRect(if (readerUsesBrownSystemBar()) colors.brownDeep else colors.creamBackground) }
                         )
                         Spacer(
                             modifier = Modifier
@@ -4986,8 +4994,10 @@ internal fun ThreadReaderScreen(
                         isFavorited = isFavorited,
                         onBack = { saveCurrentHistoryAndPop() },
                         onCatalog = {
+                            catalogRequested = true
                             scope.launch {
-                                persistCurrentReadingState(flush = true)
+                                // Queue the tap-time position. The open drawer flushes it after the transition.
+                                persistCurrentReadingState()
                                 drawerState.open()
                             }
                         },
@@ -5570,6 +5580,16 @@ internal fun ThreadReaderScreen(
             },
         )
     }
+}
+
+@Composable
+private fun ReaderSystemBars(useBrown: () -> Boolean) {
+    val colors = YamiboTheme.colors
+    SystemBarsEffect(
+        statusBarColor = if (useBrown()) colors.brownDeep else colors.creamBackground,
+        navigationBarColor = colors.creamBackground,
+        priority = 20,
+    )
 }
 
 @Composable

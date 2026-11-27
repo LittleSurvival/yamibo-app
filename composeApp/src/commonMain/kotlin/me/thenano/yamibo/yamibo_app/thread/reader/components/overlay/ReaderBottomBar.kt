@@ -5,6 +5,7 @@ import me.thenano.yamibo.yamibo_app.i18n.i18n
 import YamiboIcons
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Arrangement
@@ -62,8 +63,8 @@ fun ReaderBottomBar(
     val colors = YamiboTheme.colors
     AnimatedVisibility(
         visible = visible,
-        enter = slideInVertically(initialOffsetY = { it }),
-        exit = slideOutVertically(targetOffsetY = { it }),
+        enter = slideInVertically(tween(150), initialOffsetY = { it }),
+        exit = slideOutVertically(tween(150), targetOffsetY = { it }),
         modifier = modifier.fillMaxWidth()
     ) {
         Surface(

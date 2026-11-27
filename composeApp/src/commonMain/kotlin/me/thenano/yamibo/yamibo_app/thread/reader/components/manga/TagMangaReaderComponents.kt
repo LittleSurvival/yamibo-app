@@ -5,7 +5,9 @@ import me.thenano.yamibo.yamibo_app.components.controls.YamiboActionChip
 import me.thenano.yamibo.yamibo_app.i18n.i18n
 
 import androidx.compose.animation.*
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -134,7 +136,7 @@ internal fun InterstitialCard(item: ReaderItem.InterstitialItem) {
 
 /** Chapter navigation panel for Tag */
 @Composable
-internal fun TagCatalogPanel(
+internal fun AnimatedVisibilityScope.TagCatalogPanel(
     totalPages: Int,
     loadedThreadsByPage: Map<Int, List<ThreadSummary>>,
     currentTagPage: Int,
@@ -160,9 +162,11 @@ internal fun TagCatalogPanel(
         }
     }
 
-    // Scrim
+    val scrimOpacity by transition.animateFloat(transitionSpec = { tween(200) }) { state ->
+        if (state == EnterExitState.Visible) 0.5f else 0f
+    }
     Box(
-        modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)).clickable(
+        modifier = Modifier.fillMaxSize().drawBehind { drawRect(Color.Black, alpha = scrimOpacity) }.clickable(
             interactionSource = remember { MutableInteractionSource() },
             indication = null
         ) { onDismiss() })
@@ -170,6 +174,10 @@ internal fun TagCatalogPanel(
     // Panel
     Box(
         modifier = Modifier.fillMaxWidth(0.8f).fillMaxHeight()
+            .animateEnterExit(
+                enter = slideInHorizontally(tween(250)) { -it } + fadeIn(tween(200)),
+                exit = slideOutHorizontally(tween(250)) { -it } + fadeOut(tween(200)),
+            )
             .background(colors.creamBackground, RoundedCornerShape(topEnd = 16.dp, bottomEnd = 16.dp))
     ) {
         Column {
@@ -199,11 +207,13 @@ internal fun TagCatalogPanel(
                 }
                 if (error != null) Text(error, color = colors.textDark, modifier = Modifier.padding(12.dp))
                 val chapters = loadedThreadsByPage[1].orEmpty()
-                val ordered = if (smartDescending) chapters.asReversed() else chapters
-                val listState = rememberLazyListState()
+                val ordered = remember(chapters, smartDescending) { if (smartDescending) chapters.asReversed() else chapters }
+                val active = remember(ordered, currentThreadId) { ordered.indexOfFirst { it.tid == currentThreadId } }
+                val listState = rememberLazyListState(initialFirstVisibleItemIndex = active.coerceAtLeast(0))
                 LaunchedEffect(smartDescending, chapters, currentThreadId) {
-                    val active = ordered.indexOfFirst { it.tid == currentThreadId }
-                    if (active >= 0) listState.scrollToItem(active)
+                    if (active >= 0 && (listState.firstVisibleItemIndex != active || listState.firstVisibleItemScrollOffset != 0)) {
+                        listState.scrollToItem(active)
+                    }
                 }
                 LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                     items(ordered, key = { it.tid.value }) { thread ->

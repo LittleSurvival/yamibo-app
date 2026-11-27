@@ -40,8 +40,10 @@ import me.thenano.yamibo.yamibo_app.LocalChineseConversionRepository
 import me.thenano.yamibo.yamibo_app.forum.components.PagePickerDialog
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.ensureActive
 import kotlin.coroutines.coroutineContext
@@ -73,11 +75,11 @@ internal fun ReaderCatalogPanel(
     val colors = YamiboTheme.colors
     var expandedPages by remember { mutableStateOf(setOf(currentPage)) }
 
-    val initialPostIndex = loadedPostsByPage[currentPage].orEmpty().indexOfFirst { it.pid == currentPid }
-    val listState = rememberLazyListState(
-        initialFirstVisibleItemIndex = (currentPage - 1).coerceAtLeast(0) +
-            if (initialPostIndex > 0) initialPostIndex + 1 else 0,
-    )
+    val initialIndex = remember {
+        val postIndex = loadedPostsByPage[currentPage].orEmpty().indexOfFirst { it.pid == currentPid }
+        (currentPage - 1).coerceAtLeast(0) + if (postIndex > 0) postIndex + 1 else 0
+    }
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = LocalFocusManager.current
@@ -97,18 +99,26 @@ internal fun ReaderCatalogPanel(
     val latestPosts by rememberUpdatedState(loadedPostsByPage)
     val conversion = LocalChineseConversionRepository.current
     val conversionMode by conversion.currentMode.collectAsState()
-    val sourceTitles = remember(loadedPostsByPage) {
-        loadedPostsByPage.values.flatten().associate { it.pid to it.title.ifEmpty { "..." } }
-    }
-    var convertedTitles by remember(conversionMode) { mutableStateOf<Map<PostId, String>>(emptyMap()) }
-    LaunchedEffect(sourceTitles, conversionMode) {
-        convertedTitles = sourceTitles.mapValues { (_, title) -> conversion.convert(title) }
-    }
-    val visiblePosts = remember(loadedPostsByPage, convertedTitles, sourceTitles, textQuery) { loadedPostsByPage.mapValues { (_, posts) ->
-        if (textQuery.isEmpty()) posts else posts.filter {
-            (convertedTitles[it.pid] ?: sourceTitles[it.pid].orEmpty()).contains(textQuery, ignoreCase = true)
+    var convertedTitles by remember(loadedPostsByPage, conversionMode) { mutableStateOf<Map<PostId, String>>(emptyMap()) }
+    conversionMode?.let { mode ->
+        LaunchedEffect(loadedPostsByPage, mode) {
+            convertedTitles = withContext(Dispatchers.Default) {
+                buildMap {
+                    for (posts in loadedPostsByPage.values) {
+                        for (post in posts) {
+                            if (post.title.isNotEmpty()) put(post.pid, conversion.convert(post.title, mode))
+                        }
+                    }
+                }
+            }
         }
-    } }
+    }
+    fun catalogTitle(post: Post) = convertedTitles[post.pid] ?: post.title.ifEmpty { "..." }
+    val visiblePosts = remember(loadedPostsByPage, convertedTitles, textQuery) {
+        if (textQuery.isEmpty()) loadedPostsByPage else loadedPostsByPage.mapValues { (_, posts) ->
+            posts.filter { catalogTitle(it).contains(textQuery, ignoreCase = true) }
+        }
+    }
     val visiblePages = (1..totalPages).filter { textQuery.isEmpty() || visiblePosts[it].orEmpty().isNotEmpty() }
     val keys = buildList {
         if ((message != null && messagePage == null) || (textQuery.isNotEmpty() && visiblePages.isEmpty())) add("catalog_message")
@@ -135,6 +145,7 @@ internal fun ReaderCatalogPanel(
             .first { it != null }
         val index = latestKeys.indexOf(key)
         if (index < 0) return
+        if (!animate && index == listState.firstVisibleItemIndex && offset == listState.firstVisibleItemScrollOffset) return
         if (animate) {
             val delta = index - listState.firstVisibleItemIndex
             if (kotlin.math.abs(delta) > 35) listState.scrollToItem((index - if (delta > 0) 8 else -8).coerceIn(latestKeys.indices))
@@ -438,7 +449,7 @@ internal fun ReaderCatalogPanel(
                             val chapterState = chapterStates[post.pid.value.toLong()]
                             val isRead = post.pid.value.toLong() in readPostIds || chapterState?.read == true
                             val progressText = chapterState?.chapterPercentProgressLabel()
-                            val displayTitle = convertedTitles[post.pid] ?: sourceTitles[post.pid].orEmpty()
+                            val displayTitle = catalogTitle(post)
                             val matchRanges = catalogMatchRanges(displayTitle, textQuery)
                             val titleStart = matchRanges.firstOrNull()?.first?.minus(8)?.coerceAtLeast(0) ?: 0
                             val titleText = (if (titleStart > 0) "…" else "") + displayTitle.substring(titleStart)
