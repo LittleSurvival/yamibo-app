@@ -11,6 +11,7 @@ parser.add_argument("--damaged", action="store_true")
 parser.add_argument("--origin", default="https://reader.invalid")
 parser.add_argument("--repair-image", type=Path)
 parser.add_argument("--bench", action="store_true", help="50 floors, 20 deterministic 1080x1600 JPEGs and about 64 KiB of encoded forum content")
+parser.add_argument("--pure-text",action="store_true")
 args = parser.parse_args()
 root = args.directory / 'YamiboDownloads'
 root.mkdir(parents=True, exist_ok=True)
@@ -80,6 +81,15 @@ if args.bench:
               "size":[1080,1600], "images":[{"bytes":len(b),"sha256":hashlib.sha256(b).hexdigest()} for b in markers]}
     print("PERF_FIXTURE " + json.dumps(record),flush=True)
 write(directory / "thread_page.json", {"thread": {"tid": 140, "title": title, "forum": {"fid": 30, "name": "QA Forum", "url": "forum.php?fid=30"}}, "posts": posts, "pageNav": {"currentPage": 1, "totalPages": 1}})
+if args.pure_text:
+    assert args.bench
+    textdir=root/"thread_141_page_1_author_7"
+    texttitle="QA Text Only"
+    write(textdir/"manifest.json",{"key":{"tid":141,"page":1,"authorId":7},"title":texttitle,"downloadedAt":1,
+              "sourceTotalPages":1,"pageKind":"LastAtDownloadTime","images":[]})
+    body=[dict(post,pid=2000+i,title=texttitle,images=[],contentHtml=f"<p>READER_TEXT_{i}</p><p>Pure text reader paragraph number {i}.</p>") for i,post in enumerate(posts,1)]
+    write(textdir/"thread_page.json",{"thread":{"tid":141,"title":texttitle,"forum":{"fid":30,"name":"QA Forum","url":""}},
+           "posts":body,"pageNav":{"currentPage":1,"totalPages":1}})
 write(root / "queue.json", [])
 
 

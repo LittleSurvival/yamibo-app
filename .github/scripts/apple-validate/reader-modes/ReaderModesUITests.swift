@@ -2,6 +2,8 @@ import XCTest
 import UIKit
 
 final class ReaderModesUITests: XCTestCase {
+    private let guardLocalTransfers = false // READER_PERF_GUARD
+    private let promptInput = false // READER_PERF_PROMPT
     private let benchmarkNetwork = "none" // READER_PERF_NETWORK
     private let benchmarkChapters = 0 // READER_PERF_CHAPTERS
     private let app = XCUIApplication(bundleIdentifier: "com.yamibo.bbs.readermodesqa")
@@ -23,6 +25,13 @@ final class ReaderModesUITests: XCTestCase {
         }
         while Date() < deadline
         XCTFail("Missing control " + labels.joined(separator: ", ") + " " + app.debugDescription)
+    }
+
+    private var measureNavigation: ((String,Double,Double)->Void)?
+    private func tapDownload(_ labels:[String],stage:String) {
+        let start=ProcessInfo.processInfo.systemUptime
+        tap(labels)
+        measureNavigation?(stage,start,ProcessInfo.processInfo.systemUptime)
     }
 
     private func openDownload(_ labels: [String], dark: Bool, damaged: Bool = false, migrateInManager: Bool = true, groupTitle: String = "QA Three Readers", beforeOpen: (() -> Void)? = nil) {
@@ -66,8 +75,8 @@ final class ReaderModesUITests: XCTestCase {
             let gone = NSPredicate(format: "exists == false")
             XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: gone, object: migration)], timeout: 30), .completed)
         }
-        tap([groupTitle])
-        tap(["第 1 頁", "第 1 页", "Page 1"])
+        tapDownload([groupTitle],stage:"download_group")
+        tapDownload(["第 1 頁", "第 1 页", "Page 1"],stage:"download_page")
         XCTAssertTrue(element(["開啟下載內容", "打开下载内容", "Open downloaded content"]).waitForExistence(timeout: 10), app.debugDescription)
         if benchmarkChapters > 0 {
             XCTAssertTrue(element(["繼續這部作品"]).waitForExistence(timeout: 10), "Must find the alternate chapter belonging to seeded UID 7")
@@ -293,15 +302,15 @@ final class ReaderModesUITests: XCTestCase {
             }
         }
         let first = cold ? 1 : 0
+        defer { measureNavigation=nil }
         for round in first...rounds {
+            measureNavigation={ key,lo,hi in rows.append(["action":key,"round":round,"lo":lo,"hi":hi]) }
             let select = {
                 let button = self.element([mode.rawValue])
                 XCTAssertTrue(button.exists)
                 record("open", round: round) { button.tap() }
             }
-            if benchmarkNetwork != "none" {
-                continueAfterFailure = false
-                app.terminate()
+            if guardLocalTransfers || benchmarkNetwork != "none" {
                 let runKey="ios-\(round)-\(mode == .comic ? "comic" : (mode == .novel ? "novel":"forum"))-\(benchmarkNetwork)"
                 let ack=expectation(description:"loopback replay armed")
                 var hostNanoseconds: Double?
@@ -317,6 +326,10 @@ final class ReaderModesUITests: XCTestCase {
                 wait(for:[ack],timeout:8)
                 XCTAssertNotNil(hostNanoseconds)
                 rows.append(["action":"origin","round":round,"case":runKey,"lo":lo,"hi":ProcessInfo.processInfo.systemUptime,"host_ns":hostNanoseconds ?? -1])
+            }
+            if benchmarkNetwork != "none" {
+                continueAfterFailure = false
+                app.terminate()
                 let setting = mode == .forum ? "Forum" : (mode == .novel ? "Novel" : "SmartComic")
                 app.launchArguments = ["-AppleLanguages","(zh-Hant)","-AppleLocale","zh_TW","--reader-frame-probe","--reader-fresh-replay",
                                        "-appsettings.forumReadingMode.30",setting, "-uid","7","-username","QA Author","-userGroup","QA",
@@ -334,24 +347,36 @@ final class ReaderModesUITests: XCTestCase {
             } else if cold || round == 0 {
                 openDownload([mode.rawValue], dark: false, migrateInManager: false, beforeOpen: select)
             } else {
-                tap(["第 1 頁", "Page 1"])
+                tapDownload(["第 1 頁", "Page 1"],stage:"download_page")
                 select()
             }
             // Seek a complete first-floor witness. Elapsed XCTest time is never used for T1.
-            waitForImage(second: false)
-            if mode != .comic {
-                assertFirstFloor()
-                let node=app.staticTexts.matching(NSPredicate(format:"label == %@", "READER_FLOOR_1")).firstMatch
-                let bbox=node.frame, t=ProcessInfo.processInfo.systemUptime
-                rows.append(["round":round,"action":"glyph","lo":t,"hi":t,"label":node.label,
-                             "rect":[bbox.minX,bbox.minY,bbox.maxX,bbox.maxY]])
+            func verifyFirstContent() {
+                waitForImage(second: false)
+                if mode != .comic {
+                    assertFirstFloor()
+                    let node=app.staticTexts.matching(NSPredicate(format:"label == %@", "READER_FLOOR_1")).firstMatch
+                    let bbox=node.frame, t=ProcessInfo.processInfo.systemUptime
+                    rows.append(["round":round,"action":"glyph","lo":t,"hi":t,"label":node.label,
+                                 "rect":[bbox.minX,bbox.minY,bbox.maxX,bbox.maxY]])
+                }
             }
+            if !promptInput { verifyFirstContent() }
             record("gesture", round: round) {
                 if mode == .comic { self.app.swipeLeft() } else { self.app.swipeUp() }
             }
             if mode == .comic { waitForImage(second: true) }
             if mode == .comic { app.swipeRight(); waitForImage(second: false) }
             else { app.swipeDown(); assertFirstFloor() }
+            if promptInput {
+                verifyFirstContent()
+                app.coordinate(withNormalizedOffset: CGVector(dx:0.5,dy:0.5)).tap()
+                let control=element(["設定"])
+                XCTAssertTrue(control.exists)
+                record("settings",round:round) { control.tap() }
+                XCTAssertTrue(element(mode == .comic ? ["輕觸區域"] : ["文字排版"]).waitForExistence(timeout:8),app.debugDescription)
+                if round==rounds { capture("settings-visible-after-action") }
+            }
             if benchmarkChapters>0 && round==rounds {
                 app.coordinate(withNormalizedOffset: CGVector(dx:0.5,dy:0.5)).tap()
                 tap(["☰"])
@@ -367,6 +392,46 @@ final class ReaderModesUITests: XCTestCase {
                 // The download manager restores either the group or its page list.
                 if !element(["第 1 頁", "Page 1"]).exists { tap(["QA Three Readers"]) }
             }
+        }
+    }
+
+    func testSustainedOpenAndReturn() {
+        continueAfterFailure=false
+        var rows=[[String:Any]](), previous=""
+        func mark(_ round:Int,_ action:String,_ f:()->Void) {
+            let before=ProcessInfo.processInfo.systemUptime
+            f()
+            rows.append(["round":round,"action":action,"lo":before,"hi":ProcessInfo.processInfo.systemUptime])
+        }
+        defer {
+            if let data=try? JSONSerialization.data(withJSONObject:rows) {
+                let a=XCTAttachment(data:data,uniformTypeIdentifier:"public.json");a.name="reader-perf-actions";a.lifetime = .keepAlways;add(a)
+            }
+        }
+        for round in 1...30 {
+            let comic=round%2==1, mode=round%2==1 ? Mode.comic:Mode.novel
+            let title=comic ? "QA Three Readers":"QA Text Only"
+            let open={ mark(round,"open") { self.tap([mode.rawValue]) } }
+            if round==1 {
+                openDownload([mode.rawValue],dark:false,migrateInManager:false,groupTitle:title,beforeOpen:open)
+            } else {
+                if element(["第 1 頁","Page 1"]).exists { tap([previous]) }
+                tap([title]);tap(["第 1 頁","Page 1"]);open()
+            }
+            if comic { waitForImage(second:false) }
+            else {
+                let text=app.staticTexts["READER_TEXT_1"]
+                XCTAssertTrue(text.waitForExistence(timeout:15) && text.isHittable,app.debugDescription)
+                let rect=text.frame, now=ProcessInfo.processInfo.systemUptime
+                rows.append(["round":round,"action":"glyph","label":text.label,"lo":now,"hi":now,
+                             "rect":[rect.minX,rect.minY,rect.maxX,rect.maxY]])
+            }
+            mark(round,"correct") { if [1,10,30].contains(round) { capture("correct-reader-\(round)") } }
+            app.coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5)).tap()
+            mark(round,"back") { tap(["◀"]) }
+            XCTAssertTrue(element([title]).waitForExistence(timeout:12),app.debugDescription)
+            mark(round,"idle") { Thread.sleep(forTimeInterval:1) }
+            previous=title
         }
     }
 

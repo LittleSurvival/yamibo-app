@@ -35,16 +35,22 @@ def generate(generator):
     assert len(contract["jpeg"])==20
     (F/"contract.json").write_text(json.dumps(contract,indent=2),encoding="utf8")
 class Link:
-    def __init__(self):self.mu=threading.Lock();self.ready=0.;self.case="warmup";self.hold=False
+    def __init__(self):self.mu=threading.Lock();self.ready=0.;self.active=0;self.case="warmup";self.hold=False
     def send(self,out,payload):
-        for i in range(0,len(payload),8192):
-            block=payload[i:i+8192]
-            with self.mu:
-                self.ready=max(self.ready,time.perf_counter())+len(block)*8/10000000
-                when=self.ready
-            wait=when-time.perf_counter()
-            if wait>0:time.sleep(wait)
-            out.write(block);out.flush()
+        with self.mu:
+            if not self.active:self.ready=max(self.ready,time.perf_counter())
+            self.active+=1
+        try:
+            for i in range(0,len(payload),8192):
+                block=payload[i:i+8192]
+                with self.mu:
+                    self.ready+=len(block)*8/10000000
+                    when=self.ready
+                wait=when-time.perf_counter()
+                if wait>0:time.sleep(wait)
+                out.write(block);out.flush()
+        finally:
+            with self.mu:self.active-=1
 class Handler(BaseHTTPRequestHandler):
     def log_message(self,*args):pass
     def request_body(self):
@@ -70,12 +76,13 @@ class Handler(BaseHTTPRequestHandler):
             kind="image-"+m[1];ctype="image/jpeg";data=(F/f"YamiboDownloads/thread_140_page_1_author_7/images/{int(m[1]):04}.jpg").read_bytes()
         else:kind="unknown";data=b"unmapped fixture resource";code=404
         held=hold and kind=="catalog-post";time.sleep(.1+(5 if held else 0))
+        released=time.monotonic_ns()
         self.send_response(code);self.send_header("Content-Type",ctype);self.send_header("Content-Length",str(len(data)))
         self.send_header("Cache-Control","no-store");[self.send_header(k,v) for k,v in headers.items()];self.end_headers()
         complete=True
         try:self.server.link.send(self.wfile,data)
         except (BrokenPipeError,ConnectionResetError,ConnectionAbortedError):complete=False
-        record={"run":case,"resource":kind,"method":self.command,"status":code,"bytes_planned":len(data),"complete":complete,"begin_host_ns":start,"end_host_ns":time.monotonic_ns(),"catalog_held":held}
+        record={"run":case,"resource":kind,"method":self.command,"status":code,"bytes_planned":len(data),"complete":complete,"begin_host_ns":start,"end_host_ns":time.monotonic_ns(),"release_host_ns":released,"catalog_held":held}
         with self.server.link.mu:
             with (F/"requests.ndjson").open("a",encoding="utf8") as f:f.write(json.dumps(record)+"\n")
     do_GET=request_body;do_POST=request_body

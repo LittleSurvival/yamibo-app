@@ -12,6 +12,7 @@ import tempfile
 import shutil
 import signal
 import time
+import threading
 from contextlib import ExitStack
 from repair_origin import RepairOrigin
 
@@ -39,6 +40,8 @@ def main():
     perf = "--perf" in sys.argv
     scale = tuple(map(int,sys.argv[sys.argv.index("--scale")+1:sys.argv.index("--scale")+3])) if "--scale" in sys.argv else None
     network_mode = sys.argv[sys.argv.index("--network")+1] if "--network" in sys.argv else None
+    sustain = "--sustain" in sys.argv
+    guard_local = "--guard-local" in sys.argv
     long_image = "--long-image" in sys.argv
     config = "Debug"
     if perf:
@@ -48,8 +51,15 @@ def main():
         assert config in ("Debug", "Release")
         rounds = int(rounds_raw)
         assert 1 <= rounds <= 40
+        (OUTPUT/"profile-conditions.json").write_text(json.dumps({"mode":mode,"sequence":sequence,"demanded_samples":rounds,"configuration":config,
+            "network":network_mode,"guard_local":guard_local,"native_long":long_image,"catalog_scale":scale,"sustain":sustain,
+            "prompt_input":"--prompt-input" in sys.argv,"reference":"12" if "--tag-12" in sys.argv else "candidate"}))
         testsrc = PROFILE / "ReaderModesUITests.swift"
         program = testsrc.read_text().replace("1 // READER_PERF_ROUNDS", f"{rounds} // READER_PERF_ROUNDS")
+        if guard_local:
+            program=program.replace("false // READER_PERF_GUARD","true // READER_PERF_GUARD")
+        if "--prompt-input" in sys.argv:
+            program=program.replace("false // READER_PERF_PROMPT","true // READER_PERF_PROMPT")
         if network_mode:
             assert network_mode in ("fast","slow")
             program=program.replace('"none" // READER_PERF_NETWORK',f'"{network_mode}" // READER_PERF_NETWORK')
@@ -61,7 +71,7 @@ def main():
     try:
         run("Configure independent XCTest target", ["gem", "install", "xcodeproj",
             "-v", "1.27.0", "--no-document", "--user-install"], 180)
-        if network_mode:
+        if network_mode or guard_local:
             import urllib.request
             sdk=Path(os.environ["RUNNER_TEMP"])/"reader-replay-yamibo-api"
             upstream="6a794c8c3b7a4e14802d62d1d2c3b2c289685475"
@@ -78,7 +88,7 @@ def main():
             info=Path("iosApp/iosApp/Info.plist"); plist=plistlib.loads(info.read_bytes())
             plist["NSAppTransportSecurity"]={"NSAllowsLocalNetworking":True,"NSExceptionDomains":{"127.0.0.1":{"NSExceptionAllowsInsecureHTTPLoads":True}}}
             info.write_bytes(plistlib.dumps(plist))
-            if mode=="Novel":
+            if mode=="Novel" and network_mode:
                 # FID55 uses the native novel-details entry in *both* versions; FID30 is a normal forum on tag12.
                 origin_script=PROFILE/"replay_origin.py"
                 text=origin_script.read_text()
@@ -151,7 +161,7 @@ def main():
             resources.callback(origin.close)
             readers = ("testRepair",)
         if perf:
-            readers, palettes = (("testNativeLongFirstImage" if long_image else f"testPerf{mode}"),), ("default",)
+            readers, palettes = (("testSustainedOpenAndReturn" if sustain else ("testNativeLongFirstImage" if long_image else f"testPerf{mode}")),), ("default",)
         for palette in palettes:
             for reader in readers:
                 case = reader if palette == "default" else f"{reader}Dark"
@@ -162,6 +172,8 @@ def main():
                 fixture_args = ["--cbz"] if origin or palette == "default-dark" else []
                 if perf and config == "Release":
                     fixture_args.append("--bench")
+                    if guard_local:fixture_args.extend(["--origin","http://127.0.0.1:18928"])
+                    if sustain: fixture_args.append("--pure-text")
                 if damaged:
                     fixture_args.append("--damaged")
                 if origin:
@@ -200,6 +212,19 @@ def main():
                     if perf:
                         recording = subprocess.Popen(simctl + ["io", simulator, "recordVideo", "--codec=h264", str(movie)])
                         time.sleep(1)
+                    if sustain:
+                        done=threading.Event()
+                        executable=plistlib.loads((apps[0]/"Info.plist").read_bytes())["CFBundleExecutable"]
+                        def sample_rss():
+                            with (OUTPUT/"reader-process.ndjson").open("w",buffering=1) as samples:
+                                while not done.is_set():
+                                    at=time.monotonic_ns()
+                                    for line in subprocess.check_output(["ps","-axo","pid=,rss=,comm="],text=True).splitlines():
+                                        parts=line.strip().split(maxsplit=2)
+                                        if len(parts)==3 and parts[2].endswith(".app/"+executable) and simulator in parts[2]:
+                                            samples.write(json.dumps({"host_ns":at,"wall":time.time(),"pid":int(parts[0]),"rss_bytes":int(parts[1])*1024})+"\n")
+                                    done.wait(.5)
+                        observer=threading.Thread(target=sample_rss,daemon=True);observer.start()
                     fs_watch=None
                     if scale:
                         fs_log=resources.enter_context((OUTPUT/"fs-usage.log").open("w"))
@@ -212,6 +237,7 @@ def main():
                     except (subprocess.CalledProcessError,subprocess.TimeoutExpired) as exc:
                         test_problem=exc
                     finally:
+                        if sustain: done.set();observer.join(timeout=6)
                         if fs_watch and fs_watch.poll() is None:
                             fs_watch.send_signal(signal.SIGINT)
                             try: fs_watch.wait(timeout=5)
@@ -225,8 +251,8 @@ def main():
                             attachments = OUTPUT / "perf-attachments"
                             subprocess.run(["xcrun","xcresulttool","export","attachments","--path",str(bundle),"--output-path",str(attachments)], check=False)
                     if perf:
-                        if network_mode: collect_origin()
-                        run("Inspect encoded content and input traces",[sys.executable,str(PROFILE/"read_perf_frames.py"),str(OUTPUT),("NativeLong" if long_image else mode),sequence,str(rounds),config],1200)
+                        if network_mode or guard_local: collect_origin()
+                        run("Inspect encoded content and input traces",[sys.executable,str(PROFILE/"read_perf_frames.py"),str(OUTPUT),("Sustain" if sustain else ("NativeLong" if long_image else mode)),sequence,str(rounds),config],1200)
                         if test_problem: raise test_problem
                         results[name] = True
                         continue
