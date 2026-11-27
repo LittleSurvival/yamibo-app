@@ -166,7 +166,7 @@ def main():
         if not shared_simulator:
             run("Boot owned iPhone Simulator", ["xcrun", "simctl", "boot", simulator], 60)
         booted=True
-        run("Wait for iPhone boot", ["xcrun", "simctl", "bootstatus", simulator, "-b"], 300)
+        run("Wait for iPhone boot and first-use data migration", ["xcrun", "simctl", "bootstatus", simulator, "-b"], 900)
         simctl = ["xcrun", "simctl"]
         def downloads_root():
             container = subprocess.check_output(simctl + ["get_app_container", simulator, BUNDLE, "data"], text=True).strip()
@@ -272,7 +272,20 @@ def main():
                             for path in docs.glob("reader-perf-events-*.jsonl"):
                                 shutil.copy2(path, OUTPUT)
                             attachments = OUTPUT / "perf-attachments"
-                            subprocess.run(["xcrun","xcresulttool","export","attachments","--path",str(bundle),"--output-path",str(attachments)], check=False)
+                            exported=subprocess.run(["xcrun","xcresulttool","export","attachments","--path",str(bundle),"--output-path",str(attachments)],check=False)
+                            if exported.returncode==0:
+                                # Xcode retains the original attachments in .xcresult. Keep coordinates, screenshots
+                                # and notes unpacked, and index the extra copy of Xcode's automatic test movie.
+                                indexed=[]
+                                for media in attachments.iterdir():
+                                    if media.is_file() and media.suffix.lower() in (".mp4",".mov",".m4v"):
+                                        with media.open("rb") as movie_bytes:
+                                            digest=hashlib.file_digest(movie_bytes,"sha256").hexdigest()
+                                        indexed.append({"attachment":media.name,"bytes":media.stat().st_size,"sha256":digest})
+                                        media.unlink()
+                                (OUTPUT/"xctest-attachment-index.json").write_text(json.dumps({"result_bundle":bundle.name,
+                                    "export_command":"xcrun xcresulttool export attachments --path <bundle> --output-path <directory>",
+                                    "movies_in_result_bundle":indexed},indent=2))
                     if perf:
                         if network_mode or guard_local: collect_origin()
                         run("Inspect encoded content and input traces",[sys.executable,str(PROFILE/"read_perf_frames.py"),str(OUTPUT),("Sustain" if sustain else ("NativeLong" if long_image else mode)),sequence,str(rounds),config],1200)

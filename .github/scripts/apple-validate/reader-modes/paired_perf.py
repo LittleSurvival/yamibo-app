@@ -60,10 +60,16 @@ def main(mode,control=False):
             "mode":mode,"simulator":sim,"device_type":kind,"runtime":runtime,"receipts":receipt_by_arm,"pairs":[]}
     def save(): (output/"paired-reader.json").write_text(json.dumps(ledger,indent=2))
     bundle="com.yamibo.bbs.readermodesqa"
-    pair_indices=range(1,8) if control else range(block*5+1,block*5+6)
+    nominal=7 if control else 5
+    count=int(os.environ.get("READER_ROUND_COUNT") or nominal)
+    assert 1<=count<=nominal
+    first_index=1 if control else block*5+1
+    pair_indices=range(first_index,first_index+count)
+    ledger["planned_in_block"]=count
+    ledger["short_smoke"]=count<nominal
     ledger["comparison"]="same-version" if control else "tag12"
     try:
-        run(["xcrun","simctl","boot",sim]);run(["xcrun","simctl","bootstatus",sim,"-b"],timeout=300)
+        run(["xcrun","simctl","boot",sim]);run(["xcrun","simctl","bootstatus",sim,"-b"],timeout=900)
         for pair in pair_indices:
             p={"index":pair,"order":list(order(pair,control)),"arms":{},"valid":False}
             ledger["pairs"].append(p);save()
@@ -77,7 +83,7 @@ def main(mode,control=False):
                     run(["git","-C",str(root),"worktree","add","--quiet","--detach",str(work),"HEAD"])
                     try:
                         env=dict(os.environ,APPLE_VALIDATE_OUTPUT=str(raw),RUNNER_TEMP=str(temp),
-                            READER_PAIRED_SIMULATOR=sim,READER_FRAMEWORK_RECEIPT=receipt_by_arm[arm],
+                            READER_PAIRED_SIMULATOR=sim,READER_ROUND_COUNT="",READER_FRAMEWORK_RECEIPT=receipt_by_arm[arm],
                             READER_PAIR_DERIVED=str(temp/"derived"),
                             READER_FRAMEWORK_CACHE=str(Path(os.environ["RUNNER_TEMP"])/"reader-framework-cache"))
                         args=(["--tag-12"] if arm=="tag12" else [])+["--network","fast","--perf",mode,"cold","1","Release"]
@@ -113,7 +119,7 @@ def summarize(paths):
     key=None
     for path in map(Path,paths):
         group=json.loads(path.read_text(encoding="utf8"))
-        identity=(group["mode"],group["comparison"],group["runtime"],group["device_type"],group["receipts"])
+        identity=(group["mode"],group["comparison"],group["runtime"],group["device_type"],group["receipts"],group.get("short_smoke",False))
         if key is None: key=identity
         if identity!=key:raise ValueError("Mixed route, runners or build receipts")
         hosts[group["run"]]=group["simulator"]
@@ -130,7 +136,7 @@ def summarize(paths):
         return sorted(values)[math.ceil(q*len(values))-1]
     def quantiles(values):
         return {"p50":rank(values,.5),"p95":rank(values,.95)}
-    result={"mode":key[0],"comparison":key[1],"receipts":key[4],"requested":requested,"attempted":len(rows),
+    result={"mode":key[0],"comparison":key[1],"receipts":key[4],"short_smoke":key[5],"requested":requested,"attempted":len(rows),
             "usable":len(usable),"missing_indices":sorted(indices-set(rows)),
             "rejected_indices":sorted(p["index"] for p in rows.values() if not p["valid"]),
             "host_simulator_by_run":hosts,"metrics":{}}

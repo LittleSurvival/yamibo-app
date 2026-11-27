@@ -113,7 +113,9 @@ jobs:
             find "$APPLE_VALIDATE_OUTPUT" -name '*.xcresult' -type d -prune -print0 |
               while IFS= read -r -d '' result; do
                 xcrun xcresulttool get test-results summary --path "$result" > "${result%.xcresult}-summary.json"
-                xcrun xcresulttool export attachments --path "$result" --output-path "${result%.xcresult}-attachments"
+                if [ ! -f "$(dirname "$result")/xctest-attachment-index.json" ]; then
+                  xcrun xcresulttool export attachments --path "$result" --output-path "${result%.xcresult}-attachments"
+                fi
               done
           fi
       - name: Publish compact reader measurements
