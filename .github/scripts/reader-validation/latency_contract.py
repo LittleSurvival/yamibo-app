@@ -212,8 +212,10 @@ def android_forum_benchmark(argv):
     parser.add_argument("--trace-processor",required=True,type=Path)
     parser.add_argument("--aapt",default="aapt",help="Android SDK build-tools aapt executable")
     parser.add_argument("--output",required=True,type=Path,help="New output directory")
-    parser.add_argument("--calibration-pairs",type=int,default=7)
-    parser.add_argument("--pairs",type=int,default=40)
+    parser.add_argument("--calibration-pairs", type=int, default=1,
+                        help="Same-build pairs for an everyday check (default 1).")
+    parser.add_argument("--pairs", type=int, default=1,
+                        help="Tag 12 versus candidate pairs for an everyday check (default 1).")
     run_forum_matrix(parser.parse_args(argv))
 
 
