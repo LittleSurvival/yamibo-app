@@ -286,6 +286,39 @@ final class ReaderModesUITests: XCTestCase {
         waitForExpectations(timeout: 15)
     }
 
+    private func reverseVisibleCatalog() {
+        let chip=app.buttons["升冪"]
+        XCTAssertTrue(chip.waitForExistence(timeout:8))
+        guard let frame=app.screenshot().image.cgImage else { XCTFail("No rendered catalog"); return }
+        let scale=CGFloat(frame.width)/app.frame.width
+        func pixel(_ x: Int,_ y: Int)->[UInt8] {
+            let rect=CGRect(x:(CGFloat(x)*scale).rounded(),y:(CGFloat(y)*scale).rounded(),width:1,height:1)
+            guard let crop=frame.cropping(to:rect) else{return []}
+            var bytes=[UInt8](repeating:0,count:4)
+            bytes.withUnsafeMutableBytes { b in
+                let ctx=CGContext(data:b.baseAddress,width:1,height:1,bitsPerComponent:8,bytesPerRow:4,
+                    space:CGColorSpace(name:CGColorSpace.sRGB)!,bitmapInfo:CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue)!
+                ctx.draw(crop,in:CGRect(x:0,y:0,width:1,height:1))
+            }
+            return bytes
+        }
+        // The iOS accessibility activation point for this chip was on the line above its fill.
+        // Sample the actual two adjacent fills and their gap in the fixed Default/iPhone-17 layout.
+        let scan=(55...150).filter { y in
+            let left=pixel(20,y),right=pixel(48,y),gap=pixel(60,y)
+            guard left.count==4 && right.count==4 && gap.count==4 else{return false}
+            return (225...244).contains(Int(left[0])) && (225...244).contains(Int(right[0])) &&
+                   Int(gap[0])-Int(left[0])>=12 && Int(gap[1])-Int(right[1])>=11
+        }
+        guard let first=scan.first,let last=scan.last,scan.count>=12,last-first>=16,last-first<=45 else {
+            XCTFail("Sort chip paint is not distinguishable: \(scan)");return
+        }
+        let point=CGVector(dx:34,dy:CGFloat(first+last)/2)
+        let report="A11Y frame \(chip.frame); verified painted rows \(first)...\(last); touch \(point)"
+        let evidence=XCTAttachment(string:report);evidence.name="visible-catalog-sort-target";evidence.lifetime = .keepAlways;add(evidence)
+        app.coordinate(withNormalizedOffset:.zero).withOffset(point).tap()
+    }
+
     private func performance(_ mode: Mode) {
         // The runner provides this variable in the generated test source, not in the App.
         let rounds = 1 // READER_PERF_ROUNDS
@@ -418,7 +451,7 @@ final class ReaderModesUITests: XCTestCase {
                 app.coordinate(withNormalizedOffset: CGVector(dx:0.5,dy:0.5)).tap()
                 tap(["☰"])
                 XCTAssertTrue(element(["QA CHAPTER 0005"]).waitForExistence(timeout:10),app.debugDescription)
-                tap(["升冪"])
+                reverseVisibleCatalog()
                 XCTAssertTrue(element(["降冪"]).waitForExistence(timeout:10),app.debugDescription)
                 XCTAssertTrue(element(["QA CHAPTER 0003"]).waitForExistence(timeout:10),app.debugDescription)
                 capture("uid7-reversed-catalog")

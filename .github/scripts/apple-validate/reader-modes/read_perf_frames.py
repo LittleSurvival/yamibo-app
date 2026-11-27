@@ -1,6 +1,7 @@
 """Analyze the simulator recording independently of XCTest polling or action duration."""
 import bisect
 from array import array
+from collections import Counter
 import csv
 import math
 import re
@@ -134,6 +135,16 @@ def match_glyphs(directory, actions, samples, offset, width, height, detail=Fals
                     if "first_motion_ms" in sample: sample["glyph_t2_t1_ms"]=sample["first_motion_ms"]-time_ms
                     if "gesture_down_ms" in sample: sample["glyph_harness_delay_ms"]=sample["gesture_down_ms"]-time_ms
                     current[5]=True
+
+
+def visible_changes(aligned,start,end):
+    times=[f[0] for f in aligned if start<=f[0]<=end and f[5]>.004]
+    periods=[b-a for a,b in zip(times,times[1:])]
+    return {"changed_frames":len(times),"visible_intervals_ms":periods,
+        "first_change_after_input_ms":times[0]-start if times else None,
+        "p95_ms":percentile(periods,95),"max_ms":max(periods,default=None),
+        "over_16_7":sum(n>16.7 for n in periods),"over_33_4":sum(n>33.4 for n in periods),
+        "over_50":sum(n>50 for n in periods),"over_100":sum(n>100 for n in periods)}
 
 
 def filesystem_windows(directory,touches,samples):
@@ -334,13 +345,7 @@ def analyze(directory, mode, sequence, rounds, config):
                 p0=touch(panels[0],3);windows["settings"]=(p0,p0+700)
             sample["active_windows"]={}
             for window,(start,end) in windows.items():
-                times=[f[0] for f in aligned if start<=f[0]<=end and f[5]>.004]
-                periods=[b-a for a,b in zip(times,times[1:])]
-                sample["active_windows"][window]={"changed_frames":len(times),"visible_intervals_ms":periods,
-                    "first_change_after_input_ms":times[0]-start if times else None,
-                    "p95_ms":percentile(periods,95),"max_ms":max(periods,default=None),
-                    "over_16_7":sum(n>16.7 for n in periods),"over_33_4":sum(n>33.4 for n in periods),
-                    "over_50":sum(n>50 for n in periods),"over_100":sum(n>100 for n in periods)}
+                sample["active_windows"][window]=visible_changes(aligned,start,end)
             # Frames during motion only. Distinguish visual updates from idle ticker ticks.
             moving=[f for f in aligned if g0<=f[0]<=g1+120]
             transitions=[b[0] for a,b in zip(moving,moving[1:]) if abs(a[1]-b[1])>.002 or abs(a[2]-b[2])>.002 or abs(a[3]-b[3])+abs(a[4]-b[4])>1.5]
@@ -354,6 +359,10 @@ def analyze(directory, mode, sequence, rounds, config):
         if "settled_correct_glyph_ms" in sample and not near_edges(sample["settled_correct_glyph_ms"]):
             sample["glyph_error"]="unbracketed settled glyph"
             sample.pop("glyph_t1_t0_ms",None);sample.pop("settled_correct_glyph_ms",None)
+        if mode in ("Novel","Forum") and sample.get("settled_correct_glyph_ms") and "active_windows" in sample:
+            windows=sample["active_windows"]
+            windows["entry_image_witness"]=windows["entry"]
+            windows["entry"]=visible_changes(aligned,sample["touch_up_ms"],sample["settled_correct_glyph_ms"]+120)
         navigation={}
         for stage in ("board","download_group","download_page","open"):
             event=next((a for a in actions if a["round"]==sample["round"] and a["action"]==stage),None)
@@ -381,6 +390,7 @@ def analyze(directory, mode, sequence, rounds, config):
     filesystem_windows(directory,touches,samples)
     if (directory/"requests.ndjson").is_file():
         events=[json.loads(l) for l in (directory/"requests.ndjson").read_text().splitlines() if l]
+        fixture_contract=json.loads((directory/"contract.json").read_text())
         arrived=directory/"begins.ndjson"
         arrivals=[json.loads(l) for l in arrived.read_text().splitlines() if l] if arrived.is_file() else None
         for sample in samples:
@@ -392,9 +402,12 @@ def analyze(directory, mode, sequence, rounds, config):
             required=[r for r in rr if r["resource"] in needs and r["complete"]]
             t1=sample["presented_marker_ms"] if mode=="Comic" else sample.get("settled_correct_glyph_ms")
             t0=sample["touch_up_ms"];t2=sample["first_motion_ms"]
-            net={"requests":len(rr),"origin_clock_uncertainty_ms":(arm["hi"]-arm["lo"])*500,
+            net={"requests":len(rr),"responses_by_resource":dict(Counter(r["resource"] for r in rr)),
+                 "arrivals_by_resource":dict(Counter(r["resource"] for r in arrivals if r["run"]==arm["case"])) if arrivals is not None else None,
+                 "origin_clock_uncertainty_ms":(arm["hi"]-arm["lo"])*500,
                  "required_resources_seen":sorted({r["resource"] for r in required}),
-                 "thread_retrieved":any(r["resource"]=="thread" for r in required),
+                 "thread_retrieved":any(r["resource"]=="thread" and r["status"]==200 and r["bytes_planned"]==fixture_contract["body_bytes"] for r in required),
+                 "first_image_retrieved":any(r["resource"]=="image-1" and r["status"]==200 and r["bytes_planned"]==fixture_contract["jpeg"][0][1] for r in required),
                  "completed_catalog_hold":any(r["catalog_held"] and r["complete"] for r in rr)}
             if t1:
                 held=[r["release_host_ns"]/1e6-host_delta for r in rr if r["catalog_held"] and r["complete"] and "release_host_ns" in r]
@@ -449,6 +462,8 @@ def analyze(directory, mode, sequence, rounds, config):
         for s in valid:
             req=s.get("controlled_network",{})
             if conditions.get("network") and not req.get("thread_retrieved"):problems.append(f"round {s['round']}: cold thread response missing")
+            if conditions.get("network") and mode=="Comic" and not req.get("first_image_retrieved"):
+                problems.append(f"round {s['round']}: cold first-image transfer missing")
             if conditions.get("network")=="slow" and mode=="Comic" and req.get("both_visible_before_catalog_release") is not True:
                 problems.append(f"round {s['round']}: held catalog did not have verified content and response before release")
             if conditions.get("guard_local") and req.get("content_attempts_open_through_first_gesture")!=[]:
