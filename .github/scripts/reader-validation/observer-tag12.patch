@@ -1,0 +1,103 @@
+diff --git a/composeApp/build.gradle.kts b/composeApp/build.gradle.kts
+index c78e2198b8450d4240855ca7b42c75c477731108..67774d486b2859b6d133c1ab436a2d053dfa1b72 100644
+--- a/composeApp/build.gradle.kts
++++ b/composeApp/build.gradle.kts
+@@ -216,7 +216,7 @@ android {
+             matchingFallbacks += listOf("release")
+             signingConfig = signingConfigs.getByName(if (hasReleaseRunSigning) "releaseRunLocal" else "debug")
+             if (!hasReleaseRunSigning) {
+-                applicationIdSuffix = ".run"
++                applicationIdSuffix = ".abtag12"
+                 versionNameSuffix = "-run"
+             }
+             isDebuggable = false
+diff --git a/composeApp/src/androidMain/kotlin/me/thenano/yamibo/yamibo_app/MainActivity.kt b/composeApp/src/androidMain/kotlin/me/thenano/yamibo/yamibo_app/MainActivity.kt
+index 1fc3db197b965893b366f5b1eb24eec37a022f06..6d7779bd269659c97c65f023000bcdaa9c3b2c2a 100644
+--- a/composeApp/src/androidMain/kotlin/me/thenano/yamibo/yamibo_app/MainActivity.kt
++++ b/composeApp/src/androidMain/kotlin/me/thenano/yamibo/yamibo_app/MainActivity.kt
+@@ -82,6 +82,34 @@ import me.thenano.yamibo.yamibo_app.task.AppTaskManager
+ import kotlin.time.Duration.Companion.milliseconds
+ 
+ class MainActivity : ComponentActivity() {
++
++    override fun dump(prefix: String, fd: java.io.FileDescriptor?, writer: java.io.PrintWriter, args: Array<out String>?) {
++        if (args?.contains("reader-ab-public-floor") != true) {
++            super.dump(prefix, fd, writer, args)
++            return
++        }
++        val file = getDatabasePath("yamibo.db")
++        val found = file.isFile && android.database.sqlite.SQLiteDatabase.openDatabase(
++            file.absolutePath, null, android.database.sqlite.SQLiteDatabase.OPEN_READONLY
++        ).use { db ->
++            db.rawQuery(
++                "SELECT 1 FROM ReadingHistory WHERE threadId=535389 AND page=1 AND anchorPostId=40718127 AND postId=40718127 LIMIT 1",
++                null
++            ).use { cursor -> cursor.moveToFirst() }
++        }
++        writer.println(if (found) "ReaderABPublicFloor=535389,1,40718127,40718127" else "ReaderABPublicFloor=none")
++    }
++
++
++    override fun dispatchTouchEvent(e: android.view.MotionEvent): Boolean {
++        if (e.actionMasked == android.view.MotionEvent.ACTION_DOWN || e.actionMasked == android.view.MotionEvent.ACTION_UP) {
++            val uptimeNs = if (android.os.Build.VERSION.SDK_INT >= 34) e.eventTimeNanos else e.eventTime * 1_000_000L
++            val elapsedNs = uptimeNs + android.os.SystemClock.elapsedRealtimeNanos() - System.nanoTime()
++            android.util.Log.i("ReaderABInput", "${e.actionMasked} $elapsedNs ${e.x.toInt()} ${e.y.toInt()}")
++        }
++        return super.dispatchTouchEvent(e)
++    }
++
+     var lastBackTime = 0L
+ 
+     override fun onStart() {
+diff --git a/composeApp/src/commonMain/kotlin/me/thenano/yamibo/yamibo_app/thread/reader/components/post/impl/HtmlRenderer.kt b/composeApp/src/commonMain/kotlin/me/thenano/yamibo/yamibo_app/thread/reader/components/post/impl/HtmlRenderer.kt
+index 9d15d82e85ab2d7cc2646b262f8e24e237fe122c..ca72811088289fc1d66b6c1702f79b367671cbc4 100644
+--- a/composeApp/src/commonMain/kotlin/me/thenano/yamibo/yamibo_app/thread/reader/components/post/impl/HtmlRenderer.kt
++++ b/composeApp/src/commonMain/kotlin/me/thenano/yamibo/yamibo_app/thread/reader/components/post/impl/HtmlRenderer.kt
+@@ -1,5 +1,8 @@
+ package me.thenano.yamibo.yamibo_app.thread.reader.components.post.impl
+ 
++import androidx.compose.ui.draw.drawWithContent
++import androidx.compose.ui.layout.onGloballyPositioned
++import androidx.compose.ui.layout.positionInWindow
+ import androidx.compose.animation.AnimatedVisibility
+ import androidx.compose.foundation.*
+ import androidx.compose.foundation.gestures.waitForUpOrCancellation
+@@ -711,7 +714,19 @@ private fun HtmlBlockRenderer(
+                 adjustedAnnotatedString.getStringAnnotations(SPOILER_ANNOTATION_TAG, 0, adjustedAnnotatedString.length)
+                     .isNotEmpty()
+             }
+-            val textModifier = Modifier
++            val measureBody = remember(adjustedAnnotatedString) {
++                adjustedAnnotatedString.text.contains("入站前言") && adjustedAnnotatedString.text.contains("论坛规则")
++            }
++            val bodyMeasurement = if (!measureBody) Modifier else Modifier
++                .onGloballyPositioned { coords ->
++                    val point = coords.positionInWindow()
++                    me.thenano.yamibo.yamibo_app.Logger.i("ReaderABPaint", "place ${point.x} ${point.y}")
++                }
++                .drawWithContent {
++                    drawContent()
++                    me.thenano.yamibo.yamibo_app.Logger.i("ReaderABPaint", "draw")
++                }
++            val textModifier = bodyMeasurement
+                 .fillMaxWidth()
+                 .padding(vertical = 0.dp)
+                 .then(
+diff --git a/shared/src/androidMain/kotlin/me/thenano/yamibo/yamibo_app/Logger.android.kt b/shared/src/androidMain/kotlin/me/thenano/yamibo/yamibo_app/Logger.android.kt
+index 72033bb121a70d7afedc95a1d2f5bec5bbc05d78..11615f8c1651da2b753d9b94cc5719b19596992f 100644
+--- a/shared/src/androidMain/kotlin/me/thenano/yamibo/yamibo_app/Logger.android.kt
++++ b/shared/src/androidMain/kotlin/me/thenano/yamibo/yamibo_app/Logger.android.kt
+@@ -23,6 +23,12 @@ actual object Logger {
+     }
+ 
+     actual fun i(tag: String, message: String, throwable: Throwable?) {
++        if (tag == "ReaderABPaint") {
++            val t = android.os.SystemClock.elapsedRealtimeNanos()
++            AndroidLog.i(tag, "$t ${android.os.Process.myTid()} $message")
++            return
++        }
++
+         val formattedTag = "Yamibo_INFO($tag)"
+         if (throwable != null) {
+             AndroidLog.i(formattedTag, message, throwable)

@@ -18,6 +18,15 @@ final class ReaderModesUITests: XCTestCase {
     private func tap(_ labels: [String]) {
         let deadline = Date().addingTimeInterval(20)
         repeat {
+            if benchmarkNetwork != "none" || benchmarkChapters>0 {
+                let signPrompt=app.staticTexts["你今天還沒簽到"]
+                if signPrompt.exists {
+                    let suppress=element(["今日不再提醒"])
+                    if suppress.exists && suppress.isHittable { suppress.tap() }
+                    let dismiss=element(["取消"])
+                    if dismiss.exists && dismiss.isHittable { dismiss.tap() }
+                }
+            }
             let later = app.buttons.matching(NSPredicate(format: "label IN %@", ["稍後", "稍后", "Later"])).firstMatch
             if later.exists && later.isHittable { later.tap() }
             let target = element(labels)
