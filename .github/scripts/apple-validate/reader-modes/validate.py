@@ -78,6 +78,13 @@ def main():
             info=Path("iosApp/iosApp/Info.plist"); plist=plistlib.loads(info.read_bytes())
             plist["NSAppTransportSecurity"]={"NSAllowsLocalNetworking":True,"NSExceptionDomains":{"127.0.0.1":{"NSExceptionAllowsInsecureHTTPLoads":True}}}
             info.write_bytes(plistlib.dumps(plist))
+            if mode=="Novel":
+                # FID55 uses the native novel-details entry in *both* versions; FID30 is a normal forum on tag12.
+                origin_script=PROFILE/"replay_origin.py"
+                text=origin_script.read_text()
+                assert text.count("fid=30") >= 3
+                origin_script.write_text(text.replace("fid=30","fid=55"))
+                testsrc.write_text(testsrc.read_text().replace("-appsettings.forumReadingMode.30","-appsettings.forumReadingMode.55"))
             run("Generate fixed shaped HTTP corpus",[sys.executable,str(PROFILE/"replay_origin.py"),"--generate",str(PROFILE/"generate_fixtures.py")],120)
             origin_process=subprocess.Popen([sys.executable,str(PROFILE/"replay_origin.py")])
             resources.callback(lambda: (origin_process.terminate(),origin_process.wait(timeout=10)))
@@ -97,7 +104,7 @@ def main():
             ["xcrun", "simctl", "list", "devices", "available", "-j"], text=True))
         runtime, phone = next((runtime, device)
             for runtime, devices_in_runtime in devices["devices"].items()
-            for device in devices_in_runtime if "iPhone" in device["name"])
+            for device in devices_in_runtime if (runtime.endswith(".iOS-26-4") and device["name"]=="iPhone 17 Pro" if perf else "iPhone" in device["name"]))
         simulator = subprocess.check_output(["xcrun", "simctl", "create",
             f"YamiboDownloadValidation-{os.getpid()}", phone["deviceTypeIdentifier"], runtime], text=True).strip()
         (OUTPUT / "simulator.json").write_text(json.dumps({"udid": simulator, "runtime": runtime,
@@ -111,8 +118,11 @@ def main():
             CONFIGURATION=config, ARCHS="arm64", BUILT_PRODUCTS_DIR=str(products),
             TARGET_BUILD_DIR=str(products), FRAMEWORKS_FOLDER_PATH="yamibo_app.app/Frameworks",
             UNLOCALIZED_RESOURCES_FOLDER_PATH="yamibo_app.app", ENABLE_USER_SCRIPT_SANDBOXING="NO")
+        compiler_args=["--max-workers=1","-Dorg.gradle.jvmargs=-Xmx6g -Dfile.encoding=UTF-8"] if config=="Release" else ["--max-workers=2"]
+        if perf:
+            (OUTPUT/"runner-hardware.txt").write_text(subprocess.check_output(["sysctl","hw.model","hw.ncpu","hw.memsize","machdep.cpu.brand_string"],text=True)+"\n"+" ".join(compiler_args))
         run("Prepare framework before booting UI Simulator", ["./gradlew",
-            ":composeApp:embedAndSignAppleFrameworkForXcode", "--console=plain", "--max-workers=2"],
+            ":composeApp:embedAndSignAppleFrameworkForXcode", "--console=plain", *compiler_args],
             1800, env=framework_env)
         run("Stop Gradle before UI execution", ["./gradlew", "--stop"], 60)
         xcode = ["xcodebuild", "-project", PROJECT, "-scheme", SCHEME, "-configuration", config,
@@ -215,6 +225,7 @@ def main():
                             attachments = OUTPUT / "perf-attachments"
                             subprocess.run(["xcrun","xcresulttool","export","attachments","--path",str(bundle),"--output-path",str(attachments)], check=False)
                     if perf:
+                        if network_mode: collect_origin()
                         run("Inspect encoded content and input traces",[sys.executable,str(PROFILE/"read_perf_frames.py"),str(OUTPUT),("NativeLong" if long_image else mode),sequence,str(rounds),config],1200)
                         if test_problem: raise test_problem
                         results[name] = True

@@ -302,6 +302,21 @@ final class ReaderModesUITests: XCTestCase {
             if benchmarkNetwork != "none" {
                 continueAfterFailure = false
                 app.terminate()
+                let runKey="ios-\(round)-\(mode == .comic ? "comic" : (mode == .novel ? "novel":"forum"))-\(benchmarkNetwork)"
+                let ack=expectation(description:"loopback replay armed")
+                var hostNanoseconds: Double?
+                let lo=ProcessInfo.processInfo.systemUptime
+                let caseURL=URL(string:"http://127.0.0.1:18928/__case/"+runKey)!
+                URLSession.shared.dataTask(with:caseURL) { _,resp,error in
+                    XCTAssertNil(error)
+                    let reply=resp as? HTTPURLResponse
+                    XCTAssertEqual(reply?.statusCode,204)
+                    hostNanoseconds=reply?.value(forHTTPHeaderField:"X-Fixture-Monotonic-Ns").flatMap(Double.init)
+                    ack.fulfill()
+                }.resume()
+                wait(for:[ack],timeout:8)
+                XCTAssertNotNil(hostNanoseconds)
+                rows.append(["action":"origin","round":round,"case":runKey,"lo":lo,"hi":ProcessInfo.processInfo.systemUptime,"host_ns":hostNanoseconds ?? -1])
                 let setting = mode == .forum ? "Forum" : (mode == .novel ? "Novel" : "SmartComic")
                 app.launchArguments = ["-AppleLanguages","(zh-Hant)","-AppleLocale","zh_TW","--reader-frame-probe","--reader-fresh-replay",
                                        "-appsettings.forumReadingMode.30",setting, "-uid","7","-username","QA Author","-userGroup","QA",

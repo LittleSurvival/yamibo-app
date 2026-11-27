@@ -57,7 +57,7 @@ class Handler(BaseHTTPRequestHandler):
             case=path.path.split("/")[-1]
             if not re.fullmatch("[a-z0-9-]{1,80}",case):self.send_error(400);return
             self.server.link.case=case;self.server.link.hold=case.endswith("-slow")
-            self.send_response(204);self.end_headers();return
+            self.send_response(204);self.send_header("X-Fixture-Monotonic-Ns",str(time.monotonic_ns()));self.end_headers();return
         case=self.server.link.case;hold=self.server.link.hold;start=time.monotonic_ns()
         code=200;headers={};ctype="text/html; charset=utf-8"
         if path.path in ("/","/forum.php") and mod in ("","index"):kind="board-index";data=html(HOME)

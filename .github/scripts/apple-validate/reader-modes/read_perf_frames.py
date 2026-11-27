@@ -1,6 +1,8 @@
 """Analyze the simulator recording independently of XCTest polling or action duration."""
 import csv
 import math
+import re
+import datetime
 import json
 from pathlib import Path
 import statistics
@@ -200,6 +202,53 @@ def analyze(directory, mode, sequence, rounds, config):
             sample["error"]=str(exc) or "missing XCTest action"
     if mode in ("Novel","Forum") and any(a["action"]=="glyph" for a in actions):
         match_glyphs(directory,actions,samples,offset,width,height)
+    if (directory/"fs-usage.log").is_file():
+        watch=(directory/"fs-usage.log").read_text(errors="replace")
+        events=[]
+        for line in watch.splitlines():
+            stamp=re.match(r"\s*(\d{2}):(\d{2}):(\d{2}\.\d+)\s+(\S+)",line)
+            if not stamp: continue
+            hh,mm,ss,op=stamp.groups()
+            events.append((3600*int(hh)+60*int(mm)+float(ss),op,line))
+        clockref=next((t for t in touches if "wall" in t and "uptime" in t),None)
+        positive=sum("YamiboDownloads" in line and ("thread_140_" in line or "/threads/140/" in line or "/images/" in line) for _,_,line in events)
+        if clockref:
+            daytime=datetime.datetime.fromtimestamp(clockref["wall"])
+            day0=daytime.replace(hour=0,minute=0,second=0,microsecond=0).timestamp()
+            host_offset=clockref["wall"]-day0-clockref["uptime"]
+            for sample in samples:
+                if "touch_up_ms" not in sample: continue
+                a=sample["touch_up_ms"]/1000+host_offset; b=sample["presented_marker_ms"]/1000+host_offset
+                inside=[(op,line) for ts,op,line in events if (ts-a)%86400<=b-a]
+                others=[op for op,line in inside if "/threads/780001/" in line]
+                sample["file_trace"]={"host_events":len(inside),"selected_asset_positive_controls_entire_run":positive,
+                    "trace_reliable":positive>0 and bool(inside),"unrelated_operations":others,
+                    "caveat":"fs_usage for the App executable. A missing trace/selected-file control cannot demonstrate zero unrelated physical opens."}
+    if (directory/"requests.ndjson").is_file():
+        events=[json.loads(l) for l in (directory/"requests.ndjson").read_text().splitlines() if l]
+        for sample in samples:
+            arm=next((r for r in actions if r["round"]==sample["round"] and r["action"]=="origin"),None)
+            if not arm or "touch_up_ms" not in sample: continue
+            host_delta=arm["host_ns"]/1e6-(arm["lo"]+arm["hi"])*500
+            rr=[r for r in events if r["run"]==arm["case"]]
+            needs={"thread","image-1"} if mode=="Comic" else {"thread"}
+            required=[r for r in rr if r["resource"] in needs and r["complete"]]
+            t1=sample["presented_marker_ms"] if mode=="Comic" else sample.get("settled_correct_glyph_ms")
+            t0=sample["touch_up_ms"];t2=sample["first_motion_ms"]
+            net={"requests":len(rr),"origin_clock_uncertainty_ms":(arm["hi"]-arm["lo"])*500,
+                 "required_resources_seen":sorted({r["resource"] for r in required}),
+                 "thread_retrieved":any(r["resource"]=="thread" for r in required),
+                 "completed_catalog_hold":any(r["catalog_held"] and r["complete"] for r in rr)}
+            if t1:
+                held=[r["end_host_ns"]/1e6-host_delta for r in rr if r["catalog_held"] and r["complete"]]
+                if held: net["both_visible_before_catalog_release"]=max(t1,t2)+net["origin_clock_uncertainty_ms"]<min(held)
+                spans=sorted((max(t0,r["begin_host_ns"]/1e6-host_delta),min(t1,r["end_host_ns"]/1e6-host_delta)) for r in required)
+                total=0.;right=t0
+                for a,b in spans:
+                    total+=max(0.,b-max(a,right));right=max(right,b)
+                net["overlap_observed_required_http_ms"]=total
+                net["elapsed_outside_required_http_ms"]=t1-t0-total
+            sample["controlled_network"]=net
     valid=[s for s in samples if "error" not in s]
     summary={"mode":mode,"sequence":sequence,"configuration":config,"requested":rounds,"usable":len(valid),
         "clock_frames":len(frames),"clock_residual_p95_ms":percentile(residual,95),
@@ -215,6 +264,7 @@ def analyze(directory, mode, sequence, rounds, config):
         glyphs=[s["glyph_t1_t0_ms"] for s in valid if "glyph_t1_t0_ms" in s]
         summary["settled_glyph"]={"usable":len(glyphs),"p50":percentile(glyphs,50),"p95":percentile(glyphs,95)}
     (directory/"reader-perf.json").write_text(json.dumps(summary,indent=2))
+    for s in samples: print("READER_PRESENTED_SAMPLE "+json.dumps(s,separators=(",",":")),flush=True)
     print(json.dumps({k:v for k,v in summary.items() if k!="samples"}),flush=True)
     if len(valid)!=rounds or summary["clock_residual_p95_ms"]>35:
         raise ValueError("recording did not satisfy input/marker/clock cross-checks")
