@@ -1,5 +1,11 @@
 package me.thenano.yamibo.yamibo_app.repository.download
 
+import com.sun.net.httpserver.HttpServer
+import java.io.File
+import java.net.InetSocketAddress
+import java.util.Collections
+import java.util.concurrent.ConcurrentHashMap
+import okio.ByteString.Companion.toByteString
 import io.github.littlesurvival.core.YamiboResult
 import io.github.littlesurvival.dto.model.*
 import io.github.littlesurvival.dto.page.*
@@ -58,7 +64,7 @@ class ReaderDownloadLifecycleTest {
         val storage = mock<DownloadStorageProvider> { name, args -> when (name) {
             "getStorageKey", "getSelectedFolderLabel" -> "fixture"
             "getOfflineFiles" -> PathOfflineFiles(fs) { directory / "library" }
-            "isReady" -> true
+            "isReady", "getMayHaveDownloads" -> true
             "listManifests" -> {
                 scans++
                 List(librarySize) { index -> ThreadPageDownloadManifest(
@@ -437,5 +443,117 @@ class ReaderDownloadLifecycleTest {
     @AfterTest fun cleanUp() {
         driver.close()
         fs.deleteRecursively(directory)
+    }
+
+    private fun digest(bytes: ByteArray) = bytes.toByteString().sha256().hex()
+
+    private fun svg(size: Int, fill: String) = """<svg xmlns="http://www.w3.org/2000/svg" width="$size" height="$size"><rect width="$size" height="$size" fill="$fill"/></svg>""".toByteArray()
+    private fun aliasPage(id: Int, urls: List<String>, edited: Long?) = ThreadPage(
+        thread = ThreadInfo(ThreadId(id), "test $id", ForumSummary(ForumId(30), "test", "")),
+        posts = listOf(Post(pid = PostId(id * 10 + 1), floor = 1, title = "test",
+            author = User(UserId(7), "author"), timeCreate = TimeInfo("", null, 0),
+            lastEditedTime = edited?.let { TimeInfo("edited $it", null, it) },
+            contentHtml = urls.joinToString("") { "<img src='${it.replace("&", "&amp;")}'>" },
+            images = urls.map { PostImage(it, "same-filename.svg") }, tags = Tags(), poll = null)))
+    @Test fun crossUrlDownloadsRequireScopedEvidence() = runBlocking {
+        val http = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        val responses = ConcurrentHashMap<String, ByteArray>()
+        val httpRequests = Collections.synchronizedList(mutableListOf<String>())
+        http.createContext("/attachment") { exchange ->
+            val url = exchange.requestURI.toString()
+            httpRequests.add("${exchange.requestMethod} $url")
+            val bytes = responses[url]
+            if (bytes == null) {
+                exchange.sendResponseHeaders(404, -1)
+                exchange.close()
+            } else {
+                exchange.responseHeaders.add("Content-Type", "image/svg+xml")
+                exchange.responseHeaders.add("Cache-Control", "no-store")
+                exchange.sendResponseHeaders(200, bytes.size.toLong())
+                exchange.responseBody.use { it.write(bytes) }
+            }
+        }
+        http.start()
+        try {
+            val db = Database(driver)
+            val source = "http://127.0.0.1:${http.address.port}"
+            val firstUrl = "/attachment?aid=81&token=first"
+            val aliasUrl = "/attachment?aid=81&token=second"
+            val thumbnailUrl = "/attachment?aid=81&token=first&thumb=1"
+            val revisedUrl = "/attachment?aid=81&token=newrevision"
+            val originalImage = svg(80, "blue")
+            val thumbnail = svg(20, "blue")
+            val updatedImage = svg(80, "pink")
+            val otherAccountImage = svg(80, "gray")
+            fun blobs(vararg images: ByteArray) = images.map(::digest).toSet()
+            check(originalImage.size == updatedImage.size && digest(originalImage) != digest(updatedImage))
+            responses[firstUrl] = originalImage
+            responses[aliasUrl] = originalImage
+            responses[thumbnailUrl] = thumbnail
+            responses[revisedUrl] = updatedImage
+            val storage = mock<DownloadStorageProvider> { name, _ -> when (name) {
+                "getStorageKey", "getSelectedFolderLabel" -> "scratch"
+                "isReady", "getMayHaveDownloads" -> true
+                "getOfflineFiles" -> PathOfflineFiles(fs) { directory / "library" }
+                "readManifest", "readTagMangaManifest", "readRssMangaManifest", "readPageRecord", "readThreadPage" -> null
+                "listManifests", "listTagMangaManifests", "listRssMangaManifests", "readQueue" -> emptyList<Any>()
+                "writeQueue" -> Unit
+                else -> error("unexpected storage call $name")
+            } }
+            val threads = mock<ThreadRepository> { name, _ -> when (name) {
+                "fetchThread" -> YamiboResult.Success(body)
+                "getCachedThread", "setCachedThread" -> null
+                else -> error("unexpected thread call $name")
+            } }
+            fun httpRepository() = DownloadRepositoryImpl(threads, storageProvider = storage,
+                imageFetcher = DownloadImageFetcher { "" }, database = db, accountId = { owner },
+                cacheDirectory = directory / "cache")
+            var repo = httpRepository()
+            suspend fun step(name: String, tid: Int, paths: List<String>, bytesPerPosition: List<ByteArray>,
+                             gets: List<String>, ownerBlobs: Set<String>, edited: Long? = null) {
+                val start = httpRequests.size
+                body = aliasPage(tid, paths.map { source + it }, edited)
+                val result = repo.refreshPage(ThreadId(tid), "test $tid", null, 1)
+                assertIs<YamiboResult.Success<*>>(result, "$name: ${result.message()}")
+                val key = ThreadPageDownloadKey(tid, 1)
+                val post = assertNotNull(repo.getDownloadedPage(key)).posts.single()
+                assertEquals(bytesPerPosition.size, post.images.size, name)
+                val saved = post.images.map { image -> repo.openArchivedImage(image.url).buffer().use { digest(it.readByteArray()) } }
+                assertEquals(bytesPerPosition.map(::digest), saved, name)
+                val actualGets = synchronized(httpRequests) { httpRequests.drop(start).sorted() }
+                assertEquals(gets.map { "GET $it" }.sorted(), actualGets, name)
+                val blobs = (directory / "library" / owner.toString() / "images").toFile().walkTopDown().filter(File::isFile).toList()
+                assertEquals(ownerBlobs, blobs.map { it.name }.toSet(), name)
+                assertEquals(ownerBlobs.size, blobs.size, name)
+                assertTrue(blobs.all { digest(it.readBytes()) == it.name }, name)
+                for (path in paths.distinct()) {
+                    val alias = db.readerDownloadQueries.imageAlias("scratch", owner.toLong(), source + path).executeAsOne()
+                    assertEquals(digest(bytesPerPosition[paths.indexOf(path)]), alias.digest, name)
+                }
+            }
+            step("first URL", 141, listOf(firstUrl), listOf(originalImage), listOf(firstUrl), blobs(originalImage))
+            step("unknown alternative URL, identical bytes", 142, listOf(aliasUrl), listOf(originalImage), listOf(aliasUrl), blobs(originalImage))
+            repo = httpRepository()
+            step("previously verified aliases, new thread after repository reopen", 143, listOf(aliasUrl, firstUrl, aliasUrl),
+                listOf(originalImage, originalImage, originalImage), emptyList(), blobs(originalImage))
+            step("same aid, thumbnail", 144, listOf(thumbnailUrl), listOf(thumbnail), listOf(thumbnailUrl), blobs(originalImage, thumbnail))
+            step("same aid and dimensions, different version", 145, listOf(revisedUrl), listOf(updatedImage), listOf(revisedUrl),
+                blobs(originalImage, thumbnail, updatedImage))
+            responses[firstUrl] = updatedImage
+            step("post edit reuses URL, bypass previously saved bytes", 141, listOf(firstUrl), listOf(updatedImage), listOf(firstUrl),
+                blobs(originalImage, thumbnail, updatedImage), edited = 100)
+            step("separately verified URLs keep their own versions", 146, listOf(firstUrl, aliasUrl), listOf(updatedImage, originalImage), emptyList(),
+                blobs(originalImage, thumbnail, updatedImage))
+            owner = 8
+            responses[aliasUrl] = otherAccountImage
+            repo = httpRepository()
+            step("other owner gets same URL independently", 147, listOf(aliasUrl), listOf(otherAccountImage), listOf(aliasUrl), blobs(otherAccountImage))
+            owner = 7
+            repo = httpRepository()
+            step("original owner reuses its own verified bytes", 148, listOf(aliasUrl), listOf(originalImage), emptyList(),
+                blobs(originalImage, thumbnail, updatedImage))
+        } finally {
+            http.stop(0)
+        }
     }
 }

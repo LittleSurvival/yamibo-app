@@ -116,6 +116,8 @@ def summarize(paths):
     """Combine distinct preregistered attempts. Refuse duplicated or mixed comparisons."""
     rows={}
     hosts={}
+    host_by_index={}
+    smoke_schedule=set()
     key=None
     for path in map(Path,paths):
         group=json.loads(path.read_text(encoding="utf8"))
@@ -123,20 +125,24 @@ def summarize(paths):
         if key is None: key=identity
         if identity!=key:raise ValueError("Mixed route, runners or build receipts")
         hosts[group["run"]]=group["simulator"]
+        if group.get("short_smoke"):
+            first_index=1 if group["comparison"]=="same-version" else group["block"]*5+1
+            smoke_schedule.update(range(first_index,first_index+group["planned_in_block"]))
         for pair in group["pairs"]:
             if pair["index"] in rows:
                 raise ValueError("Overlapping preregistered pair index: "+str(pair["index"]))
             rows[pair["index"]]=pair
+            host_by_index[pair["index"]]=group["run"]
     control=key[1]=="same-version"
     requested=7 if control else 40
-    indices=set(range(1,requested+1))
+    indices=smoke_schedule if key[5] else set(range(1,requested+1))
     if not set(rows)<=indices:raise ValueError("Unscheduled trial index")
     usable=[p for p in rows.values() if p["valid"]]
     def rank(values,q):
         return sorted(values)[math.ceil(q*len(values))-1]
     def quantiles(values):
         return {"p50":rank(values,.5),"p95":rank(values,.95)}
-    result={"mode":key[0],"comparison":key[1],"receipts":key[4],"short_smoke":key[5],"requested":requested,"attempted":len(rows),
+    result={"mode":key[0],"comparison":key[1],"receipts":key[4],"short_smoke":key[5],"requested":len(indices),"formal_target":requested,"attempted":len(rows),
             "usable":len(usable),"missing_indices":sorted(indices-set(rows)),
             "rejected_indices":sorted(p["index"] for p in rows.values() if not p["valid"]),
             "host_simulator_by_run":hosts,"metrics":{}}
@@ -148,9 +154,19 @@ def summarize(paths):
             delta=[y-x for x,y in zip(a,b)]
             rng=random.Random(140)
             medians=[rank(rng.choices(delta,k=len(delta)),.5) for _ in range(2000)]
+            blocks={}
+            for pair,value in zip(usable,delta):
+                blocks.setdefault(host_by_index[pair["index"]],[]).append(value)
+            block_medians=[]
+            if len(blocks)>1:
+                for _ in range(2000):
+                    sampled=rng.choices(list(blocks.values()),k=len(blocks))
+                    block_medians.append(rank([v for block in sampled for v in block],.5))
             result["metrics"][metric]={first:quantiles(a),second:quantiles(b),"paired_differences":quantiles(delta),
                 "difference_of_p95":rank(b,.95)-rank(a,.95),
-                "paired_median_bootstrap95_ms":[rank(medians,.025),rank(medians,.975)]}
+                "within_sample_paired_median_bootstrap95_ms":[rank(medians,.025),rank(medians,.975)],
+                "hosted_job_block_median_bootstrap95_ms":[rank(block_medians,.025),rank(block_medians,.975)] if block_medians else None,
+                "hosted_job_blocks":len(blocks)}
     return result
 
 
