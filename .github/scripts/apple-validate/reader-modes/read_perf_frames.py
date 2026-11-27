@@ -150,7 +150,15 @@ def visible_changes(aligned,start,end):
 def filesystem_windows(directory,touches,samples):
     if not (directory/"fs-usage.log").is_file():return
     meta=directory/"file-observer.json"
-    binary=json.loads(meta.read_text())["executable"] if meta.exists() else "yamibo_app"
+    source=json.loads(meta.read_text()) if meta.exists() else {}
+    binary=source.get("executable","yamibo_app")
+    utc_offset=source.get("utc_offset_seconds")
+    if utc_offset is None and (directory/"validation.log").exists():
+        # Older artifacts record the actual host timezone on XCTest logger timestamps.
+        with (directory/"validation.log").open(errors="replace") as log:
+            zone=next((match for line in log if (match:=re.search(r"\d{2}:\d{2}:\d{2}\.\d+([+-])(\d{2})(\d{2}) ReaderModesUITests-Runner",line))),None)
+        if zone:
+            utc_offset=(1 if zone[1]=="+" else -1)*(int(zone[2])*3600+int(zone[3])*60)
     process=re.compile(r"\s"+re.escape(binary)+r"\.\d+\s*$")
     stamps=array("d")
     relevant=[]
@@ -191,10 +199,8 @@ def filesystem_windows(directory,touches,samples):
             if other or root or unresolved:relevant.append((t,op,other,root,unresolved))
     stamps=array("d",sorted(stamps))
     clockref=next((t for t in touches if "wall" in t and "uptime" in t),None)
-    if clockref:
-        daytime=datetime.datetime.fromtimestamp(clockref["wall"])
-        day0=daytime.replace(hour=0,minute=0,second=0,microsecond=0).timestamp()
-        host_offset=clockref["wall"]-day0-clockref["uptime"]
+    if clockref and utc_offset is not None:
+        host_offset=(clockref["wall"]+utc_offset)%86400-clockref["uptime"]
         for sample in samples:
             if "touch_up_ms" not in sample: continue
             b=sample["presented_marker_ms"]/1000+host_offset
@@ -207,7 +213,7 @@ def filesystem_windows(directory,touches,samples):
                 others=[op for op,other,_,_ in inside if other]
                 root_lists=[op for op,_,root,_ in inside if root]
                 unknown=sum(1 for _,_,_,unresolved in inside if unresolved)
-                return {"app_events":count,"selected_asset_positive_controls_entire_run":positive,
+                return {"app_events":count,"source_utc_offset_seconds":utc_offset,"selected_asset_positive_controls_entire_run":positive,
                     "trace_reliable":positive>0 and count>0,"unrelated_operations":others,"thread_root_enumerations_with_resolved_path":root_lists,"unresolved_directory_calls":unknown,
                     "caveat":"Missing traces or selected-file controls cannot demonstrate zero unrelated opens. Directory enumeration without a resolved root path cannot establish a zero inspection count."}
             sample["file_trace"]=filesystem_window(sample["touch_up_ms"])
@@ -423,9 +429,15 @@ def analyze(directory, mode, sequence, rounds, config):
                 net["ingress_recording_available"]=arrivals is not None
                 if arrivals is not None:
                     guard=net["origin_clock_uncertainty_ms"]
-                    trace=[r for r in arrivals if r["run"]==arm["case"] and t0-guard<=r["begin_host_ns"]/1e6-host_delta<=t2+700+guard]
-                    net["content_attempts_open_through_first_gesture"]=[r["resource"] for r in trace if r["resource"] in
-                        ("thread","catalog-post","catalog-results","unknown") or r["resource"].startswith("image-")]
+                    taps=sample.get("navigation_touch_up_ms",{})
+                    starts={k:v for k,v in taps.items() if v is not None}
+                    starts.setdefault("open",t0)
+                    neg={}
+                    for stage,when in starts.items():
+                        trace=[r for r in arrivals if r["run"]==arm["case"] and when-guard<=r["begin_host_ns"]/1e6-host_delta<=t2+700+guard]
+                        neg[stage]=[r["resource"] for r in trace if r["resource"] in ("thread","catalog-post","catalog-results","unknown") or r["resource"].startswith("image-")]
+                    net["content_attempts_by_navigation_stage"]=neg
+                    net["content_attempts_open_through_first_gesture"]=neg["open"]
                 net["negative_window_ms"]=[t0,t2+700]
                 net["coverage"]="Observed the fixture-origin SDK and image URL traffic only. Positive network board tests on the same code are separate. No airplane-mode claim."
             sample["controlled_network"]=net
@@ -458,6 +470,14 @@ def analyze(directory, mode, sequence, rounds, config):
         if values:
             navigation_summary[stage]={"usable":len(values),"p50":percentile(values,50),"p95":percentile(values,95)}
     summary["navigation_to_correct_content_ms"]=navigation_summary
+    if conditions.get("guard_local"):
+        arrived=directory/"begins.ndjson"
+        controls=[json.loads(line) for line in arrived.read_text().splitlines()] if arrived.exists() else []
+        expected=[("GET","image-1"),("GET","image-1"),("POST","catalog-post"),("GET","catalog-results")]
+        seen=[(r["method"],r["resource"]) for r in controls if r["run"]=="ios-observer-positive" and r["resource"] in {"image-1","catalog-post","catalog-results"}]
+        summary["post_window_simulator_transport_control"]={"observed":seen,"expected":expected,"matches":seen==expected,
+            "scope":"Independent simulator URLSession reaches the same fixture origin. Real App SDK and image consumer are observed separately on network openings."}
+        if seen!=expected:problems.append("missing origin ingress duplicate/redirect positive control")
     if conditions.get("network") or conditions.get("guard_local"):
         for s in valid:
             req=s.get("controlled_network",{})
@@ -466,7 +486,12 @@ def analyze(directory, mode, sequence, rounds, config):
                 problems.append(f"round {s['round']}: cold first-image transfer missing")
             if conditions.get("network")=="slow" and mode=="Comic" and req.get("both_visible_before_catalog_release") is not True:
                 problems.append(f"round {s['round']}: held catalog did not have verified content and response before release")
-            if conditions.get("guard_local") and req.get("content_attempts_open_through_first_gesture")!=[]:
+            if conditions.get("guard_local"):
+                required_stages={"download_page","open"} | ({"download_group"} if sequence=="cold" else set())
+                missing=required_stages-set(req.get("content_attempts_by_navigation_stage",{}))
+                if missing:problems.append(f"round {s['round']}: missing navigation ingress windows {sorted(missing)}")
+            if conditions.get("guard_local") and (req.get("content_attempts_open_through_first_gesture")!=[] or
+                    any(req.get("content_attempts_by_navigation_stage",{}).values())):
                 problems.append(f"round {s['round']}: local content request or unobserved interval")
     if conditions.get("prompt_input"):
         summary["harness_injected_within_100_ms"]=sum(0 <= s.get("glyph_harness_delay_ms",s["harness_delay_ms"]) <=100 for s in valid)

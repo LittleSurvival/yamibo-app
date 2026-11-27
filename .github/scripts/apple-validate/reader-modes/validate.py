@@ -251,7 +251,7 @@ def main():
                     if scale:
                         fs_log=resources.enter_context((OUTPUT/"fs-usage.log").open("w"))
                         binary=plistlib.loads((apps[0]/"Info.plist").read_bytes())["CFBundleExecutable"]
-                        (OUTPUT/"file-observer.json").write_text(json.dumps({"executable":binary,"tool":"fs_usage -w -f filesys"}))
+                        (OUTPUT/"file-observer.json").write_text(json.dumps({"executable":binary,"tool":"fs_usage -w -f filesys","utc_offset_seconds":time.localtime().tm_gmtoff}))
                         fs_watch=subprocess.Popen(["sudo","-n","fs_usage","-w","-f","filesys",binary],stdout=fs_log,stderr=subprocess.STDOUT)
                     test_problem=None
                     try:

@@ -468,6 +468,25 @@ final class ReaderModesUITests: XCTestCase {
                 if !element(["第 1 頁", "Page 1"]).exists { tap(["QA Three Readers"]) }
             }
         }
+        if guardLocalTransfers {
+            // Independent simulator transport controls run after all timed interactions.
+            let probe=URLSession(configuration:.ephemeral)
+            defer { probe.invalidateAndCancel() }
+            for (method,path,expected) in [("GET","/__case/ios-observer-positive",204),("GET","/bench-1.jpg",200),
+                                          ("GET","/bench-1.jpg",200),("POST","/search.php?mod=forum",200)] {
+                var request=URLRequest(url:URL(string:"http://127.0.0.1:18928"+path)!,
+                                       cachePolicy:.reloadIgnoringLocalCacheData,timeoutInterval:10)
+                request.httpMethod=method
+                if method=="POST" { request.httpBody=Data("srchtxt=QA".utf8) }
+                let done=expectation(description:"independent simulator HTTP "+method+" "+path)
+                probe.dataTask(with:request) { data,reply,problem in
+                    XCTAssertNil(problem);XCTAssertEqual((reply as? HTTPURLResponse)?.statusCode,expected)
+                    if path.hasSuffix(".jpg") { XCTAssertEqual(data?.count,262761) }
+                    done.fulfill()
+                }.resume()
+                wait(for:[done],timeout:12)
+            }
+        }
     }
 
     func testSustainedOpenAndReturn() {

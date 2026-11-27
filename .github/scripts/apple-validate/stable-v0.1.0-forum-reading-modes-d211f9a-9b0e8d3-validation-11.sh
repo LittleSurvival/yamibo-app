@@ -1,3 +1,3 @@
 #!/usr/bin/env bash
 set -euo pipefail
-exec bash "$(dirname "$0")/reader-modes/run_perf.sh" --perf Forum warm 40 Release
+exec bash "$(dirname "$0")/reader-modes/run_perf.sh" --guard-local --perf Forum warm 40 Release
