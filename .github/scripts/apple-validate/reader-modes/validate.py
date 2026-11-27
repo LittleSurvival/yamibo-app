@@ -19,7 +19,7 @@ from repair_origin import RepairOrigin
 
 PROFILE = Path(__file__).resolve().parent
 OUTPUT = Path(os.environ["APPLE_VALIDATE_OUTPUT"])
-DERIVED = (OUTPUT.parent / "derived-data").resolve()
+DERIVED = Path(os.environ.get("READER_PAIR_DERIVED",OUTPUT.parent / "derived-data")).resolve()
 BUNDLE = "com.yamibo.bbs.readermodesqa"
 PROJECT = "iosApp/iosApp.xcodeproj"
 SCHEME = "ReaderModesQA"
@@ -37,6 +37,7 @@ def run(label, command, timeout, *, env=None, capture=False):
 def main():
     simulator = None
     booted = False
+    shared_simulator = os.environ.get("READER_PAIRED_SIMULATOR")
     resources = ExitStack()
     perf = "--perf" in sys.argv
     scale = tuple(map(int,sys.argv[sys.argv.index("--scale")+1:sys.argv.index("--scale")+3])) if "--scale" in sys.argv else None
@@ -116,7 +117,10 @@ def main():
         runtime, phone = next((runtime, device)
             for runtime, devices_in_runtime in devices["devices"].items()
             for device in devices_in_runtime if (runtime.endswith(".iOS-26-4") and device["name"]=="iPhone 17 Pro" if perf else "iPhone" in device["name"]))
-        simulator = subprocess.check_output(["xcrun", "simctl", "create",
+        if shared_simulator:
+            actual=next(d for d in devices["devices"][runtime] if d["udid"]==shared_simulator)
+            assert actual["state"]=="Booted" and actual["deviceTypeIdentifier"]==phone["deviceTypeIdentifier"]
+        simulator = shared_simulator or subprocess.check_output(["xcrun", "simctl", "create",
             f"YamiboDownloadValidation-{os.getpid()}", phone["deviceTypeIdentifier"], runtime], text=True).strip()
         (OUTPUT / "simulator.json").write_text(json.dumps({"udid": simulator, "runtime": runtime,
             "deviceType": phone["deviceTypeIdentifier"]}, indent=2), encoding="utf-8")
@@ -156,7 +160,8 @@ def main():
         apps = [path for path in products.glob("*.app")
                 if plistlib.loads((path / "Info.plist").read_bytes()).get("CFBundleIdentifier") == BUNDLE]
         assert len(apps) == 1, apps
-        run("Boot owned iPhone Simulator", ["xcrun", "simctl", "boot", simulator], 60)
+        if not shared_simulator:
+            run("Boot owned iPhone Simulator", ["xcrun", "simctl", "boot", simulator], 60)
         booted=True
         run("Wait for iPhone boot", ["xcrun", "simctl", "bootstatus", simulator, "-b"], 300)
         simctl = ["xcrun", "simctl"]
@@ -306,7 +311,7 @@ def main():
             raise RuntimeError(f"Reader UI results: {results}")
     finally:
         resources.close()
-        if simulator:
+        if simulator and not shared_simulator:
             if booted: subprocess.run(["xcrun", "simctl", "shutdown", simulator], check=False, timeout=60)
             subprocess.run(["xcrun", "simctl", "delete", simulator], check=True, timeout=60)
 

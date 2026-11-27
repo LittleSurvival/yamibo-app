@@ -69,11 +69,22 @@ def restore(receipt,products,out,expected):
     metadata=json.loads(subprocess.check_output(["gh","api",artifact]))
     if metadata["digest"]!="sha256:"+digest or metadata["expired"]:
         raise ValueError("GitHub artifact metadata does not match the pinned digest")
+    if metadata["workflow_run"]["head_sha"] != donor:
+        raise ValueError("GitHub producer workflow ref does not match the pinned donor")
     with tempfile.TemporaryDirectory(prefix="reader-framework-") as tmp:
-        tmp=Path(tmp); outer=tmp/"hosted.zip"
-        with outer.open("wb") as target:
-            subprocess.run(["gh","api",artifact+"/zip"],stdout=target,check=True,timeout=300)
-        if sha(outer)!=digest:raise ValueError("Transferred workflow archive digest mismatch")
+        tmp = Path(tmp)
+        cache = Path(os.environ.get("READER_FRAMEWORK_CACHE",tmp))
+        cache.mkdir(exist_ok=True,parents=True)
+        outer = cache / (digest + ".zip")
+        if not outer.is_file():
+            staged = tmp / "download.zip"
+            with staged.open("wb") as target:
+                subprocess.run(["gh","api",artifact+"/zip"],stdout=target,check=True,timeout=300)
+            if sha(staged)!=digest:
+                raise ValueError("Transferred workflow archive digest mismatch")
+            shutil.move(staged,outer)
+        elif sha(outer)!=digest:
+            raise ValueError("Cached workflow archive digest mismatch")
         with zipfile.ZipFile(outer) as z:
             env=z.read("environment.log").decode()
             assert f"Commit: {donor}\n" in env

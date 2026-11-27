@@ -21,7 +21,11 @@ on:
         required: false
         type: string
       reader_framework_receipt:
-        description: Optional hosted iOS framework receipt (artifact ID, donor commit, archive SHA-256 separated by colons)
+        description: Pinned framework artifact ID, donor commit and digest separated by colons (for paired runs, candidate and tag12 receipts separated by a comma)
+        required: false
+        type: string
+      reader_pair_block:
+        description: Five-pair block number (0 through 7) on one hosted simulator
         required: false
         type: string
 
@@ -30,7 +34,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: apple-validation-${{ inputs.validation_ref }}-${{ inputs.validation_script }}-${{ inputs.custom_script }}
+  group: apple-validation-${{ inputs.validation_ref }}-${{ inputs.validation_script }}-${{ inputs.custom_script }}-${{ inputs.reader_pair_block }}
   cancel-in-progress: false
 
 jobs:
@@ -63,6 +67,7 @@ jobs:
         env:
           SELECTED_SCRIPT: ${{ inputs.validation_script }}
           CUSTOM_SCRIPT: ${{ inputs.custom_script }}
+          READER_PAIR_BLOCK: ${{ inputs.reader_pair_block }}
           READER_FRAMEWORK_RECEIPT: ${{ inputs.reader_framework_receipt }}
           GH_TOKEN: ${{ inputs.reader_framework_receipt != '' && github.token || '' }}
         run: |
