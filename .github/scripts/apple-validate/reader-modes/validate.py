@@ -37,6 +37,9 @@ def main():
     simulator = None
     resources = ExitStack()
     perf = "--perf" in sys.argv
+    scale = tuple(map(int,sys.argv[sys.argv.index("--scale")+1:sys.argv.index("--scale")+3])) if "--scale" in sys.argv else None
+    network_mode = sys.argv[sys.argv.index("--network")+1] if "--network" in sys.argv else None
+    long_image = "--long-image" in sys.argv
     config = "Debug"
     if perf:
         os.environ["READER_PERF"] = "1"
@@ -47,12 +50,48 @@ def main():
         assert 1 <= rounds <= 40
         testsrc = PROFILE / "ReaderModesUITests.swift"
         program = testsrc.read_text().replace("1 // READER_PERF_ROUNDS", f"{rounds} // READER_PERF_ROUNDS")
+        if network_mode:
+            assert network_mode in ("fast","slow")
+            program=program.replace('"none" // READER_PERF_NETWORK',f'"{network_mode}" // READER_PERF_NETWORK')
+        if scale:
+            program=program.replace("0 // READER_PERF_CHAPTERS",f"{scale[0]} // READER_PERF_CHAPTERS")
         testsrc.write_text(program.replace("true // READER_PERF_COLD", f"{str(sequence=='cold').lower()} // READER_PERF_COLD"))
 
     Path("gradlew").chmod(0o755)
     try:
         run("Configure independent XCTest target", ["gem", "install", "xcodeproj",
             "-v", "1.27.0", "--no-document", "--user-install"], 180)
+        if network_mode:
+            import urllib.request
+            sdk=Path(os.environ["RUNNER_TEMP"])/"reader-replay-yamibo-api"
+            upstream="6a794c8c3b7a4e14802d62d1d2c3b2c289685475"
+            run("Checkout the tagged SDK sources",["git","clone","--depth=1","--branch","v1.1.29","https://github.com/LittleSurvival/yamibo-api.git",str(sdk)],180)
+            assert subprocess.check_output(["git","-C",str(sdk),"rev-parse","HEAD"],text=True).strip()==upstream
+            route=sdk/"library/src/commonMain/kotlin/io/github/littlesurvival/YamiboRoute.kt"
+            source=route.read_text();old='internal val domain = "https://bbs.yamibo.com/"'
+            assert source.count(old)==1
+            route.write_text(source.replace(old,'internal val domain = "http://127.0.0.1:18928/"'))
+            (OUTPUT/"sdk-origin.patch").write_bytes(subprocess.check_output(["git","-C",str(sdk),"diff"]))
+            settings=Path("settings.gradle.kts")
+            with settings.open("a") as out:
+                out.write(f'\nincludeBuild("{sdk}") {{ dependencySubstitution {{ substitute(module("io.github.littlesurvival:yamibo-api")).using(project(":library")) }} }}\n')
+            info=Path("iosApp/iosApp/Info.plist"); plist=plistlib.loads(info.read_bytes())
+            plist["NSAppTransportSecurity"]={"NSAllowsLocalNetworking":True,"NSExceptionDomains":{"127.0.0.1":{"NSExceptionAllowsInsecureHTTPLoads":True}}}
+            info.write_bytes(plistlib.dumps(plist))
+            run("Generate fixed shaped HTTP corpus",[sys.executable,str(PROFILE/"replay_origin.py"),"--generate",str(PROFILE/"generate_fixtures.py")],120)
+            origin_process=subprocess.Popen([sys.executable,str(PROFILE/"replay_origin.py")])
+            resources.callback(lambda: (origin_process.terminate(),origin_process.wait(timeout=10)))
+            for _ in range(50):
+                try:
+                    urllib.request.urlopen(f"http://127.0.0.1:18928/__case/ios-{mode.lower()}-{network_mode}",timeout=2).read()
+                    break
+                except OSError: time.sleep(.2)
+            else: raise RuntimeError("Loopback origin failed to start")
+            def collect_origin():
+                for name in ("contract.json","requests.ndjson","fixture-generator.log"):
+                    f=PROFILE/"network-fixture"/name
+                    if f.is_file():shutil.copy2(f,OUTPUT)
+            resources.callback(collect_origin)
         run("Create QA scheme", ["ruby", str(PROFILE / "configure_tests.rb")], 60)
         devices = json.loads(subprocess.check_output(
             ["xcrun", "simctl", "list", "devices", "available", "-j"], text=True))
@@ -102,7 +141,7 @@ def main():
             resources.callback(origin.close)
             readers = ("testRepair",)
         if perf:
-            readers, palettes = (f"testPerf{mode}",), ("default",)
+            readers, palettes = (("testNativeLongFirstImage" if long_image else f"testPerf{mode}"),), ("default",)
         for palette in palettes:
             for reader in readers:
                 case = reader if palette == "default" else f"{reader}Dark"
@@ -111,21 +150,62 @@ def main():
                 fixture = downloads_root()
                 damaged = origin is not None or case in ("testForumDark", "testComicDark")
                 fixture_args = ["--cbz"] if origin or palette == "default-dark" else []
+                if perf and config == "Release":
+                    fixture_args.append("--bench")
                 if damaged:
                     fixture_args.append("--damaged")
                 if origin:
                     fixture_args.extend(["--origin", origin.begin(case), "--repair-image", str(origin.image)])
-                run("Seed downloaded page", [sys.executable, str(PROFILE / "generate_fixtures.py"), str(fixture)] + fixture_args, 120)
+                if network_mode:
+                    pass  # This scenario has no downloaded thread.
+                elif long_image:
+                    # Produced by this checkout's native repository; preserve the actual storage bytes.
+                    with zipfile.ZipFile(OUTPUT/"long-thread-native-fixture.zip") as archive:
+                        assert all(name.startswith("YamiboDownloads/") and ".." not in Path(name).parts for name in archive.namelist())
+                        archive.extractall(fixture)
+                    blobs = list(fixture.glob("YamiboDownloads/library/0/images/*/*"))
+                    assert len(blobs)==1 and hashlib.sha256(blobs[0].read_bytes()).hexdigest()=="0e92708f9b5063336c4036998ab625845bcf983de1cc212d5bb3851df8d0fbc4"
+                    shutil.copy2(blobs[0],OUTPUT/"native-image.png")
+                else:
+                    run("Seed downloaded page", [sys.executable, str(PROFILE / "generate_fixtures.py"), str(fixture)] + fixture_args, 120)
+                if scale:
+                    from seed_perf_scale import seed
+                    # Bootstrap the application's own database schema, stop it, then seed the isolated simulator.
+                    run("Initialize native SQLite in the QA app",simctl+["launch",simulator,BUNDLE,"-uid","7","-username","QA Bench","-userGroup","Fixture"],60)
+                    deadline=time.monotonic()+60; database=None
+                    while time.monotonic()<deadline:
+                        databases=list(fixture.parent.parent.rglob("yamibo.db"))
+                        if databases:
+                            import sqlite3
+                            with sqlite3.connect(databases[0]) as conn:
+                                if conn.execute("SELECT 1 FROM sqlite_master WHERE name='SmartComicMember'").fetchone():
+                                    database=databases[0];break
+                        time.sleep(.2)
+                    assert database, "Native database schema not available"
+                    run("Stop preparation process",simctl+["terminate",simulator,BUNDLE],30)
+                    seed(fixture,database,*scale,OUTPUT)
                 bundle = OUTPUT / f"{name}.xcresult"
                 try:
                     movie = OUTPUT / "presented.mp4"
                     if perf:
                         recording = subprocess.Popen(simctl + ["io", simulator, "recordVideo", "--codec=h264", str(movie)])
                         time.sleep(1)
+                    fs_watch=None
+                    if scale:
+                        fs_log=resources.enter_context((OUTPUT/"fs-usage.log").open("w"))
+                        binary=plistlib.loads((apps[0]/"Info.plist").read_bytes())["CFBundleExecutable"]
+                        fs_watch=subprocess.Popen(["sudo","-n","fs_usage","-w","-f","filesys",binary],stdout=fs_log,stderr=subprocess.STDOUT)
+                    test_problem=None
                     try:
                         run(name, xcode + ["-resultBundlePath", str(bundle), "-parallel-testing-enabled", "NO",
                             f"-only-testing:ReaderModesUITests/ReaderModesUITests/{case}", "test-without-building"], 1800 if perf else 300)
+                    except (subprocess.CalledProcessError,subprocess.TimeoutExpired) as exc:
+                        test_problem=exc
                     finally:
+                        if fs_watch and fs_watch.poll() is None:
+                            fs_watch.send_signal(signal.SIGINT)
+                            try: fs_watch.wait(timeout=5)
+                            except subprocess.TimeoutExpired: fs_watch.terminate()
                         if perf:
                             recording.send_signal(signal.SIGINT)
                             recording.wait(timeout=45)
@@ -135,9 +215,11 @@ def main():
                             attachments = OUTPUT / "perf-attachments"
                             subprocess.run(["xcrun","xcresulttool","export","attachments","--path",str(bundle),"--output-path",str(attachments)], check=False)
                     if perf:
-                        run("Inspect encoded content and input traces",[sys.executable,str(PROFILE/"read_perf_frames.py"),str(OUTPUT),mode,sequence,str(rounds),config],1200)
+                        run("Inspect encoded content and input traces",[sys.executable,str(PROFILE/"read_perf_frames.py"),str(OUTPUT),("NativeLong" if long_image else mode),sequence,str(rounds),config],1200)
+                        if test_problem: raise test_problem
                         results[name] = True
                         continue
+                    if test_problem: raise test_problem
                     summary = json.loads(subprocess.check_output(["xcrun", "xcresulttool", "get",
                         "test-results", "summary", "--path", str(bundle)], text=True))
                     # XCTest may reinstall the app, moving its data to a new container UUID.

@@ -1,8 +1,7 @@
 """Analyze the simulator recording independently of XCTest polling or action duration."""
-import argparse
 import csv
-import json
 import math
+import json
 from pathlib import Path
 import statistics
 
@@ -11,7 +10,8 @@ import numpy as np
 
 
 def read_actions(output):
-    for path in (output / "perf-attachments").glob("*"):
+    collected={}
+    for path in (output / "perf-attachments").rglob("*"):
         if not path.is_file() or path.stat().st_size > 400_000:
             continue
         try:
@@ -19,7 +19,9 @@ def read_actions(output):
         except (ValueError, UnicodeError):
             continue
         if isinstance(rows, list) and rows and isinstance(rows[0], dict) and "round" in rows[0] and "action" in rows[0]:
-            return rows
+            for row in rows:
+                collected[(row["round"],row["action"])]=row
+    if collected: return list(collected.values())
     raise ValueError("XCTest input correlation attachment missing")
 
 
@@ -45,8 +47,79 @@ def metrics(rgb):
             float(ys.mean()*3) if len(ys) else 0)
 
 
+def native_pattern(rgb):
+    # Template from the decoded grayscale source, known to be L=(x+y) mod 256.
+    # A translation changes phase; only the absolute phase correlation is compared.
+    h,w,_ = rgb.shape
+    ys,xs = np.mgrid[int(h*.39):int(h*.62):6,int(w*.28):int(w*.72):6]
+    samples = rgb[ys,xs].astype(np.float32)
+    if np.mean(samples.max(2)-samples.min(2)<9) < .94: return 0.
+    light = samples.mean(2)
+    if light.std()<26: return 0.
+    factor = 2j*np.pi/256
+    scales = [320/w, 512/h, 1., 2., 3.] + list(np.linspace(.6,2.,19))
+    return max(abs(np.mean(np.exp(factor*(light-slope*(xs+ys))))) for slope in scales)
+
+
 def percentile(a,p):
-    return float(np.percentile(a,p)) if a else None
+    return float(sorted(a)[max(0,math.ceil(len(a)*p/100)-1)]) if a else None
+
+
+def match_glyphs(directory, actions, samples, offset, width, height):
+    """Locate the exact settled label glyphs, including its distinguishing last digit."""
+    import cv2
+    templates=[]
+    with av.open(str(directory/"presented.mp4")) as video:
+        stream=video.streams.video[0]
+        for sample in samples:
+            row=next((r for r in actions if r["round"]==sample["round"] and r["action"]=="glyph"),None)
+            if not row or row.get("label")!="READER_FLOOR_1" or "touch_up_ms" not in sample: continue
+            target=row["lo"]*1000-offset; video.seek(max(0,int(target/1000/stream.time_base)),stream=stream,backward=True)
+            f=next((f for f in video.decode(stream) if f.pts is not None and float(f.pts*f.time_base)*1000>=target),None)
+            if f is None: continue
+            frame=f.reformat(width=width,height=height,format="gray").to_ndarray()
+            x0,y0,x1,y1=map(round,row["rect"])
+            x0=max(0,x0);y0=max(0,y0);x1=min(width,x1);y1=min(height,y1)
+            region=frame[y0:y1,x0:x1]
+            if not region.size: continue
+            ry,rx=np.where(region<110)
+            if not len(rx):continue
+            a=max(0,int(rx.min())-1);b=min(region.shape[1],int(rx.max())+2)
+            c=max(0,int(ry.min())-1);d=min(region.shape[0],int(ry.max())+2)
+            template=region[c:d,a:b].copy()
+            if not (5<=d-c<=60 and 30<=b-a<=310 and template.std()>17):continue
+            if not templates: cv2.imwrite(str(directory/"pid1401-glyph-template.png"),template)
+            templates.append([sample,template,x0+a,y0+c,False,False])
+    if not templates:return
+    with av.open(str(directory/"presented.mp4")) as video:
+        for f in video.decode(video=0):
+            if f.pts is None:continue
+            time_ms=float(f.pts*f.time_base)*1000+offset
+            current=next((r for r in templates if r[0]["touch_up_ms"]-300<=time_ms<=r[0]["gesture_down_ms"] and not r[5]),None)
+            if current is None:continue
+            sample,img,tx,ty,_,_=current
+            frame=f.reformat(width=width,height=height,format="gray").to_ndarray()
+            th,tw=img.shape
+            # Match the unobscured glyph line inside the actual viewport. Threshold both
+            # the full string and its numeric suffix to reject the neighbouring floor.
+            y0=40;area=frame[y0:height-35,:]
+            _,score,_,(x,y)=cv2.minMaxLoc(cv2.matchTemplate(area,img,cv2.TM_CCOEFF_NORMED))
+            y+=y0; sx=int(tw*.82)
+            suffix=float(cv2.matchTemplate(frame[y:y+th,x+sx:x+tw],img[:,sx:],cv2.TM_CCOEFF_NORMED)[0,0])
+            if time_ms < sample["touch_up_ms"]:
+                sample["glyph_preopen_frames"]=1+sample.get("glyph_preopen_frames",0)
+            if score <.94 or suffix<.93:continue
+            if time_ms <sample["touch_up_ms"]:
+                current[4]=True
+                sample["glyph_error"]="matching label already visible before the selected tap"
+            elif not current[4]:
+                sample.setdefault("first_correct_glyph_ms",time_ms)
+                if abs(x-tx)<=2 and abs(y-ty)<=2 and sample.get("glyph_preopen_frames",0)>0:
+                    sample["settled_correct_glyph_ms"]=time_ms
+                    sample["glyph_t1_t0_ms"]=time_ms-sample["touch_up_ms"]
+                    sample["glyph_t2_t1_ms"]=sample["first_motion_ms"]-time_ms
+                    sample["glyph_harness_delay_ms"]=sample["gesture_down_ms"]-time_ms
+                    current[5]=True
 
 
 def analyze(directory, mode, sequence, rounds, config):
@@ -54,6 +127,7 @@ def analyze(directory, mode, sequence, rounds, config):
     touches=[json.loads(line) for p in directory.glob("reader-perf-events-*.jsonl") for line in p.read_text().splitlines() if line]
     if not touches:
         raise ValueError("App UITouch capture missing")
+    max_time=max(e["time"] for e in touches)*1000+10000
     ref=min(e["time"] for e in touches)*1000
     width,height=map(lambda key: int(touches[0][key]),("width","height"))
     frames=[]
@@ -65,7 +139,8 @@ def analyze(directory, mode, sequence, rounds, config):
             if stamp is None: continue
             raw_ms=stamp+round((ref-stamp)/2**24)*2**24
             if ref-10000 <= raw_ms <= max_time:
-                frames.append((1000*float(f.pts*f.time_base),raw_ms,*metrics(rgb)))
+                witness=(native_pattern(rgb),0,0,0) if mode=="NativeLong" else metrics(rgb)
+                frames.append((1000*float(f.pts*f.time_base),raw_ms,*witness))
     if len(frames)<5:
         raise ValueError(f"insufficient independently decoded clock frames: {len(frames)}")
     offset=statistics.median(f[1]-f[0] for f in frames)
@@ -77,6 +152,24 @@ def analyze(directory, mode, sequence, rounds, config):
         hits=[t for t in touches if t["phase"]==phase and action["lo"]-.01 <= t["time"] <= action["hi"]+.01]
         if len(hits)!=1: raise ValueError(f"{action['action']} needs one correlated touch, got {len(hits)}")
         return hits[0]["time"]*1000
+    if mode=="NativeLong":
+        from PIL import Image
+        original = np.array(Image.open(directory/"native-image.png").convert("L"))
+        row,col = np.indices(original.shape)
+        assert original.shape == (512,320) and np.all(original==(row+col)%256)
+        t0=touch(next(a for a in actions if a["action"]=="open"),3)
+        end=next(a["hi"] for a in actions if a["action"]=="visible")*1000
+        before=[f for f in aligned if t0-350<=f[0]<t0]
+        after=[f for f in aligned if t0<=f[0]<=end and f[1]>.93]
+        valid=bool(before and max(f[1] for f in before)<.8 and after and percentile(residual,95)<=35)
+        report={"usable":int(valid), "observed":len(after), "pid":100001, "image_sha256":"0e92708f9b5063336c4036998ab625845bcf983de1cc212d5bb3851df8d0fbc4",
+                "native_floors":240,"native_pages":12,"native_blobs":1,"max_preopen_template_score":max((f[1] for f in before),default=None),
+                "first_presented_template_score":after[0][1] if after else None,"t1_t0_ms":after[0][0]-t0 if valid else None,
+                "clock_residual_p95_ms":percentile(residual,95),"coverage":"First real, winning center patch from the native library. Repeated floor images share a blob; page/first position additionally checked in XCTest. One diagnostic sample."}
+        (directory/"reader-perf.json").write_text(json.dumps(report,indent=2))
+        if not valid: raise ValueError("native library bitmap/clock/counter evidence incomplete")
+        print(json.dumps(report),flush=True)
+        return
     samples=[]
     for i in range(1,rounds+1):
         sample={"round":i};samples.append(sample)
@@ -105,6 +198,8 @@ def analyze(directory, mode, sequence, rounds, config):
             sample["animation_content_intervals_ms"]=[b-a for a,b in zip(transitions,transitions[1:])]
         except (StopIteration,ValueError) as exc:
             sample["error"]=str(exc) or "missing XCTest action"
+    if mode in ("Novel","Forum") and any(a["action"]=="glyph" for a in actions):
+        match_glyphs(directory,actions,samples,offset,width,height)
     valid=[s for s in samples if "error" not in s]
     summary={"mode":mode,"sequence":sequence,"configuration":config,"requested":rounds,"usable":len(valid),
         "clock_frames":len(frames),"clock_residual_p95_ms":percentile(residual,95),
@@ -112,6 +207,13 @@ def analyze(directory, mode, sequence, rounds, config):
         "coverage":"Seeded local author page. Cyan is an independently rendered PID 1401 image, including in text modes. Earliest textual glyph is not measured. Gesture injection after XCTest readiness checks is recorded separately. No network-attempt or tag-12 comparison in this run."}
     for key in ("t1_t0_ms","t2_t0_ms","t2_t1_ms","harness_delay_ms","gesture_to_response_ms"):
         vals=[s[key] for s in valid];summary[key]={"p50":percentile(vals,50),"p95":percentile(vals,95)}
+    summary["percentile"]="nearest rank ceil(n*p/100), p95 of 40 is the 38th ordered sample"
+    if mode in ("Novel","Forum"):
+        summary["image_witness_t1_t0_ms"]=summary.pop("t1_t0_ms")
+        summary["image_witness_t2_t1_ms"]=summary.pop("t2_t1_ms")
+        summary["coverage"]="Source PID1401 label READER_FLOOR_1 uses a separate glyph template and suffix at settled geometry. Cyan image timings are retained as secondary observations. No zero-content-requests or tag-12 claim without separate evidence."
+        glyphs=[s["glyph_t1_t0_ms"] for s in valid if "glyph_t1_t0_ms" in s]
+        summary["settled_glyph"]={"usable":len(glyphs),"p50":percentile(glyphs,50),"p95":percentile(glyphs,95)}
     (directory/"reader-perf.json").write_text(json.dumps(summary,indent=2))
     print(json.dumps({k:v for k,v in summary.items() if k!="samples"}),flush=True)
     if len(valid)!=rounds or summary["clock_residual_p95_ms"]>35:
@@ -120,5 +222,4 @@ def analyze(directory, mode, sequence, rounds, config):
 if __name__=="__main__":
     import sys
     directory=Path(sys.argv[1])
-    max_time=max(json.loads(line)["time"] for p in directory.glob("reader-perf-events-*.jsonl") for line in p.read_text().splitlines() if line)*1000+10000
     analyze(directory,sys.argv[2],sys.argv[3],int(sys.argv[4]),sys.argv[5])

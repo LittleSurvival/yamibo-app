@@ -2,6 +2,8 @@ import XCTest
 import UIKit
 
 final class ReaderModesUITests: XCTestCase {
+    private let benchmarkNetwork = "none" // READER_PERF_NETWORK
+    private let benchmarkChapters = 0 // READER_PERF_CHAPTERS
     private let app = XCUIApplication(bundleIdentifier: "com.yamibo.bbs.readermodesqa")
 
     private func element(_ labels: [String]) -> XCUIElement {
@@ -23,13 +25,14 @@ final class ReaderModesUITests: XCTestCase {
         XCTFail("Missing control " + labels.joined(separator: ", ") + " " + app.debugDescription)
     }
 
-    private func openDownload(_ labels: [String], dark: Bool, damaged: Bool = false, migrateInManager: Bool = true, beforeOpen: (() -> Void)? = nil) {
+    private func openDownload(_ labels: [String], dark: Bool, damaged: Bool = false, migrateInManager: Bool = true, groupTitle: String = "QA Three Readers", beforeOpen: (() -> Void)? = nil) {
         continueAfterFailure = false
         app.terminate()
         app.launchArguments = ["-AppleLanguages", "(zh-Hant)", "-AppleLocale", "zh_TW"]
         // SettingsRegistry stores delegated property names in lowercase.
         if dark { app.launchArguments += ["-appsettings.themescheme", "DEFAULT_DARK"] }
         if beforeOpen != nil { app.launchArguments += ["--reader-frame-probe"] }
+        if benchmarkChapters > 0 { app.launchArguments += ["-uid","7","-username","QA Bench","-userGroup","Fixture"] }
         app.launch()
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let alert = springboard.alerts.firstMatch
@@ -63,9 +66,13 @@ final class ReaderModesUITests: XCTestCase {
             let gone = NSPredicate(format: "exists == false")
             XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: gone, object: migration)], timeout: 30), .completed)
         }
-        tap(["QA Three Readers"])
+        tap([groupTitle])
         tap(["第 1 頁", "第 1 页", "Page 1"])
         XCTAssertTrue(element(["開啟下載內容", "打开下载内容", "Open downloaded content"]).waitForExistence(timeout: 10), app.debugDescription)
+        if benchmarkChapters > 0 {
+            XCTAssertTrue(element(["繼續這部作品"]).waitForExistence(timeout: 10), "Must find the alternate chapter belonging to seeded UID 7")
+        }
+        if let beforeOpen { beforeOpen(); return }
         // Inspect the chooser surface in sRGB. iOS appearance alone does not select a Yamibo palette.
         let surface = dark ? (42, 30, 24) : (255, 247, 224)
         let palette = NSPredicate { _, _ in
@@ -76,7 +83,7 @@ final class ReaderModesUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: palette, object: app)], timeout: 10),
                        .completed, "Expected the selected Yamibo chooser palette")
         capture("download-reader-chooser")
-        if let beforeOpen { beforeOpen() } else { tap(labels) }
+        tap(labels)
     }
 
     private func capture(_ name: String) {
@@ -268,7 +275,14 @@ final class ReaderModesUITests: XCTestCase {
         func record(_ key: String, round: Int, action: () -> Void) {
             let before = ProcessInfo.processInfo.systemUptime
             action()
-            rows.append(["round": round, "action": key, "lo": before, "hi": ProcessInfo.processInfo.systemUptime])
+            let row: [String: Any] = ["round": round, "action": key, "lo": before, "hi": ProcessInfo.processInfo.systemUptime]
+            rows.append(row)
+            if let data = try? JSONSerialization.data(withJSONObject: [row]) {
+                let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+                attachment.name = "input-\(round)-\(key)"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+            }
         }
         defer {
             if let data = try? JSONSerialization.data(withJSONObject: rows) {
@@ -278,13 +292,31 @@ final class ReaderModesUITests: XCTestCase {
                 add(attachment)
             }
         }
-        for round in 1...rounds {
+        let first = cold ? 1 : 0
+        for round in first...rounds {
             let select = {
                 let button = self.element([mode.rawValue])
                 XCTAssertTrue(button.exists)
                 record("open", round: round) { button.tap() }
             }
-            if cold || round == 1 {
+            if benchmarkNetwork != "none" {
+                continueAfterFailure = false
+                app.terminate()
+                let setting = mode == .forum ? "Forum" : (mode == .novel ? "Novel" : "SmartComic")
+                app.launchArguments = ["-AppleLanguages","(zh-Hant)","-AppleLocale","zh_TW","--reader-frame-probe","--reader-fresh-replay",
+                                       "-appsettings.forumReadingMode.30",setting, "-uid","7","-username","QA Author","-userGroup","QA",
+                                       "-cookie","EeqY_2132_auth=synthetic; EeqY_2132_saltkey=synthetic"]
+                app.launch()
+                let alert=XCUIApplication(bundleIdentifier:"com.apple.springboard").alerts.firstMatch
+                if alert.waitForExistence(timeout:1) { alert.buttons.firstMatch.tap() }
+                tap(["QA Forum"])
+                if mode == .novel {
+                    record("board",round:round) { tap(["QA Three Readers"]) }
+                    record("open",round:round) { tap(["開始閱讀","繼續閱讀"]) }
+                } else {
+                    record("open",round:round) { tap(["QA Three Readers"]) }
+                }
+            } else if cold || round == 0 {
                 openDownload([mode.rawValue], dark: false, migrateInManager: false, beforeOpen: select)
             } else {
                 tap(["第 1 頁", "Page 1"])
@@ -292,13 +324,28 @@ final class ReaderModesUITests: XCTestCase {
             }
             // Seek a complete first-floor witness. Elapsed XCTest time is never used for T1.
             waitForImage(second: false)
-            if mode != .comic { assertFirstFloor() }
+            if mode != .comic {
+                assertFirstFloor()
+                let node=app.staticTexts.matching(NSPredicate(format:"label == %@", "READER_FLOOR_1")).firstMatch
+                let bbox=node.frame, t=ProcessInfo.processInfo.systemUptime
+                rows.append(["round":round,"action":"glyph","lo":t,"hi":t,"label":node.label,
+                             "rect":[bbox.minX,bbox.minY,bbox.maxX,bbox.maxY]])
+            }
             record("gesture", round: round) {
                 if mode == .comic { self.app.swipeLeft() } else { self.app.swipeUp() }
             }
             if mode == .comic { waitForImage(second: true) }
             if mode == .comic { app.swipeRight(); waitForImage(second: false) }
             else { app.swipeDown(); assertFirstFloor() }
+            if benchmarkChapters>0 && round==rounds {
+                app.coordinate(withNormalizedOffset: CGVector(dx:0.5,dy:0.5)).tap()
+                tap(["☰"])
+                XCTAssertTrue(element(["QA CHAPTER 0005"]).waitForExistence(timeout:10),app.debugDescription)
+                tap(["升冪"])
+                XCTAssertTrue(element(["降冪"]).waitForExistence(timeout:10),app.debugDescription)
+                XCTAssertTrue(element(["QA CHAPTER 0003"]).waitForExistence(timeout:10),app.debugDescription)
+                capture("uid7-reversed-catalog")
+            }
             if !cold {
                 app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
                 tap(["◀"])
@@ -307,6 +354,33 @@ final class ReaderModesUITests: XCTestCase {
             }
         }
     }
+
+    func testNativeLongFirstImage() {
+        var rows = [[String: Any]]()
+        func mark(_ action: String, operation: () -> Void) {
+            let before = ProcessInfo.processInfo.systemUptime
+            operation()
+            rows.append(["round": 1, "action": action, "lo": before, "hi": ProcessInfo.processInfo.systemUptime])
+        }
+        defer {
+            if let data = try? JSONSerialization.data(withJSONObject: rows) {
+                let result = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+                result.name = "reader-perf-actions"
+                result.lifetime = .keepAlways
+                add(result)
+            }
+        }
+        openDownload([Mode.comic.rawValue], dark: false, migrateInManager: false, groupTitle: "Storage fixture") {
+            mark("open") { self.tap([Mode.comic.rawValue]) }
+        }
+        XCTAssertTrue(element(["1 / 20"]).waitForExistence(timeout: 15), app.debugDescription)
+        // Keep the bitmap on screen for independent comparison with the real native blob.
+        mark("visible") {
+            capture("native-long-first-image")
+            Thread.sleep(forTimeInterval: 2)
+        }
+    }
+
     func testPerfComic() { performance(.comic) }
     func testPerfNovel() { performance(.novel) }
     func testPerfForum() { performance(.forum) }

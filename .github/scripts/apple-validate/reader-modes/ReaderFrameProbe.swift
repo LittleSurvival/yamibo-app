@@ -12,6 +12,25 @@ final class ReaderFrameProbe: UIView {
 
     static func install() {
         guard ProcessInfo.processInfo.arguments.contains("--reader-frame-probe") else { return }
+        if ProcessInfo.processInfo.arguments.contains("--reader-fresh-replay") {
+            #if targetEnvironment(simulator)
+            precondition(Bundle.main.bundleIdentifier=="com.yamibo.bbs.readermodesqa")
+            let fm=FileManager.default
+            // This is a disposable simulator sandbox with synthetic data. Remove the previous
+            // replay's disk cache/database before application initialization for every cold round.
+            for scope in [FileManager.SearchPathDirectory.cachesDirectory,.applicationSupportDirectory,.libraryDirectory] {
+                guard let base=fm.urls(for:scope,in:.userDomainMask).first else { continue }
+                if scope == .cachesDirectory, let files=try? fm.contentsOfDirectory(at:base,includingPropertiesForKeys:nil) {
+                    for path in files { try? fm.removeItem(at:path) }
+                } else if let files=fm.enumerator(at:base,includingPropertiesForKeys:nil) {
+                    var saved=[URL]()
+                    for case let path as URL in files where ["yamibo.db","yamibo.db-shm","yamibo.db-wal"].contains(path.lastPathComponent) { saved.append(path) }
+                    for path in saved { try? fm.removeItem(at:path) }
+                }
+            }
+            URLCache.shared.removeAllCachedResponses()
+            #endif
+        }
         let original = class_getInstanceMethod(UIWindow.self, #selector(UIWindow.sendEvent(_:)))!
         let replacement = class_getInstanceMethod(UIWindow.self, #selector(UIWindow.readerPerfSend(_:)))!
         method_exchangeImplementations(original, replacement)
@@ -35,6 +54,7 @@ final class ReaderFrameProbe: UIView {
         for t in event.allTouches ?? [] where t.window === window && (t.phase == .began || t.phase == .ended || t.phase == .cancelled) {
             let point = t.location(in: window)
             let row: [String: Any] = ["time": t.timestamp, "phase": t.phase.rawValue, "x": point.x, "y": point.y,
+                                      "wall": Date().timeIntervalSince1970, "uptime": ProcessInfo.processInfo.systemUptime,
                                       "width": window.bounds.width, "height": window.bounds.height,
                                       "scale": window.screen.scale, "pid": ProcessInfo.processInfo.processIdentifier]
             p.stream.async {
