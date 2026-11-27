@@ -23,12 +23,13 @@ final class ReaderModesUITests: XCTestCase {
         XCTFail("Missing control " + labels.joined(separator: ", ") + " " + app.debugDescription)
     }
 
-    private func openDownload(_ labels: [String], dark: Bool, damaged: Bool = false, migrateInManager: Bool = true) {
+    private func openDownload(_ labels: [String], dark: Bool, damaged: Bool = false, migrateInManager: Bool = true, beforeOpen: (() -> Void)? = nil) {
         continueAfterFailure = false
         app.terminate()
         app.launchArguments = ["-AppleLanguages", "(zh-Hant)", "-AppleLocale", "zh_TW"]
         // SettingsRegistry stores delegated property names in lowercase.
         if dark { app.launchArguments += ["-appsettings.themescheme", "DEFAULT_DARK"] }
+        if beforeOpen != nil { app.launchArguments += ["--reader-frame-probe"] }
         app.launch()
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let alert = springboard.alerts.firstMatch
@@ -75,7 +76,7 @@ final class ReaderModesUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: palette, object: app)], timeout: 10),
                        .completed, "Expected the selected Yamibo chooser palette")
         capture("download-reader-chooser")
-        tap(labels)
+        if let beforeOpen { beforeOpen() } else { tap(labels) }
     }
 
     private func capture(_ name: String) {
@@ -258,6 +259,57 @@ final class ReaderModesUITests: XCTestCase {
         expectation(for: painted, evaluatedWith: app)
         waitForExpectations(timeout: 15)
     }
+
+    private func performance(_ mode: Mode) {
+        // The runner provides this variable in the generated test source, not in the App.
+        let rounds = 1 // READER_PERF_ROUNDS
+        let cold = true // READER_PERF_COLD
+        var rows = [[String: Any]]()
+        func record(_ key: String, round: Int, action: () -> Void) {
+            let before = ProcessInfo.processInfo.systemUptime
+            action()
+            rows.append(["round": round, "action": key, "lo": before, "hi": ProcessInfo.processInfo.systemUptime])
+        }
+        defer {
+            if let data = try? JSONSerialization.data(withJSONObject: rows) {
+                let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+                attachment.name = "reader-perf-actions"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+            }
+        }
+        for round in 1...rounds {
+            let select = {
+                let button = self.element([mode.rawValue])
+                XCTAssertTrue(button.exists)
+                record("open", round: round) { button.tap() }
+            }
+            if cold || round == 1 {
+                openDownload([mode.rawValue], dark: false, migrateInManager: false, beforeOpen: select)
+            } else {
+                tap(["第 1 頁", "Page 1"])
+                select()
+            }
+            // Seek a complete first-floor witness. Elapsed XCTest time is never used for T1.
+            waitForImage(second: false)
+            if mode != .comic { assertFirstFloor() }
+            record("gesture", round: round) {
+                if mode == .comic { self.app.swipeLeft() } else { self.app.swipeUp() }
+            }
+            if mode == .comic { waitForImage(second: true) }
+            if mode == .comic { app.swipeRight(); waitForImage(second: false) }
+            else { app.swipeDown(); assertFirstFloor() }
+            if !cold {
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                tap(["◀"])
+                // The download manager restores either the group or its page list.
+                if !element(["第 1 頁", "Page 1"]).exists { tap(["QA Three Readers"]) }
+            }
+        }
+    }
+    func testPerfComic() { performance(.comic) }
+    func testPerfNovel() { performance(.novel) }
+    func testPerfForum() { performance(.forum) }
 
     private func largeColorArea(centerOnly: Bool = false, matching: (Int, Int, Int) -> Bool) -> Bool {
         let source = app.screenshot().image.cgImage!

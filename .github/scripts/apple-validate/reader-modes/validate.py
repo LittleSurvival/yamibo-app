@@ -9,6 +9,9 @@ import plistlib
 import subprocess
 import sys
 import tempfile
+import shutil
+import signal
+import time
 from contextlib import ExitStack
 from repair_origin import RepairOrigin
 
@@ -33,6 +36,19 @@ def run(label, command, timeout, *, env=None, capture=False):
 def main():
     simulator = None
     resources = ExitStack()
+    perf = "--perf" in sys.argv
+    config = "Debug"
+    if perf:
+        os.environ["READER_PERF"] = "1"
+        mode, sequence, rounds_raw, config = sys.argv[sys.argv.index("--perf")+1:]
+        assert mode in ("Comic","Novel","Forum") and sequence in ("cold","warm")
+        assert config in ("Debug", "Release")
+        rounds = int(rounds_raw)
+        assert 1 <= rounds <= 40
+        testsrc = PROFILE / "ReaderModesUITests.swift"
+        program = testsrc.read_text().replace("1 // READER_PERF_ROUNDS", f"{rounds} // READER_PERF_ROUNDS")
+        testsrc.write_text(program.replace("true // READER_PERF_COLD", f"{str(sequence=='cold').lower()} // READER_PERF_COLD"))
+
     Path("gradlew").chmod(0o755)
     try:
         run("Configure independent XCTest target", ["gem", "install", "xcodeproj",
@@ -48,19 +64,19 @@ def main():
         (OUTPUT / "simulator.json").write_text(json.dumps({"udid": simulator, "runtime": runtime,
             "deviceType": phone["deviceTypeIdentifier"]}, indent=2), encoding="utf-8")
 
-        products = DERIVED / "Build/Products/Debug-iphonesimulator"
+        products = DERIVED / f"Build/Products/{config}-iphonesimulator"
         products.mkdir(parents=True, exist_ok=True)
         sdk = subprocess.check_output(
             ["xcrun", "--sdk", "iphonesimulator", "--show-sdk-version"], text=True).strip()
         framework_env = dict(os.environ, SDK_NAME=f"iphonesimulator{sdk}", PLATFORM_NAME="iphonesimulator",
-            CONFIGURATION="Debug", ARCHS="arm64", BUILT_PRODUCTS_DIR=str(products),
+            CONFIGURATION=config, ARCHS="arm64", BUILT_PRODUCTS_DIR=str(products),
             TARGET_BUILD_DIR=str(products), FRAMEWORKS_FOLDER_PATH="yamibo_app.app/Frameworks",
             UNLOCALIZED_RESOURCES_FOLDER_PATH="yamibo_app.app", ENABLE_USER_SCRIPT_SANDBOXING="NO")
         run("Prepare framework before booting UI Simulator", ["./gradlew",
             ":composeApp:embedAndSignAppleFrameworkForXcode", "--console=plain", "--max-workers=2"],
             1800, env=framework_env)
         run("Stop Gradle before UI execution", ["./gradlew", "--stop"], 60)
-        xcode = ["xcodebuild", "-project", PROJECT, "-scheme", SCHEME, "-configuration", "Debug",
+        xcode = ["xcodebuild", "-project", PROJECT, "-scheme", SCHEME, "-configuration", config,
                  "-destination", f"id={simulator}", "-derivedDataPath", str(DERIVED), "CODE_SIGNING_ALLOWED=NO"]
         run("Build App and UI test bundle", xcode + ["-sdk", "iphonesimulator", "build-for-testing"],
             600, env=dict(os.environ, OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED="YES"))
@@ -85,6 +101,8 @@ def main():
             origin = RepairOrigin(simulator, resources.enter_context(tempfile.TemporaryDirectory()))
             resources.callback(origin.close)
             readers = ("testRepair",)
+        if perf:
+            readers, palettes = (f"testPerf{mode}",), ("default",)
         for palette in palettes:
             for reader in readers:
                 case = reader if palette == "default" else f"{reader}Dark"
@@ -100,8 +118,26 @@ def main():
                 run("Seed downloaded page", [sys.executable, str(PROFILE / "generate_fixtures.py"), str(fixture)] + fixture_args, 120)
                 bundle = OUTPUT / f"{name}.xcresult"
                 try:
-                    run(name, xcode + ["-resultBundlePath", str(bundle), "-parallel-testing-enabled", "NO",
-                        f"-only-testing:ReaderModesUITests/ReaderModesUITests/{case}", "test-without-building"], 300)
+                    movie = OUTPUT / "presented.mp4"
+                    if perf:
+                        recording = subprocess.Popen(simctl + ["io", simulator, "recordVideo", "--codec=h264", str(movie)])
+                        time.sleep(1)
+                    try:
+                        run(name, xcode + ["-resultBundlePath", str(bundle), "-parallel-testing-enabled", "NO",
+                            f"-only-testing:ReaderModesUITests/ReaderModesUITests/{case}", "test-without-building"], 1800 if perf else 300)
+                    finally:
+                        if perf:
+                            recording.send_signal(signal.SIGINT)
+                            recording.wait(timeout=45)
+                            docs = downloads_root().parent
+                            for path in docs.glob("reader-perf-events-*.jsonl"):
+                                shutil.copy2(path, OUTPUT)
+                            attachments = OUTPUT / "perf-attachments"
+                            subprocess.run(["xcrun","xcresulttool","export","attachments","--path",str(bundle),"--output-path",str(attachments)], check=False)
+                    if perf:
+                        run("Inspect encoded content and input traces",[sys.executable,str(PROFILE/"read_perf_frames.py"),str(OUTPUT),mode,sequence,str(rounds),config],1200)
+                        results[name] = True
+                        continue
                     summary = json.loads(subprocess.check_output(["xcrun", "xcresulttool", "get",
                         "test-results", "summary", "--path", str(bundle)], text=True))
                     # XCTest may reinstall the app, moving its data to a new container UUID.
