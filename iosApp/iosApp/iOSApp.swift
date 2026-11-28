@@ -36,9 +36,12 @@ private final class MessageNotificationDelegate: NSObject, UNUserNotificationCen
 @main
 struct iOSApp: App {
     @Environment(\.scenePhase) private var scenePhase
+    @State private var pendingReport: CrashReportStore.Report?
     private let messageNotificationDelegate = MessageNotificationDelegate()
 
     init() {
+        CrashReportStore.shared.install()
+        _pendingReport = State(initialValue: CrashReportStore.shared.pendingReport())
         let center = UNUserNotificationCenter.current()
         center.delegate = messageNotificationDelegate
         let open = UNNotificationAction(
@@ -105,7 +108,14 @@ struct iOSApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            if let report = pendingReport {
+                CrashReportView(report: report) {
+                    try CrashReportStore.shared.markViewed(report)
+                    pendingReport = nil
+                }
+            } else {
+                ContentView()
+            }
         }
         .onChange(of: scenePhase) { phase in
             guard IOSAppSyncBackgroundKt.appSyncAvailable else { return }

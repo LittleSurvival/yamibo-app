@@ -17,6 +17,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.withResumed
 import io.github.littlesurvival.core.YamiboResult
 import kotlinx.coroutines.*
 import me.thenano.yamibo.yamibo_app.appsync.AndroidAppSyncBackgroundScheduler
@@ -24,6 +26,8 @@ import me.thenano.yamibo.yamibo_app.appsync.AndroidAppSyncLifecycleBridge
 import me.thenano.yamibo.yamibo_app.appsync.AppSyncLifecycleController
 import me.thenano.yamibo.yamibo_app.confirmation.AppConfirmationController
 import me.thenano.yamibo.yamibo_app.core.cache.DiskCacheFactory
+import me.thenano.yamibo.yamibo_app.crash.AndroidCrashReport
+import me.thenano.yamibo.yamibo_app.crash.CrashReportActivity
 import me.thenano.yamibo.yamibo_app.db.DatabaseFactory
 import me.thenano.yamibo.yamibo_app.download.AndroidDownloadBackgroundController
 import me.thenano.yamibo.yamibo_app.download.AndroidDownloadRuntime
@@ -113,6 +117,14 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        lifecycleScope.launch {
+            val pending = withContext(Dispatchers.IO) { AndroidCrashReport.hasPending(applicationContext) }
+            if (pending && !isFinishing) {
+                lifecycle.withResumed {
+                    startActivity(android.content.Intent(this@MainActivity, CrashReportActivity::class.java))
+                }
+            }
+        }
         setContent {
             val context = LocalContext.current
             val notificationPermissionLauncher = rememberLauncherForActivityResult(
