@@ -14,11 +14,11 @@ Readers can change the persistent default in settings or from the forum. Switchi
 
 ## Smart Comic chapter directory
 
-Show the selected chapter while discovering related threads in its forum. Sort numbered chapters by number, then put explicit upper, middle and lower parts in their printed order. Sort compilations by their first chapter and place unnumbered extras last. Reversing the display keeps the current chapter selected.
+Show the selected chapter while discovering related threads in its forum. Sort numbered chapters by number, then put explicit upper, middle and lower parts in their printed order. Sort compilations by their first chapter and place unnumbered extras last. For example, `#33+7卷加笔` belongs at chapter 33, while a separate post titled `纸质书第一卷新增内容` belongs with the extras. Reversing the display keeps the current chapter selected.
 
 Saved work membership must outlive the signed-in account's two-hour search cache. Persist the work identity, forum, account scope, member TIDs and last-read TID. Preserve known chapters when titles or attribution change, earlier chapters appear, a search is interrupted or a similar title conflicts. Mark a catalog complete only after a consistent search covers its known membership. Manual refresh updates the directory. Saved chapters remain readable if refresh fails. How readers correct a mistaken match remains an open design question.
 
-Live checks still need to cover chapters across search pages, the author's continuations on later post pages, changes of account and conflicting matches. The examples for cross-page discovery and compilations are *DOUBLE HELIX BLOSSOM* and *青梅竹马BIG LOVE*. The examples for fractional and split chapters are *少女所不期望的英雄史诗* and *JK⇔杀手*.
+Live checks covered cross-page discovery with *DOUBLE HELIX BLOSSOM* and compilation threads with *青梅竹马BIG LOVE*. The author's continuations on later post pages, account changes and conflicting matches still need live checks. The examples for fractional and split chapters are *少女所不期望的英雄史诗* and *JK⇔杀手*.
 
 ## What a download covers
 

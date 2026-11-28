@@ -11,8 +11,8 @@ internal data class SmartComicTitle(val query: String, val credit: String?, val 
 
 private val prefix = Regex("""^(?:[\[［][^\]］]+[\]］]|【[^】]+】|\([^()]+\)|（[^（）]+）)""")
 private const val number = "[0-9零〇一二两兩三四五六七八九十百千]+"
-private val numbered = Regex("""(?:第\s*|(?:stage|chapter|ch\.?|#)\s*)($number)(?:[.\-]([0-9]+))?(?=\s*(?:[話话章回卷話~～\-、：:\s]|$))|($number)(?:[.\-]([0-9]+))?\s*[话話章回](?=\D|$)|\s+([0-9]+)(?:[.\-]([0-9]+))?(?=\s|$|[+（(])""", RegexOption.IGNORE_CASE)
-private val extra = Regex("""(?:发售图|發售圖|贺图|賀圖|附赠|附贈|番外|特別篇|特别篇|幕间|幕間|短篇|短編|后记|後記)""")
+private val numbered = Regex("""(?:第\s*|(?:stage|chapter|ch\.?|#)\s*)($number)(?:[.\-]([0-9]+))?(?=\s*(?:[話话章回卷話~～\-、：:\s]|\+[0-9]+卷加[笔筆](?:部分)?$|$))|($number)(?:[.\-]([0-9]+))?\s*[话話章回](?=\D|$)|\s+([0-9]+)(?:[.\-]([0-9]+))?(?=\s|$|[+（(])""", RegexOption.IGNORE_CASE)
+private val extra = Regex("""(?:发售图|發售圖|贺图|賀圖|附赠|附贈|番外|特別篇|特别篇|幕间|幕間|短篇|短編|后记|後記|\s+纸质书第${number}卷新增内容$)""")
 private val missingNumber = Regex("""第[话話]\s*$""")
 private val alias = Regex("""[（(][^（）()]+[）)]\s*$""")
 private val subpart = Regex("""^[话話章回]?\s*其\s*([0-9]+)""")
