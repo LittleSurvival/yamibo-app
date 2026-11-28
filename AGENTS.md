@@ -9,7 +9,9 @@
 
 ## Delivery authorization
 
-- Match each commit, push and manual Actions dispatch to the current delivery request. An instruction to implement or test authorizes local edits, builds and tests. A completed round's publication approval applies to that round. Use an existing authorization when it covers the current action; otherwise keep working locally and ask before the first uncovered delivery action.
+- Agents may commit and push work within the requested scope to a validation branch at their discretion. This standing authorization includes candidate fixes needed for validation and follow-up test fixes.
+- For other branches, match commits and pushes to the current delivery request. Match manual Actions dispatches to the requested validation, including reruns when asked to verify a fix through completion. An instruction to implement or test also authorizes local edits, builds and tests.
+- Use existing delivery authorization for the actions it covers. Ask before the first uncovered publication or dispatch.
 
 ## OpenSpec isolation
 
@@ -33,6 +35,7 @@
 
 ## Subagent delegation
 
+- Start subagents with `reasoning_effort="medium"` and `fork_turns="none"` by default. Include the relevant task context in each brief.
 - Prefer subagents when unfinished features and validation can proceed independently. Give each agent a concrete deliverable, owned files or a separate worktree, acceptance criteria, and the evidence to return. Check outstanding planning items when assigning work so implementation and verification both have an owner.
 - Assign one operator per emulator, simulator or other shared mutable resource. The lead integrates the changes, reviews the combined diff and verifies the complete user flow. Delegation carries the same delivery authorization as the parent task.
 
