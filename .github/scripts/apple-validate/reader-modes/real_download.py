@@ -16,6 +16,8 @@ from replay_origin import BOARD, HOME, ORIGIN, PROFILE, SEARCH, html
 
 PIDS = (1401, 1402, 1403)
 AUTHORS = (7, 7, 8)
+PHASES = {"issue": "initial", "downloaded": "issue", "block": "downloaded",
+          "cold-opened": "block", "saved-position": "cold-opened", "verified": "saved-position"}
 # Give the later anchors enough ordinary text above them to distinguish paragraph restoration from opening the post at its top.
 WALK = ("清晨我從車站出發，沿著河岸慢慢走。巷口的早餐店剛開門，老闆正在把一籠饅頭從蒸鍋裡提出來。"
         "過了石橋，路旁有一排剛修剪過的樹，樹下的長椅上放著一本沒寫完的旅行筆記。"
@@ -52,6 +54,7 @@ class RealDownloadOrigin:
         self.events = []
         self.saved = None
         self.first_pid = None
+        self.first_cold_pid = None
         self.blocked = False
 
     def __enter__(self):
@@ -83,13 +86,16 @@ class RealDownloadOrigin:
             return 200, html(BOARD), "board"
         if path == "/forum.php" and mod == "viewthread" and query.get("tid") == ["140"] and query.get("page", ["1"]) == ["1"]:
             author = query.get("authorid", [""])[0]
-            return 200, thread_html(author), "thread-" + (author or "all")
+            scope = author if author in ("7", "8") else ("other" if author else "all")
+            return 200, thread_html(author), "thread-" + scope
         if path == "/home.php":
             return 200, html(PROFILE), "profile"
         if path == "/search.php":
             return (302, b"", "search-submit") if method == "POST" else (200, html(SEARCH), "search-results")
         if path in {"/" + name for name in self.images}:
             return 200, self.images[path[1:]], path[1:]
+        if path == "/forum.php" and mod in ("viewthread", "redirect"):
+            return 404, b"unmapped fixture resource", "thread-" + mod
         return 404, b"unmapped fixture resource", "unknown"
 
     def store(self):
@@ -149,10 +155,25 @@ class RealDownloadOrigin:
         return {"keys": sorted(entries), "pids": sorted(floors), "page_files": sorted(page_paths),
                 "original_images_in_ordinary_cache": sorted(image_files)}
 
+    def offline_requests(self):
+        rows = [r for r in self.events if r["phase"] == self.phase and not r["resource"].startswith("control/")]
+        witness = [r for r in rows if r["witness"]]
+        assert all(r["blocked"] and r["status"] == 503 for r in rows), "Content gate did not stay closed"
+        assert all(r["resource"] == "marker-1.png" and r["method"] == "GET" for r in witness), "Invalid offline witness"
+        if self.phase == "block":
+            assert witness, "Missing independent 503 witness before cold open"
+        # Home/profile may refresh in the background. Catalog reads during a
+        # mode switch are reported separately from thread/attachment requests.
+        content = [r for r in rows if not r["witness"] and
+                   (r["resource"].startswith("thread-") or r["resource"] in self.images)]
+        assert not content, f"{self.phase}: offline reader tried to fetch content: {content}"
+        unknown = [r for r in rows if not r["witness"] and r["resource"] not in
+                   ("home", "profile", "board", "search-submit", "search-results")]
+        assert not unknown, f"{self.phase}: unclassified traffic prevents verifying zero content requests: {unknown}"
+        return rows
+
     def control(self, action):
-        order = {"issue": "initial", "downloaded": "issue", "block": "downloaded",
-                 "cold-opened": "block", "verified": "cold-opened"}
-        assert order.get(action) == self.phase, f"Unexpected transition {self.phase} -> {action}"
+        assert PHASES.get(action) == self.phase, f"Unexpected transition {self.phase} -> {action}"
         pid = self.pid()
         record = {"app_pid": pid}
         if action == "issue":
@@ -173,14 +194,16 @@ class RealDownloadOrigin:
             assert self.store() == self.saved
             self.blocked = True
         elif action == "cold-opened":
-            assert pid and pid != self.first_pid
-            requests = [r for r in self.events if r["phase"] == "block" and not r["resource"].startswith("control/")]
-            assert any(r["resource"] == "marker-1.png" and r["witness"] and r["status"] == 503 for r in requests), "Offline witness missing"
-            reader_attempts = [r for r in requests if not r["witness"] and (r["resource"].startswith("thread-") or r["resource"] in self.images)]
-            assert not reader_attempts, f"Downloaded reader attempted content fetch: {reader_attempts}"
-            record["requests"] = requests
+            assert pid and pid != self.first_pid, f"First offline launch not confirmed: online={self.first_pid}, now={pid}"
+            record["requests"] = self.offline_requests()
+            self.first_cold_pid = pid
+        elif action == "saved-position":
+            assert pid is None, f"Reader still running after saving position: {pid}"
+            record["requests"] = self.offline_requests()
+            assert self.store() == self.saved, "Mode switches changed canonical offline files"
         elif action == "verified":
-            assert pid and pid != self.first_pid
+            assert pid and pid != self.first_cold_pid, f"Second cold launch not confirmed: previous={self.first_cold_pid}, now={pid}"
+            record["requests"] = self.offline_requests()
             record["library"] = self.store()
             assert record["library"] == self.saved, "Cold open changed canonical offline files"
         (self.output / f"real-download-{action}.json").write_text(json.dumps(record, indent=2))
@@ -203,10 +226,12 @@ class DownloadHandler(BaseHTTPRequestHandler):
         origin = self.server.origin
         parsed = urlsplit(self.path)
         action = parsed.path.removeprefix("/__offline/")
+        query = parse_qs(parsed.query)
         row = {"host_ns": monotonic_ns(), "phase": origin.phase, "blocked": origin.blocked,
-               "method": self.command, "witness": self.headers.get("X-Reader-Control") == "offline-witness"}
+               "method": self.command, "witness": self.command == "GET" and parsed.path == "/marker-1.png" and
+               not parsed.query and self.headers.get("X-Reader-Control") == "offline-witness"}
         payload = b""
-        if parsed.path.startswith("/__offline/") and self.command == "POST":
+        if parsed.path.startswith("/__offline/") and action in PHASES and self.command == "POST":
             resource = "control/" + action
             try:
                 origin.control(action)
@@ -214,7 +239,15 @@ class DownloadHandler(BaseHTTPRequestHandler):
             except Exception as exc:
                 status, payload = 409, repr(exc).encode()
         else:
-            status, payload, resource = origin.data(parsed.path, parse_qs(parsed.query), self.command)
+            status, payload, resource = origin.data(parsed.path, query, self.command)
+            if origin.blocked and resource == "profile" and (
+                    self.command != "GET" or query.get("mod", ["space"]) != ["space"] or query.get("do", ["profile"]) != ["profile"]):
+                # The same PHP endpoint also serves private messages and other actions.
+                resource = "unknown"
+            if resource in ("unknown", "thread-viewthread", "thread-redirect"):
+                # Do not log query values, headers or arbitrary URL paths.
+                row["path"] = parsed.path if parsed.path in ("/", "/forum.php", "/home.php", "/search.php") else "unmapped"
+                row["route_keys"] = sorted({"mod", "goto", "do", "tid", "ptid", "pid", "page", "authorid", "fid"}.intersection(query))
             if origin.blocked:
                 status, payload = 503, b"fixture origin offline"
         row.update(resource=resource, status=status, bytes=len(payload))

@@ -43,7 +43,8 @@ final class ReaderModesUITests: XCTestCase {
         measureNavigation?(stage,start,ProcessInfo.processInfo.systemUptime)
     }
 
-    private func openDownload(_ labels: [String], dark: Bool, damaged: Bool = false, migrateInManager: Bool = true, groupTitle: String = "QA Three Readers", accountArguments: [String] = [], beforeOpen: (() -> Void)? = nil) {
+    @discardableResult
+    private func openDownload(_ labels: [String], dark: Bool, damaged: Bool = false, migrateInManager: Bool = true, groupTitle: String = "QA Three Readers", accountArguments: [String] = [], beforeOpen: (() -> Void)? = nil) -> Bool {
         continueAfterFailure = false
         if app.state != .notRunning { app.terminate() }
         app.launchArguments = ["-AppleLanguages", "(zh-Hant)", "-AppleLocale", "zh_TW"] + accountArguments
@@ -65,9 +66,18 @@ final class ReaderModesUITests: XCTestCase {
             if element(contentLabels).exists { break }
             let later = app.buttons["稍後"]
             if later.exists && later.isHittable { later.tap() }
-            if manager.waitForExistence(timeout: 2) && manager.isHittable { manager.tap() }
-            else if benchmarkChapters>0 { app.swipeUp() }
+            guard manager.waitForExistence(timeout: 2), manager.isHittable,
+                  app.frame.contains(CGPoint(x: manager.frame.midX, y: manager.frame.midY)) else {
+                // A signed-in profile has more rows above Downloads.
+                app.swipeUp()
+                continue
+            }
+            manager.tap()
             if element(contentLabels).waitForExistence(timeout: 5) { break }
+        }
+        guard element(contentLabels).isHittable else {
+            XCTFail("Download manager did not open from Profile: " + app.debugDescription)
+            return false
         }
         tap(contentLabels)
         if migrateInManager {
@@ -87,11 +97,14 @@ final class ReaderModesUITests: XCTestCase {
         }
         tapDownload([groupTitle],stage:"download_group")
         tapDownload(["第 1 頁", "第 1 页", "Page 1"],stage:"download_page")
-        XCTAssertTrue(element(["開啟下載內容", "打开下载内容", "Open downloaded content"]).waitForExistence(timeout: 10), app.debugDescription)
+        guard element(["開啟下載內容", "打开下载内容", "Open downloaded content"]).waitForExistence(timeout: 10) else {
+            XCTFail("Downloaded page did not open the reader chooser: " + app.debugDescription)
+            return false
+        }
         if benchmarkChapters > 0 {
             XCTAssertTrue(element(["繼續這部作品"]).waitForExistence(timeout: 10), "Must find the alternate chapter belonging to seeded UID 7")
         }
-        if let beforeOpen { beforeOpen(); return }
+        if let beforeOpen { beforeOpen(); return true }
         // Inspect the chooser surface in sRGB. iOS appearance alone does not select a Yamibo palette.
         let surface = dark ? (42, 30, 24) : (255, 247, 224)
         let palette = NSPredicate { _, _ in
@@ -99,10 +112,13 @@ final class ReaderModesUITests: XCTestCase {
                 abs(red - surface.0) < 8 && abs(green - surface.1) < 8 && abs(blue - surface.2) < 8
             }
         }
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: palette, object: app)], timeout: 10),
-                       .completed, "Expected the selected Yamibo chooser palette")
+        guard XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: palette, object: app)], timeout: 10) == .completed else {
+            XCTFail("Expected the selected Yamibo chooser palette")
+            return false
+        }
         capture("download-reader-chooser")
         tap(labels)
+        return true
     }
 
     private func capture(_ name: String) {
@@ -357,6 +373,15 @@ final class ReaderModesUITests: XCTestCase {
     @MainActor
     func testRealDownloadOfflineColdOpen() async throws {
         continueAfterFailure = false
+        // The async test can continue after a synchronous XCTest assertion.
+        // Keep success attachments and host checkpoints behind the actual evidence.
+        func captureVerified(_ name: String) throws {
+            guard let run = testRun, run.failureCount == 0 else {
+                throw NSError(domain: "OfflineReaderUI", code: 1,
+                              userInfo: [NSLocalizedDescriptionKey: "UI verification failed before \(name)"])
+            }
+            capture(name)
+        }
         let account = ["-appsettings.forumReadingMode.30", "Forum", "-uid", "7", "-username", "QA Author",
                        "-userGroup", "QA", "-cookie", "EeqY_2132_auth=synthetic; EeqY_2132_saltkey=synthetic"]
         app.launchArguments = ["-AppleLanguages", "(zh-Hant)", "-AppleLocale", "zh_TW"] + account
@@ -372,7 +397,7 @@ final class ReaderModesUITests: XCTestCase {
         tap(["下載"])
         let download = element(["下載完整 Thread"])
         XCTAssertTrue(download.waitForExistence(timeout: 8) && download.isHittable, app.debugDescription)
-        capture("forum-full-thread-download-action")
+        try captureVerified("forum-full-thread-download-action")
         try await waitForOfflineControl("/__offline/issue")
         download.tap()
         try await waitForOfflineControl("/__offline/downloaded", retryConflict: true)
@@ -389,7 +414,7 @@ final class ReaderModesUITests: XCTestCase {
         tapSettingsRow("儲存空間")
         tapSettingsRow("立即清除所有緩存")
         XCTAssertTrue(element(["已清除所有緩存"]).waitForExistence(timeout: 10), app.debugDescription)
-        capture("general-cache-cleared")
+        try captureVerified("general-cache-cleared")
         app.terminate()
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 10))
         try await waitForOfflineControl("/__offline/block", retryConflict: true)
@@ -397,12 +422,12 @@ final class ReaderModesUITests: XCTestCase {
 
         // Cold start with the same synthetic account. All fixture content is
         // now denied by the origin; this does not switch the simulator's radio.
-        openDownload([Mode.forum.rawValue], dark: false, migrateInManager: false, accountArguments: account)
+        guard openDownload([Mode.forum.rawValue], dark: false, migrateInManager: false, accountArguments: account) else { return }
         assertFirstFloor()
         waitForImage(second: false)
         let page = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "1/1 [0-9]{1,3}%")).firstMatch
         XCTAssertTrue(page.waitForExistence(timeout: 8) && page.isHittable, app.debugDescription)
-        capture("offline-forum-page-1-floor-1401-cyan")
+        try captureVerified("offline-forum-page-1-floor-1401-cyan")
         try await waitForOfflineControl("/__offline/cold-opened")
 
         openModePicker(from: .forum)
@@ -412,7 +437,7 @@ final class ReaderModesUITests: XCTestCase {
         app.swipeLeft()
         XCTAssertTrue(element(["2 / 2"]).waitForExistence(timeout: 10), app.debugDescription)
         waitForImage(second: true)
-        capture("offline-comic-author-page-2-magenta")
+        try captureVerified("offline-comic-author-page-2-magenta")
 
         openModePicker(from: .comic)
         tap([Mode.novel.rawValue])
@@ -420,23 +445,35 @@ final class ReaderModesUITests: XCTestCase {
         let paragraph = "PID1402_PARA2", comment = "PID1403_COMMENT"
         let novelY = positionOfflineParagraph(paragraph, towardLater: false)
         assertOfflineParagraph(paragraph, near: novelY)
-        capture("offline-novel-author-paragraph")
+        try captureVerified("offline-novel-author-paragraph")
         openModePicker(from: .novel)
         tap([Mode.forum.rawValue])
         assertOfflineParagraph(paragraph, near: novelY)
         let forumY = positionOfflineParagraph(comment, towardLater: true)
         assertOfflineParagraph(comment, near: forumY)
         waitForGreenImage()
-        capture("offline-forum-guest-comment")
+        try captureVerified("offline-forum-guest-comment")
         openModePicker(from: .forum)
         tap([Mode.novel.rawValue])
         assertOfflineParagraph(paragraph, near: novelY)
         XCTAssertNil(offlineParagraphY(comment), "Guest comment visible in author-only novel")
-        capture("offline-novel-restored-own-paragraph")
+        try captureVerified("offline-novel-restored-own-paragraph")
         openModePicker(from: .novel)
         tap([Mode.forum.rawValue])
         assertOfflineParagraph(comment, near: forumY)
-        capture("offline-forum-restored-guest-comment")
+        try captureVerified("offline-forum-restored-guest-comment")
+
+        XCUIDevice.shared.press(.home)
+        app.terminate()
+        XCTAssertTrue(app.wait(for: .notRunning, timeout: 10))
+        try await waitForOfflineControl("/__offline/saved-position", retryConflict: true)
+        guard openDownload([Mode.forum.rawValue], dark: false, migrateInManager: false, accountArguments: account) else { return }
+        assertOfflineParagraph(comment, near: forumY)
+        try captureVerified("offline-relaunched-forum-guest-comment")
+        openModePicker(from: .forum)
+        tap([Mode.novel.rawValue])
+        assertOfflineParagraph(paragraph, near: novelY)
+        try captureVerified("offline-relaunched-novel-author-paragraph")
         try await waitForOfflineControl("/__offline/verified")
     }
 
