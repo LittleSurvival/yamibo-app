@@ -115,7 +115,7 @@ class IThreadReaderScreen(
             openingImage = openingImage,
             offlineOnly = offlineOnly,
             offlinePage = offlinePage,
-            fromModeSwitch = fromModeSwitch,
+            modeSwitchRequest = this.takeIf { fromModeSwitch },
         )
     }
 

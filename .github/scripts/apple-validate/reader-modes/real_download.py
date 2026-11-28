@@ -73,10 +73,40 @@ class RealDownloadOrigin:
         self.thread.start()
         return self
 
-    def __exit__(self, *_):
+    def __exit__(self, exc_type, exc, traceback):
+        if exc_type is not None:
+            try:
+                self.capture_failure_positions()
+            except Exception as diagnostic:
+                print(f"Could not write failure reading positions: {diagnostic}", file=sys.stderr)
         self.http.shutdown()
         self.thread.join(timeout=5)
         self.http.server_close()
+
+    def capture_failure_positions(self):
+        report = {"threadId": 140, "phase": self.phase}
+        try:
+            db, = self.downloads_root().parent.parent.rglob("yamibo.db")
+            with closing(sqlite3.connect(db.as_uri() + "?mode=ro", uri=True, timeout=1)) as conn:
+                conn.row_factory = sqlite3.Row
+                conn.execute("BEGIN")  # Read all three sets at the same SQLite snapshot.
+                for name, sql in (
+                    ("text", """SELECT threadId, threadType, authorId, historyOrigin, page, postId, anchorPostId,
+                                anchorPostRatio, anchorBlockId, anchorBlockType, anchorBlockRatio, globalScrollY,
+                                viewportHeight, firstVisibleItemIndex, firstVisibleItemOffset, lastVisitTime
+                                FROM ReadingHistory WHERE threadId = ? ORDER BY lastVisitTime DESC"""),
+                    ("textAnchors", """SELECT threadType, authorId, origin, observedAt, floorAuthor, imageSource, occurrence
+                                       FROM ReaderTextAnchor WHERE threadId = ? ORDER BY observedAt DESC"""),
+                    ("images", """SELECT h.threadId, h.postId, h.pageIndex, h.totalPages, h.firstVisibleItemIndex,
+                                  h.firstVisibleItemOffset, h.lastVisitTime, a.observedAt, a.floorPid, a.sourceId,
+                                  a.occurrence, a.page AS forumPage, a.authorId AS scopeAuthor
+                                  FROM ImageReadingHistory h LEFT JOIN ReaderImageAnchor a ON a.historyPostId = h.postId
+                                  WHERE h.threadId = ? ORDER BY h.lastVisitTime DESC, a.observedAt DESC"""),
+                ):
+                    report[name] = [dict(row) for row in conn.execute(sql, (140,))]
+        except Exception as diagnostic:
+            report["read_error"] = str(diagnostic)
+        (self.output / "real-download-failure-positions.json").write_text(json.dumps(report, indent=2), encoding="utf8")
 
     def data(self, path, query, method):
         mod = query.get("mod", [""])[0]

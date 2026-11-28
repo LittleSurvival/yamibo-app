@@ -29,6 +29,7 @@ suspend fun ReadHistoryRepository.textReaderStart(
     openingImage: ReadHistoryRepository.ImageReadingHistory? = null,
     fallbackPage: ThreadPageDownloadKey? = null,
     stayOnSelectedPage: Boolean = false,
+    loadedPageForPost: ((PostId) -> ThreadPage?)? = null,
 ): TextReaderStart {
     val own = getPosition(tid, type, author)
     val recent = getLatestTextPosition(tid)
@@ -48,7 +49,8 @@ suspend fun ReadHistoryRepository.textReaderStart(
     if (author != null && floorAuthor != null && author != floorAuthor) return TextReaderStart(own, preserveUntilMoved = true)
     val pageHint = if (author == sourceScope) imageAnchor?.forumPage ?: recent?.page ?: 1
         else own?.takeIf { it.postId == pid }?.page ?: 1
-    val located = (if (offlineOnly) {
+    val visible = loadedPageForPost?.invoke(pid)?.takeIf { it.isValidThreadPage(tid, pid, authorId = author) }
+    val located = visible ?: (if (offlineOnly) {
         if (stayOnSelectedPage && fallbackPage != null) downloads.floorOnPage(fallbackPage, tid, author, pid)
         else downloads.locateDownloadedFloor(tid, author, pid, pageHint, fallbackPage)
     } else threads.locateReaderFloor(tid, pid, author, pageHint, downloads))
