@@ -96,6 +96,7 @@ import me.thenano.yamibo.yamibo_app.thread.detail.novel.components.ThreadLoading
 import me.thenano.yamibo.yamibo_app.thread.image.*
 import me.thenano.yamibo.yamibo_app.thread.reader.components.CommentBanner
 import me.thenano.yamibo.yamibo_app.thread.reader.components.ReaderCatalogPanel
+import me.thenano.yamibo.yamibo_app.thread.reader.components.ReaderDownloadSheet
 import me.thenano.yamibo.yamibo_app.thread.reader.components.ReaderOverlayMenu
 import me.thenano.yamibo.yamibo_app.thread.reader.components.novel.NovelReaderSettingsPanel
 import me.thenano.yamibo.yamibo_app.thread.reader.components.overlay.*

@@ -1,4 +1,4 @@
-package me.thenano.yamibo.yamibo_app.thread.reader
+package me.thenano.yamibo.yamibo_app.thread.reader.components
 
 import YamiboIcons
 import androidx.compose.foundation.layout.Arrangement

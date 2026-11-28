@@ -11,7 +11,7 @@ import me.thenano.yamibo.yamibo_app.navigation.LocalNavigator
 import me.thenano.yamibo.yamibo_app.profile.settings.ISettingsCategoryScreen
 import me.thenano.yamibo.yamibo_app.thread.detail.components.CatalogDownloadAction
 import me.thenano.yamibo.yamibo_app.thread.detail.components.CatalogDownloadActionSheet
-import me.thenano.yamibo.yamibo_app.thread.reader.ReaderDownloadSheet
+import me.thenano.yamibo.yamibo_app.thread.reader.components.ReaderDownloadSheet
 import me.thenano.yamibo.yamibo_app.task.AppTaskKey
 
 internal enum class FavoritePostAddDownloadSurface {
