@@ -8,9 +8,8 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -47,8 +46,6 @@ fun NovelReaderSettingsPanel(
     modifier: Modifier = Modifier
 ) {
     val colors = YamiboTheme.colors
-    val themeMode = appSettingsRepo.themeMode.state()
-    val themeScheme = appSettingsRepo.themeScheme.state()
 
     AnimatedVisibility(
         visible = visible,
@@ -70,80 +67,117 @@ fun NovelReaderSettingsPanel(
                         indication = null
                     ) {}
             ) {
-                Column(
+                LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
                         .navigationBarsPadding()
                         .padding(horizontal = 20.dp, vertical = 20.dp)
-                        .verticalScroll(rememberScrollState())
                 ) {
-                    // Typography Section
-                    SectionTitle(i18n("文字排版"), color = colors.textDark)
+                    item(key = "font-and-spacing") {
+                        Column {
+                            SectionTitle(i18n("文字排版"), color = colors.textDark)
 
-                    Spacer(Modifier.height(8.dp))
-                    NovelFontSizeSetting()
+                            Spacer(Modifier.height(8.dp))
+                            NovelFontSizeSetting()
 
-                    Spacer(Modifier.height(16.dp))
-                    NovelLineSpacingSetting()
+                            Spacer(Modifier.height(16.dp))
+                            NovelLineSpacingSetting()
 
-                    Spacer(Modifier.height(16.dp))
-                    ReaderFontSelectorSetting()
+                            Spacer(Modifier.height(16.dp))
+                            ReaderFontSelectorSetting()
 
-                    Spacer(Modifier.height(8.dp))
-                    NovelDefaultBoldSetting()
+                            Spacer(Modifier.height(8.dp))
+                        }
+                    }
 
-                    NovelDefaultItalicSetting()
+                    item(key = "text-style") {
+                        Column {
+                            NovelDefaultBoldSetting()
 
-                    NovelFirstLineIndentSetting()
+                            NovelDefaultItalicSetting()
 
-                    Spacer(Modifier.height(16.dp))
-                    NovelSystemBarsBackgroundSetting()
+                            NovelFirstLineIndentSetting()
 
-                    Spacer(Modifier.height(24.dp))
+                            Spacer(Modifier.height(16.dp))
+                        }
+                    }
 
-                    SectionTitle(i18n("簡繁轉換"), color = colors.textDark)
-                    NovelChineseConversionSetting()
+                    item(key = "system-bars") {
+                        Column {
+                            NovelSystemBarsBackgroundSetting()
 
-                    Spacer(Modifier.height(24.dp))
+                            Spacer(Modifier.height(24.dp))
+                        }
+                    }
 
-                    SectionTitle("${i18n("閱讀模式")} (beta測試)", color = colors.textDark)
-                    ThreadReaderModeSetting()
+                    item(key = "conversion") {
+                        Column {
+                            SectionTitle(i18n("簡繁轉換"), color = colors.textDark)
+                            NovelChineseConversionSetting()
 
-                    Spacer(Modifier.height(24.dp))
+                            Spacer(Modifier.height(24.dp))
+                        }
+                    }
 
-                    SectionTitle(i18n("觸控分區"), color = colors.textDark)
-                    ThreadReaderTouchZoneSetting()
+                    item(key = "mode") {
+                        Column {
+                            SectionTitle("${i18n("閱讀模式")} (beta測試)", color = colors.textDark)
+                            ThreadReaderModeSetting()
 
-                    Spacer(Modifier.height(12.dp))
-                    ThreadReaderReverseTouchZonesSetting()
+                            Spacer(Modifier.height(24.dp))
+                        }
+                    }
 
-                    Spacer(Modifier.height(24.dp))
+                    item(key = "touch-zones") {
+                        Column {
+                            SectionTitle(i18n("觸控分區"), color = colors.textDark)
+                            ThreadReaderTouchZoneSetting()
 
-                    SectionTitle(i18n("浮動跳轉按鈕"), color = colors.textDark)
-                    NovelScrollButtonDisplayModeSetting()
+                            Spacer(Modifier.height(12.dp))
+                            ThreadReaderReverseTouchZonesSetting()
 
-                    Spacer(Modifier.height(16.dp))
-                    NovelScrollButtonThresholdSetting()
+                            Spacer(Modifier.height(24.dp))
+                        }
+                    }
 
-                    Spacer(Modifier.height(16.dp))
-                    NovelScrollButtonJumpTargetSetting()
+                    item(key = "scroll-button") {
+                        Column {
+                            SectionTitle(i18n("浮動跳轉按鈕"), color = colors.textDark)
+                            NovelScrollButtonDisplayModeSetting()
 
-                    Spacer(Modifier.height(24.dp))
+                            Spacer(Modifier.height(16.dp))
+                            NovelScrollButtonThresholdSetting()
 
-                    SectionTitle(i18n("閱讀進度"), color = colors.textDark)
-                    NovelPageProgressHintSetting()
+                            Spacer(Modifier.height(16.dp))
+                            NovelScrollButtonJumpTargetSetting()
 
-                    Spacer(Modifier.height(24.dp))
+                            Spacer(Modifier.height(24.dp))
+                        }
+                    }
 
-                    // Theme Section
-                    ThemeSelectorContent(
-                        currentMode = themeMode,
-                        currentScheme = themeScheme,
-                        onModeChange = { appSettingsRepo.themeMode.setValue(it) },
-                        onSchemeChange = { appSettingsRepo.themeScheme.setValue(it) }
-                    )
+                    item(key = "reading-progress") {
+                        Column {
+                            SectionTitle(i18n("閱讀進度"), color = colors.textDark)
+                            NovelPageProgressHintSetting()
 
-                    Spacer(Modifier.height(16.dp))
+                            Spacer(Modifier.height(24.dp))
+                        }
+                    }
+
+                    item(key = "theme") {
+                        Column {
+                            val themeMode = appSettingsRepo.themeMode.state()
+                            val themeScheme = appSettingsRepo.themeScheme.state()
+                            ThemeSelectorContent(
+                                currentMode = themeMode,
+                                currentScheme = themeScheme,
+                                onModeChange = { appSettingsRepo.themeMode.setValue(it) },
+                                onSchemeChange = { appSettingsRepo.themeScheme.setValue(it) }
+                            )
+
+                            Spacer(Modifier.height(16.dp))
+                        }
+                    }
                 }
             }
         }

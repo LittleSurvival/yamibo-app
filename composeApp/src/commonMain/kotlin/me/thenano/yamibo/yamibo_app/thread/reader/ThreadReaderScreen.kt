@@ -202,6 +202,9 @@ private data class ReaderBodySegment(
     val imageOccurrence: Int? = null,
 )
 
+private const val SCROLL_POST_BODY = "scroll-post-body"
+private const val SCROLL_POST_FOOTER = "footer-scroll-section"
+
 private data class ReaderListEntry(
     val key: String,
     val contentType: String,
@@ -215,8 +218,10 @@ private data class ReaderListEntry(
     val imageOccurrence: Int? = null,
     val footerRenderOptions: PostFooterRenderOptions = PostFooterRenderOptions(),
 ) {
+    val separateHeavyFooter: Boolean
+        get() = anchorBlockId == SCROLL_POST_BODY || anchorBlockId == SCROLL_POST_FOOTER
     val isScrollAnchor: Boolean
-        get() = kind == ReaderEntryKind.WholePost ||
+        get() = kind == ReaderEntryKind.WholePost || anchorBlockId == SCROLL_POST_FOOTER ||
             kind == ReaderEntryKind.SegmentedBodyWithHeader ||
             kind == ReaderEntryKind.SegmentedBodyWithHeaderAndFooter ||
             kind == ReaderEntryKind.SegmentedBodyWithFooter ||
@@ -833,6 +838,8 @@ internal fun ThreadReaderScreen(
 
     var hasRestoredPosition by remember { mutableStateOf(false) }
     var pendingSavedPosition by remember(tid, targetPid) { mutableStateOf<ThreadReadingHistory?>(null) }
+    // A legacy whole-post ratio includes its footer. Keep its original geometry for this visit.
+    var restoredSectionLayouts by remember(tid, targetPid) { mutableStateOf(emptyMap<Long, Boolean>()) }
     var centeredEntry by remember(tid, targetPid) { mutableStateOf<Pair<String, Float>?>(null) }
     var hasResolvedInitialHistoryLookup by remember(tid, targetPid) { mutableStateOf(targetPid != null) }
     var imageGeometryPriorityPostId by remember(tid, targetPid) {
@@ -1239,6 +1246,8 @@ internal fun ThreadReaderScreen(
         preparedBodies,
         pageByPid,
         isNovelThread,
+        isSinglePageMode,
+        restoredSectionLayouts,
         showRegularFirstPostTagBanner,
         showNovelFirstPostTagBanner,
     ) {
@@ -1249,15 +1258,30 @@ internal fun ThreadReaderScreen(
                 val segmentedBody = preparedBodies.getValue(postId).segments
 
                 if (segmentedBody.isNullOrEmpty()) {
+                    val separateHeavyFooter = !isSinglePageMode && post.floor > 1 && post.images.isEmpty() &&
+                        (restoredSectionLayouts[postId] ?: (post.rateBlock.rates.size >= 10))
                     add(
                         ReaderListEntry(
                             key = "post-$postId",
                             contentType = "thread_post",
                             kind = ReaderEntryKind.WholePost,
+                            anchorBlockId = if (separateHeavyFooter) SCROLL_POST_BODY else null,
                             post = post,
                             postIndex = index,
                         )
                     )
+                    if (separateHeavyFooter) {
+                        add(
+                            ReaderListEntry(
+                                key = "post-$postId-footer",
+                                contentType = "thread_post_footer",
+                                kind = ReaderEntryKind.SegmentedFooter,
+                                post = post,
+                                postIndex = index,
+                                anchorBlockId = SCROLL_POST_FOOTER,
+                            )
+                        )
+                    }
                 } else {
                     add(
                         ReaderListEntry(
@@ -2272,10 +2296,10 @@ internal fun ThreadReaderScreen(
             imageOccurrence = centerReaderEntry.imageOccurrence,
             postTitle = centerPost.title,
             anchorPostId = centerPost.pid.value.toLong(),
-            anchorPostRatio = if (centerReaderEntry.kind == ReaderEntryKind.WholePost) entryRatio else null,
+            anchorPostRatio = if (centerReaderEntry.kind == ReaderEntryKind.WholePost && !centerReaderEntry.separateHeavyFooter) entryRatio else null,
             anchorBlockId = centerReaderEntry.anchorBlockId,
             anchorBlockType = centerReaderEntry.anchorBlockType,
-            anchorBlockRatio = if (centerReaderEntry.kind.isSegmentedBodyLike()) entryRatio else null,
+            anchorBlockRatio = if (centerReaderEntry.kind.isSegmentedBodyLike() || centerReaderEntry.separateHeavyFooter) entryRatio else null,
             globalScrollY = null,
             viewportHeight = (viewportBottom - viewportTop),
             firstVisibleItemIndex = firstVisible,
@@ -3129,6 +3153,20 @@ internal fun ThreadReaderScreen(
 
     fun TextReaderStart.pageNumber() = snapshot?.let { it.pageNav?.currentPage ?: 1 } ?: history?.page ?: initialPage
 
+    fun stageSavedPosition(history: ThreadReadingHistory?) {
+        if (history != null && history.imageSource == null) {
+            val split = when (history.anchorBlockId) {
+                SCROLL_POST_BODY, SCROLL_POST_FOOTER -> true
+                null -> false
+                else -> null
+            }
+            if (split != null && restoredSectionLayouts[history.anchorPostId] != split) {
+                restoredSectionLayouts = restoredSectionLayouts + (history.anchorPostId to split)
+            }
+        }
+        pendingSavedPosition = history
+    }
+
     suspend fun readOpeningPage(reuseLoadedPages: Boolean): Pair<TextReaderStart, YamiboResult<ThreadPage>> {
         val visiblePages = if (reuseLoadedPages) loadedPageSnapshots else emptyMap()
         val start = if (targetPid == null) {
@@ -3189,7 +3227,7 @@ internal fun ThreadReaderScreen(
             val saved = start.history
             if (saved != null) {
                 pendingTargetPid = null
-                if (!reuseLoadedPages) pendingSavedPosition = saved
+                if (!reuseLoadedPages) stageSavedPosition(saved)
                 imageGeometryPriorityPostId = saved.anchorPostId
                 saved.threadCover?.let { cover ->
                     coverUrl = canonicalCover?.resolvedUrl ?: cover
@@ -3200,7 +3238,7 @@ internal fun ThreadReaderScreen(
             opened = loadPage(start.pageNumber(), initialResult = result, openingProjection = projection)
             if (reuseLoadedPages && (opened || state is ReaderState.Error)) {
                 preserveRestoredProgress = start.preserveUntilMoved
-                pendingSavedPosition = saved
+                stageSavedPosition(saved)
             }
             if (saved == null && targetPid == null && opened) {
                 hasRestoredPosition = true
@@ -3247,6 +3285,11 @@ internal fun ThreadReaderScreen(
         }
     }
 
+    // The scroll list can have an extra footer before this position. Keep the old row's key
+    // across the mode change instead of interpreting its index in the new list.
+    val priorScrollItemKey = remember(threadReaderMode) {
+        listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == listState.firstVisibleItemIndex }?.key as? String
+    }
     LaunchedEffect(threadReaderMode, state, readerEntries) {
         val previousMode = previousThreadReaderMode
         if (previousMode == threadReaderMode) return@LaunchedEffect
@@ -3256,10 +3299,14 @@ internal fun ThreadReaderScreen(
         }
 
         if (previousMode == ThreadReaderMode.SCROLL_CONTINUOUS && isSinglePageMode) {
-            setSinglePageEntryIndex(listState.firstVisibleItemIndex)
+            val source = readerEntries.indexOfFirst { it.key == priorScrollItemKey }.takeIf { it >= 0 }
+                ?: readerEntries.indexOfFirst { it.key == priorScrollItemKey?.removeSuffix("-footer") }.takeIf { it >= 0 }
+            setSinglePageEntryIndex(source ?: listState.firstVisibleItemIndex)
             listState.scrollToItem(0)
         } else if (previousMode != ThreadReaderMode.SCROLL_CONTINUOUS && !isSinglePageMode) {
-            val sourceIndex = singlePageEntries.getOrNull(singlePageModelIndex)?.sourceEntryIndex ?: 0
+            val page = singlePageEntries.getOrNull(singlePageModelIndex)
+            val sourceIndex = readerEntries.indexOfFirst { it.key == page?.sourceEntry?.key }.takeIf { it >= 0 }
+                ?: page?.sourceEntryIndex ?: 0
             listState.scrollToItem(sourceIndex)
         }
 
@@ -3558,6 +3605,7 @@ internal fun ThreadReaderScreen(
         }
     }
 
+    val canPreloadAdjacentPages = totalPages > 1 && allowAdjacentPagePreload
     LaunchedEffect(
         listState,
         state,
@@ -3569,9 +3617,9 @@ internal fun ThreadReaderScreen(
         isLoadingNextPage,
         loadedPages,
         totalPages,
-        allowAdjacentPagePreload,
+        canPreloadAdjacentPages,
     ) {
-        if (!allowAdjacentPagePreload || totalPages <= 1 || state != ReaderState.Success || posts.isEmpty() || readerEntries.isEmpty()) return@LaunchedEffect
+        if (!canPreloadAdjacentPages || state != ReaderState.Success || posts.isEmpty() || readerEntries.isEmpty()) return@LaunchedEffect
 
         val pagePreloadThreshold = 5
 
@@ -3847,7 +3895,7 @@ internal fun ThreadReaderScreen(
                                     (finalChange.position - down.position).getDistance() > viewConfiguration.touchSlop
                                 ) {
                                     exceededTouchSlop = true
-                                        preserveRestoredProgress = false
+                                    preserveRestoredProgress = false
                                 }
                                 readerScrollSession.scheduleIdle(scope) {
                                     if (!exceededTouchSlop) {
@@ -4353,6 +4401,8 @@ internal fun ThreadReaderScreen(
                                             ReaderEntryKind.WholePost -> {
                                                 PostRenderer(
                                                     post = post,
+                                                    showFooter = !entry.separateHeavyFooter,
+                                                    bottomPadding = if (entry.separateHeavyFooter) 0.dp else 8.dp,
                                                     modifier = Modifier.onSizeChanged { size ->
                                                         progressCoordinator.updateItemHeight(entry.key, size.height)
                                                     },
@@ -4703,6 +4753,7 @@ internal fun ThreadReaderScreen(
                                                         footerRenderOptions = entry.footerRenderOptions,
                                                         linkContext = htmlLinkContext,
                                                         verticalPadding = 0.dp,
+                                                        bottomPadding = if (entry.separateHeavyFooter) 8.dp else 0.dp,
                                                         onVote = { optionIds -> handleVote(optionIds) },
                                                         onLoadRateOptions = {
                                                             threadRepository.fetchRatePopoutPage(
@@ -4961,7 +5012,7 @@ internal fun ThreadReaderScreen(
                             )
                         }
                     ReaderPageProgressHint(
-                        progress = singlePageHintProgress,
+                        progress = { singlePageHintProgress },
                         visible = isSinglePageMode &&
                             !showMenu &&
                             !showSettingsPanel &&
@@ -5826,16 +5877,17 @@ private fun ThreadReaderProgressOverlay(
             currentProgress = stabilizer.update(sample, direction)
         }
     }
-    val progress = currentProgress ?: return
+    val hasProgress by remember { derivedStateOf { currentProgress != null } }
+    if (!hasProgress) return
 
     ReaderPageProgressSlideBar(
-        progress = progress,
+        fraction = { currentProgress?.fraction ?: 0f },
         readerScrollState = listState,
         modifier = slideBarModifier,
         onSeek = onSeek,
     )
     ReaderPageProgressHint(
-        progress = progress,
+        progress = { currentProgress },
         visible = showHint,
         modifier = hintModifier,
     )

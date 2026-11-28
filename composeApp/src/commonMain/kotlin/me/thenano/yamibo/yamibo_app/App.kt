@@ -212,7 +212,8 @@ fun App() {
     val stack = navigator.stack
     val poppingIdx by navigator.poppingIndex
     val duration = 250
-    var completedPushTopId by remember { mutableStateOf(stack.lastOrNull()?.id) }
+    val pushSequence = navigator.pushSequence
+    var completedPushSequence by remember(navigator) { mutableLongStateOf(pushSequence) }
     val signReminder = rememberSaveable(
         saver = Saver<LaunchSignReminderState, Boolean>(
             save = { it.suppressed },
@@ -279,21 +280,15 @@ fun App() {
                     priority = -1,
                 )
                 val topIndex = stack.lastIndex
-                val topId = stack.lastOrNull()?.id
                 val renderPreviousForPush =
                     navigator.lastAction == NavAction.Push &&
                         topIndex > 0 &&
-                        completedPushTopId != topId
+                        completedPushSequence != pushSequence
                 stack.forEachIndexed { index, navigatable ->
                     val isPopping = index == poppingIdx
                     val isTop = index == stack.lastIndex
                     val active = index == if (poppingIdx >= 0) poppingIdx - 1 else topIndex
-                    val isNewPush =
-                        navigator.lastAction == NavAction.Push &&
-                            isTop &&
-                            !isPopping &&
-                            topIndex > 0 &&
-                            completedPushTopId != navigatable.id
+                    val isNewPush = renderPreviousForPush && isTop && !isPopping
                     val shouldDraw =
                         isTop ||
                             isPopping ||
@@ -343,9 +338,9 @@ fun App() {
                                 navigator.completePop()
                             }
                         }
-                        if (isNewPush && visibleState.isIdle && visibleState.currentState && completedPushTopId != navigatable.id) {
-                            LaunchedEffect(navigatable.id) {
-                                completedPushTopId = navigatable.id
+                        if (isNewPush && visibleState.isIdle && visibleState.currentState) {
+                            LaunchedEffect(pushSequence) {
+                                completedPushSequence = pushSequence
                             }
                         }
                     }

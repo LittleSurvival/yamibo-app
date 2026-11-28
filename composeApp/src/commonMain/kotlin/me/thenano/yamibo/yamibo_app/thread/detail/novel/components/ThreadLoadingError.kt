@@ -3,18 +3,19 @@ package me.thenano.yamibo.yamibo_app.thread.detail.novel.components
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import me.thenano.yamibo.yamibo_app.components.feedback.YamiboDetailedErrorContent
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
@@ -35,50 +36,24 @@ internal fun ThreadLoadingSkeleton() {
             label = "thread_shimmer_x"
         )
 
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().background(colors.creamBackground),
-            contentPadding = PaddingValues(16.dp),
+        Column(
+            modifier = Modifier.fillMaxSize().background(colors.creamBackground)
+                .verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            /** Header placeholder */
-            item {
-                Box(
-                    modifier =
-                        Modifier.fillMaxWidth()
-                            .height(180.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .shimmer(shimmerX, shimmerColor)
-                )
-            }
-
-            /** Content preview placeholder */
-            item {
-                Box(
-                    modifier =
-                        Modifier.fillMaxWidth()
-                            .height(120.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .shimmer(shimmerX, shimmerColor)
-                )
-            }
-
-            /** Page section placeholders */
-            items(4) {
-                Box(
-                    modifier =
-                        Modifier.fillMaxWidth()
-                            .height(48.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .shimmer(shimmerX, shimmerColor)
-                )
+            Spacer(Modifier.fillMaxWidth().height(180.dp).shimmer(shimmerX, shimmerColor, 20.dp))
+            Spacer(Modifier.fillMaxWidth().height(120.dp).shimmer(shimmerX, shimmerColor, 16.dp))
+            repeat(4) {
+                Spacer(Modifier.fillMaxWidth().height(48.dp).shimmer(shimmerX, shimmerColor, 12.dp))
             }
         }
     }
 }
 
 /** Shimmer modifier */
-private fun Modifier.shimmer(translateX: State<Float>, baseColor: Color): Modifier =
+private fun Modifier.shimmer(translateX: State<Float>, baseColor: Color, radius: Dp): Modifier =
     drawWithCache {
+        val corner = CornerRadius(radius.toPx())
         val brush =
             Brush.linearGradient(
                 colors =
@@ -93,8 +68,7 @@ private fun Modifier.shimmer(translateX: State<Float>, baseColor: Color): Modifi
         onDrawBehind {
             val x = translateX.value
             translate(left = x) {
-                // Move the gradient while keeping the rectangle inside the original clip.
-                drawRect(brush, topLeft = Offset(-x, 0f), size = size)
+                drawRoundRect(brush, topLeft = Offset(-x, 0f), size = size, cornerRadius = corner)
             }
         }
     }

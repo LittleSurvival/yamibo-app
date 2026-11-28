@@ -12,6 +12,17 @@ DELETE FROM ReaderFloorPage WHERE accessScope = ? AND threadId = ? AND authorSco
 rememberFloor:
 INSERT OR REPLACE INTO ReaderFloorPage(accessScope, threadId, authorScope, pid, page) VALUES (?, ?, ?, ?, ?);
 
+rememberEightFloors:
+INSERT OR REPLACE INTO ReaderFloorPage(accessScope, threadId, authorScope, page, pid)
+VALUES (:scope, :thread, :author, :page, :pid1),
+       (:scope, :thread, :author, :page, :pid2),
+       (:scope, :thread, :author, :page, :pid3),
+       (:scope, :thread, :author, :page, :pid4),
+       (:scope, :thread, :author, :page, :pid5),
+       (:scope, :thread, :author, :page, :pid6),
+       (:scope, :thread, :author, :page, :pid7),
+       (:scope, :thread, :author, :page, :pid8);
+
 clearAll:
 DELETE FROM ReaderFloorPage;
 

@@ -87,9 +87,17 @@ internal class ThreadPageReads(factory: DiskCacheFactory, private val cookies: C
     private fun store(tid: ThreadId, author: UserId?, page: Int, scope: String, value: ThreadPage) {
         val thread = tid.value.toLong()
         val authorScope = author?.value?.toLong() ?: 0L
+        val pageNumber = page.toLong()
         cache.set(key(tid, author, page, scope), value) {
-            floors.clearPage(scope, thread, authorScope, page.toLong())
-            value.posts.forEach { floors.rememberFloor(scope, thread, authorScope, it.pid.value.toLong(), page.toLong()) }
+            floors.clearPage(scope, thread, authorScope, pageNumber)
+            val posts = value.posts.iterator()
+            fun nextPid() = posts.next().pid.value.toLong()
+            repeat(value.posts.size / 8) {
+                floors.rememberEightFloors(scope, thread, authorScope, pageNumber,
+                    nextPid(), nextPid(), nextPid(), nextPid(),
+                    nextPid(), nextPid(), nextPid(), nextPid())
+            }
+            while (posts.hasNext()) floors.rememberFloor(scope, thread, authorScope, nextPid(), pageNumber)
         }
     }
 

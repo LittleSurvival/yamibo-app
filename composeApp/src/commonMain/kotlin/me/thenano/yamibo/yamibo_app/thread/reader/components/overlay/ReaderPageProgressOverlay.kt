@@ -34,6 +34,7 @@ import kotlinx.coroutines.channels.Channel
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
@@ -48,18 +49,17 @@ data class ReaderPageProgress(
 
 @Composable
 fun ReaderPageProgressSlideBar(
-    progress: ReaderPageProgress?,
+    fraction: () -> Float,
     readerScrollState: ScrollableState,
     modifier: Modifier = Modifier,
     onSeek: suspend (Float) -> Unit,
     thumbColor: androidx.compose.ui.graphics.Color? = null,
 ) {
     val colors = YamiboTheme.colors
-    val value = progress?.fraction?.coerceIn(0f, 1f) ?: return
     val requests = remember { Channel<Float>(Channel.CONFLATED) }
     val latestSeek by rememberUpdatedState(onSeek)
     var dragFraction by remember { mutableStateOf<Float?>(null) }
-    val latestFraction by rememberUpdatedState(value)
+    val latestFraction by rememberUpdatedState(fraction)
     val glowAlpha by animateFloatAsState(
         targetValue = if (dragFraction != null) 1f else 0f,
         animationSpec = tween(180),
@@ -101,7 +101,7 @@ fun ReaderPageProgressSlideBar(
                     if (cancelled == true) return@awaitEachGesture
                     try {
                         // Arm without seeking; only movement after the long press changes progress.
-                        dragFraction = latestFraction
+                        dragFraction = latestFraction().coerceIn(0f, 1f)
                         if (drag(down.id) { change ->
                             change.consume()
                             dragFraction = readerTrackFraction(change.position.y, size.height.toFloat(), thumbHeightPx)
@@ -129,7 +129,9 @@ fun ReaderPageProgressSlideBar(
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .offset(y = travel * (dragFraction ?: value))
+                .offset {
+                    IntOffset(0, (travel * (dragFraction ?: fraction()).coerceIn(0f, 1f)).roundToPx())
+                }
                 .width((3 + 2 * glowAlpha).dp)
                 .height(thumbHeight)
                 .background(
@@ -145,16 +147,20 @@ fun ReaderPageProgressSlideBar(
 
 @Composable
 fun ReaderPageProgressHint(
-    progress: ReaderPageProgress?,
+    progress: () -> ReaderPageProgress?,
     visible: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val colors = YamiboTheme.colors
-    val value = progress?.fraction?.coerceIn(0f, 1f) ?: return
     if (!visible) return
+    val colors = YamiboTheme.colors
+    val label by remember(progress) {
+        derivedStateOf {
+            progress()?.let { "${it.page}/${it.totalPages} ${(it.fraction.coerceIn(0f, 1f) * 100f).roundToInt()}%" }
+        }
+    }
 
     Text(
-        text = "${progress.page}/${progress.totalPages} ${(value * 100f).roundToInt()}%",
+        text = label ?: return,
         color = colors.textDark.copy(alpha = 0.46f),
         fontSize = 9.sp,
         lineHeight = 10.sp,

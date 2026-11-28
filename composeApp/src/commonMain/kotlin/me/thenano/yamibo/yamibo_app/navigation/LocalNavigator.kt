@@ -31,6 +31,8 @@ class ComposableNavigator private constructor(
     val stack = mutableStateListOf<Navigatable>()
     private val snapshotStack = mutableListOf<RestorableScreenSnapshot?>()
     var lastAction by mutableStateOf(initialLastAction)
+    var pushSequence by mutableLongStateOf(0L)
+        private set
     lateinit var stateHolder: SaveableStateHolder
     val backHandlers = mutableListOf<() -> Boolean>()
 
@@ -56,6 +58,7 @@ class ComposableNavigator private constructor(
 
         removeExistingScreen(navigatable.id)
         lastAction = NavAction.Push
+        pushSequence++
         stack.add(navigatable)
         snapshotStack.add(navigatable.toRestoreSnapshotOrNull())
     }

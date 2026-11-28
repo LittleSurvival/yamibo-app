@@ -108,6 +108,7 @@ fun PostRenderer(
     totalViews: Int? = null,
     totalReplies: Int? = null,
     linkContext: InAppLinkContext = InAppLinkContext(),
+    bottomPadding: Dp = verticalPadding,
 ) {
     DebugRecomposeProbe("PostRenderer", "${post.pid.value}#${post.floor}")
 
@@ -161,7 +162,7 @@ fun PostRenderer(
             Column(
                 modifier = Modifier
                     .fillMaxWidth(contentWidthFraction)
-                    .padding(horizontal = 16.dp, vertical = verticalPadding)
+                    .padding(start = 16.dp, end = 16.dp, top = verticalPadding, bottom = bottomPadding)
             ) {
                 HtmlBlocksRenderer(
                     blocks = bodyBlocks,
@@ -189,7 +190,7 @@ fun PostRenderer(
             .then(heightTrackingModifier),
         contentAlignment = Alignment.TopCenter
     ) {
-        Column(modifier = Modifier.fillMaxWidth(contentWidthFraction).padding(horizontal = 16.dp, vertical = verticalPadding)) {
+        Column(modifier = Modifier.fillMaxWidth(contentWidthFraction).padding(start = 16.dp, end = 16.dp, top = verticalPadding, bottom = bottomPadding)) {
             if (showHeader) {
                 // Title
                 if (post.floor == 1 && !convertedThreadTitle.isNullOrEmpty()) {
