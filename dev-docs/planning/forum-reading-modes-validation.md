@@ -75,6 +75,10 @@ Android 產品 `:composeApp:assembleReleaseRun` 建置成功。SQLDelight 生成
 
 一筆 QA 原型冷啟動在進帖前的首頁解析發生 Ksoup `ClassCastException`，另行保留堆疊。該次未產生 Reader 捲動樣本，原因仍待確認。
 
+**漫畫操作列崩潰。** 11 月 29 日 01:15，Android 模擬器上的 `0.1.0-run` 在 `MangaReaderOverlay` 重組時讀取主題，Compose 的 `produceState` 把協程 lambda 轉成 `MutableState` 時拋出 `ClassCastException`。改由 App 收集配色設定，操作列與其他元件只讀共用調色盤。用實際操作列比對六種畫面，新舊版逐像素相同；面板展開時切換預設色與「午夜暮色」可即時換色。舊版在這組操作也能通過，確切觸發手勢仍未重現。
+
+Android 原地升級實測同一本五頁離線漫畫，修正版（`7d262684`）首開接續舊版第 5 頁。預設主題下開關操作列與設定、翻至第 4 頁，再改用「傳統黑」開啟仍在第 4 頁；繼續翻至第 3 頁，離開重開仍在第 3 頁。
+
 ## 智能漫畫手動驗收
 
 已核對《DOUBLE HELIX BLOSSOM》跨 4 頁的 61 話、《BIG LOVE》合集中 34 張圖，以及《反差女孩们的百合故事》從兩個入口整理的 16 帖與升降序。[第 33 話](https://bbs.yamibo.com/thread-579225-1-1.html) · [紙本附錄](https://bbs.yamibo.com/thread-578239-1-1.html)

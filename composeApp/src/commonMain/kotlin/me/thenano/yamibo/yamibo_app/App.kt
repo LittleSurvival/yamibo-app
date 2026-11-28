@@ -48,6 +48,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import me.thenano.yamibo.yamibo_app.components.font.getFontFamily
+import me.thenano.yamibo.yamibo_app.components.theme.LocalYamiboColors
+import me.thenano.yamibo.yamibo_app.components.theme.resolveYamiboColors
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboSnackbarHost
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.components.systembars.SystemBarsScope
@@ -265,8 +267,11 @@ fun App() {
 
     AppLocaleProvider(appLanguage) {
         val rootTextStyle = LocalTextStyle.current
+        val scheme = appSettingsRepository.themeScheme.state()
+        val colors = remember(scheme) { resolveYamiboColors(scheme.toScheme()) }
         CompositionLocalProvider(
             LocalTextStyle provides rootTextStyle.copy(fontFamily = appFontFamily),
+            LocalYamiboColors provides colors,
         ) {
             Surface(
                 modifier = Modifier.fillMaxSize(),

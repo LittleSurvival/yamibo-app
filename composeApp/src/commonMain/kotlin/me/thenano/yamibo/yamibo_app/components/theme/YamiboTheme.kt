@@ -2,10 +2,10 @@ package me.thenano.yamibo.yamibo_app.components.theme
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.graphics.Color
-import me.thenano.yamibo.yamibo_app.LocalAppSettingsRepository
 import me.thenano.yamibo.yamibo_app.repository.scheme.YamiboColorScheme
-import me.thenano.yamibo.yamibo_app.util.state
 
 /** Compose-layer color wrapper. Converts repo Long hex → Compose Color. */
 @Immutable
@@ -35,84 +35,87 @@ data class YamiboColors(
     val readerImageErrorLightSurface: Color = Color(0xFFF3F3F3),
 )
 
+internal val LocalYamiboColors = compositionLocalOf { resolveYamiboColors(YamiboColorScheme.Default) }
+
 /** Central theme object. Access colors via `YamiboTheme.colors`. */
 object YamiboTheme {
     val colors: YamiboColors
         @Composable
-        get() {
-            val schemeEnum = LocalAppSettingsRepository.current.themeScheme.state()
-            val scheme = schemeEnum.toScheme()
-            val brownDeep = Color(scheme.brownDeep)
-            val creamBackground = Color(scheme.creamBackground)
-            val creamSurface = Color(scheme.creamSurface)
-            val brownPrimary = Color(scheme.brownPrimary).ensureContrastOn(creamSurface, 3.0)
-            val textDark = Color(scheme.textDark)
-                .ensureContrastOn(creamBackground, 4.5)
-                .ensureContrastOn(creamSurface, 4.5)
-            val navBarBg = Color(scheme.navBarBg)
-            val isDefault = scheme === YamiboColorScheme.Default
-            
-            return YamiboColors(
-                brownDeep = brownDeep,
-                brownPrimary = brownPrimary,
-                brownLight = Color(scheme.brownLight),
-                creamBackground = creamBackground,
-                creamSurface = creamSurface,
-                orangeAccent = Color(scheme.orangeAccent),
-                textDark = textDark,
-                textStrong = if (isDefault) {
-                    brownDeep
-                } else {
-                    textDark
-                },
-                textOnBackground = if (isDefault) {
-                    brownDeep
-                } else {
-                    textDark.bestReadableOn(creamBackground)
-                },
-                textOnSurface = if (isDefault) {
-                    brownDeep
-                } else {
-                    textDark.bestReadableOn(creamSurface)
-                },
-                textOnTint = if (isDefault) {
-                    brownDeep
-                } else {
-                    textDark
-                },
-                textOnDeep = if (isDefault) {
-                    creamBackground
-                } else {
-                    textDark.bestReadableOn(brownDeep)
-                },
-                textOnDeepHigh = if (isDefault) {
-                    Color.White
-                } else {
-                    textDark.bestReadableOn(brownDeep)
-                },
-                textOnPrimary = if (isDefault) {
-                    Color.White
-                } else {
-                    textDark.bestReadableOn(brownPrimary)
-                },
-                textOnAccent = if (isDefault) {
-                    Color.White
-                } else {
-                    textDark.bestReadableOn(Color(scheme.orangeAccent))
-                },
-                htmlTextDark = Color(scheme.htmlTextDark).ensureContrastOn(creamBackground, 4.5),
-                redAccent = if (isDefault) {
-                    Color(scheme.redAccent)
-                } else {
-                    Color(scheme.redAccent).ensureContrastOn(creamSurface, 3.0)
-                },
-                pinnedBg = Color(scheme.pinnedBg),
-                announceBg = Color(scheme.announceBg),
-                navBarBg = navBarBg,
-                navBarIconSelected = Color(scheme.navBarIconSelected).ensureContrastOn(navBarBg, 3.0),
-                navBarIconUnselected = Color(scheme.navBarIconUnselected),
-            )
-        }
+        @ReadOnlyComposable
+        get() = LocalYamiboColors.current
+}
+
+internal fun resolveYamiboColors(scheme: YamiboColorScheme): YamiboColors {
+    val brownDeep = Color(scheme.brownDeep)
+    val creamBackground = Color(scheme.creamBackground)
+    val creamSurface = Color(scheme.creamSurface)
+    val brownPrimary = Color(scheme.brownPrimary).ensureContrastOn(creamSurface, 3.0)
+    val textDark = Color(scheme.textDark)
+        .ensureContrastOn(creamBackground, 4.5)
+        .ensureContrastOn(creamSurface, 4.5)
+    val navBarBg = Color(scheme.navBarBg)
+    val isDefault = scheme === YamiboColorScheme.Default
+
+    return YamiboColors(
+        brownDeep = brownDeep,
+        brownPrimary = brownPrimary,
+        brownLight = Color(scheme.brownLight),
+        creamBackground = creamBackground,
+        creamSurface = creamSurface,
+        orangeAccent = Color(scheme.orangeAccent),
+        textDark = textDark,
+        textStrong = if (isDefault) {
+            brownDeep
+        } else {
+            textDark
+        },
+        textOnBackground = if (isDefault) {
+            brownDeep
+        } else {
+            textDark.bestReadableOn(creamBackground)
+        },
+        textOnSurface = if (isDefault) {
+            brownDeep
+        } else {
+            textDark.bestReadableOn(creamSurface)
+        },
+        textOnTint = if (isDefault) {
+            brownDeep
+        } else {
+            textDark
+        },
+        textOnDeep = if (isDefault) {
+            creamBackground
+        } else {
+            textDark.bestReadableOn(brownDeep)
+        },
+        textOnDeepHigh = if (isDefault) {
+            Color.White
+        } else {
+            textDark.bestReadableOn(brownDeep)
+        },
+        textOnPrimary = if (isDefault) {
+            Color.White
+        } else {
+            textDark.bestReadableOn(brownPrimary)
+        },
+        textOnAccent = if (isDefault) {
+            Color.White
+        } else {
+            textDark.bestReadableOn(Color(scheme.orangeAccent))
+        },
+        htmlTextDark = Color(scheme.htmlTextDark).ensureContrastOn(creamBackground, 4.5),
+        redAccent = if (isDefault) {
+            Color(scheme.redAccent)
+        } else {
+            Color(scheme.redAccent).ensureContrastOn(creamSurface, 3.0)
+        },
+        pinnedBg = Color(scheme.pinnedBg),
+        announceBg = Color(scheme.announceBg),
+        navBarBg = navBarBg,
+        navBarIconSelected = Color(scheme.navBarIconSelected).ensureContrastOn(navBarBg, 3.0),
+        navBarIconUnselected = Color(scheme.navBarIconUnselected),
+    )
 }
 
 private fun Color.bestReadableOn(background: Color): Color {
