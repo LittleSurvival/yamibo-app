@@ -687,8 +687,9 @@ internal fun ThreadReaderScreen(
     openingImage: ReadHistoryRepository.ImageReadingHistory? = null,
     offlineOnly: Boolean = false,
     offlinePage: ThreadPageDownloadKey? = null,
-    fromModeSwitch: Boolean = false,
+    modeSwitchRequest: IThreadReaderScreen? = null,
 ) {
+    val fromModeSwitch = modeSwitchRequest != null
     val errorMessages = LocalForumErrorMessageResolver.current
     DebugRecomposeProbe("ThreadReaderScreen", tid.value.toString())
     val colors = YamiboTheme.colors
@@ -773,7 +774,8 @@ internal fun ThreadReaderScreen(
     var pageByPid by remember { mutableStateOf<Map<Long, Int>>(emptyMap()) }
     var pageIndexBounds by remember { mutableStateOf<Map<Int, IntRange>>(emptyMap()) }
     var threadInfo by remember { mutableStateOf<ThreadInfo?>(null) }
-    var loadedPages by remember { mutableStateOf(setOf<Int>()) }
+    var loadedPageSnapshots by remember { mutableStateOf(emptyMap<Int, ThreadPage>()) }
+    val loadedPages by remember { derivedStateOf { loadedPageSnapshots.keys } }
     var currentPageFetching by remember { mutableStateOf(1) }
     var totalPages by remember { mutableStateOf(1) }
     var isLoadingNextPage by remember { mutableStateOf(false) }
@@ -2817,7 +2819,7 @@ internal fun ThreadReaderScreen(
         suspend fun updatePage(result: ThreadPage) {
             if (!prepareReaderPosts(page, result.posts, openingProjection)) return
             totalPages = result.pageNav?.totalPages ?: 1
-            loadedPages = loadedPages + page
+            loadedPageSnapshots = loadedPageSnapshots + (page to result)
             failedAutoLoadPages.remove(page)
             threadInfo = result.thread
             markPageLoadSucceeded()
@@ -3129,10 +3131,12 @@ internal fun ThreadReaderScreen(
 
     fun TextReaderStart.pageNumber() = snapshot?.let { it.pageNav?.currentPage ?: 1 } ?: history?.page ?: initialPage
 
-    suspend fun readOpeningPage(): Pair<TextReaderStart, YamiboResult<ThreadPage>> {
+    suspend fun readOpeningPage(reuseLoadedPages: Boolean): Pair<TextReaderStart, YamiboResult<ThreadPage>> {
+        val visiblePages = if (reuseLoadedPages) loadedPageSnapshots else emptyMap()
         val start = if (targetPid == null) {
             val direct = readHistoryRepo.textReaderStart(tid, threadType, authorId, threadRepository, downloadRepository,
-                offlineOnly, openingImage, fallbackPage = offlinePage, stayOnSelectedPage = !fromModeSwitch)
+                offlineOnly, openingImage, fallbackPage = offlinePage, stayOnSelectedPage = !fromModeSwitch,
+                loadedPageForPost = if (reuseLoadedPages) { pid -> visiblePages[pageByPid[pid.value.toLong()]] } else null)
             if (fromModeSwitch || offlinePage == null || direct.history?.page == offlinePage.page) direct
             else direct.copy(history = null)
         } else {
@@ -3157,14 +3161,23 @@ internal fun ThreadReaderScreen(
             }
             TextReaderStart(history, snapshot)
         }
-        return start to readPage(start.pageNumber(), start.snapshot)
+        val number = start.pageNumber()
+        return start to readPage(number, start.snapshot ?: visiblePages[number])
     }
 
-    suspend fun openReader() {
+    suspend fun openReader(reuseLoadedPages: Boolean = false) {
+        val previouslyWritable = canPersistReadingState
+        val previousPending = pendingSavedPosition
+        var opened = false
         try {
+            if (reuseLoadedPages) {
+                centeredEntry = null
+                pendingSavedPosition = null
+                canPersistReadingState = false
+            }
             val firstPage = loadedPostsByPage.isEmpty()
             val (start, result, projection) = withContext(Dispatchers.Default) {
-                val (opening, response) = readOpeningPage()
+                val (opening, response) = readOpeningPage(reuseLoadedPages)
                 val prepared = if (firstPage && response is YamiboResult.Success) {
                     chineseConversionRepository.projectReaderPosts(
                         mapOf(opening.pageNumber() to response.value.posts),
@@ -3174,11 +3187,11 @@ internal fun ThreadReaderScreen(
                 } else null
                 Triple(opening, response, prepared)
             }
-            preserveRestoredProgress = start.preserveUntilMoved
+            if (!reuseLoadedPages) preserveRestoredProgress = start.preserveUntilMoved
             val saved = start.history
             if (saved != null) {
                 pendingTargetPid = null
-                pendingSavedPosition = saved
+                if (!reuseLoadedPages) pendingSavedPosition = saved
                 imageGeometryPriorityPostId = saved.anchorPostId
                 saved.threadCover?.let { cover ->
                     coverUrl = canonicalCover?.resolvedUrl ?: cover
@@ -3186,8 +3199,12 @@ internal fun ThreadReaderScreen(
                 }
             }
             hasResolvedInitialHistoryLookup = true
-            val loaded = loadPage(start.pageNumber(), initialResult = result, openingProjection = projection)
-            if (saved == null && targetPid == null && loaded) {
+            opened = loadPage(start.pageNumber(), initialResult = result, openingProjection = projection)
+            if (reuseLoadedPages && (opened || state is ReaderState.Error)) {
+                preserveRestoredProgress = start.preserveUntilMoved
+                pendingSavedPosition = saved
+            }
+            if (saved == null && targetPid == null && opened) {
                 hasRestoredPosition = true
                 canPersistReadingState = true
             }
@@ -3197,10 +3214,21 @@ internal fun ThreadReaderScreen(
             Logger.w("ThreadReaderScreen", "Failed to load initial reader page", error)
             hasResolvedInitialHistoryLookup = true
             state = ReaderState.Error(i18n("載入失敗，請重試"))
+        } finally {
+            // A failed adjacent-page read can leave the previous page on screen.
+            if (reuseLoadedPages && !opened && state == ReaderState.Success) {
+                pendingSavedPosition = previousPending
+                canPersistReadingState = previouslyWritable
+            }
         }
     }
 
-    LaunchedEffect(tid, initialPage, targetPid) { openReader() }
+    // Navigation keeps covered readers composed. A fresh mode selection can return to this exact route.
+    val lastModeSwitch = remember(tid, initialPage, targetPid) { mutableStateOf(modeSwitchRequest) }
+    if (modeSwitchRequest != null) SideEffect { lastModeSwitch.value = modeSwitchRequest }
+    LaunchedEffect(tid, initialPage, targetPid, lastModeSwitch.value) {
+        openReader(reuseLoadedPages = modeSwitchRequest != null && loadedPages.isNotEmpty())
+    }
 
     val anchorEntriesReady = pendingSavedPosition?.anchorPostId?.let { pid ->
         pid !in entryIndexByPid || preparedBodies.containsKey(pid)
@@ -5346,7 +5374,7 @@ internal fun ThreadReaderScreen(
                             when (val result =
                                 downloadRepository.refreshPage(tid, threadInfo?.title ?: title, authorId, page)) {
                                 is YamiboResult.Success -> {
-                                    loadedPages = loadedPages - page
+                                    loadedPageSnapshots = loadedPageSnapshots - page
                                     loadPage(page)
                                     feedbackController.post(i18n("已刷新下載內容"))
                                 }
