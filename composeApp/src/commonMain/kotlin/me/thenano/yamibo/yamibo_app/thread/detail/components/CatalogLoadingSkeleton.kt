@@ -16,15 +16,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import me.thenano.yamibo.yamibo_app.components.feedback.shimmer
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 
 /** Loading skeleton */
@@ -36,7 +32,7 @@ fun CatalogLoadingSkeleton() {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val widthPx = with(LocalDensity.current) { maxWidth.toPx() }
         val shimmerAnim = rememberInfiniteTransition(label = "tag_shimmer")
-        val shimmerX by shimmerAnim.animateFloat(
+        val shimmerX = shimmerAnim.animateFloat(
             initialValue = -widthPx,
             targetValue = widthPx * 2f,
             animationSpec = infiniteRepeatable(tween(1200, easing = LinearEasing)),
@@ -55,7 +51,7 @@ fun CatalogLoadingSkeleton() {
                         .fillMaxWidth()
                         .height(180.dp)
                         .clip(RoundedCornerShape(20.dp))
-                        .shimmer(shimmerX, shimmerColor)
+                        .shimmer(shimmerColor, shimmerX)
                 )
             }
             // Threads skeletons
@@ -65,24 +61,9 @@ fun CatalogLoadingSkeleton() {
                         .fillMaxWidth()
                         .height(100.dp)
                         .clip(RoundedCornerShape(16.dp))
-                        .shimmer(shimmerX, shimmerColor)
+                        .shimmer(shimmerColor, shimmerX)
                 )
             }
         }
     }
 }
-
-/** Shimmer modifier */
-private fun Modifier.shimmer(translateX: Float, baseColor: Color): Modifier =
-    this.drawBehind {
-        val brush = Brush.linearGradient(
-            colors = listOf(
-                baseColor.copy(alpha = 0.25f),
-                baseColor.copy(alpha = 0.5f),
-                baseColor.copy(alpha = 0.25f),
-            ),
-            start = Offset(translateX, 0f),
-            end = Offset(translateX + size.width, size.height)
-        )
-        drawRect(brush)
-    }

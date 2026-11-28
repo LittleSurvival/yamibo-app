@@ -21,9 +21,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -48,6 +46,7 @@ import kotlinx.coroutines.sync.Mutex
 import me.thenano.yamibo.yamibo_app.LocalAppSettingsRepository
 import me.thenano.yamibo.yamibo_app.LocalForumRepository
 import me.thenano.yamibo.yamibo_app.components.feedback.YamiboDetailedErrorContent
+import me.thenano.yamibo.yamibo_app.components.feedback.shimmer
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboHomeTopBar
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
 import me.thenano.yamibo.yamibo_app.event.AppEventBus
@@ -330,7 +329,7 @@ private fun HomeSwiper(images: List<SwiperImages>) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .shimmer(0f, colors.brownLight),
+                                    .shimmer(colors.brownLight),
                             )
                         },
                         error = {
@@ -577,8 +576,7 @@ private fun LoadingSkeleton() {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val widthPx = with(LocalDensity.current) { maxWidth.toPx() }
         val shimmerAnim = rememberInfiniteTransition(label = "shimmer")
-        val shimmerX by
-        shimmerAnim.animateFloat(
+        val shimmerX = shimmerAnim.animateFloat(
             initialValue = -widthPx,
             targetValue = widthPx * 2f,
             animationSpec = infiniteRepeatable(tween(1200, easing = LinearEasing)),
@@ -597,7 +595,7 @@ private fun LoadingSkeleton() {
                         Modifier.fillMaxWidth()
                             .height(72.dp)
                             .clip(RoundedCornerShape(14.dp))
-                            .shimmer(shimmerX, shimmerColor)
+                            .shimmer(shimmerColor, shimmerX)
                 )
             }
 
@@ -609,7 +607,7 @@ private fun LoadingSkeleton() {
                             Modifier.fillMaxWidth()
                                 .height(44.dp)
                                 .clip(RoundedCornerShape(14.dp))
-                                .shimmer(shimmerX, shimmerColor)
+                                .shimmer(shimmerColor, shimmerX)
                     )
                     Spacer(Modifier.height(8.dp))
                     repeat(3) {
@@ -619,7 +617,7 @@ private fun LoadingSkeleton() {
                                     .height(60.dp)
                                     .padding(vertical = 3.dp)
                                     .clip(RoundedCornerShape(16.dp))
-                                    .shimmer(shimmerX, shimmerColor)
+                                    .shimmer(shimmerColor, shimmerX)
                         )
                     }
                 }
@@ -627,23 +625,6 @@ private fun LoadingSkeleton() {
         }
     }
 }
-
-/** Shimmer modifier */
-private fun Modifier.shimmer(translateX: Float, baseColor: Color): Modifier =
-    this.drawBehind {
-        val brush =
-            Brush.linearGradient(
-                colors =
-                    listOf(
-                        baseColor.copy(alpha = 0.25f),
-                        baseColor.copy(alpha = 0.50f),
-                        baseColor.copy(alpha = 0.25f),
-                    ),
-                start = Offset(translateX, 0f),
-                end = Offset(translateX + size.width, size.height)
-            )
-        drawRect(brush)
-    }
 
 /** Error Content */
 @Composable

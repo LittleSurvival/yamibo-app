@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
  * @param contentDescription Accessibility label for the action.
  * @param onClick Action invoked when the icon is tapped.
  * @param iconSize Visual icon size in dp. The touch target remains 36dp.
+ * @param iconModifier Modifier applied to the artwork inside the button.
  */
 @Composable
 fun YamiboTopBarIconAction(
@@ -27,13 +28,14 @@ fun YamiboTopBarIconAction(
     contentDescription: String?,
     onClick: () -> Unit,
     iconSize: Int = 24,
+    iconModifier: Modifier = Modifier,
 ) {
     IconButton(onClick = onClick, modifier = Modifier.size(36.dp)) {
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
             tint = Color.White,
-            modifier = Modifier.size(iconSize.dp),
+            modifier = Modifier.size(iconSize.dp).then(iconModifier),
         )
     }
 }

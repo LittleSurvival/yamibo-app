@@ -15,9 +15,6 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -38,6 +35,7 @@ import me.thenano.yamibo.yamibo_app.MainTab
 import me.thenano.yamibo.yamibo_app.components.controls.YamiboSingleSelectDialog
 import me.thenano.yamibo.yamibo_app.components.feedback.YamiboDetailedErrorContent
 import me.thenano.yamibo.yamibo_app.components.feedback.YamiboEmptyContent
+import me.thenano.yamibo.yamibo_app.components.feedback.shimmer
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBar
 import me.thenano.yamibo.yamibo_app.components.navigation.YamiboTopBarIconAction
 import me.thenano.yamibo.yamibo_app.components.theme.YamiboTheme
@@ -388,14 +386,17 @@ private fun ForumTopBar(
         titleFontSize = 18,
         onBack = onBack,
     ) {
-            YamiboTopBarIconAction(YamiboIcons.Search, i18n("搜尋"), onSearch, iconSize = 28)
-            Box(modifier = Modifier.offset(y = 0.dp)) {
+            YamiboTopBarIconAction(
+                YamiboIcons.Search, i18n("搜尋"), onSearch,
+                iconSize = 28, iconModifier = Modifier.offset(y = 6.dp),
+            )
+            Box {
                 IconButton(onClick = { showMenu = true }) {
                     Icon(
                         imageVector = YamiboIcons.ThreeDots,
                         contentDescription = i18n("更多"),
                         tint = Color.White,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(24.dp).offset(y = 1.dp)
                     )
                 }
                 DropdownMenu(
@@ -405,6 +406,9 @@ private fun ForumTopBar(
                 ) {
                     DropdownMenuItem(
                         text = { Text(i18n("板塊閱讀模式"), color = colors.textStrong) },
+                        leadingIcon = {
+                            Icon(YamiboIcons.Setting, contentDescription = null, tint = colors.brownPrimary)
+                        },
                         onClick = { showMenu = false; onReadingMode() },
                     )
                     DropdownMenuItem(
@@ -611,8 +615,7 @@ private fun ForumLoadingSkeleton() {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val widthPx = with(LocalDensity.current) { maxWidth.toPx() }
         val shimmerAnim = rememberInfiniteTransition(label = "forum_shimmer")
-        val shimmerX by
-        shimmerAnim.animateFloat(
+        val shimmerX = shimmerAnim.animateFloat(
             initialValue = -widthPx,
             targetValue = widthPx * 2f,
             animationSpec = infiniteRepeatable(tween(1200, easing = LinearEasing)),
@@ -630,7 +633,7 @@ private fun ForumLoadingSkeleton() {
                         Modifier.fillMaxWidth()
                             .height(70.dp)
                             .clip(RoundedCornerShape(14.dp))
-                            .shimmer(shimmerX, shimmerColor)
+                            .shimmer(shimmerColor, shimmerX)
                 )
             }
             items(6) {
@@ -639,29 +642,12 @@ private fun ForumLoadingSkeleton() {
                         Modifier.fillMaxWidth()
                             .height(100.dp)
                             .clip(RoundedCornerShape(16.dp))
-                            .shimmer(shimmerX, shimmerColor)
+                            .shimmer(shimmerColor, shimmerX)
                 )
             }
         }
     }
 }
-
-/** Shimmer modifier */
-private fun Modifier.shimmer(translateX: Float, baseColor: Color): Modifier =
-    this.drawBehind {
-        val brush =
-            Brush.linearGradient(
-                colors =
-                    listOf(
-                        baseColor.copy(alpha = 0.25f),
-                        baseColor.copy(alpha = 0.50f),
-                        baseColor.copy(alpha = 0.25f),
-                    ),
-                start = Offset(translateX, 0f),
-                end = Offset(translateX + size.width, size.height)
-            )
-        drawRect(brush)
-    }
 
 /** Error content */
 @Composable
