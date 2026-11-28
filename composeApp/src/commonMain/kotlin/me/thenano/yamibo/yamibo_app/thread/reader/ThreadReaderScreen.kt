@@ -879,7 +879,9 @@ internal fun ThreadReaderScreen(
         ContentCoverRepository.TargetType.RssSearch -> i18n("已設為RSS封面")
         else -> null
     }
-    val canonicalCover by contentCoverRepository.observeCover(coverKey).collectAsState(null)
+    val canonicalCover by remember(contentCoverRepository, coverKey) {
+        contentCoverRepository.observeCover(coverKey)
+    }.collectAsState(null)
     val threadCoverResolver = remember(threadRepository) { ThreadCoverResolver(threadRepository) }
     var showFavoriteDialog by remember { mutableStateOf(false) }
     var favoriteDialogCategories by remember {
@@ -2566,6 +2568,7 @@ internal fun ThreadReaderScreen(
         totalPages,
         tid,
         authorId,
+        isSinglePageMode,
         readerEntries,
         singlePageEntries,
         singlePageModelIndex,
@@ -2573,21 +2576,15 @@ internal fun ThreadReaderScreen(
         downloadQueue,
         dismissedUpdateWarningPages,
     ) {
-        snapshotFlow {
-            currentVisiblePageForAction() to isMeaningfulLastLoadedBoundaryForUpdateWarning(
-                currentVisiblePageForAction()
-            )
+        val lastPageKey = ThreadPageDownloadKey(tid.value, totalPages, authorId?.value)
+        if (totalPages in dismissedUpdateWarningPages ||
+            downloadQueue.none { it.key == lastPageKey && it.status == DownloadStatus.UpdateAvailable }
+        ) {
+            showDownloadedLastPageWarning = false
+            return@LaunchedEffect
         }
-            .distinctUntilChanged()
-            .collect { (currentPage, isMeaningfulBoundary) ->
-                showDownloadedLastPageWarning =
-                    isMeaningfulBoundary &&
-                        currentPage !in dismissedUpdateWarningPages &&
-                        downloadQueue.any {
-                            it.key == ThreadPageDownloadKey(tid.value, currentPage, authorId?.value) &&
-                                it.status == DownloadStatus.UpdateAvailable
-                        }
-            }
+        snapshotFlow { isMeaningfulLastLoadedBoundaryForUpdateWarning(currentVisiblePageForAction()) }
+            .collect { showDownloadedLastPageWarning = it }
     }
 
     LaunchedEffect(downloadQueue, tid, authorId) {
@@ -3573,7 +3570,7 @@ internal fun ThreadReaderScreen(
         totalPages,
         allowAdjacentPagePreload,
     ) {
-        if (!allowAdjacentPagePreload || state != ReaderState.Success || posts.isEmpty() || readerEntries.isEmpty()) return@LaunchedEffect
+        if (!allowAdjacentPagePreload || totalPages <= 1 || state != ReaderState.Success || posts.isEmpty() || readerEntries.isEmpty()) return@LaunchedEffect
 
         val pagePreloadThreshold = 5
 
@@ -3628,11 +3625,10 @@ internal fun ThreadReaderScreen(
         }
 
         snapshotFlow {
-            val visibleEntryIndices = listState.layoutInfo.visibleItemsInfo
-                .map { it.index }
+            val visible = listState.layoutInfo.visibleItemsInfo
             VisibleEntryRange(
-                firstIndex = visibleEntryIndices.minOrNull(),
-                lastIndex = visibleEntryIndices.maxOrNull(),
+                firstIndex = visible.minOfOrNull { it.index },
+                lastIndex = visible.maxOfOrNull { it.index },
             )
         }
             .distinctUntilChanged()
